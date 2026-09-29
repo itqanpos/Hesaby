@@ -1,0 +1,107 @@
+# ============================================================================
+# HESABI — Continuous Integration
+# ----------------------------------------------------------------------------
+# Verifies every change pushed to `main` / `develop` and every pull request
+# targeting those branches. Runs on Flutter stable.
+#
+# Security model:
+#   * Secrets (SUPABASE_URL, SUPABASE_ANON_KEY) are only referenced by the
+#     web build step, which runs on trusted pushes and manual dispatches.
+#   * Pull requests never depend on secrets, so forked PRs are never blocked
+#     by missing credentials.
+#   * Only the public anon / publishable Supabase key may ever be supplied.
+#     A service-role key must never reach the Flutter client.
+# ============================================================================
+
+name: Flutter CI
+
+on:
+  push:
+    branches:
+      - main
+      - develop
+  pull_request:
+    branches:
+      - main
+      - develop
+  workflow_dispatch:
+
+# Cancel superseded runs on the same branch / PR.
+concurrency:
+  group: flutter-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Minimal default permissions: only reading repository contents.
+permissions:
+  contents: read
+
+jobs:
+  analyze-and-test:
+    name: Analyze & Test
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Display Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Verify Dart formatting
+        run: dart format --output=none --set-exit-if-changed lib test
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test
+
+  build-web:
+    name: Build Web (release)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    needs: analyze-and-test
+    # Only run when secrets are expected to be available:
+    # pushes to main/develop and manual dispatches, never pull requests.
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Build Flutter Web
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter build web --release \
+            --dart-define=APP_ENV=production \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Upload Web build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: flutter-web-build
+          path: build/web
+          retention-days: 7
+          if-no-files-found: error
