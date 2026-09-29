@@ -1,0 +1,39 @@
+# .gitignore — Flutter / Dart
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+.packages
+build/
+.pub-cache/
+.pub/
+doc/api/
+
+# IDE
+.idea/
+.vscode/
+*.iml
+*.ipr
+*.iws
+
+# Platform build output
+android/.gradle/
+android/local.properties
+android/key.properties
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+macos/Pods/
+windows/flutter/ephemeral/
+linux/flutter/ephemeral/
+
+# Secrets — never commit these
+.env
+.env.*
+*.keystore
+*.jks
+key.properties
+
+# Miscellaneous
+*.log
+.DS_Store
