@@ -1,0 +1,45 @@
+# pubspec.yaml
+name: hesabi
+description: "Hesabi - Multi-tenant SaaS for POS, Inventory, Sales and Accounting"
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.5.0 <4.0.0"
+  flutter: ">=3.24.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+  flutter_localizations:
+    sdk: flutter
+
+  # State management
+  flutter_riverpod: ^2.6.1
+
+  # Routing
+  go_router: ^14.6.2
+
+  # Backend
+  supabase_flutter: ^2.8.0
+
+  # Storage
+  flutter_secure_storage: ^9.2.2
+  shared_preferences: ^2.3.3
+
+  # UI
+  google_fonts: ^6.2.1
+
+  # Utilities
+  intl: any
+  logger: ^2.4.0
+  equatable: ^2.0.5
+  uuid: ^4.5.1
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
