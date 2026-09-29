@@ -1,4 +1,5 @@
 // lib/features/home/presentation/pages/home_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -6,12 +7,14 @@ import '../../../../app/config/app_config.dart';
 import '../../../../core/responsive/responsive_helper.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../../shared/layouts/app_shell.dart';
+import '../../../companies/presentation/widgets/branch_selector.dart';
+import '../../../companies/presentation/widgets/company_selector.dart';
 
-/// Phase 0 placeholder screen.
+/// Phase 3 placeholder screen.
 ///
-/// It intentionally contains no business logic. Its only purpose is to prove
-/// that routing, theming, localization, responsiveness and configuration are
-/// wired correctly.
+/// It intentionally contains no business logic. Its purpose is to prove that
+/// routing, theming, localization, responsiveness, configuration and — as of
+/// Phase 3 — the company/branch context selectors are wired correctly.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -60,6 +63,8 @@ class HomePage extends ConsumerWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 _HeroSection(l10n: l10n, config: config),
+                const SizedBox(height: 24),
+                const _ContextSection(),
                 const SizedBox(height: 32),
                 Text(
                   l10n.homeFoundationStatusTitle,
@@ -87,6 +92,34 @@ class HomePage extends ConsumerWidget {
           );
         },
       ),
+    );
+  }
+}
+
+/// Company and branch selectors grouped under a single section header.
+///
+/// The two selectors read their data from the company context provider and
+/// render their own loading, empty and error states. This section contains
+/// no logic beyond layout.
+class _ContextSection extends StatelessWidget {
+  const _ContextSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text(
+          'سياق العمل',
+          style: theme.textTheme.titleLarge,
+        ),
+        const SizedBox(height: 12),
+        const CompanySelector(),
+        const SizedBox(height: 8),
+        const BranchSelector(),
+      ],
     );
   }
 }
