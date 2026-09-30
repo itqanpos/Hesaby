@@ -37,10 +37,11 @@ class AuthRepositoryImpl implements AuthRepository {
     required String password,
   }) async {
     try {
-      final AuthSessionModel model = await _remoteDataSource.signInWithPassword(
-        email: email,
-        password: password,
-      );
+      final AuthSessionModel model = await _remoteDataSource
+          .signInWithPassword(
+            email: email,
+            password: password,
+          );
       return model.toEntity();
     } on supabase.AuthException catch (error, stackTrace) {
       throw _mapSupabaseAuthException(error, stackTrace);
@@ -114,7 +115,14 @@ class AuthRepositoryImpl implements AuthRepository {
     final String? rawCode = error.code;
     final String code = (rawCode ?? '').toLowerCase();
     final String message = error.message.toLowerCase();
-    final int? status = error.statusCode;
+
+    // `statusCode` is delivered by supabase_flutter as a `String?`, since it
+    // originates from an HTTP response header. It is parsed to an `int?` so
+    // that the classification below can use numeric comparisons. A
+    // non-numeric value (unexpected) safely falls back to `null` and skips
+    // the numeric branches.
+    final String? rawStatus = error.statusCode;
+    final int? status = rawStatus == null ? null : int.tryParse(rawStatus);
 
     switch (code) {
       case 'invalid_credentials':
