@@ -7,29 +7,31 @@ import 'package:hesabi/features/auth/presentation/providers/auth_provider.dart';
 import 'package:hesabi/features/home/presentation/pages/home_page.dart';
 import 'package:hesabi/shared/layouts/app_shell.dart';
 
+class _AuthenticatedAuthNotifier extends AuthNotifier {
+  @override
+  AuthState build() {
+    return AuthState.authenticated(
+      const AuthSession(
+        userId: 'test-user-id',
+        email: 'test@example.com',
+      ),
+    );
+  }
+}
+
 void main() {
   testWidgets('HesabiApp boots into the home page', (
     WidgetTester tester,
   ) async {
-    // توفير حالة المصادقة قبل بناء التطبيق
-    // يتم override authProvider لحالة authenticated بجلسة اختبار
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
-          authProvider.overrideWith(
-            () => AuthState.authenticated(
-              const AuthSession(
-                userId: 'test-user-id',
-                email: 'test@example.com',
-              ),
-            ),
-          ),
+          authProvider.overrideWith(() => _AuthenticatedAuthNotifier()),
         ],
         child: const HesabiApp(),
       ),
     );
 
-    // السماح لـ localization delegates بالتحقق قبل الفحص
     for (int i = 0; i < 3; i++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
