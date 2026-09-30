@@ -35,7 +35,7 @@ class CompanyRemoteDataSource {
   /// The query is filtered and ordered server-side; RLS applies the tenant
   /// boundary transparently.
   Future<List<CompanyModel>> fetchMyCompanies() async {
-    final SupabaseClient? client = _requireClient();
+    final SupabaseClient client = _requireClient();
 
     final List<Map<String, dynamic>> rows = await client
         .from('companies')
@@ -52,7 +52,7 @@ class CompanyRemoteDataSource {
   /// an empty list rather than raising an error. This is intentional: it
   /// avoids leaking the existence of companies the user cannot access.
   Future<List<BranchModel>> fetchCompanyBranches(String companyId) async {
-    final SupabaseClient? client = _requireClient();
+    final SupabaseClient client = _requireClient();
 
     final List<Map<String, dynamic>> rows = await client
         .from('branches')
@@ -64,6 +64,11 @@ class CompanyRemoteDataSource {
     return rows.map(BranchModel.fromMap).toList(growable: false);
   }
 
+  /// Returns the active Supabase client, or throws [CompanyException] when
+  /// Supabase was not initialised.
+  ///
+  /// The return type is non-nullable on purpose: callers receive a client
+  /// they can use directly, without `!` or redundant nullable checks.
   SupabaseClient _requireClient() {
     final SupabaseClient? client = _client;
     if (client == null) {
