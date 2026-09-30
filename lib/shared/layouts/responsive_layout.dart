@@ -1,4 +1,5 @@
 // lib/shared/layouts/responsive_layout.dart
+
 import 'package:flutter/material.dart';
 
 import '../../core/responsive/responsive_helper.dart';
@@ -27,8 +28,7 @@ class ResponsiveLayout extends StatelessWidget {
       DeviceType.mobile => mobile,
       DeviceType.tablet => tablet ?? mobile,
       DeviceType.desktop => desktop ?? tablet ?? mobile,
-      DeviceType.wideDesktop =>
-        wideDesktop ?? desktop ?? tablet ?? mobile,
+      DeviceType.wideDesktop => wideDesktop ?? desktop ?? tablet ?? mobile,
     };
   }
 }
