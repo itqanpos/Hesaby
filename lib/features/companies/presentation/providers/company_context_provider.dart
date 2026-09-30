@@ -22,20 +22,20 @@ import 'company_context_state.dart';
 /// time). The data source handles a `null` client gracefully.
 final Provider<CompanyRemoteDataSource> companyRemoteDataSourceProvider =
     Provider<CompanyRemoteDataSource>((ref) {
-  SupabaseClient? client;
-  try {
-    client = Supabase.instance.client;
-  } on Object {
-    client = null;
-  }
-  return CompanyRemoteDataSource(client);
-});
+      SupabaseClient? client;
+      try {
+        client = Supabase.instance.client;
+      } on Object {
+        client = null;
+      }
+      return CompanyRemoteDataSource(client);
+    });
 
 /// The application's companies/branches repository.
 final Provider<CompanyRepository> companyRepositoryProvider =
     Provider<CompanyRepository>(
-  (ref) => CompanyRepositoryImpl(ref.watch(companyRemoteDataSourceProvider)),
-);
+      (ref) => CompanyRepositoryImpl(ref.watch(companyRemoteDataSourceProvider)),
+    );
 
 /// Owns the company/branch selection context.
 ///
@@ -51,7 +51,16 @@ final Provider<CompanyRepository> companyRepositoryProvider =
 ///
 /// The notifier never accepts a client-supplied identity: the current user
 /// is determined by `auth.uid()` inside the database, through RLS.
+///
+/// Lifecycle safety:
+/// Riverpod 3.x exposes `ref.mounted`, but this project targets Riverpod 2.x.
+/// Disposal is therefore tracked with a private flag updated by
+/// [Ref.onDispose], which is the canonical pattern for 2.x. Every write to
+/// [state] that can happen after an `await` is guarded by this flag, matching
+/// the semantics that `ref.mounted` would provide.
 class CompanyContextNotifier extends Notifier<CompanyContextState> {
+  bool _isDisposed = false;
+
   /// Local storage key for the persisted current company identifier.
   static const String _currentCompanyIdKey =
       'hesabi.company_context.current_company_id';
@@ -62,6 +71,11 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
 
   @override
   CompanyContextState build() {
+    _isDisposed = false;
+    ref.onDispose(() {
+      _isDisposed = true;
+    });
+
     // React to sign-in / sign-out without rebuilding this notifier.
     ref.listen<AuthState>(authProvider, _onAuthStateChanged);
 
@@ -100,7 +114,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
     );
     await preferences.remove(key: _currentBranchIdKey);
 
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
@@ -138,7 +152,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       value: branch.id,
     );
 
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
@@ -167,7 +181,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
   }
 
   Future<void> _loadFromScratch() async {
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
@@ -183,21 +197,22 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
     );
 
     final PreferencesStorage preferences = await _preferences();
-    final String? savedCompanyId =
-        await preferences.readString(key: _currentCompanyIdKey);
-    final String? savedBranchId =
-        await preferences.readString(key: _currentBranchIdKey);
+    final String? savedCompanyId = await preferences.readString(
+      key: _currentCompanyIdKey,
+    );
+    final String? savedBranchId = await preferences.readString(
+      key: _currentBranchIdKey,
+    );
 
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
     final List<Company> companies;
     try {
-      companies =
-          await ref.read(companyRepositoryProvider).getMyCompanies();
+      companies = await ref.read(companyRepositoryProvider).getMyCompanies();
     } on CompanyException catch (error) {
-      if (!ref.mounted) {
+      if (_isDisposed) {
         return;
       }
       state = state.copyWith(
@@ -207,7 +222,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       return;
     }
 
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
@@ -215,7 +230,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       // No accessible companies: a valid terminal state, not an error.
       await preferences.remove(key: _currentCompanyIdKey);
       await preferences.remove(key: _currentBranchIdKey);
-      if (!ref.mounted) {
+      if (_isDisposed) {
         return;
       }
       state = CompanyContextState(
@@ -234,7 +249,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       // Multiple companies, none selected yet: wait for an explicit choice.
       await preferences.remove(key: _currentCompanyIdKey);
       await preferences.remove(key: _currentBranchIdKey);
-      if (!ref.mounted) {
+      if (_isDisposed) {
         return;
       }
       state = CompanyContextState(
@@ -249,7 +264,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       value: selectedCompany.id,
     );
 
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
@@ -271,10 +286,11 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
 
     final List<Branch> branches;
     try {
-      branches =
-          await ref.read(companyRepositoryProvider).getCompanyBranches(company.id);
+      branches = await ref
+          .read(companyRepositoryProvider)
+          .getCompanyBranches(company.id);
     } on CompanyException catch (error) {
-      if (!ref.mounted) {
+      if (_isDisposed) {
         return;
       }
       // Ignore results that arrive for a company the user has already
@@ -289,7 +305,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       return;
     }
 
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
@@ -311,7 +327,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       await preferences.remove(key: _currentBranchIdKey);
     }
 
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
@@ -333,7 +349,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
     await preferences.remove(key: _currentCompanyIdKey);
     await preferences.remove(key: _currentBranchIdKey);
 
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
 
@@ -399,7 +415,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
 
 /// Provides the company/branch selection context.
 final NotifierProvider<CompanyContextNotifier, CompanyContextState>
-    companyContextProvider =
+companyContextProvider =
     NotifierProvider<CompanyContextNotifier, CompanyContextState>(
-  CompanyContextNotifier.new,
-);
+      CompanyContextNotifier.new,
+    );
