@@ -65,7 +65,8 @@ class BranchSelector extends ConsumerWidget {
           icon: Icons.store_mall_directory_outlined,
           title: 'لا توجد فروع',
           message:
-              'لا توجد فروع متاحة في الشركة المختارة حتى الآن. تواصل مع مسؤول الشركة لإضافة فرع.',
+              'لا توجد فروع متاحة في الشركة المختارة حتى الآن. '
+              'تواصل مع مسؤول الشركة لإضافة فرع.',
           action: AppButton(
             label: 'تحديث',
             icon: Icons.refresh,
@@ -103,8 +104,9 @@ class BranchSelector extends ConsumerWidget {
   }
 
   Future<void> _showBranchPicker(BuildContext context, WidgetRef ref) async {
-    final CompanyContextNotifier notifier =
-        ref.read(companyContextProvider.notifier);
+    final CompanyContextNotifier notifier = ref.read(
+      companyContextProvider.notifier,
+    );
     final CompanyContextState state = ref.read(companyContextProvider);
     final List<Branch> branches = state.branches;
     final String? currentId = state.currentBranch?.id;
@@ -119,8 +121,9 @@ class BranchSelector extends ConsumerWidget {
       isScrollControlled: true,
       builder: (BuildContext sheetContext) {
         final DeviceType deviceType = sheetContext.deviceType;
-        final double horizontalPadding =
-            ResponsiveHelper.horizontalPadding(deviceType);
+        final double horizontalPadding = ResponsiveHelper.horizontalPadding(
+          deviceType,
+        );
 
         return SafeArea(
           child: Padding(
@@ -144,7 +147,7 @@ class BranchSelector extends ConsumerWidget {
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: branches.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 4),
+                    separatorBuilder: (_, _) => const SizedBox(height: 4),
                     itemBuilder: (BuildContext itemContext, int index) {
                       final Branch branch = branches[index];
                       final bool isCurrent = branch.id == currentId;
@@ -162,8 +165,7 @@ class BranchSelector extends ConsumerWidget {
                             ? const Icon(Icons.check_circle_outline)
                             : null,
                         selected: isCurrent,
-                        onTap: () =>
-                            Navigator.of(sheetContext).pop(branch),
+                        onTap: () => Navigator.of(sheetContext).pop(branch),
                       );
                     },
                   ),
@@ -252,10 +254,7 @@ class _CurrentBranchCard extends StatelessWidget {
                 ),
               ),
               if (interactive)
-                Icon(
-                  Icons.expand_more,
-                  color: scheme.onSurfaceVariant,
-                ),
+                Icon(Icons.expand_more, color: scheme.onSurfaceVariant),
             ],
           ),
         ),
@@ -336,18 +335,17 @@ class _NoSelectionCard extends StatelessWidget {
 /// Kept local to this widget pending migration into `AppLocalizations`,
 /// which is out of scope for Phase 3.
 String _branchFailureMessage(CompanyFailureType type) => switch (type) {
-      CompanyFailureType.network =>
-        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
-      CompanyFailureType.unauthorized =>
-        'انتهت صلاحية الجلسة أو لا تملك صلاحية للوصول. يرجى تسجيل الدخول مجددًا.',
-      CompanyFailureType.noCompanies =>
-        'حسابك غير مرتبط بأي شركة حتى الآن.',
-      CompanyFailureType.companyNotAccessible =>
-        'لا تملك صلاحية الوصول إلى فروع هذه الشركة.',
-      CompanyFailureType.noBranches =>
-        'لا توجد فروع متاحة في هذه الشركة.',
-      CompanyFailureType.invalidResponse =>
-        'تعذّر قراءة بيانات الفروع. يرجى المحاولة لاحقًا.',
-      CompanyFailureType.unknown =>
-        'حدث خطأ غير متوقع أثناء تحميل الفروع. يرجى المحاولة مرة أخرى.',
-    };
+  CompanyFailureType.network =>
+    'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+  CompanyFailureType.unauthorized =>
+    'انتهت صلاحية الجلسة أو لا تملك صلاحية للوصول. '
+        'يرجى تسجيل الدخول مجددًا.',
+  CompanyFailureType.noCompanies => 'حسابك غير مرتبط بأي شركة حتى الآن.',
+  CompanyFailureType.companyNotAccessible =>
+    'لا تملك صلاحية الوصول إلى فروع هذه الشركة.',
+  CompanyFailureType.noBranches => 'لا توجد فروع متاحة في هذه الشركة.',
+  CompanyFailureType.invalidResponse =>
+    'تعذّر قراءة بيانات الفروع. يرجى المحاولة لاحقًا.',
+  CompanyFailureType.unknown =>
+    'حدث خطأ غير متوقع أثناء تحميل الفروع. يرجى المحاولة مرة أخرى.',
+};
