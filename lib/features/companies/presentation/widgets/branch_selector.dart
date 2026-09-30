@@ -147,7 +147,10 @@ class BranchSelector extends ConsumerWidget {
                   child: ListView.separated(
                     shrinkWrap: true,
                     itemCount: branches.length,
-                    separatorBuilder: (_, _) => const SizedBox(height: 4),
+                    // `__` is used rather than a repeated `_`, because
+                    // wildcard parameters (multiple `_`) require Dart 3.7+,
+                    // while this project targets Dart 3.5.
+                    separatorBuilder: (_, __) => const SizedBox(height: 4),
                     itemBuilder: (BuildContext itemContext, int index) {
                       final Branch branch = branches[index];
                       final bool isCurrent = branch.id == currentId;
