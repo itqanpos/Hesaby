@@ -11,21 +11,23 @@ void main() {
   testWidgets('HesabiApp boots into the home page', (
     WidgetTester tester,
   ) async {
-    // Create a test session
+    // Create a test-authenticated state
     const testSession = AuthSession(
       userId: 'test-user-id',
       email: 'test@example.com',
     );
     
-    final testAuthState = AuthState.authenticated(testSession);
+    const testAuthState = AuthState.authenticated(testSession);
 
     await tester.pumpWidget(
-      ProviderScope(
+      ProviderContainer(
         overrides: <Override>[
-          // Override the authProvider to return a fixed authenticated state
-          authProvider.overrideWithValue(testAuthState),
+          // Override the entire authProvider notifier to return a fixed state
+          authProvider.overrideWith(
+            (ref) => testAuthState as AuthNotifier,
+          ),
         ],
-        child: const HesabiApp(),
+        child: const ProviderScope(child: HesabiApp()),
       ),
     );
 
