@@ -63,19 +63,20 @@ class AuthState extends Equatable {
 /// `null` client gracefully.
 final Provider<AuthRemoteDataSource> authRemoteDataSourceProvider =
     Provider<AuthRemoteDataSource>((ref) {
-  SupabaseClient? client;
-  try {
-    client = Supabase.instance.client;
-  } on Object {
-    client = null;
-  }
-  return AuthRemoteDataSource(client);
-});
+      SupabaseClient? client;
+      try {
+        client = Supabase.instance.client;
+      } on Object {
+        client = null;
+      }
+      return AuthRemoteDataSource(client);
+    });
 
 /// The application's authentication repository.
-final Provider<AuthRepository> authRepositoryProvider = Provider<AuthRepository>(
-  (ref) => AuthRepositoryImpl(ref.watch(authRemoteDataSourceProvider)),
-);
+final Provider<AuthRepository> authRepositoryProvider =
+    Provider<AuthRepository>(
+      (ref) => AuthRepositoryImpl(ref.watch(authRemoteDataSourceProvider)),
+    );
 
 /// `login` use case.
 final Provider<Login> loginUseCaseProvider = Provider<Login>(
@@ -90,8 +91,8 @@ final Provider<Logout> logoutUseCaseProvider = Provider<Logout>(
 /// `getCurrentSession` use case.
 final Provider<GetCurrentSession> getCurrentSessionUseCaseProvider =
     Provider<GetCurrentSession>(
-  (ref) => GetCurrentSession(ref.watch(authRepositoryProvider)),
-);
+      (ref) => GetCurrentSession(ref.watch(authRepositoryProvider)),
+    );
 
 /// Owns the authentication state and exposes safe authentication actions.
 ///
@@ -99,9 +100,23 @@ final Provider<GetCurrentSession> getCurrentSessionUseCaseProvider =
 /// resolves the initial state through [GetCurrentSession] so that a missing
 /// Supabase client still produces a deterministic `unauthenticated` result
 /// rather than leaving the state `unknown` forever.
+///
+/// Lifecycle safety:
+/// Riverpod 3.x exposes `ref.mounted`, but this project targets Riverpod 2.x.
+/// Disposal is therefore tracked with a private flag updated by
+/// [Ref.onDispose], which is the canonical pattern for 2.x. Every write to
+/// [state] that can happen after an `await` is guarded by this flag, matching
+/// the semantics that `ref.mounted` would provide.
 class AuthNotifier extends Notifier<AuthState> {
+  bool _isDisposed = false;
+
   @override
   AuthState build() {
+    _isDisposed = false;
+    ref.onDispose(() {
+      _isDisposed = true;
+    });
+
     final AuthRepository repository = ref.watch(authRepositoryProvider);
 
     final StreamSubscription<AuthSession?> subscription = repository
@@ -109,6 +124,9 @@ class AuthNotifier extends Notifier<AuthState> {
         .listen(
           _applySession,
           onError: (Object _, StackTrace __) {
+            if (_isDisposed) {
+              return;
+            }
             state = const AuthState.unauthenticated();
           },
         );
@@ -132,9 +150,10 @@ class AuthNotifier extends Notifier<AuthState> {
         email: email,
         password: password,
       );
-      if (ref.mounted) {
-        state = AuthState.authenticated(session);
+      if (_isDisposed) {
+        return null;
       }
+      state = AuthState.authenticated(session);
       return null;
     } on AuthException catch (error) {
       return error.type;
@@ -147,9 +166,10 @@ class AuthNotifier extends Notifier<AuthState> {
   Future<AuthFailureType?> logout() async {
     try {
       await ref.read(logoutUseCaseProvider)();
-      if (ref.mounted) {
-        state = const AuthState.unauthenticated();
+      if (_isDisposed) {
+        return null;
       }
+      state = const AuthState.unauthenticated();
       return null;
     } on AuthException catch (error) {
       return error.type;
@@ -158,14 +178,15 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> _restoreSession() async {
     try {
-      final AuthSession? session =
-          await ref.read(getCurrentSessionUseCaseProvider)();
-      if (!ref.mounted || !state.isUnknown) {
+      final AuthSession? session = await ref.read(
+        getCurrentSessionUseCaseProvider,
+      )();
+      if (_isDisposed || !state.isUnknown) {
         return;
       }
       _applySession(session);
     } on AuthException {
-      if (!ref.mounted || !state.isUnknown) {
+      if (_isDisposed || !state.isUnknown) {
         return;
       }
       state = const AuthState.unauthenticated();
@@ -173,7 +194,7 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   void _applySession(AuthSession? session) {
-    if (!ref.mounted) {
+    if (_isDisposed) {
       return;
     }
     state = session == null
