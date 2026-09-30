@@ -23,18 +23,24 @@ void main() {
   testWidgets('HesabiApp boots into the home page', (
     WidgetTester tester,
   ) async {
+    final ProviderContainer container = ProviderContainer(
+      overrides: <Override>[
+        authProvider.overrideWith(() => _AuthenticatedAuthNotifier()),
+      ],
+    );
+    addTearDown(container.dispose);
+
+    // Initialize the overridden notifier before GoRouter evaluates redirects.
+    expect(container.read(authProvider).isAuthenticated, isTrue);
+
     await tester.pumpWidget(
-      ProviderScope(
-        overrides: <Override>[
-          authProvider.overrideWith(() => _AuthenticatedAuthNotifier()),
-        ],
+      UncontrolledProviderScope(
+        container: container,
         child: const HesabiApp(),
       ),
     );
 
-    for (int i = 0; i < 3; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-    }
+    await tester.pumpAndSettle();
 
     expect(find.byType(HomePage), findsOneWidget);
     expect(find.byType(AppShell), findsOneWidget);
