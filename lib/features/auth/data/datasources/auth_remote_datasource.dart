@@ -1,7 +1,7 @@
 // lib/features/auth/data/datasources/auth_remote_datasource.dart
 
 import 'package:supabase_flutter/supabase_flutter.dart'
-    show AuthResponse, Session, SupabaseClient;
+    show AuthResponse, AuthState, Session, SupabaseClient;
 
 import '../../domain/repositories/auth_repository.dart';
 import '../models/auth_session_model.dart';
