@@ -17,7 +17,7 @@ void main() {
       ProviderScope(
         overrides: <Override>[
           authProvider.overrideWith(
-            (ref) => AuthState.authenticated(
+            () => AuthState.authenticated(
               const AuthSession(
                 userId: 'test-user-id',
                 email: 'test@example.com',
