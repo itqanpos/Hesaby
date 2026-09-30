@@ -1,7 +1,6 @@
 // lib/features/companies/data/repositories/company_repository_impl.dart
 
-import 'package:supabase_flutter/supabase_flutter.dart'
-    show AuthException as SupabaseAuthException, PostgrestException;
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../../../../core/utils/logger.dart';
 import '../../domain/entities/branch.dart';
@@ -37,9 +36,9 @@ class CompanyRepositoryImpl implements CompanyRepository {
           .toList(growable: false);
     } on FormatException catch (error, stackTrace) {
       throw _mapInvalidResponse(error, stackTrace, operation: 'getMyCompanies');
-    } on PostgrestException catch (error, stackTrace) {
+    } on supabase.PostgrestException catch (error, stackTrace) {
       throw _mapPostgrest(error, stackTrace, operation: 'getMyCompanies');
-    } on SupabaseAuthException catch (error, stackTrace) {
+    } on supabase.AuthException catch (error, stackTrace) {
       throw _mapAuth(error, stackTrace, operation: 'getMyCompanies');
     } on CompanyException {
       rethrow;
@@ -62,13 +61,13 @@ class CompanyRepositoryImpl implements CompanyRepository {
         stackTrace,
         operation: 'getCompanyBranches',
       );
-    } on PostgrestException catch (error, stackTrace) {
+    } on supabase.PostgrestException catch (error, stackTrace) {
       throw _mapPostgrest(
         error,
         stackTrace,
         operation: 'getCompanyBranches',
       );
-    } on SupabaseAuthException catch (error, stackTrace) {
+    } on supabase.AuthException catch (error, stackTrace) {
       throw _mapAuth(
         error,
         stackTrace,
@@ -108,7 +107,7 @@ class CompanyRepositoryImpl implements CompanyRepository {
   }
 
   static CompanyException _mapPostgrest(
-    PostgrestException error,
+    supabase.PostgrestException error,
     StackTrace stackTrace, {
     required String operation,
   }) {
@@ -127,7 +126,7 @@ class CompanyRepositoryImpl implements CompanyRepository {
   }
 
   static CompanyException _mapAuth(
-    SupabaseAuthException error,
+    supabase.AuthException error,
     StackTrace stackTrace, {
     required String operation,
   }) {
@@ -166,7 +165,9 @@ class CompanyRepositoryImpl implements CompanyRepository {
     );
   }
 
-  static CompanyFailureType _classifyPostgrest(PostgrestException error) {
+  static CompanyFailureType _classifyPostgrest(
+    supabase.PostgrestException error,
+  ) {
     final String code = (error.code ?? '').toLowerCase();
     final String message = error.message.toLowerCase();
 
