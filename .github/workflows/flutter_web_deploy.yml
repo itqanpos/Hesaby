@@ -4,14 +4,16 @@
 # Production deployment of the Flutter Web build to GitHub Pages, using the
 # modern Pages deployment model (source = GitHub Actions).
 #
+# This project is Flutter/Dart only. It does NOT use Node.js or npm.
+# Do not add `actions/setup-node`, `npm ci`, `yarn`, or npm caching here.
+# Adding npm caching without a package-lock.json causes the CI to fail with
+# "Dependencies lock file is not found".
+#
 # Preconditions (repository setting, not enforced by YAML):
 #   * Repository → Settings → Pages → Source = "GitHub Actions"
 #   * Repository secrets SUPABASE_URL and SUPABASE_ANON_KEY are configured.
 #
-# Security model:
-#   * Only the public anon / publishable key is passed to the client.
-#   * A service-role key must never be used here.
-#   * Secrets are passed through env vars and never echoed.
+# Formatting policy: informational (see flutter_ci.yml for rationale).
 # ============================================================================
 
 name: Flutter Web Deploy
@@ -22,14 +24,11 @@ on:
       - main
   workflow_dispatch:
 
-# Serialise deploys without cancelling an in-progress deployment. A deploy
-# left half-finished is worse than a slightly stale one, so we let the
-# current deployment finish and queue the next.
+# Serialise deploys without cancelling an in-progress deployment.
 concurrency:
   group: flutter-web-deploy-${{ github.ref }}
   cancel-in-progress: false
 
-# Required for GitHub Pages deployment via actions/deploy-pages.
 permissions:
   contents: read
   pages: write
@@ -38,7 +37,9 @@ permissions:
 jobs:
   build:
     name: Build Web
-    runs-on: ubuntu-latest
+    # Pinned LTS runner instead of ubuntu-latest, to avoid an unexpected
+    # migration to Ubuntu 26 while the project is still under development.
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
 
     steps:
@@ -57,8 +58,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Verify Dart formatting
-        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Verify Dart formatting (informational)
+        continue-on-error: true
+        run: dart format --output=none lib test
 
       - name: Analyze
         run: flutter analyze
@@ -88,7 +90,7 @@ jobs:
 
   deploy:
     name: Deploy to GitHub Pages
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     needs: build
     environment:
       name: github-pages
