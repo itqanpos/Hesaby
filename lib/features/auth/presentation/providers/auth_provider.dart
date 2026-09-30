@@ -12,26 +12,14 @@ import '../../data/datasources/auth_remote_datasource.dart';
 import '../../data/repositories/auth_repository_impl.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/repositories/auth_repository.dart';
-import '../../domain/usecases/get_current_session.dart';
-import '../../domain/usecases/login.dart';
-import '../../domain/usecases/logout.dart';
+import '../../domain/useCases/get_current_session.dart';
+import '../../domain/useCases/login.dart';
+import '../../domain/useCases/logout.dart';
 
 /// Lifecycle stage of the authentication state.
-enum AuthStatus {
-  /// The application is still resolving whether a session exists.
-  unknown,
-
-  /// A valid session is available.
-  authenticated,
-
-  /// No session is available; the user must sign in.
-  unauthenticated,
-}
+enum AuthStatus { unknown, authenticated, unauthenticated }
 
 /// Immutable snapshot of the authentication state.
-///
-/// [session] is guaranteed to be non-null only when [status] is
-/// [AuthStatus.authenticated].
 @immutable
 class AuthState extends Equatable {
   const AuthState({required this.status, this.session});
@@ -57,10 +45,6 @@ class AuthState extends Equatable {
 }
 
 /// Data source bound to the active Supabase client.
-///
-/// Falls back to `null` when Supabase was not initialised (for example when
-/// credentials were not provided at build time). The data source handles a
-/// `null` client gracefully.
 final Provider<AuthRemoteDataSource> authRemoteDataSourceProvider =
     Provider<AuthRemoteDataSource>((ref) {
       SupabaseClient? client;
@@ -96,26 +80,21 @@ final Provider<GetCurrentSession> getCurrentSessionUseCaseProvider =
 
 /// Owns the authentication state and exposes safe authentication actions.
 ///
-/// The notifier subscribes to [AuthRepository.authStateChanges] once, and
-/// resolves the initial state through [GetCurrentSession] so that a missing
-/// Supabase client still produces a deterministic `unauthenticated` result
-/// rather than leaving the state `unknown` forever.
-///
-/// Lifecycle safety:
+/// Lifecycle safety (Riverpod 2.x):
 /// Riverpod 3.x exposes `ref.mounted`, but this project targets Riverpod 2.x.
-/// Disposal is therefore tracked with a private flag updated by
-/// [Ref.onDispose], which is the canonical pattern for 2.x. Every write to
-/// [state] that can happen after an `await` is guarded by this flag, matching
-/// the semantics that `ref.mounted` would provide.
+/// Disposal is tracked with a private flag updated by [Ref.onDispose].
+///
+/// `Ref.onDispose` callbacks execute in LIFO order in Riverpod 2.x, so the
+/// flag flip is registered LAST: this ensures `_isDisposed == true` is
+/// visible to the async continuations *before* the underlying subscription
+/// is torn down, closing the race window in which a late stream event could
+/// write to `state` after the notifier began disposing.
 class AuthNotifier extends Notifier<AuthState> {
   bool _isDisposed = false;
 
   @override
   AuthState build() {
     _isDisposed = false;
-    ref.onDispose(() {
-      _isDisposed = true;
-    });
 
     final AuthRepository repository = ref.watch(authRepositoryProvider);
 
@@ -130,7 +109,14 @@ class AuthNotifier extends Notifier<AuthState> {
             state = const AuthState.unauthenticated();
           },
         );
+
+    // Register the subscription teardown first, so it runs LAST in LIFO.
     ref.onDispose(subscription.cancel);
+
+    // Register the flag flip last, so it runs FIRST in LIFO.
+    ref.onDispose(() {
+      _isDisposed = true;
+    });
 
     unawaited(_restoreSession());
 
@@ -138,9 +124,6 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   /// Signs in with the supplied credentials.
-  ///
-  /// Returns `null` on success, or a safe [AuthFailureType] the caller can
-  /// translate into a localized message. Never returns raw backend text.
   Future<AuthFailureType?> login({
     required String email,
     required String password,
@@ -161,8 +144,6 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   /// Signs the current user out.
-  ///
-  /// Returns `null` on success, or a safe [AuthFailureType] on failure.
   Future<AuthFailureType?> logout() async {
     try {
       await ref.read(logoutUseCaseProvider)();
