@@ -1,7 +1,6 @@
 // lib/features/auth/data/repositories/auth_repository_impl.dart
 
-import 'package:supabase_flutter/supabase_flutter.dart'
-    show AuthException as SupabaseAuthException;
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../../../../core/utils/logger.dart';
 import '../../domain/entities/auth_session.dart';
@@ -43,7 +42,7 @@ class AuthRepositoryImpl implements AuthRepository {
         password: password,
       );
       return model.toEntity();
-    } on SupabaseAuthException catch (error, stackTrace) {
+    } on supabase.AuthException catch (error, stackTrace) {
       throw _mapSupabaseAuthException(error, stackTrace);
     } on AuthException {
       rethrow;
@@ -56,7 +55,7 @@ class AuthRepositoryImpl implements AuthRepository {
   Future<void> logout() async {
     try {
       await _remoteDataSource.signOut();
-    } on SupabaseAuthException catch (error, stackTrace) {
+    } on supabase.AuthException catch (error, stackTrace) {
       throw _mapSupabaseAuthException(error, stackTrace);
     } on AuthException {
       rethrow;
@@ -69,7 +68,7 @@ class AuthRepositoryImpl implements AuthRepository {
       model?.toEntity();
 
   static AuthException _mapSupabaseAuthException(
-    SupabaseAuthException error,
+    supabase.AuthException error,
     StackTrace stackTrace,
   ) {
     final AuthFailureType type = _classify(error);
@@ -111,11 +110,7 @@ class AuthRepositoryImpl implements AuthRepository {
     );
   }
 
-  /// Classifies a Supabase auth error into a safe [AuthFailureType].
-  ///
-  /// The mapping prefers stable identifiers (`code`, then `statusCode`),
-  /// with a defensive textual fallback only for network-shaped failures.
-  static AuthFailureType _classify(SupabaseAuthException error) {
+  static AuthFailureType _classify(supabase.AuthException error) {
     final String? rawCode = error.code;
     final String code = (rawCode ?? '').toLowerCase();
     final String message = error.message.toLowerCase();
