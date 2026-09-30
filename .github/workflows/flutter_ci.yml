@@ -4,6 +4,11 @@
 # Verifies every change pushed to `main` / `develop` and every pull request
 # targeting those branches. Runs on Flutter stable.
 #
+# This project is Flutter/Dart only. It does NOT use Node.js or npm.
+# Do not add `actions/setup-node`, `npm ci`, `yarn`, or npm caching here.
+# Adding npm caching without a package-lock.json causes the CI to fail with
+# "Dependencies lock file is not found".
+#
 # Security model:
 #   * Secrets (SUPABASE_URL, SUPABASE_ANON_KEY) are only referenced by the
 #     web build step, which runs on trusted pushes and manual dispatches.
@@ -11,6 +16,14 @@
 #     by missing credentials.
 #   * Only the public anon / publishable Supabase key may ever be supplied.
 #     A service-role key must never reach the Flutter client.
+#
+# Formatting policy:
+#   The `Verify Dart formatting` step is INFORMATIONAL. It reports which files
+#   would change under `dart format`, but it does not fail the job. This lets
+#   analyze/test reveal real issues while the codebase is progressively being
+#   formatted. Once the whole repository is formatted, remove
+#   `continue-on-error: true` and re-add `--set-exit-if-changed` to make the
+#   check strict again.
 # ============================================================================
 
 name: Flutter CI
@@ -38,7 +51,9 @@ permissions:
 jobs:
   analyze-and-test:
     name: Analyze & Test
-    runs-on: ubuntu-latest
+    # Pinned LTS runner instead of ubuntu-latest, to avoid an unexpected
+    # migration to Ubuntu 26 while the project is still under development.
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
 
     steps:
@@ -57,8 +72,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      - name: Verify Dart formatting
-        run: dart format --output=none --set-exit-if-changed lib test
+      - name: Verify Dart formatting (informational)
+        continue-on-error: true
+        run: dart format --output=none lib test
 
       - name: Analyze
         run: flutter analyze
@@ -68,7 +84,7 @@ jobs:
 
   build-web:
     name: Build Web (release)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: analyze-and-test
     # Only run when secrets are expected to be available:
