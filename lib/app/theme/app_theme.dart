@@ -1,4 +1,5 @@
 // lib/app/theme/app_theme.dart
+
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
 
@@ -13,18 +14,20 @@ abstract final class AppTheme {
   static ThemeData _build(Brightness brightness) {
     final bool isLight = brightness == Brightness.light;
 
-    final ColorScheme colorScheme =
-        ColorScheme.fromSeed(
-          seedColor: AppColors.brandPrimary,
-          brightness: brightness,
-        ).copyWith(
-          error: AppColors.danger,
-          surface: isLight ? AppColors.lightSurface : AppColors.darkSurface,
-        );
+    final ColorScheme colorScheme = ColorScheme.fromSeed(
+      seedColor: AppColors.brandPrimary,
+      brightness: brightness,
+    ).copyWith(
+      error: AppColors.danger,
+      surface: isLight ? AppColors.lightSurface : AppColors.darkSurface,
+    );
 
+    // `Typography.material2021()` is a factory constructor and therefore
+    // cannot be used with `const`. It is invoked once per theme build, so
+    // the absence of `const` has no measurable cost.
     final TextTheme baseTextTheme = isLight
-        ? const Typography.material2021().black
-        : const Typography.material2021().white;
+        ? Typography.material2021().black
+        : Typography.material2021().white;
 
     return ThemeData(
       useMaterial3: true,
