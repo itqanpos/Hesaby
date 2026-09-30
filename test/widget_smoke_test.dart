@@ -16,9 +16,9 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
-          authProvider.overrideWithValue(
-            const AuthState.authenticated(
-              AuthSession(
+          authProvider.overrideWith(
+            (ref) => AuthState.authenticated(
+              const AuthSession(
                 userId: 'test-user-id',
                 email: 'test@example.com',
               ),
