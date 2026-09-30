@@ -25,9 +25,18 @@ class HomePage extends ConsumerWidget {
     final TextTheme textTheme = Theme.of(context).textTheme;
 
     final List<_FoundationItem> items = <_FoundationItem>[
-      _FoundationItem(icon: Icons.flutter_dash, title: l10n.homeStatusFlutter),
-      _FoundationItem(icon: Icons.route_outlined, title: l10n.homeStatusRouting),
-      _FoundationItem(icon: Icons.palette_outlined, title: l10n.homeStatusTheme),
+      _FoundationItem(
+        icon: Icons.flutter_dash,
+        title: l10n.homeStatusFlutter,
+      ),
+      _FoundationItem(
+        icon: Icons.route_outlined,
+        title: l10n.homeStatusRouting,
+      ),
+      _FoundationItem(
+        icon: Icons.palette_outlined,
+        title: l10n.homeStatusTheme,
+      ),
       _FoundationItem(
         icon: Icons.translate_outlined,
         title: l10n.homeStatusLocalization,
@@ -111,10 +120,7 @@ class _ContextSection extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        Text(
-          'سياق العمل',
-          style: theme.textTheme.titleLarge,
-        ),
+        Text('سياق العمل', style: theme.textTheme.titleLarge),
         const SizedBox(height: 12),
         const CompanySelector(),
         const SizedBox(height: 8),
@@ -128,10 +134,10 @@ String _environmentLabel(
   AppLocalizations l10n,
   AppEnvironment environment,
 ) => switch (environment) {
-      AppEnvironment.development => l10n.homeEnvironmentDevelopment,
-      AppEnvironment.staging => l10n.homeEnvironmentStaging,
-      AppEnvironment.production => l10n.homeEnvironmentProduction,
-    };
+  AppEnvironment.development => l10n.homeEnvironmentDevelopment,
+  AppEnvironment.staging => l10n.homeEnvironmentStaging,
+  AppEnvironment.production => l10n.homeEnvironmentProduction,
+};
 
 class _HeroSection extends StatelessWidget {
   const _HeroSection({required this.l10n, required this.config});
