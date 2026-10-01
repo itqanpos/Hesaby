@@ -53,7 +53,7 @@ void main() {
       ),
     );
 
-    // انتظار اكتمال جميع عمليات التوجيه وبناء الشاشات
+    // انتظار اكتمال التوجيه وبناء الشاشات
     await tester.pumpAndSettle();
 
     expect(find.byType(HomePage), findsOneWidget);
