@@ -1,7 +1,12 @@
 import 'package:flutter/material.dart';
+import 'package:flutter_localizations/flutter_localizations.dart'; // إضافة استيراد مكتبة اللغات
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
+
+// تأكد من مسار استيراد AppLocalizations الخاص بمشروعك (هذا هو المسار الافتراضي غالباً)
+import 'package:flutter_gen/gen_l10n/app_localizations.dart'; 
+
 import 'package:hesabi/app/router.dart';
 import 'package:hesabi/features/auth/domain/entities/auth_session.dart';
 import 'package:hesabi/features/auth/presentation/providers/auth_provider.dart';
@@ -42,6 +47,17 @@ void main() {
         ],
         child: MaterialApp.router(
           routerConfig: router,
+          // إضافة إعدادات الترجمة المطابقة لما في تطبيقك الأصلي
+          localizationsDelegates: const [
+            AppLocalizations.delegate, 
+            GlobalMaterialLocalizations.delegate,
+            GlobalWidgetsLocalizations.delegate,
+            GlobalCupertinoLocalizations.delegate,
+          ],
+          supportedLocales: const [
+            Locale('ar'), // أو اللغات التي يدعمها تطبيقك
+            Locale('en'),
+          ],
         ),
       ),
     );
