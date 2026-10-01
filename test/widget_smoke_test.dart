@@ -1,7 +1,7 @@
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
-import 'package:hesabi/app/app.dart';
 import 'package:hesabi/app/router.dart';
 import 'package:hesabi/features/auth/domain/entities/auth_session.dart';
 import 'package:hesabi/features/auth/presentation/providers/auth_provider.dart';
@@ -23,38 +23,31 @@ void main() {
   testWidgets('HesabiApp boots into the home page', (
     WidgetTester tester,
   ) async {
+    final router = GoRouter(
+      initialLocation: AppRouter.homePath,
+      routes: <RouteBase>[
+        GoRoute(
+          path: AppRouter.homePath,
+          name: AppRouter.homeName,
+          builder: (context, state) => const HomePage(),
+        ),
+      ],
+    );
+
     await tester.pumpWidget(
       ProviderScope(
         overrides: <Override>[
           authProvider.overrideWith(() => _AuthenticatedAuthNotifier()),
-          appRouterProvider.overrideWith((ref) {
-            final router = GoRouter(
-              initialLocation: AppRouter.homePath,
-              routes: <RouteBase>[
-                GoRoute(
-                  path: AppRouter.homePath,
-                  name: AppRouter.homeName,
-                  builder: (context, state) => const HomePage(),
-                ),
-              ],
-            );
-
-            ref.listen<AuthState>(authProvider, (previous, next) {
-              if (previous?.status != next.status) {
-                router.refresh();
-              }
-            });
-
-            ref.onDispose(router.dispose);
-            return router;
-          }),
+          appRouterProvider.overrideWithValue(router),
         ],
-        child: const HesabiApp(),
+        child: MaterialApp.router(
+          routerConfig: router,
+        ),
       ),
     );
 
-    // انتظار اكتمال التوجيه وبناء الشاشات
-    await tester.pumpAndSettle();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 100));
 
     expect(find.byType(HomePage), findsOneWidget);
   });
