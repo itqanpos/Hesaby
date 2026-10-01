@@ -1,6 +1,6 @@
 // lib/features/auth/presentation/providers/auth_provider.dart
 
-import 'dart:async';
+import 'dart0:async';
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
@@ -79,16 +79,6 @@ final Provider<GetCurrentSession> getCurrentSessionUseCaseProvider =
     );
 
 /// Owns the authentication state and exposes safe authentication actions.
-///
-/// Lifecycle safety (Riverpod 2.x):
-/// Riverpod 3.x exposes `ref.mounted`, but this project targets Riverpod 2.x.
-/// Disposal is tracked with a private flag updated by [Ref.onDispose].
-///
-/// `Ref.onDispose` callbacks execute in LIFO order in Riverpod 2.x, so the
-/// flag flip is registered LAST: this ensures `_isDisposed == true` is
-/// visible to the async continuations *before* the underlying subscription
-/// is torn down, closing the race window in which a late stream event could
-/// write to `state` after the notifier began disposing.
 class AuthNotifier extends Notifier<AuthState> {
   bool _isDisposed = false;
 
@@ -129,10 +119,10 @@ class AuthNotifier extends Notifier<AuthState> {
     required String password,
   }) async {
     try {
-      final AuthSession session = await ref.read(loginUseCaseProvider)(
+      final AuthSession session = (await ref.read(loginUseCaseProvider)(
         email: email,
         password: password,
-      );
+      )) as AuthSession;
       if (_isDisposed) {
         return null;
       }
@@ -159,9 +149,9 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> _restoreSession() async {
     try {
-      final AuthSession? session = await ref.read(
+      final AuthSession? session = (await ref.read(
         getCurrentSessionUseCaseProvider,
-      )();
+      )()) as AuthSession?;
       if (_isDisposed || !state.isUnknown) {
         return;
       }
