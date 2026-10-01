@@ -1,4 +1,3 @@
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -54,7 +53,9 @@ void main() {
       ),
     );
 
-    await tester.pump();
+    // انتظار اكتمال جميع عمليات التوجيه وبناء الشاشات
+    await tester.pumpAndSettle();
+
     expect(find.byType(HomePage), findsOneWidget);
   });
 }
