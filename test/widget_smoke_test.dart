@@ -1,11 +1,12 @@
 import 'package:flutter/material.dart';
-import 'package:flutter_localizations/flutter_localizations.dart'; // إضافة استيراد مكتبة اللغات
+import 'package:flutter_localizations/flutter_localizations.dart'; 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
 
-// تأكد من مسار استيراد AppLocalizations الخاص بمشروعك (هذا هو المسار الافتراضي غالباً)
-import 'package:flutter_gen/gen_l10n/app_localizations.dart'; 
+// 🔴 هام: قم بتغيير هذا المسار ليتطابق تماماً مع مسار AppLocalizations في تطبيقك!
+// يمكنك نسخه من ملف lib/app/app.dart
+import 'package:hesabi/l10n/app_localizations.dart'; // <--- ضع الاستيراد الصحيح هنا
 
 import 'package:hesabi/app/router.dart';
 import 'package:hesabi/features/auth/domain/entities/auth_session.dart';
@@ -47,15 +48,15 @@ void main() {
         ],
         child: MaterialApp.router(
           routerConfig: router,
-          // إضافة إعدادات الترجمة المطابقة لما في تطبيقك الأصلي
-          localizationsDelegates: const [
+          // تم إزالة const من القائمة لحل خطأ (non_constant_list_element)
+          localizationsDelegates: [
             AppLocalizations.delegate, 
             GlobalMaterialLocalizations.delegate,
             GlobalWidgetsLocalizations.delegate,
             GlobalCupertinoLocalizations.delegate,
           ],
           supportedLocales: const [
-            Locale('ar'), // أو اللغات التي يدعمها تطبيقك
+            Locale('ar'), 
             Locale('en'),
           ],
         ),
