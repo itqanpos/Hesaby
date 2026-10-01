@@ -1,6 +1,6 @@
 // lib/features/auth/presentation/providers/auth_provider.dart
 
-import 'dart0:async';
+import 'dart:async';
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
@@ -12,9 +12,9 @@ import '../../data/datasources/auth_remote_datasource.dart';
 import '../../data/repositories/auth_repository_impl.dart';
 import '../../domain/entities/auth_session.dart';
 import '../../domain/repositories/auth_repository.dart';
-import '../../domain/useCases/get_current_session.dart';
-import '../../domain/useCases/login.dart';
-import '../../domain/useCases/logout.dart';
+import '../../domain/usecases/get_current_session.dart';
+import '../../domain/usecases/login.dart';
+import '../../domain/usecases/logout.dart';
 
 /// Lifecycle stage of the authentication state.
 enum AuthStatus { unknown, authenticated, unauthenticated }
