@@ -30,7 +30,6 @@ void main() {
       ),
     );
 
-    // انتظار بناء الشاشات واكتمال التوجيه
     await tester.pumpAndSettle();
 
     expect(find.byType(HomePage), findsOneWidget);
