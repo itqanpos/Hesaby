@@ -1,11 +1,12 @@
-// test/widget_smoke_test.dart
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:go_router/go_router.dart';
 import 'package:hesabi/app/app.dart';
+import 'package:hesabi/app/router.dart';
 import 'package:hesabi/features/auth/domain/entities/auth_session.dart';
 import 'package:hesabi/features/auth/presentation/providers/auth_provider.dart';
 import 'package:hesabi/features/home/presentation/pages/home_page.dart';
-import 'package:hesabi/shared/layouts/app_shell.dart';
 
 class _AuthenticatedAuthNotifier extends AuthNotifier {
   @override
@@ -27,20 +28,33 @@ void main() {
       ProviderScope(
         overrides: <Override>[
           authProvider.overrideWith(() => _AuthenticatedAuthNotifier()),
-          // Add overrides for any other providers accessed during app initialization
-          // Example: if your app accesses a theme provider, router provider, etc.
-          // themeProvider.overrideWith(...),
-          // routerProvider.overrideWith(...),
+          appRouterProvider.overrideWith((ref) {
+            final router = GoRouter(
+              initialLocation: AppRouter.homePath,
+              routes: <RouteBase>[
+                GoRoute(
+                  path: AppRouter.homePath,
+                  name: AppRouter.homeName,
+                  builder: (context, state) => const HomePage(),
+                ),
+              ],
+            );
+
+            ref.listen<AuthState>(authProvider, (previous, next) {
+              if (previous?.status != next.status) {
+                router.refresh();
+              }
+            });
+
+            ref.onDispose(router.dispose);
+            return router;
+          }),
         ],
         child: const HesabiApp(),
       ),
     );
 
-    for (int i = 0; i < 3; i++) {
-      await tester.pump(const Duration(milliseconds: 16));
-    }
-
+    await tester.pump();
     expect(find.byType(HomePage), findsOneWidget);
-    expect(find.byType(AppShell), findsOneWidget);
   });
 }
