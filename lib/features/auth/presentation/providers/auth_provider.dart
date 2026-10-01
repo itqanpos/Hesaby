@@ -119,10 +119,10 @@ class AuthNotifier extends Notifier<AuthState> {
     required String password,
   }) async {
     try {
-      final AuthSession session = (await ref.read(loginUseCaseProvider)(
+      final AuthSession session = await ref.read(loginUseCaseProvider)(
         email: email,
         password: password,
-      )) as AuthSession;
+      );
       if (_isDisposed) {
         return null;
       }
@@ -149,9 +149,9 @@ class AuthNotifier extends Notifier<AuthState> {
 
   Future<void> _restoreSession() async {
     try {
-      final AuthSession? session = (await ref.read(
+      final AuthSession? session = await ref.read(
         getCurrentSessionUseCaseProvider,
-      )()) as AuthSession?;
+      )();
       if (_isDisposed || !state.isUnknown) {
         return;
       }
