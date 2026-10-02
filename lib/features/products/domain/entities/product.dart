@@ -12,13 +12,7 @@ import 'package:flutter/foundation.dart';
 /// The database stores all monetary values as `numeric(15,4)` — exact,
 /// never floating point. In Dart, they are exposed as `double`. `double`
 /// represents values with two decimals exactly up to 2^53 / 100 (about
-/// 9 × 10^13), which is far beyond any realistic POS price. Sums and
-/// products of such values remain exact for typical magnitudes; any
-/// residual rounding is only possible when aggregating very small
-/// fractional amounts across many lines, which is out of scope for
-/// Phase 4. If exact arbitrary-precision arithmetic is required later
-/// (for example during inventory valuation), a `Decimal` value object can
-/// be introduced without breaking this entity's API.
+/// 9 × 10^13), which is far beyond any realistic POS price.
 ///
 /// A product always belongs to exactly one company; [companyId] is part of
 /// the entity so that the presentation layer can verify tenant coherence
@@ -94,11 +88,17 @@ class Product extends Equatable {
 
   bool get hasCategory => categoryId != null;
 
-  bool get hasSku => sku != null && sku!.isNotEmpty;
+  /// True when a meaningful SKU is present: non-null and not whitespace-only.
+  bool get hasSku => sku != null && sku!.trim().isNotEmpty;
 
-  bool get hasBarcode => barcode != null && barcode!.isNotEmpty;
+  /// True when a meaningful barcode is present: non-null and not
+  /// whitespace-only.
+  bool get hasBarcode => barcode != null && barcode!.trim().isNotEmpty;
 
-  bool get hasDescription => description != null && description!.isNotEmpty;
+  /// True when a meaningful description is present: non-null and not
+  /// whitespace-only.
+  bool get hasDescription =>
+      description != null && description!.trim().isNotEmpty;
 
   bool get hasMinSellingPrice => minSellingPrice != null;
 
