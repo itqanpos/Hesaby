@@ -1,35 +1,43 @@
+// lib/features/products/presentation/pages/product_form_dialog.dart
+
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/utils/logger.dart';
+import '../../../../core/utils/validators.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../domain/entities/category.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/unit.dart';
+import '../../domain/repositories/product_repository.dart';
 import '../providers/category_providers.dart';
 import '../providers/product_providers.dart';
 import '../providers/unit_providers.dart';
 
-/// يعرض نافذة إضافة / تعديل منتج.
+/// Opens the product create / edit dialog.
 ///
-/// مرّر [existing] لتعديل منتج قائم، أو اتركه `null` لإضافة منتج جديد.
-/// تُعيد `true` عند الحفظ بنجاح، و `false` عند الإلغاء، و `null` عند
-/// إغلاق النافذة دون قرار.
+/// Pass [existing] to edit an existing product, or leave it `null` to create
+/// a new one. Returns `true` when the product was saved, `false` when the
+/// user cancelled, and `null` when the dialog was dismissed.
 Future<bool?> showProductFormDialog({
   required BuildContext context,
+  required WidgetRef ref,
   Product? existing,
 }) {
   return showDialog<bool>(
     context: context,
     barrierDismissible: false,
-    builder: (_) => _ProductFormDialog(existing: existing),
+    builder: (BuildContext dialogContext) => _ProductFormDialog(existing: existing),
   );
 }
 
 class _ProductFormDialog extends ConsumerStatefulWidget {
   const _ProductFormDialog({this.existing});
 
+  /// When non-null, the dialog is in edit mode.
   final Product? existing;
 
   @override
@@ -37,61 +45,43 @@ class _ProductFormDialog extends ConsumerStatefulWidget {
 }
 
 class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
-  static const String _noCategorySentinel = '__no_category__';
-
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   late final TextEditingController _nameController;
   late final TextEditingController _skuController;
   late final TextEditingController _barcodeController;
-  late final TextEditingController _costPriceController;
   late final TextEditingController _sellingPriceController;
-  late final TextEditingController _minSellingPriceController;
-  late final TextEditingController _taxRateController;
+  late final TextEditingController _costPriceController;
   late final TextEditingController _descriptionController;
 
   String? _categoryId;
   String? _defaultUnitId;
   bool _isActive = true;
 
-  bool _isSaving = false;
-  String? _errorMessage;
+  bool _isSubmitting = false;
+  ProductFailureType? _failureType;
 
   bool get _isEditing => widget.existing != null;
 
   @override
   void initState() {
     super.initState();
-
-    final Product? product = widget.existing;
-
-    _nameController = TextEditingController(text: product?.name ?? '');
-    _skuController = TextEditingController(text: product?.sku ?? '');
-    _barcodeController = TextEditingController(text: product?.barcode ?? '');
-    _costPriceController = TextEditingController(
-      text: product == null ? '' : _formatNumber(product.costPrice),
-    );
+    final Product? existing = widget.existing;
+    _nameController = TextEditingController(text: existing?.name ?? '');
+    _skuController = TextEditingController(text: existing?.sku ?? '');
+    _barcodeController = TextEditingController(text: existing?.barcode ?? '');
     _sellingPriceController = TextEditingController(
-      text: product == null ? '' : _formatNumber(product.sellingPrice),
+      text: existing == null ? '' : _formatNumber(existing.sellingPrice),
     );
-
-    final double? minSellingPrice = product?.minSellingPrice;
-    _minSellingPriceController = TextEditingController(
-      text: minSellingPrice == null ? '' : _formatNumber(minSellingPrice),
+    _costPriceController = TextEditingController(
+      text: existing == null ? '' : _formatNumber(existing.costPrice),
     );
-
-    final double? taxRate = product?.taxRate;
-    _taxRateController = TextEditingController(
-      text: taxRate == null ? '' : _formatNumber(taxRate),
-    );
-
     _descriptionController = TextEditingController(
-      text: product?.description ?? '',
+      text: existing?.description ?? '',
     );
-
-    _categoryId = product?.categoryId;
-    _defaultUnitId = product?.defaultUnitId;
-    _isActive = product?.isActive ?? true;
+    _categoryId = existing?.categoryId;
+    _defaultUnitId = existing?.defaultUnitId;
+    _isActive = existing?.isActive ?? true;
   }
 
   @override
@@ -99,10 +89,8 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     _nameController.dispose();
     _skuController.dispose();
     _barcodeController.dispose();
-    _costPriceController.dispose();
     _sellingPriceController.dispose();
-    _minSellingPriceController.dispose();
-    _taxRateController.dispose();
+    _costPriceController.dispose();
     _descriptionController.dispose();
     super.dispose();
   }
@@ -114,91 +102,62 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     return value.toString();
   }
 
-  static String? _emptyToNull(String raw) {
-    final String trimmed = raw.trim();
+  static String? _emptyToNull(String value) {
+    final String trimmed = value.trim();
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  static double? _parseNullableNumber(String raw) {
-    final String trimmed = raw.trim();
-    if (trimmed.isEmpty) {
-      return null;
-    }
-    return double.tryParse(trimmed);
-  }
-
-  String? _validateRequired(String? value, String label) {
-    if (value == null || value.trim().isEmpty) {
-      return 'الرجاء إدخال $label';
-    }
-    return null;
-  }
-
-  String? _validateNonNegativeNumber(
-    String? value,
-    String label, {
-    bool required = true,
-  }) {
-    final String raw = value?.trim() ?? '';
-    if (raw.isEmpty) {
-      return required ? 'الرجاء إدخال $label' : null;
-    }
-    final double? parsed = double.tryParse(raw);
-    if (parsed == null) {
-      return 'الرجاء إدخال رقم صحيح';
-    }
-    if (parsed < 0) {
-      return 'لا يمكن أن يكون $label سالباً';
-    }
-    return null;
-  }
-
   Future<void> _submit() async {
-    final FormState? formState = _formKey.currentState;
-    if (formState == null || !formState.validate()) {
+    FocusScope.of(context).unfocus();
+
+    if (_failureType != null) {
+      setState(() => _failureType = null);
+    }
+
+    final bool isValid = _formKey.currentState?.validate() ?? false;
+    if (!isValid) {
       return;
     }
 
-    final String unitId = _defaultUnitId ?? '';
-    if (unitId.isEmpty) {
+    final String? unitId = _defaultUnitId;
+    if (unitId == null || unitId.isEmpty) {
       setState(() {
-        _errorMessage = 'الرجاء اختيار الوحدة الأساسية';
+        _failureType = ProductFailureType.unitNotFound;
       });
       return;
     }
 
-    final double? costPrice =
-        double.tryParse(_costPriceController.text.trim());
     final double? sellingPrice =
         double.tryParse(_sellingPriceController.text.trim());
-
-    if (costPrice == null || sellingPrice == null) {
+    final double? costPrice = double.tryParse(_costPriceController.text.trim());
+    if (sellingPrice == null || costPrice == null) {
       setState(() {
-        _errorMessage = 'الرجاء إدخال أسعار صحيحة';
+        _failureType = ProductFailureType.invalidResponse;
       });
       return;
     }
 
-    setState(() {
-      _isSaving = true;
-      _errorMessage = null;
-    });
+    setState(() => _isSubmitting = true);
+
+    final ProductsNotifier notifier = ref.read(productsProvider.notifier);
+    final String name = _nameController.text.trim();
+    final String? sku = _emptyToNull(_skuController.text);
+    final String? barcode = _emptyToNull(_barcodeController.text);
+    final String? description = _emptyToNull(_descriptionController.text);
 
     try {
-      final notifier = ref.read(productsProvider.notifier);
+      if (widget.existing == null) {
+        final CompanyContextState context = ref.read(companyContextProvider);
+        final String? companyId = context.currentCompany?.id;
+        if (companyId == null) {
+          throw const ProductException(
+            type: ProductFailureType.unauthorized,
+            cause: 'No company is currently selected.',
+          );
+        }
 
-      final String name = _nameController.text.trim();
-      final String? sku = _emptyToNull(_skuController.text);
-      final String? barcode = _emptyToNull(_barcodeController.text);
-      final String? description = _emptyToNull(_descriptionController.text);
-      final double? minSellingPrice =
-          _parseNullableNumber(_minSellingPriceController.text);
-      final double? taxRate = _parseNullableNumber(_taxRateController.text);
-
-      final Product? existing = widget.existing;
-
-      if (existing == null) {
         await notifier.createProduct(
+          companyId: companyId,
           name: name,
           defaultUnitId: unitId,
           costPrice: costPrice,
@@ -207,12 +166,10 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
           sku: sku,
           barcode: barcode,
           description: description,
-          minSellingPrice: minSellingPrice,
-          taxRate: taxRate,
         );
       } else {
         await notifier.updateProduct(
-          productId: existing.id,
+          productId: widget.existing!.id,
           name: name,
           defaultUnitId: unitId,
           categoryId: _categoryId,
@@ -225,10 +182,6 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
           clearDescription: description == null,
           costPrice: costPrice,
           sellingPrice: sellingPrice,
-          minSellingPrice: minSellingPrice,
-          clearMinSellingPrice: minSellingPrice == null,
-          taxRate: taxRate,
-          clearTaxRate: taxRate == null,
           isActive: _isActive,
         );
       }
@@ -237,14 +190,21 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
         return;
       }
       Navigator.of(context).pop(true);
-    } catch (error, stackTrace) {
-      AppLogger.error('فشل حفظ المنتج', error, stackTrace);
+    } on ProductException catch (error) {
       if (!mounted) {
         return;
       }
       setState(() {
-        _isSaving = false;
-        _errorMessage = 'تعذّر حفظ المنتج، الرجاء المحاولة مرة أخرى';
+        _isSubmitting = false;
+        _failureType = error.type;
+      });
+    } on Object {
+      if (!mounted) {
+        return;
+      }
+      setState(() {
+        _isSubmitting = false;
+        _failureType = ProductFailureType.unknown;
       });
     }
   }
@@ -254,263 +214,335 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     final AsyncValue<List<ProductCategory>> categoriesAsync =
         ref.watch(categoriesProvider);
     final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
-    final String? errorMessage = _errorMessage;
+    final ProductFailureType? failure = _failureType;
 
     return AlertDialog(
       title: Text(_isEditing ? 'تعديل منتج' : 'إضافة منتج'),
-      content: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
+      content: SizedBox(
+        width: 480,
         child: SingleChildScrollView(
           child: Form(
             key: _formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
             child: Column(
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
+              children: <Widget>[
                 AppTextField(
                   controller: _nameController,
                   label: 'اسم المنتج',
-                  textInputAction: TextInputAction.next,
-                  enabled: !_isSaving,
-                  validator: (value) =>
-                      _validateRequired(value, 'اسم المنتج'),
+                  hint: 'مثال: بيبسي 1 لتر',
+                  enabled: !_isSubmitting,
+                  autofocus: true,
+                  validator: (String? value) => _validateRequired(
+                    value,
+                    'اسم المنتج',
+                  ),
                 ),
                 const SizedBox(height: 12),
                 AppTextField(
                   controller: _skuController,
-                  label: 'رمز المنتج (SKU)',
-                  textInputAction: TextInputAction.next,
-                  enabled: !_isSaving,
+                  label: 'رمز المنتج (SKU) — اختياري',
+                  enabled: !_isSubmitting,
+                  validator: _validateSku,
                 ),
                 const SizedBox(height: 12),
                 AppTextField(
                   controller: _barcodeController,
-                  label: 'الباركود',
-                  textInputAction: TextInputAction.next,
-                  enabled: !_isSaving,
+                  label: 'الباركود — اختياري',
+                  enabled: !_isSubmitting,
+                  keyboardType: TextInputType.number,
+                  validator: _validateBarcode,
                 ),
                 const SizedBox(height: 12),
-                _buildCategoriesField(categoriesAsync),
-                const SizedBox(height: 12),
-                _buildUnitsField(unitsAsync),
-                const SizedBox(height: 12),
-                AppTextField(
-                  controller: _costPriceController,
-                  label: 'سعر التكلفة',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
+                categoriesAsync.when(
+                  data: (List<ProductCategory> categories) =>
+                      _buildCategoryField(categories),
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: LinearProgressIndicator(),
                   ),
-                  textInputAction: TextInputAction.next,
-                  enabled: !_isSaving,
-                  validator: (value) =>
-                      _validateNonNegativeNumber(value, 'سعر التكلفة'),
+                  error: (Object _, StackTrace __) => _buildLookupError('الفئات'),
+                ),
+                const SizedBox(height: 12),
+                unitsAsync.when(
+                  data: (List<Unit> units) => _buildUnitField(units),
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 12),
+                    child: LinearProgressIndicator(),
+                  ),
+                  error: (Object _, StackTrace __) => _buildLookupError('الوحدات'),
                 ),
                 const SizedBox(height: 12),
                 AppTextField(
                   controller: _sellingPriceController,
                   label: 'سعر البيع',
+                  enabled: !_isSubmitting,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  textInputAction: TextInputAction.next,
-                  enabled: !_isSaving,
-                  validator: (value) =>
-                      _validateNonNegativeNumber(value, 'سعر البيع'),
+                  validator: _validatePrice,
                 ),
                 const SizedBox(height: 12),
                 AppTextField(
-                  controller: _minSellingPriceController,
-                  label: 'أدنى سعر للبيع (اختياري)',
+                  controller: _costPriceController,
+                  label: 'سعر التكلفة',
+                  enabled: !_isSubmitting,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
-                  textInputAction: TextInputAction.next,
-                  enabled: !_isSaving,
-                  validator: (value) => _validateNonNegativeNumber(
-                    value,
-                    'أدنى سعر للبيع',
-                    required: false,
-                  ),
-                ),
-                const SizedBox(height: 12),
-                AppTextField(
-                  controller: _taxRateController,
-                  label: 'نسبة الضريبة % (اختياري)',
-                  keyboardType: const TextInputType.numberWithOptions(
-                    decimal: true,
-                  ),
-                  textInputAction: TextInputAction.next,
-                  enabled: !_isSaving,
-                  validator: (value) => _validateNonNegativeNumber(
-                    value,
-                    'نسبة الضريبة',
-                    required: false,
-                  ),
+                  validator: _validatePrice,
                 ),
                 const SizedBox(height: 12),
                 AppTextField(
                   controller: _descriptionController,
-                  label: 'الوصف (اختياري)',
+                  label: 'الوصف — اختياري',
+                  enabled: !_isSubmitting,
                   maxLines: 3,
-                  enabled: !_isSaving,
+                  validator: _validateDescription,
                 ),
-                if (_isEditing) ...[
+                const SizedBox(height: 8),
+                SwitchListTile(
+                  contentPadding: EdgeInsets.zero,
+                  title: const Text('نشط'),
+                  value: _isActive,
+                  onChanged: _isSubmitting
+                      ? null
+                      : (bool value) {
+                          setState(() => _isActive = value);
+                        },
+                ),
+                if (failure != null) ...<Widget>[
                   const SizedBox(height: 8),
-                  SwitchListTile(
-                    contentPadding: EdgeInsets.zero,
-                    title: const Text('نشط'),
-                    value: _isActive,
-                    onChanged: _isSaving
-                        ? null
-                        : (value) {
-                            setState(() {
-                              _isActive = value;
-                            });
-                          },
-                  ),
-                ],
-                if (errorMessage != null) ...[
-                  const SizedBox(height: 8),
-                  Text(
-                    errorMessage,
-                    style: TextStyle(
-                      color: Theme.of(context).colorScheme.error,
-                    ),
-                  ),
+                  _FailureBanner(message: _failureMessage(failure)),
                 ],
               ],
             ),
           ),
         ),
       ),
-      actions: [
+      actions: <Widget>[
         AppButton(
           label: 'إلغاء',
           variant: AppButtonVariant.text,
-          onPressed: _isSaving
-              ? null
-              : () => Navigator.of(context).pop(false),
+          onPressed:
+              _isSubmitting ? null : () => Navigator.of(context).pop(false),
         ),
         AppButton(
           label: _isEditing ? 'حفظ التعديلات' : 'إضافة',
-          variant: AppButtonVariant.primary,
-          isLoading: _isSaving,
-          onPressed: _isSaving ? null : _submit,
+          isLoading: _isSubmitting,
+          onPressed: _isSubmitting ? null : _submit,
         ),
       ],
+      scrollable: false,
     );
   }
 
-  Widget _buildCategoriesField(AsyncValue<List<ProductCategory>> async) {
-    return async.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: LinearProgressIndicator(),
-      ),
-      error: (error, stackTrace) => _buildLookupError('الفئات'),
-      data: (List<ProductCategory> categories) {
-        final Set<String> knownIds =
-            categories.map((category) => category.id).toSet();
-        final String? current = _categoryId;
-        final String selected =
-            (current != null && knownIds.contains(current))
-                ? current
-                : _noCategorySentinel;
+  // ---------------------------------------------------------------------------
+  // Field builders
+  // ---------------------------------------------------------------------------
 
-        return DropdownButtonFormField<String>(
-          value: selected,
-          decoration: const InputDecoration(
-            labelText: 'الفئة (اختياري)',
-            border: OutlineInputBorder(),
+  Widget _buildCategoryField(List<ProductCategory> categories) {
+    final Set<String> knownIds =
+        categories.map((ProductCategory category) => category.id).toSet();
+    final String? current = _categoryId;
+    final String? selected =
+        (current != null && knownIds.contains(current)) ? current : null;
+
+    return DropdownButtonFormField<String?>(
+      initialValue: selected,
+      decoration: const InputDecoration(
+        labelText: 'الفئة — اختياري',
+        border: OutlineInputBorder(),
+      ),
+      items: <DropdownMenuItem<String?>>[
+        const DropdownMenuItem<String?>(
+          value: null,
+          child: Text('بدون فئة'),
+        ),
+        for (final ProductCategory category in categories)
+          DropdownMenuItem<String?>(
+            value: category.id,
+            child: Text(category.name),
           ),
-          items: [
-            const DropdownMenuItem<String>(
-              value: _noCategorySentinel,
-              child: Text('بدون فئة'),
-            ),
-            ...categories.map(
-              (category) => DropdownMenuItem<String>(
-                value: category.id,
-                child: Text(category.name),
-              ),
-            ),
-          ],
-          onChanged: _isSaving
-              ? null
-              : (value) {
-                  setState(() {
-                    if (value == null || value == _noCategorySentinel) {
-                      _categoryId = null;
-                    } else {
-                      _categoryId = value;
-                    }
-                  });
-                },
-        );
-      },
+      ],
+      onChanged: _isSubmitting
+          ? null
+          : (String? value) {
+              setState(() => _categoryId = value);
+            },
     );
   }
 
-  Widget _buildUnitsField(AsyncValue<List<Unit>> async) {
-    return async.when(
-      loading: () => const Padding(
-        padding: EdgeInsets.symmetric(vertical: 8),
-        child: LinearProgressIndicator(),
-      ),
-      error: (error, stackTrace) => _buildLookupError('الوحدات'),
-      data: (List<Unit> units) {
-        final Set<String> knownIds = units.map((unit) => unit.id).toSet();
-        final String? current = _defaultUnitId;
-        final String? selected =
-            (current != null && knownIds.contains(current)) ? current : null;
+  Widget _buildUnitField(List<Unit> units) {
+    final Set<String> knownIds =
+        units.map((Unit unit) => unit.id).toSet();
+    final String? current = _defaultUnitId;
+    final String? selected =
+        (current != null && knownIds.contains(current)) ? current : null;
 
-        return DropdownButtonFormField<String>(
-          value: selected,
-          hint: const Text('اختر الوحدة الأساسية'),
-          decoration: const InputDecoration(
-            labelText: 'الوحدة الأساسية',
-            border: OutlineInputBorder(),
+    return DropdownButtonFormField<String>(
+      initialValue: selected,
+      hint: const Text('اختر الوحدة الأساسية'),
+      decoration: const InputDecoration(
+        labelText: 'الوحدة الأساسية',
+        border: OutlineInputBorder(),
+      ),
+      items: <DropdownMenuItem<String>>[
+        for (final Unit unit in units)
+          DropdownMenuItem<String>(
+            value: unit.id,
+            child: Text(unit.name),
           ),
-          items: units
-              .map(
-                (unit) => DropdownMenuItem<String>(
-                  value: unit.id,
-                  child: Text(unit.name),
-                ),
-              )
-              .toList(),
-          onChanged: _isSaving
-              ? null
-              : (value) {
-                  setState(() {
-                    _defaultUnitId = value;
-                  });
-                },
-          validator: (value) {
-            if (value == null || value.isEmpty) {
-              return 'الرجاء اختيار الوحدة الأساسية';
-            }
-            return null;
-          },
-        );
+      ],
+      onChanged: _isSubmitting
+          ? null
+          : (String? value) {
+              setState(() => _defaultUnitId = value);
+            },
+      validator: (String? value) {
+        if (value == null || value.isEmpty) {
+          return 'الرجاء اختيار الوحدة الأساسية';
+        }
+        return null;
       },
     );
   }
 
   Widget _buildLookupError(String label) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
-        children: [
-          Icon(
-            Icons.error_outline,
-            color: Theme.of(context).colorScheme.error,
-            size: 20,
-          ),
+        children: <Widget>[
+          Icon(Icons.error_outline, color: scheme.error, size: 20),
           const SizedBox(width: 8),
           Expanded(child: Text('تعذّر تحميل $label')),
         ],
       ),
     );
   }
+
+  // ---------------------------------------------------------------------------
+  // Validators
+  // ---------------------------------------------------------------------------
+
+  String? _validateRequired(String? value, String fieldName) {
+    final ValidationError? error = Validators.required(value);
+    return error == null ? null : 'الرجاء إدخال $fieldName';
+  }
+
+  String? _validateSku(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.length > 64) {
+      return 'الرمز طويل جدًا (الحد الأقصى 64 حرفًا)';
+    }
+    return null;
+  }
+
+  String? _validateBarcode(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.length > 64) {
+      return 'الباركود طويل جدًا (الحد الأقصى 64 حرفًا)';
+    }
+    return null;
+  }
+
+  String? _validateDescription(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return null;
+    }
+    if (trimmed.length > 2000) {
+      return 'الوصف طويل جدًا (الحد الأقصى 2000 حرف)';
+    }
+    return null;
+  }
+
+  String? _validatePrice(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) {
+      return 'الرجاء إدخال السعر';
+    }
+    final double? parsed = double.tryParse(trimmed);
+    if (parsed == null) {
+      return 'الرجاء إدخال رقم صحيح';
+    }
+    if (parsed < 0) {
+      return 'لا يمكن أن يكون السعر سالبًا';
+    }
+    return null;
+  }
 }
+
+// -----------------------------------------------------------------------------
+// Inline error banner
+// -----------------------------------------------------------------------------
+
+class _FailureBanner extends StatelessWidget {
+  const _FailureBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.error.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(Icons.error_outline, color: scheme.onErrorContainer, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: scheme.onErrorContainer),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Localization helpers
+// -----------------------------------------------------------------------------
+
+String _failureMessage(ProductFailureType type) => switch (type) {
+      ProductFailureType.network =>
+        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+      ProductFailureType.unauthorized =>
+        'انتهت صلاحية الجلسة أو لا تملك صلاحية. يرجى تسجيل الدخول مجددًا.',
+      ProductFailureType.notFound => 'المنتج غير موجود.',
+      ProductFailureType.skuConflict =>
+        'يوجد منتج آخر بنفس الـ SKU في هذه الشركة.',
+      ProductFailureType.barcodeConflict =>
+        'يوجد منتج آخر بنفس الباركود في هذه الشركة.',
+      ProductFailureType.categoryNotFound =>
+        'التصنيف المختار غير متاح. يرجى إعادة اختياره.',
+      ProductFailureType.unitNotFound =>
+        'الرجاء اختيار الوحدة الأساسية.',
+      ProductFailureType.inUse =>
+        'لا يمكن حذف المنتج لوجود سجلات مرتبطة به.',
+      ProductFailureType.invalidResponse =>
+        'الرجاء إدخال أسعار صحيحة.',
+      ProductFailureType.unknown =>
+        'تعذّر حفظ المنتج. يرجى المحاولة مرة أخرى.',
+    };
