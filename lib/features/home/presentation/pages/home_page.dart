@@ -19,7 +19,8 @@ import '../../../companies/presentation/widgets/company_selector.dart';
 /// Groups, in a single scrollable view:
 /// * the application hero,
 /// * the company / branch context selectors,
-/// * a navigation grid to the business modules (products catalog),
+/// * a navigation grid to the business modules (products catalog and
+///   inventory),
 /// * a foundation status panel that verifies the running infrastructure.
 ///
 /// It contains no business logic: every action is a navigation or a state
@@ -170,6 +171,12 @@ class _BusinessNavSection extends StatelessWidget {
         title: 'الوحدات',
         subtitle: 'وحدات القياس (قطعة، كرتونة، كيلو، ...)',
         routeName: AppRouter.unitsName,
+      ),
+      const _NavTileData(
+        icon: Icons.warehouse_outlined,
+        title: 'المخزون',
+        subtitle: 'أرصدة المخزون وحركات الإدخال والإخراج',
+        routeName: AppRouter.inventoryName,
       ),
     ];
 
