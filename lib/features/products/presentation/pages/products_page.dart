@@ -50,8 +50,9 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
         ref.watch(categoriesProvider);
     final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
 
-    final bool anyLoading =
-        productsAsync.isLoading || categoriesAsync.isLoading || unitsAsync.isLoading;
+    final bool anyLoading = productsAsync.isLoading ||
+        categoriesAsync.isLoading ||
+        unitsAsync.isLoading;
     final Object? firstError =
         productsAsync.error ?? categoriesAsync.error ?? unitsAsync.error;
 
@@ -139,7 +140,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                     }
 
                     if (filtered.isEmpty) {
-                      return AppEmptyView(
+                      return const AppEmptyView(
                         icon: Icons.search_off_outlined,
                         title: 'لا نتائج',
                         message: 'لم يُطابق أي منتج كلمة البحث.',
@@ -209,7 +210,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
   }) async {
     final bool? saved = await showProductFormDialog(
       context: context,
-      ref: ref,
       existing: product,
     );
 
@@ -230,7 +230,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
   ) async {
     await showProductUnitsDialog(
       context: context,
-      ref: ref,
       product: product,
     );
   }
