@@ -2,19 +2,28 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
 import '../../../../app/config/app_config.dart';
+import '../../../../app/router.dart';
 import '../../../../core/responsive/responsive_helper.dart';
 import '../../../../l10n/app_localizations.dart';
 import '../../../../shared/layouts/app_shell.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../companies/presentation/widgets/branch_selector.dart';
 import '../../../companies/presentation/widgets/company_selector.dart';
 
-/// Phase 3 placeholder screen.
+/// Home screen.
 ///
-/// It intentionally contains no business logic. Its purpose is to prove that
-/// routing, theming, localization, responsiveness, configuration and — as of
-/// Phase 3 — the company/branch context selectors are wired correctly.
+/// Groups, in a single scrollable view:
+/// * the application hero,
+/// * the company / branch context selectors,
+/// * a navigation grid to the business modules (products catalog),
+/// * a foundation status panel that verifies the running infrastructure.
+///
+/// It contains no business logic: every action is a navigation or a state
+/// read from existing providers.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -22,21 +31,16 @@ class HomePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AppLocalizations l10n = AppLocalizations.of(context);
     final AppConfig config = ref.watch(appConfigProvider);
+    final CompanyContextState contextState =
+        ref.watch(companyContextProvider);
     final TextTheme textTheme = Theme.of(context).textTheme;
 
+    final bool hasCompany = contextState.currentCompany != null;
+
     final List<_FoundationItem> items = <_FoundationItem>[
-      _FoundationItem(
-        icon: Icons.flutter_dash,
-        title: l10n.homeStatusFlutter,
-      ),
-      _FoundationItem(
-        icon: Icons.route_outlined,
-        title: l10n.homeStatusRouting,
-      ),
-      _FoundationItem(
-        icon: Icons.palette_outlined,
-        title: l10n.homeStatusTheme,
-      ),
+      _FoundationItem(icon: Icons.flutter_dash, title: l10n.homeStatusFlutter),
+      _FoundationItem(icon: Icons.route_outlined, title: l10n.homeStatusRouting),
+      _FoundationItem(icon: Icons.palette_outlined, title: l10n.homeStatusTheme),
       _FoundationItem(
         icon: Icons.translate_outlined,
         title: l10n.homeStatusLocalization,
@@ -74,6 +78,10 @@ class HomePage extends ConsumerWidget {
                 _HeroSection(l10n: l10n, config: config),
                 const SizedBox(height: 24),
                 const _ContextSection(),
+                if (hasCompany) ...<Widget>[
+                  const SizedBox(height: 24),
+                  _BusinessNavSection(itemWidth: itemWidth),
+                ],
                 const SizedBox(height: 32),
                 Text(
                   l10n.homeFoundationStatusTitle,
@@ -105,11 +113,11 @@ class HomePage extends ConsumerWidget {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Sections
+// -----------------------------------------------------------------------------
+
 /// Company and branch selectors grouped under a single section header.
-///
-/// The two selectors read their data from the company context provider and
-/// render their own loading, empty and error states. This section contains
-/// no logic beyond layout.
 class _ContextSection extends StatelessWidget {
   const _ContextSection();
 
@@ -130,14 +138,153 @@ class _ContextSection extends StatelessWidget {
   }
 }
 
+/// Navigation grid to the business modules.
+///
+/// Visible only when a company is selected, because the underlying pages
+/// scope every query to the current company. Each tile simply navigates via
+/// go_router and does not touch any provider.
+class _BusinessNavSection extends StatelessWidget {
+  const _BusinessNavSection({required this.itemWidth});
+
+  final double itemWidth;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    final List<_NavTileData> tiles = <_NavTileData>[
+      const _NavTileData(
+        icon: Icons.inventory_2_outlined,
+        title: 'المنتجات',
+        subtitle: 'كتالوج المنتجات مع الأسعار والباركود',
+        routeName: AppRouter.productsName,
+      ),
+      const _NavTileData(
+        icon: Icons.category_outlined,
+        title: 'التصنيفات',
+        subtitle: 'تصنيفات المنتجات (مشروبات، أغذية، ...)',
+        routeName: AppRouter.categoriesName,
+      ),
+      const _NavTileData(
+        icon: Icons.straighten_outlined,
+        title: 'الوحدات',
+        subtitle: 'وحدات القياس (قطعة، كرتونة، كيلو، ...)',
+        routeName: AppRouter.unitsName,
+      ),
+    ];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Text('الأعمال', style: theme.textTheme.titleLarge),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 16,
+          runSpacing: 16,
+          children: <Widget>[
+            for (final _NavTileData tile in tiles)
+              SizedBox(
+                width: itemWidth,
+                child: _NavCard(tile: tile),
+              ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _NavTileData {
+  const _NavTileData({
+    required this.icon,
+    required this.title,
+    required this.subtitle,
+    required this.routeName,
+  });
+
+  final IconData icon;
+  final String title;
+  final String subtitle;
+  final String routeName;
+}
+
+class _NavCard extends StatelessWidget {
+  const _NavCard({required this.tile});
+
+  final _NavTileData tile;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: () => context.pushNamed(tile.routeName),
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Row(
+            children: <Widget>[
+              DecoratedBox(
+                decoration: BoxDecoration(
+                  color: scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Padding(
+                  padding: const EdgeInsets.all(10),
+                  child: Icon(tile.icon, color: scheme.onPrimaryContainer),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      tile.title,
+                      style: theme.textTheme.titleMedium,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      tile.subtitle,
+                      style: theme.textTheme.bodySmall,
+                      overflow: TextOverflow.ellipsis,
+                      maxLines: 2,
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.arrow_forward_ios_outlined,
+                size: 16,
+                color: scheme.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Hero
+// -----------------------------------------------------------------------------
+
 String _environmentLabel(
   AppLocalizations l10n,
   AppEnvironment environment,
-) => switch (environment) {
-  AppEnvironment.development => l10n.homeEnvironmentDevelopment,
-  AppEnvironment.staging => l10n.homeEnvironmentStaging,
-  AppEnvironment.production => l10n.homeEnvironmentProduction,
-};
+) =>
+    switch (environment) {
+      AppEnvironment.development => l10n.homeEnvironmentDevelopment,
+      AppEnvironment.staging => l10n.homeEnvironmentStaging,
+      AppEnvironment.production => l10n.homeEnvironmentProduction,
+    };
 
 class _HeroSection extends StatelessWidget {
   const _HeroSection({required this.l10n, required this.config});
@@ -186,8 +333,7 @@ class _HeroSection extends StatelessWidget {
             ),
             const SizedBox(height: 10),
             _Pill(
-              label:
-                  '${l10n.homeEnvironmentLabel}: '
+              label: '${l10n.homeEnvironmentLabel}: '
                   '${_environmentLabel(l10n, config.environment)}',
               foreground: scheme.onPrimary,
               background: scheme.primary,
@@ -221,14 +367,19 @@ class _Pill extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
         child: Text(
           label,
-          style: Theme.of(
-            context,
-          ).textTheme.labelMedium?.copyWith(color: foreground),
+          style: Theme.of(context)
+              .textTheme
+              .labelMedium
+              ?.copyWith(color: foreground),
         ),
       ),
     );
   }
 }
+
+// -----------------------------------------------------------------------------
+// Foundation status
+// -----------------------------------------------------------------------------
 
 class _StatusCard extends StatelessWidget {
   const _StatusCard({
