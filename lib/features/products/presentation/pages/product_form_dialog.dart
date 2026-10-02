@@ -1,14 +1,11 @@
 // lib/features/products/presentation/pages/product_form_dialog.dart
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/validators.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
-import '../../../companies/presentation/providers/company_context_provider.dart';
-import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../domain/entities/category.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/unit.dart';
@@ -22,15 +19,19 @@ import '../providers/unit_providers.dart';
 /// Pass [existing] to edit an existing product, or leave it `null` to create
 /// a new one. Returns `true` when the product was saved, `false` when the
 /// user cancelled, and `null` when the dialog was dismissed.
+///
+/// The dialog obtains its [WidgetRef] from its own [ConsumerState]; a
+/// caller-supplied ref is therefore not required (and would be redundant,
+/// producing an unused-parameter lint).
 Future<bool?> showProductFormDialog({
   required BuildContext context,
-  required WidgetRef ref,
   Product? existing,
 }) {
   return showDialog<bool>(
     context: context,
     barrierDismissible: false,
-    builder: (BuildContext dialogContext) => _ProductFormDialog(existing: existing),
+    builder: (BuildContext dialogContext) =>
+        _ProductFormDialog(existing: existing),
   );
 }
 
@@ -121,9 +122,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
 
     final String? unitId = _defaultUnitId;
     if (unitId == null || unitId.isEmpty) {
-      setState(() {
-        _failureType = ProductFailureType.unitNotFound;
-      });
+      setState(() => _failureType = ProductFailureType.unitNotFound);
       return;
     }
 
@@ -131,9 +130,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
         double.tryParse(_sellingPriceController.text.trim());
     final double? costPrice = double.tryParse(_costPriceController.text.trim());
     if (sellingPrice == null || costPrice == null) {
-      setState(() {
-        _failureType = ProductFailureType.invalidResponse;
-      });
+      setState(() => _failureType = ProductFailureType.invalidResponse);
       return;
     }
 
@@ -147,17 +144,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
 
     try {
       if (widget.existing == null) {
-        final CompanyContextState context = ref.read(companyContextProvider);
-        final String? companyId = context.currentCompany?.id;
-        if (companyId == null) {
-          throw const ProductException(
-            type: ProductFailureType.unauthorized,
-            cause: 'No company is currently selected.',
-          );
-        }
-
         await notifier.createProduct(
-          companyId: companyId,
           name: name,
           defaultUnitId: unitId,
           costPrice: costPrice,
@@ -234,10 +221,8 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                   hint: 'مثال: بيبسي 1 لتر',
                   enabled: !_isSubmitting,
                   autofocus: true,
-                  validator: (String? value) => _validateRequired(
-                    value,
-                    'اسم المنتج',
-                  ),
+                  validator: (String? value) =>
+                      _validateRequired(value, 'اسم المنتج'),
                 ),
                 const SizedBox(height: 12),
                 AppTextField(
@@ -262,7 +247,8 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                     padding: EdgeInsets.symmetric(vertical: 12),
                     child: LinearProgressIndicator(),
                   ),
-                  error: (Object _, StackTrace __) => _buildLookupError('الفئات'),
+                  error: (Object _, StackTrace __) =>
+                      _buildLookupError('الفئات'),
                 ),
                 const SizedBox(height: 12),
                 unitsAsync.when(
@@ -271,7 +257,8 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
                     padding: EdgeInsets.symmetric(vertical: 12),
                     child: LinearProgressIndicator(),
                   ),
-                  error: (Object _, StackTrace __) => _buildLookupError('الوحدات'),
+                  error: (Object _, StackTrace __) =>
+                      _buildLookupError('الوحدات'),
                 ),
                 const SizedBox(height: 12),
                 AppTextField(
@@ -351,6 +338,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
 
     return DropdownButtonFormField<String?>(
       initialValue: selected,
+      isExpanded: true,
       decoration: const InputDecoration(
         labelText: 'الفئة — اختياري',
         border: OutlineInputBorder(),
@@ -375,14 +363,14 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
   }
 
   Widget _buildUnitField(List<Unit> units) {
-    final Set<String> knownIds =
-        units.map((Unit unit) => unit.id).toSet();
+    final Set<String> knownIds = units.map((Unit unit) => unit.id).toSet();
     final String? current = _defaultUnitId;
     final String? selected =
         (current != null && knownIds.contains(current)) ? current : null;
 
     return DropdownButtonFormField<String>(
       initialValue: selected,
+      isExpanded: true,
       hint: const Text('اختر الوحدة الأساسية'),
       decoration: const InputDecoration(
         labelText: 'الوحدة الأساسية',
@@ -537,12 +525,10 @@ String _failureMessage(ProductFailureType type) => switch (type) {
         'يوجد منتج آخر بنفس الباركود في هذه الشركة.',
       ProductFailureType.categoryNotFound =>
         'التصنيف المختار غير متاح. يرجى إعادة اختياره.',
-      ProductFailureType.unitNotFound =>
-        'الرجاء اختيار الوحدة الأساسية.',
+      ProductFailureType.unitNotFound => 'الرجاء اختيار الوحدة الأساسية.',
       ProductFailureType.inUse =>
-        'لا يمكن حذف المنتج لوجود سجلات مرتبطة به.',
-      ProductFailureType.invalidResponse =>
-        'الرجاء إدخال أسعار صحيحة.',
+        'لا يمكن إتمام العملية لوجود سجلات مرتبطة.',
+      ProductFailureType.invalidResponse => 'الرجاء إدخال أسعار صحيحة.',
       ProductFailureType.unknown =>
         'تعذّر حفظ المنتج. يرجى المحاولة مرة أخرى.',
     };
