@@ -34,8 +34,11 @@ final Provider<UnitRepository> unitRepositoryProvider =
 ///
 /// The notifier reloads automatically whenever [companyContextProvider]
 /// reports a different `currentCompany.id`. When no company is selected, it
-/// resolves to an empty list, matching the presentation layer's expectation
-/// that there is nothing to display until a company context exists.
+/// resolves to an empty list.
+///
+/// Note on naming: [AsyncNotifier] already declares an `update` method with
+/// a different signature. Business operations are therefore named
+/// `createUnit`, `updateUnit` and `deleteUnit`.
 class UnitsNotifier extends AsyncNotifier<List<Unit>> {
   @override
   Future<List<Unit>> build() async {
@@ -53,10 +56,7 @@ class UnitsNotifier extends AsyncNotifier<List<Unit>> {
   }
 
   /// Creates a new unit for the currently selected company.
-  ///
-  /// Throws [UnitException] when there is no current company, or when the
-  /// underlying repository rejects the operation (name or symbol conflict).
-  Future<Unit> create({
+  Future<Unit> createUnit({
     required String name,
     String? symbol,
   }) async {
@@ -76,7 +76,7 @@ class UnitsNotifier extends AsyncNotifier<List<Unit>> {
   ///
   /// Passing `null` for a nullable parameter leaves it unchanged, except for
   /// [symbol]: clearing it requires [clearSymbol] to be `true`.
-  Future<Unit> update({
+  Future<Unit> updateUnit({
     required String unitId,
     String? name,
     String? symbol,
@@ -99,7 +99,7 @@ class UnitsNotifier extends AsyncNotifier<List<Unit>> {
   ///
   /// Throws [UnitException] with type [UnitFailureType.inUse] when products
   /// or product-unit conversions still reference the unit.
-  Future<void> delete(String unitId) async {
+  Future<void> deleteUnit(String unitId) async {
     await ref.read(unitRepositoryProvider).deleteUnit(unitId);
     await _reload();
   }
