@@ -7,6 +7,9 @@ import 'package:go_router/go_router.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/home/presentation/pages/home_page.dart';
+import '../features/products/presentation/pages/categories_page.dart';
+import '../features/products/presentation/pages/products_page.dart';
+import '../features/products/presentation/pages/units_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
 import '../shared/widgets/app_loader.dart';
@@ -23,6 +26,15 @@ abstract final class AppRouter {
 
   static const String loadingPath = '/loading';
   static const String loadingName = 'loading';
+
+  static const String productsPath = '/products';
+  static const String productsName = 'products';
+
+  static const String categoriesPath = '/products/categories';
+  static const String categoriesName = 'categories';
+
+  static const String unitsPath = '/products/units';
+  static const String unitsName = 'units';
 }
 
 /// Provides the application router.
@@ -31,8 +43,10 @@ abstract final class AppRouter {
 /// redirection:
 ///
 /// * `AuthStatus.unknown`      → `/loading` (waiting for session restoration)
-/// * `AuthStatus.unauthenticated` → `/login`  (Home is not reachable)
-/// * `AuthStatus.authenticated`  → `/`       (Login/Loading are not reachable)
+/// * `AuthStatus.unauthenticated` → `/login`  (all other routes, including
+///   `/products`, are unreachable)
+/// * `AuthStatus.authenticated`  → every route except `/login` and
+///   `/loading` is reachable, including the product catalog pages.
 ///
 /// The redirect callback is intentionally synchronous: `go_router` requires
 /// a deterministic decision on every navigation. The current authentication
@@ -78,6 +92,24 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.loadingName,
         builder: (BuildContext context, GoRouterState state) =>
             const _AuthLoadingPage(),
+      ),
+      GoRoute(
+        path: AppRouter.productsPath,
+        name: AppRouter.productsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const ProductsPage(),
+      ),
+      GoRoute(
+        path: AppRouter.categoriesPath,
+        name: AppRouter.categoriesName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const CategoriesPage(),
+      ),
+      GoRoute(
+        path: AppRouter.unitsPath,
+        name: AppRouter.unitsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const UnitsPage(),
       ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {
