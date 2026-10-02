@@ -75,7 +75,9 @@ class ProductsNotifier extends AsyncNotifier<List<Product>> {
   }) async {
     final String companyId = _requireCurrentCompanyId();
 
-    final Product created = await ref.read(productRepositoryProvider).createProduct(
+    final Product created = await ref
+        .read(productRepositoryProvider)
+        .createProduct(
           companyId: companyId,
           name: name,
           defaultUnitId: defaultUnitId,
@@ -119,7 +121,9 @@ class ProductsNotifier extends AsyncNotifier<List<Product>> {
     bool clearTaxRate = false,
     bool? isActive,
   }) async {
-    final Product updated = await ref.read(productRepositoryProvider).updateProduct(
+    final Product updated = await ref
+        .read(productRepositoryProvider)
+        .updateProduct(
           productId: productId,
           name: name,
           defaultUnitId: defaultUnitId,
@@ -205,12 +209,13 @@ class ProductUnitsNotifier
   }) async {
     final String productId = arg;
 
-    final ProductUnit created =
-        await ref.read(productRepositoryProvider).addProductUnit(
-              productId: productId,
-              unitId: unitId,
-              conversionFactor: conversionFactor,
-            );
+    final ProductUnit created = await ref
+        .read(productRepositoryProvider)
+        .addProductUnit(
+          productId: productId,
+          unitId: unitId,
+          conversionFactor: conversionFactor,
+        );
 
     await _reload();
     return created;
@@ -221,11 +226,12 @@ class ProductUnitsNotifier
     required String productUnitId,
     required double conversionFactor,
   }) async {
-    final ProductUnit updated =
-        await ref.read(productRepositoryProvider).updateProductUnit(
-              productUnitId: productUnitId,
-              conversionFactor: conversionFactor,
-            );
+    final ProductUnit updated = await ref
+        .read(productRepositoryProvider)
+        .updateProductUnit(
+          productUnitId: productUnitId,
+          conversionFactor: conversionFactor,
+        );
 
     await _reload();
     return updated;
@@ -244,7 +250,11 @@ class ProductUnitsNotifier
 }
 
 /// Provides the unit conversions of a single product, keyed by product id.
-final AsyncNotifierProvider.family<ProductUnitsNotifier, List<ProductUnit>,
+///
+/// The declared type is `AsyncNotifierProviderFamily` — the concrete class
+/// returned by `AsyncNotifierProvider.family<...>(...)`. Using the factory
+/// constructor invocation itself as a type annotation is invalid Dart.
+final AsyncNotifierProviderFamily<ProductUnitsNotifier, List<ProductUnit>,
         String> productUnitsProvider =
     AsyncNotifierProvider.family<ProductUnitsNotifier, List<ProductUnit>,
         String>(ProductUnitsNotifier.new);
