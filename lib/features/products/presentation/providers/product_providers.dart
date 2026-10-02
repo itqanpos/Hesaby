@@ -57,10 +57,6 @@ class ProductsNotifier extends AsyncNotifier<List<Product>> {
   }
 
   /// Creates a new product for the currently selected company.
-  ///
-  /// Throws [ProductException] when there is no current company, or when
-  /// the underlying repository rejects the operation (SKU / barcode
-  /// conflict, category / unit not accessible).
   Future<Product> createProduct({
     required String name,
     required String defaultUnitId,
@@ -96,11 +92,6 @@ class ProductsNotifier extends AsyncNotifier<List<Product>> {
   }
 
   /// Updates an existing product.
-  ///
-  /// Passing `null` for a nullable parameter leaves it unchanged, except for
-  /// the six nullable fields that carry an explicit `clear*` flag:
-  /// `categoryId`, `sku`, `barcode`, `description`, `minSellingPrice` and
-  /// `taxRate`.
   Future<Product> updateProduct({
     required String productId,
     String? name,
@@ -149,18 +140,10 @@ class ProductsNotifier extends AsyncNotifier<List<Product>> {
   }
 
   /// Deletes a product.
-  ///
-  /// Throws [ProductException] with type [ProductFailureType.inUse] when the
-  /// product is still referenced in a way that prevents deletion. Prefer
-  /// [updateProduct] with `isActive: false` for a soft disable.
   Future<void> deleteProduct(String productId) async {
     await ref.read(productRepositoryProvider).deleteProduct(productId);
     await _reload();
   }
-
-  // ---------------------------------------------------------------------------
-  // Internal helpers
-  // ---------------------------------------------------------------------------
 
   String _requireCurrentCompanyId() {
     final CompanyContextState context = ref.read(companyContextProvider);
@@ -188,8 +171,7 @@ final AsyncNotifierProvider<ProductsNotifier, List<Product>> productsProvider =
 ///
 /// This is a *family* provider: the argument is the product id. Each product
 /// keeps its own cached list, so mutating the conversions of one product does
-/// not disturb the conversions of another, and does not reload the main
-/// products list.
+/// not disturb the conversions of another.
 class ProductUnitsNotifier
     extends FamilyAsyncNotifier<List<ProductUnit>, String> {
   @override
@@ -197,12 +179,6 @@ class ProductUnitsNotifier
     return ref.read(productRepositoryProvider).listProductUnits(productId);
   }
 
-  /// Adds a non-base unit conversion to the product this notifier is bound to.
-  ///
-  /// Throws [ProductException] with type [ProductFailureType.unitNotFound]
-  /// when the unit is unavailable, or with
-  /// [ProductFailureType.invalidResponse] when the row is rejected by the
-  /// database (duplicate unit / base-unit collision).
   Future<ProductUnit> addProductUnit({
     required String unitId,
     required double conversionFactor,
@@ -221,7 +197,6 @@ class ProductUnitsNotifier
     return created;
   }
 
-  /// Updates the conversion factor of an existing product-unit row.
   Future<ProductUnit> updateProductUnit({
     required String productUnitId,
     required double conversionFactor,
@@ -237,7 +212,6 @@ class ProductUnitsNotifier
     return updated;
   }
 
-  /// Deletes a non-base unit conversion.
   Future<void> deleteProductUnit(String productUnitId) async {
     await ref.read(productRepositoryProvider).deleteProductUnit(productUnitId);
     await _reload();
@@ -251,10 +225,10 @@ class ProductUnitsNotifier
 
 /// Provides the unit conversions of a single product, keyed by product id.
 ///
-/// The declared type is `AsyncNotifierProviderFamily` — the concrete class
-/// returned by `AsyncNotifierProvider.family<...>(...)`. Using the factory
-/// constructor invocation itself as a type annotation is invalid Dart.
-final AsyncNotifierProviderFamily<ProductUnitsNotifier, List<ProductUnit>,
-        String> productUnitsProvider =
-    AsyncNotifierProvider.family<ProductUnitsNotifier, List<ProductUnit>,
-        String>(ProductUnitsNotifier.new);
+/// No explicit type annotation is used here. `AsyncNotifierProvider.family`
+/// is a factory constructor, not a type, so writing
+/// `AsyncNotifierProvider.family<...>` as a type annotation is invalid Dart.
+/// Dart infers the correct `AsyncNotifierProviderFamily<...>` automatically
+/// from the value expression.
+final productUnitsProvider = AsyncNotifierProvider.family<
+    ProductUnitsNotifier, List<ProductUnit>, String>(ProductUnitsNotifier.new);
