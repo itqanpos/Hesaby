@@ -17,9 +17,21 @@ import '../../domain/usecases/login.dart';
 import '../../domain/usecases/logout.dart';
 
 /// Lifecycle stage of the authentication state.
-enum AuthStatus { unknown, authenticated, unauthenticated }
+enum AuthStatus {
+  /// The application is still resolving whether a session exists.
+  unknown,
+
+  /// A valid session is available.
+  authenticated,
+
+  /// No session is available; the user must sign in.
+  unauthenticated,
+}
 
 /// Immutable snapshot of the authentication state.
+///
+/// [session] is guaranteed to be non-null only when [status] is
+/// [AuthStatus.authenticated].
 @immutable
 class AuthState extends Equatable {
   const AuthState({required this.status, this.session});
@@ -45,6 +57,10 @@ class AuthState extends Equatable {
 }
 
 /// Data source bound to the active Supabase client.
+///
+/// Falls back to `null` when Supabase was not initialised (for example when
+/// credentials were not provided at build time). The data source handles a
+/// `null` client gracefully.
 final Provider<AuthRemoteDataSource> authRemoteDataSourceProvider =
     Provider<AuthRemoteDataSource>((ref) {
       SupabaseClient? client;
@@ -79,6 +95,19 @@ final Provider<GetCurrentSession> getCurrentSessionUseCaseProvider =
     );
 
 /// Owns the authentication state and exposes safe authentication actions.
+///
+/// The notifier subscribes to [AuthRepository.authStateChanges] once, and
+/// resolves the initial state through [GetCurrentSession] so that a missing
+/// Supabase client still produces a deterministic `unauthenticated` result
+/// rather than leaving the state `unknown` forever.
+///
+/// Lifecycle safety (Riverpod 2.x):
+/// Riverpod 3.x exposes `ref.mounted`, but this project targets Riverpod 2.x.
+/// Disposal is tracked with a private flag updated by [Ref.onDispose]. The
+/// flag is flipped *and* the subscription is cancelled inside a single
+/// callback, so behaviour does not depend on Riverpod's callback ordering.
+/// Every write to [state] that can happen after an `await` is guarded by
+/// this flag, matching the semantics that `ref.mounted` would provide.
 class AuthNotifier extends Notifier<AuthState> {
   bool _isDisposed = false;
 
@@ -100,12 +129,9 @@ class AuthNotifier extends Notifier<AuthState> {
           },
         );
 
-    // Register the subscription teardown first, so it runs LAST in LIFO.
-    ref.onDispose(subscription.cancel);
-
-    // Register the flag flip last, so it runs FIRST in LIFO.
     ref.onDispose(() {
       _isDisposed = true;
+      subscription.cancel();
     });
 
     unawaited(_restoreSession());
@@ -114,6 +140,9 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   /// Signs in with the supplied credentials.
+  ///
+  /// Returns `null` on success, or a safe [AuthFailureType] the caller can
+  /// translate into a localized message. Never returns raw backend text.
   Future<AuthFailureType?> login({
     required String email,
     required String password,
@@ -134,6 +163,8 @@ class AuthNotifier extends Notifier<AuthState> {
   }
 
   /// Signs the current user out.
+  ///
+  /// Returns `null` on success, or a safe [AuthFailureType] on failure.
   Future<AuthFailureType?> logout() async {
     try {
       await ref.read(logoutUseCaseProvider)();
