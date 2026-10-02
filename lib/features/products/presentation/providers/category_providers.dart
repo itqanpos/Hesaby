@@ -37,6 +37,11 @@ final Provider<CategoryRepository> categoryRepositoryProvider =
 /// reports a different `currentCompany.id`. When no company is selected, it
 /// resolves to an empty list, matching the presentation layer's expectation
 /// that there is nothing to display until a company context exists.
+///
+/// Note on naming: [AsyncNotifier] already declares an `update` method with
+/// a completely different signature (used by Riverpod to transform state).
+/// The business operations here are therefore named `createCategory`,
+/// `updateCategory` and `deleteCategory` to avoid an invalid override.
 class CategoriesNotifier extends AsyncNotifier<List<ProductCategory>> {
   @override
   Future<List<ProductCategory>> build() async {
@@ -57,12 +62,12 @@ class CategoriesNotifier extends AsyncNotifier<List<ProductCategory>> {
   ///
   /// Throws [CategoryException] when there is no current company, or when
   /// the underlying repository rejects the operation.
-  Future<ProductCategory> create({
+  Future<ProductCategory> createCategory({
     required String name,
     String? description,
     int sortOrder = 0,
   }) async {
-    final String? companyId = _requireCurrentCompanyId();
+    final String companyId = _requireCurrentCompanyId();
 
     final ProductCategory created = await ref
         .read(categoryRepositoryProvider)
@@ -81,7 +86,7 @@ class CategoriesNotifier extends AsyncNotifier<List<ProductCategory>> {
   ///
   /// Passing `null` for a nullable parameter leaves it unchanged, except for
   /// [description]: clearing it requires [clearDescription] to be `true`.
-  Future<ProductCategory> update({
+  Future<ProductCategory> updateCategory({
     required String categoryId,
     String? name,
     String? description,
@@ -108,7 +113,7 @@ class CategoriesNotifier extends AsyncNotifier<List<ProductCategory>> {
   ///
   /// Throws [CategoryException] with type [CategoryFailureType.inUse] when
   /// products still reference the category.
-  Future<void> delete(String categoryId) async {
+  Future<void> deleteCategory(String categoryId) async {
     await ref.read(categoryRepositoryProvider).deleteCategory(categoryId);
     await _reload();
   }
