@@ -62,11 +62,11 @@ class CategoryException extends Equatable implements Exception {
   String toString() => 'CategoryException(type: ${type.name})';
 }
 
-/// Contract for category operations.
+/// Contract for product-category operations.
 ///
-/// All access decisions are ultimately enforced by Row Level Security in the
-/// database: the data layer never accepts a `userId`, and `companyId` is
-/// only ever used to filter results — RLS rejects any attempt to read or
+/// All access decisions are ultimately enforced by Row Level Security in
+/// the database: the data layer never accepts a `userId`, and `companyId`
+/// is only ever used to filter results — RLS rejects any attempt to read or
 /// write rows outside the caller's memberships.
 abstract interface class CategoryRepository {
   /// Returns every category of [companyId] visible to the current user.
@@ -74,13 +74,14 @@ abstract interface class CategoryRepository {
   /// The list is empty when the company has no categories or when the
   /// current user has no membership in the company (RLS filters rows).
   /// Throws [CategoryException] when the request fails.
-  Future<List<Category>> listCategories(String companyId);
+  Future<List<ProductCategory>> listCategories(String companyId);
 
   /// Returns a single category by id.
   ///
-  /// Throws [CategoryException] with type [CategoryFailureType.notFound] when
-  /// the category does not exist or is not accessible to the current user.
-  Future<Category> getCategory(String categoryId);
+  /// Throws [CategoryException] with type [CategoryFailureType.notFound]
+  /// when the category does not exist or is not accessible to the current
+  /// user.
+  Future<ProductCategory> getCategory(String categoryId);
 
   /// Creates a new category inside [companyId].
   ///
@@ -88,7 +89,7 @@ abstract interface class CategoryRepository {
   /// when a category with the same name already exists for the company.
   /// Throws [CategoryException] with type [CategoryFailureType.unauthorized]
   /// when the caller lacks owner / admin / manager role.
-  Future<Category> createCategory({
+  Future<ProductCategory> createCategory({
     required String companyId,
     required String name,
     String? description,
@@ -100,7 +101,7 @@ abstract interface class CategoryRepository {
   /// Passing `null` for a nullable parameter leaves it unchanged. [isActive]
   /// is the canonical way to soft-disable a category without deleting it.
   /// Throws [CategoryException] when the update fails.
-  Future<Category> updateCategory({
+  Future<ProductCategory> updateCategory({
     required String categoryId,
     String? name,
     String? description,
