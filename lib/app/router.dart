@@ -7,6 +7,8 @@ import 'package:go_router/go_router.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/home/presentation/pages/home_page.dart';
+import '../features/inventory/presentation/pages/inventory_page.dart';
+import '../features/inventory/presentation/pages/stock_movements_page.dart';
 import '../features/products/presentation/pages/categories_page.dart';
 import '../features/products/presentation/pages/products_page.dart';
 import '../features/products/presentation/pages/units_page.dart';
@@ -35,6 +37,12 @@ abstract final class AppRouter {
 
   static const String unitsPath = '/products/units';
   static const String unitsName = 'units';
+
+  static const String inventoryPath = '/inventory';
+  static const String inventoryName = 'inventory';
+
+  static const String stockMovementsPath = '/inventory/movements';
+  static const String stockMovementsName = 'stock-movements';
 }
 
 /// Provides the application router.
@@ -44,9 +52,10 @@ abstract final class AppRouter {
 ///
 /// * `AuthStatus.unknown`      → `/loading` (waiting for session restoration)
 /// * `AuthStatus.unauthenticated` → `/login`  (all other routes, including
-///   `/products`, are unreachable)
+///   `/products` and `/inventory`, are unreachable)
 /// * `AuthStatus.authenticated`  → every route except `/login` and
-///   `/loading` is reachable, including the product catalog pages.
+///   `/loading` is reachable, including the product catalog and inventory
+///   pages.
 ///
 /// The redirect callback is intentionally synchronous: `go_router` requires
 /// a deterministic decision on every navigation. The current authentication
@@ -110,6 +119,18 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.unitsName,
         builder: (BuildContext context, GoRouterState state) =>
             const UnitsPage(),
+      ),
+      GoRoute(
+        path: AppRouter.inventoryPath,
+        name: AppRouter.inventoryName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const InventoryPage(),
+      ),
+      GoRoute(
+        path: AppRouter.stockMovementsPath,
+        name: AppRouter.stockMovementsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const StockMovementsPage(),
       ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {
