@@ -5,16 +5,22 @@ import 'package:flutter/foundation.dart';
 
 /// Represents a product category inside HESABI.
 ///
-/// This is a pure Domain entity. It knows nothing about Supabase,
-/// PostgreSQL, or Flutter widgets: the data layer is responsible for mapping
-/// database rows into this entity.
+/// Named `ProductCategory` rather than `Category` to avoid a name clash
+/// with Flutter's `Category` annotation, which is exported by
+/// `package:flutter/foundation.dart` (used here for `@immutable`). Any
+/// file that imports both `foundation.dart` and this file would otherwise
+/// produce an `ambiguous_import` error.
 ///
-/// A category always belongs to exactly one company; [companyId] is part of
-/// the entity so that the presentation layer can verify that a selected
+/// This is a pure Domain entity. It knows nothing about Supabase,
+/// PostgreSQL, or Flutter widgets: the data layer is responsible for
+/// mapping database rows into this entity.
+///
+/// A category always belongs to exactly one company; [companyId] is part
+/// of the entity so that the presentation layer can verify that a selected
 /// category is coherent with the current company without an extra query.
 @immutable
-class Category extends Equatable {
-  const Category({
+class ProductCategory extends Equatable {
+  const ProductCategory({
     required this.id,
     required this.companyId,
     required this.name,
@@ -63,6 +69,6 @@ class Category extends Equatable {
 
   @override
   String toString() =>
-      'Category(id: $id, companyId: $companyId, name: $name, '
+      'ProductCategory(id: $id, companyId: $companyId, name: $name, '
       'isActive: $isActive)';
 }
