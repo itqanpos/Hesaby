@@ -98,13 +98,19 @@ abstract interface class CategoryRepository {
 
   /// Updates an existing category.
   ///
-  /// Passing `null` for a nullable parameter leaves it unchanged. [isActive]
-  /// is the canonical way to soft-disable a category without deleting it.
+  /// Passing `null` for a nullable parameter leaves it unchanged, except for
+  /// [description]: because [description] is itself nullable, clearing it
+  /// requires [clearDescription] to be `true`. This avoids the ambiguity of
+  /// `null` meaning both "leave as is" and "set to null".
+  /// [isActive] is the canonical way to soft-disable a category without
+  /// deleting it.
+  ///
   /// Throws [CategoryException] when the update fails.
   Future<ProductCategory> updateCategory({
     required String categoryId,
     String? name,
     String? description,
+    bool clearDescription = false,
     int? sortOrder,
     bool? isActive,
   });
