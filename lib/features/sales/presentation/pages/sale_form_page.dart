@@ -156,6 +156,13 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
     });
   }
 
+  /// Called by each item row when its internal numeric values change.
+  /// Triggers a rebuild of the parent so that the totals section reflects
+  /// the new line values.
+  void _onItemChanged() {
+    setState(() {});
+  }
+
   // ---------------------------------------------------------------------------
   // Totals
   // ---------------------------------------------------------------------------
@@ -535,7 +542,7 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
                   products: products,
                   units: units,
                   enabled: !_isSubmitting,
-                  onChanged: () => setState(() {}),
+                  onChanged: _onItemChanged,
                   onRemove:
                       _items.length > 1 ? () => _removeItem(i) : null,
                 ),
@@ -722,6 +729,13 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
 // Draft item
 // -----------------------------------------------------------------------------
 
+/// Mutable editing state for one sale line.
+///
+/// Numeric values (`_quantity`, `_unitPrice`) are cached in dedicated fields
+/// and updated explicitly via [updateQuantity] / [updateUnitPrice]. This
+/// avoids the subtle bug where reading `controller.text` at an arbitrary
+/// moment could return the pre-typed value or the placeholder text, in
+/// either case producing an incorrect `lineTotal`.
 class _DraftItem {
   _DraftItem({
     this.productId,
@@ -729,7 +743,11 @@ class _DraftItem {
     required this.quantityController,
     required this.unitPriceController,
     this.notes,
-  });
+  }) {
+    // Initialise cached numeric values from the controllers.
+    _quantity = double.tryParse(quantityController.text.trim()) ?? 0;
+    _unitPrice = double.tryParse(unitPriceController.text.trim()) ?? 0;
+  }
 
   factory _DraftItem.empty() => _DraftItem(
         quantityController: TextEditingController(text: '1'),
@@ -754,10 +772,20 @@ class _DraftItem {
   final TextEditingController unitPriceController;
   String? notes;
 
-  double get quantity => double.tryParse(quantityController.text.trim()) ?? 0;
-  double get unitPrice =>
-      double.tryParse(unitPriceController.text.trim()) ?? 0;
-  double get lineTotal => quantity * unitPrice;
+  late double _quantity;
+  late double _unitPrice;
+
+  double get quantity => _quantity;
+  double get unitPrice => _unitPrice;
+  double get lineTotal => _quantity * _unitPrice;
+
+  void updateQuantity(String text) {
+    _quantity = double.tryParse(text.trim()) ?? 0;
+  }
+
+  void updateUnitPrice(String text) {
+    _unitPrice = double.tryParse(text.trim()) ?? 0;
+  }
 
   void dispose() {
     quantityController.dispose();
@@ -900,7 +928,10 @@ class _ItemRow extends StatelessWidget {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    onChanged: (String _) => onChanged(),
+                    onChanged: (String value) {
+                      item.updateQuantity(value);
+                      onChanged();
+                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -913,7 +944,10 @@ class _ItemRow extends StatelessWidget {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    onChanged: (String _) => onChanged(),
+                    onChanged: (String value) {
+                      item.updateUnitPrice(value);
+                      onChanged();
+                    },
                   ),
                 ),
               ],
