@@ -23,11 +23,6 @@ import '../../domain/repositories/purchase_repository.dart';
 import '../providers/purchase_providers.dart';
 
 /// Read-only view of a single purchase order.
-///
-/// The purchase id is read from the current route's `pathParameters`, so the
-/// page supports deep linking without constructor arguments. The page also
-/// exposes the actions available for the current status: edit / confirm for
-/// drafts, cancel for drafts and confirmed purchases.
 class PurchaseDetailPage extends ConsumerStatefulWidget {
   const PurchaseDetailPage({super.key});
 
@@ -37,7 +32,6 @@ class PurchaseDetailPage extends ConsumerStatefulWidget {
 }
 
 class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
-  /// Guards against double-tapping action buttons.
   bool _isActing = false;
 
   @override
@@ -213,7 +207,7 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
       ),
     );
 
-    if (confirmed != true || !mounted) {
+    if (confirmed != true || !context.mounted) {
       return;
     }
 
@@ -223,24 +217,25 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
       await ref
           .read(purchasesProvider.notifier)
           .confirmPurchase(purchase.id);
-      if (!mounted) {
+      if (!context.mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تأكيد الفاتورة')),
       );
     } on PurchaseException catch (error) {
-      if (!mounted) {
+      if (!context.mounted) {
         return;
       }
       _showError(context, error);
     } on Object {
-      if (!mounted) {
+      if (!context.mounted) {
         return;
       }
-      _showError(context, const PurchaseException(
-        type: PurchaseFailureType.unknown,
-      ));
+      _showError(
+        context,
+        const PurchaseException(type: PurchaseFailureType.unknown),
+      );
     } finally {
       if (mounted) {
         setState(() => _isActing = false);
@@ -276,7 +271,7 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
       ),
     );
 
-    if (confirmed != true || !mounted) {
+    if (confirmed != true || !context.mounted) {
       return;
     }
 
@@ -286,24 +281,25 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
       await ref
           .read(purchasesProvider.notifier)
           .cancelPurchase(purchase.id);
-      if (!mounted) {
+      if (!context.mounted) {
         return;
       }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم إلغاء الفاتورة')),
       );
     } on PurchaseException catch (error) {
-      if (!mounted) {
+      if (!context.mounted) {
         return;
       }
       _showError(context, error);
     } on Object {
-      if (!mounted) {
+      if (!context.mounted) {
         return;
       }
-      _showError(context, const PurchaseException(
-        type: PurchaseFailureType.unknown,
-      ));
+      _showError(
+        context,
+        const PurchaseException(type: PurchaseFailureType.unknown),
+      );
     } finally {
       if (mounted) {
         setState(() => _isActing = false);
