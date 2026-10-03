@@ -33,6 +33,7 @@ class ProductModel extends Equatable {
     this.barcode,
     this.description,
     this.minSellingPrice,
+    this.maxSellingPrice,
     this.taxRate,
   });
 
@@ -50,6 +51,7 @@ class ProductModel extends Equatable {
       costPrice: _optionalDouble(map, 'cost_price') ?? 0,
       sellingPrice: _optionalDouble(map, 'selling_price') ?? 0,
       minSellingPrice: _optionalDouble(map, 'min_selling_price'),
+      maxSellingPrice: _optionalDouble(map, 'max_selling_price'),
       taxRate: _optionalDouble(map, 'tax_rate'),
       isActive: _optionalBool(map, 'is_active') ?? true,
       createdAt: _requireTimestamp(map, 'created_at'),
@@ -68,6 +70,7 @@ class ProductModel extends Equatable {
   final double costPrice;
   final double sellingPrice;
   final double? minSellingPrice;
+  final double? maxSellingPrice;
   final double? taxRate;
   final bool isActive;
   final DateTime createdAt;
@@ -86,6 +89,7 @@ class ProductModel extends Equatable {
         costPrice: costPrice,
         sellingPrice: sellingPrice,
         minSellingPrice: minSellingPrice,
+        maxSellingPrice: maxSellingPrice,
         taxRate: taxRate,
         isActive: isActive,
         createdAt: createdAt,
@@ -197,6 +201,7 @@ class ProductModel extends Equatable {
         costPrice,
         sellingPrice,
         minSellingPrice,
+        maxSellingPrice,
         taxRate,
         isActive,
         createdAt,
