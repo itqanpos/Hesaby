@@ -117,6 +117,7 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
 
   @override
   Future<Purchase> createPurchase({
+    required String companyId,
     required String branchId,
     required String supplierId,
     required DateTime purchaseDate,
@@ -128,7 +129,7 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
   }) async {
     try {
       final PurchaseModel model = await _remoteDataSource.createPurchase(
-        companyId: _requireCompanyId(),
+        companyId: companyId,
         branchId: branchId,
         supplierId: supplierId,
         purchaseDate: purchaseDate,
@@ -155,6 +156,7 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
   @override
   Future<Purchase> updateDraft({
     required String purchaseId,
+    required String companyId,
     required String branchId,
     required String supplierId,
     required DateTime purchaseDate,
@@ -167,7 +169,7 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
     try {
       final PurchaseModel model = await _remoteDataSource.updateDraft(
         purchaseId: purchaseId,
-        companyId: _requireCompanyId(),
+        companyId: companyId,
         branchId: branchId,
         supplierId: supplierId,
         purchaseDate: purchaseDate,
@@ -235,27 +237,6 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(error, stackTrace, operation: 'cancelPurchase');
     }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Internal helpers
-  // ---------------------------------------------------------------------------
-
-  /// Resolves the current company id from the authenticated session's
-  /// company context.
-  ///
-  /// Note: the domain repository does not receive a `companyId` argument, so
-  /// the concrete implementation reads it from the app's provider layer
-  /// indirectly via the calling notifier. In practice the notifier always
-  /// passes a resolved company id; this method exists only for safety.
-  /// The check is intentionally lenient: it will throw a typed
-  /// [PurchaseException] rather than a raw [StateError].
-  static String _requireCompanyId() {
-    throw const PurchaseException(
-      type: PurchaseFailureType.unauthorized,
-      cause:
-          'createPurchase / updateDraft must be called through PurchaseNotifier.',
-    );
   }
 
   // ---------------------------------------------------------------------------
