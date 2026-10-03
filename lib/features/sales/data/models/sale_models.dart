@@ -8,11 +8,13 @@ import '../../domain/entities/sale_entities.dart';
 // CustomerModel
 // ============================================================================
 
+/// Data-layer representation of a row in `public.customers`.
 class CustomerModel extends Equatable {
   const CustomerModel({
     required this.id,
     required this.companyId,
     required this.name,
+    required this.balance,
     required this.isActive,
     required this.createdAt,
     required this.updatedAt,
@@ -33,6 +35,7 @@ class CustomerModel extends Equatable {
       email: _optionalString(map, 'email'),
       address: _optionalString(map, 'address'),
       notes: _optionalString(map, 'notes'),
+      balance: _optionalDouble(map, 'balance') ?? 0,
       isActive: _optionalBool(map, 'is_active') ?? true,
       createdAt: _requireTimestamp(map, 'created_at'),
       updatedAt: _requireTimestamp(map, 'updated_at'),
@@ -47,6 +50,7 @@ class CustomerModel extends Equatable {
   final String? email;
   final String? address;
   final String? notes;
+  final double balance;
   final bool isActive;
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -60,6 +64,7 @@ class CustomerModel extends Equatable {
         email: email,
         address: address,
         notes: notes,
+        balance: balance,
         isActive: isActive,
         createdAt: createdAt,
         updatedAt: updatedAt,
@@ -85,6 +90,30 @@ class CustomerModel extends Equatable {
       return trimmed.isEmpty ? null : trimmed;
     }
     return value.toString();
+  }
+
+  static double? _optionalDouble(Map<String, dynamic> map, String key) {
+    final Object? value = map[key];
+    if (value == null) {
+      return null;
+    }
+    if (value is double) {
+      return value;
+    }
+    if (value is int) {
+      return value.toDouble();
+    }
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      final String trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      return double.tryParse(trimmed);
+    }
+    return null;
   }
 
   static bool? _optionalBool(Map<String, dynamic> map, String key) {
@@ -136,6 +165,7 @@ class CustomerModel extends Equatable {
         email,
         address,
         notes,
+        balance,
         isActive,
         createdAt,
         updatedAt,
@@ -143,19 +173,24 @@ class CustomerModel extends Equatable {
 
   @override
   String toString() =>
-      'CustomerModel(id: $id, companyId: $companyId, name: $name, code: $code)';
+      'CustomerModel(id: $id, companyId: $companyId, name: $name, '
+      'code: $code, balance: $balance)';
 }
 
 // ============================================================================
 // SaleModel
 // ============================================================================
 
+/// Data-layer representation of a row in `public.sales`.
+///
+/// `sale_date` is a `timestamptz`; it is handled by the timestamp helper.
+/// `customer_id` is optional: cash sales without a registered customer
+/// leave it `null`.
 class SaleModel extends Equatable {
   const SaleModel({
     required this.id,
     required this.companyId,
     required this.branchId,
-    required this.customerId,
     required this.saleDate,
     required this.status,
     required this.subtotal,
@@ -166,6 +201,7 @@ class SaleModel extends Equatable {
     required this.paymentStatus,
     required this.createdAt,
     required this.updatedAt,
+    this.customerId,
     this.invoiceNumber,
     this.notes,
     this.createdBy,
@@ -178,7 +214,7 @@ class SaleModel extends Equatable {
       id: _requireString(map, 'id'),
       companyId: _requireString(map, 'company_id'),
       branchId: _requireString(map, 'branch_id'),
-      customerId: _requireString(map, 'customer_id'),
+      customerId: _optionalString(map, 'customer_id'),
       invoiceNumber: _optionalString(map, 'invoice_number'),
       saleDate: _requireTimestamp(map, 'sale_date'),
       status: _requireString(map, 'status'),
@@ -200,7 +236,7 @@ class SaleModel extends Equatable {
   final String id;
   final String companyId;
   final String branchId;
-  final String customerId;
+  final String? customerId;
   final String? invoiceNumber;
   final DateTime saleDate;
   final String status;
@@ -355,6 +391,7 @@ class SaleModel extends Equatable {
 // SaleItemModel
 // ============================================================================
 
+/// Data-layer representation of a row in `public.sale_items`.
 class SaleItemModel extends Equatable {
   const SaleItemModel({
     required this.id,
