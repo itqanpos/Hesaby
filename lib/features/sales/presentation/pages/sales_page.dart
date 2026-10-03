@@ -481,7 +481,7 @@ class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
     }
 
     final List<Sale> sales = salesAsync.value ?? const <Sale>[];
-    final Sale? current = _findSale(sales, widget.sale.id) ?? widget.sale;
+    final Sale current = _findSale(sales, widget.sale.id) ?? widget.sale;
     final List<SaleItem> items =
         itemsAsync.value ?? const <SaleItem>[];
     final List<Customer> customers =
