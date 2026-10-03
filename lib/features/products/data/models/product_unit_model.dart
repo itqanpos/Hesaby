@@ -11,12 +11,12 @@ import '../../domain/entities/product_unit.dart';
 /// allowed to know the physical column names for product-unit conversions.
 ///
 /// Precision:
-/// `conversion_factor` is `numeric(15,6)` in the database. PostgREST
+/// `conversion_factor`, `selling_price`, `min_selling_price` and
+/// `max_selling_price` are `numeric(...)` in the database. PostgREST
 /// returns `numeric` values as JSON *strings* to preserve precision, so the
-/// helper below accepts `String`, `int` and `double` inputs and converts
-/// safely to `double`. Because the column is NOT NULL, absence or
-/// unparseable input raises [FormatException] instead of falling back to a
-/// default.
+/// helpers below accept `String`, `int` and `double` inputs and convert
+/// safely to `double`. `conversion_factor` is NOT NULL so it uses a strict
+/// helper; the three price columns are optional and default to `null`.
 class ProductUnitModel extends Equatable {
   const ProductUnitModel({
     required this.id,
@@ -26,6 +26,9 @@ class ProductUnitModel extends Equatable {
     required this.conversionFactor,
     required this.createdAt,
     required this.updatedAt,
+    this.sellingPrice,
+    this.minSellingPrice,
+    this.maxSellingPrice,
   });
 
   /// Builds a model from a row returned by Supabase / PostgreSQL.
@@ -39,6 +42,9 @@ class ProductUnitModel extends Equatable {
       productId: _requireString(map, 'product_id'),
       unitId: _requireString(map, 'unit_id'),
       conversionFactor: _requireDouble(map, 'conversion_factor'),
+      sellingPrice: _optionalDouble(map, 'selling_price'),
+      minSellingPrice: _optionalDouble(map, 'min_selling_price'),
+      maxSellingPrice: _optionalDouble(map, 'max_selling_price'),
       createdAt: _requireTimestamp(map, 'created_at'),
       updatedAt: _requireTimestamp(map, 'updated_at'),
     );
@@ -49,6 +55,9 @@ class ProductUnitModel extends Equatable {
   final String productId;
   final String unitId;
   final double conversionFactor;
+  final double? sellingPrice;
+  final double? minSellingPrice;
+  final double? maxSellingPrice;
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -59,6 +68,9 @@ class ProductUnitModel extends Equatable {
         productId: productId,
         unitId: unitId,
         conversionFactor: conversionFactor,
+        sellingPrice: sellingPrice,
+        minSellingPrice: minSellingPrice,
+        maxSellingPrice: maxSellingPrice,
         createdAt: createdAt,
         updatedAt: updatedAt,
       );
@@ -105,6 +117,32 @@ class ProductUnitModel extends Equatable {
     );
   }
 
+  /// Parses an optional numeric column. Returns `null` when the value is
+  /// absent or unparseable.
+  static double? _optionalDouble(Map<String, dynamic> map, String key) {
+    final Object? value = map[key];
+    if (value == null) {
+      return null;
+    }
+    if (value is double) {
+      return value;
+    }
+    if (value is int) {
+      return value.toDouble();
+    }
+    if (value is num) {
+      return value.toDouble();
+    }
+    if (value is String) {
+      final String trimmed = value.trim();
+      if (trimmed.isEmpty) {
+        return null;
+      }
+      return double.tryParse(trimmed);
+    }
+    return null;
+  }
+
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
     if (value is DateTime) {
@@ -128,6 +166,9 @@ class ProductUnitModel extends Equatable {
         productId,
         unitId,
         conversionFactor,
+        sellingPrice,
+        minSellingPrice,
+        maxSellingPrice,
         createdAt,
         updatedAt,
       ];
@@ -135,5 +176,5 @@ class ProductUnitModel extends Equatable {
   @override
   String toString() =>
       'ProductUnitModel(id: $id, productId: $productId, unitId: $unitId, '
-      'conversionFactor: $conversionFactor)';
+      'conversionFactor: $conversionFactor, sellingPrice: $sellingPrice)';
 }
