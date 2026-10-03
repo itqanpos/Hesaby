@@ -718,17 +718,21 @@ class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
     }
     return null;
   }
-
-  static String _resolveCustomerName(
-    List<Customer> customers,
-    String customerId,
-  ) {
-    for (final Customer customer in customers) {
-      if (customer.id == customerId) {
-        return customer.name;
-      }
+static String _resolveCustomerName(
+  List<Customer> customers,
+  String? customerId,
+) {
+  if (customerId == null) {
+    return 'عميل نقدي';
+  }
+  for (final Customer customer in customers) {
+    if (customer.id == customerId) {
+      return customer.name;
     }
-    return 'عميل محذوف';
+  }
+  return 'عميل محذوف';
+}
+
   }
 }
 
