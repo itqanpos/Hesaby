@@ -20,7 +20,7 @@ import '../../../companies/presentation/widgets/company_selector.dart';
 /// * the application hero,
 /// * the company / branch context selectors,
 /// * a navigation grid to the business modules (products catalog, inventory,
-///   suppliers and purchases),
+///   suppliers, purchases, customers and sales),
 /// * a foundation status panel that verifies the running infrastructure.
 ///
 /// It contains no business logic: every action is a navigation or a state
@@ -189,6 +189,18 @@ class _BusinessNavSection extends StatelessWidget {
         title: 'فواتير الشراء',
         subtitle: 'تسجيل فواتير الموردين وتأكيد إدخال المخزون',
         routeName: AppRouter.purchasesName,
+      ),
+      const _NavTileData(
+        icon: Icons.people_outline,
+        title: 'العملاء',
+        subtitle: 'بيانات العملاء ومَن نبيع لهم',
+        routeName: AppRouter.customersName,
+      ),
+      const _NavTileData(
+        icon: Icons.point_of_sale_outlined,
+        title: 'فواتير البيع',
+        subtitle: 'تسجيل فواتير العملاء وخصم المخزون',
+        routeName: AppRouter.salesName,
       ),
     ];
 
