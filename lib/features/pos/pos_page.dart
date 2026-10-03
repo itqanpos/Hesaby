@@ -10,8 +10,6 @@ import '../../shared/widgets/app_empty.dart';
 import '../../shared/widgets/app_error.dart';
 import '../../shared/widgets/app_loader.dart';
 import '../../shared/widgets/app_text_field.dart';
-import '../companies/presentation/providers/company_context_provider.dart';
-import '../companies/presentation/providers/company_context_state.dart';
 import '../products/domain/entities/product.dart';
 import '../products/domain/entities/product_unit.dart';
 import '../products/domain/entities/unit.dart';
