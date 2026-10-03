@@ -34,6 +34,7 @@ class Product extends Equatable {
     this.barcode,
     this.description,
     this.minSellingPrice,
+    this.maxSellingPrice,
     this.taxRate,
   });
 
@@ -55,7 +56,7 @@ class Product extends Equatable {
   /// Optional stock keeping unit. Unique per company when present.
   final String? sku;
 
-  /// Optional barcode. Stored as data only in Phase 4 (no scanning).
+  /// Optional barcode. Stored as data only.
   final String? barcode;
 
   /// Optional description.
@@ -68,7 +69,16 @@ class Product extends Equatable {
   final double sellingPrice;
 
   /// Optional floor selling price. Never negative when present.
+  ///
+  /// When both [minSellingPrice] and [maxSellingPrice] are set, the
+  /// database enforces `minSellingPrice <= maxSellingPrice`.
   final double? minSellingPrice;
+
+  /// Optional cap selling price. Never negative when present.
+  ///
+  /// Used by the POS to constrain the price a cashier may enter for the
+  /// default unit.
+  final double? maxSellingPrice;
 
   /// Optional tax percentage, 0–100.
   final double? taxRate;
@@ -102,7 +112,12 @@ class Product extends Equatable {
 
   bool get hasMinSellingPrice => minSellingPrice != null;
 
+  bool get hasMaxSellingPrice => maxSellingPrice != null;
+
   bool get hasTaxRate => taxRate != null;
+
+  /// Whether the product defines an explicit selling-price range.
+  bool get hasPriceRange => hasMinSellingPrice || hasMaxSellingPrice;
 
   @override
   List<Object?> get props => <Object?>[
@@ -117,6 +132,7 @@ class Product extends Equatable {
         costPrice,
         sellingPrice,
         minSellingPrice,
+        maxSellingPrice,
         taxRate,
         isActive,
         createdAt,
