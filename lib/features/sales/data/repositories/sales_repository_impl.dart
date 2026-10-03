@@ -295,7 +295,7 @@ class SalesRepositoryImpl implements SalesRepository {
   Future<Sale> createSale({
     required String companyId,
     required String branchId,
-    required String customerId,
+    String? customerId,
     required DateTime saleDate,
     List<SaleItemDraft> items = const <SaleItemDraft>[],
     String? invoiceNumber,
@@ -340,7 +340,7 @@ class SalesRepositoryImpl implements SalesRepository {
     required String saleId,
     required String companyId,
     required String branchId,
-    required String customerId,
+    String? customerId,
     required DateTime saleDate,
     required List<SaleItemDraft> items,
     String? invoiceNumber,
@@ -703,8 +703,6 @@ SalesFailureType _classifySalePostgrest(
 
   // --- Integrity: check violations (business rules) -------------------------
   if (code == '23514') {
-    // Insufficient stock during confirmation is raised by the Phase 5
-    // trigger with a stable leading sentence.
     if (message.contains('insufficient stock') ||
         full.contains('insufficient stock')) {
       return SalesFailureType.insufficientStock;
@@ -713,7 +711,6 @@ SalesFailureType _classifySalePostgrest(
         full.contains('cannot confirm sale')) {
       return SalesFailureType.emptySale;
     }
-    // The payment CHECK is named; look for it explicitly.
     if (full.contains('sales_paid_amount_not_exceeding_total') ||
         message.contains('paid_amount')) {
       return SalesFailureType.invalidPayment;
