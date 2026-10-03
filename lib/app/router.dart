@@ -12,6 +12,9 @@ import '../features/inventory/presentation/pages/stock_movements_page.dart';
 import '../features/products/presentation/pages/categories_page.dart';
 import '../features/products/presentation/pages/products_page.dart';
 import '../features/products/presentation/pages/units_page.dart';
+import '../features/purchases/presentation/pages/purchase_detail_page.dart';
+import '../features/purchases/presentation/pages/purchase_form_page.dart';
+import '../features/purchases/presentation/pages/purchases_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
@@ -47,6 +50,22 @@ abstract final class AppRouter {
 
   static const String suppliersPath = '/suppliers';
   static const String suppliersName = 'suppliers';
+
+  static const String purchasesPath = '/purchases';
+  static const String purchasesName = 'purchases';
+
+  /// Full path of the "new purchase" page. Declared for completeness; the
+  /// route itself is defined as a child of `/purchases` to guarantee that
+  /// `new` is not interpreted as an `:id`.
+  static const String purchaseNewPath = '/purchases/new';
+  static const String purchaseNewName = 'purchase-new';
+
+  static const String purchaseDetailPath = '/purchases/:id';
+  static const String purchaseDetailName = 'purchase-detail';
+
+  /// Full path of the "edit purchase" page.
+  static const String purchaseEditPath = '/purchases/:id/edit';
+  static const String purchaseEditName = 'purchase-edit';
 }
 
 /// Provides the application router.
@@ -56,10 +75,10 @@ abstract final class AppRouter {
 ///
 /// * `AuthStatus.unknown`      → `/loading` (waiting for session restoration)
 /// * `AuthStatus.unauthenticated` → `/login`  (all other routes, including
-///   `/products`, `/inventory` and `/suppliers`, are unreachable)
+///   `/products`, `/inventory`, `/suppliers` and `/purchases`, are
+///   unreachable)
 /// * `AuthStatus.authenticated`  → every route except `/login` and
-///   `/loading` is reachable, including the product catalog, inventory and
-///   supplier pages.
+///   `/loading` is reachable.
 ///
 /// The redirect callback is intentionally synchronous: `go_router` requires
 /// a deterministic decision on every navigation. The current authentication
@@ -141,6 +160,44 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.suppliersName,
         builder: (BuildContext context, GoRouterState state) =>
             const SuppliersPage(),
+      ),
+      // -------------------------------------------------------------------------
+      // Purchases — nested so that `new` is matched before `:id`.
+      // -------------------------------------------------------------------------
+      GoRoute(
+        path: AppRouter.purchasesPath,
+        name: AppRouter.purchasesName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const PurchasesPage(),
+        routes: <RouteBase>[
+          GoRoute(
+            path: 'new',
+            name: AppRouter.purchaseNewName,
+            builder: (BuildContext context, GoRouterState state) =>
+                const PurchaseFormPage(),
+          ),
+          GoRoute(
+            path: ':id',
+            name: AppRouter.purchaseDetailName,
+            builder: (BuildContext context, GoRouterState state) {
+              final String? id = state.pathParameters['id'];
+              return PurchaseDetailPage(key: ValueKey<String>(id ?? ''));
+            },
+            routes: <RouteBase>[
+              GoRoute(
+                path: 'edit',
+                name: AppRouter.purchaseEditName,
+                builder: (BuildContext context, GoRouterState state) {
+                  final String? id = state.pathParameters['id'];
+                  return PurchaseFormPage(
+                    key: ValueKey<String>('edit-${id ?? ''}'),
+                    purchaseId: id,
+                  );
+                },
+              ),
+            ],
+          ),
+        ],
       ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {
