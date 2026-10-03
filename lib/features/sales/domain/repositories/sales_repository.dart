@@ -169,38 +169,22 @@ abstract interface class SalesRepository {
   /// The sale is always created with `status = draft`; the database enforces
   /// this. [paidAmount] is validated by the database to never exceed the
   /// computed [total]; the payment status is derived automatically.
-  Future<Sale> createSale({
-    required String companyId,
-    required String branchId,
-    required String customerId,
-    required DateTime saleDate,
-    List<SaleItemDraft> items,
-    String? invoiceNumber,
-    double discount,
-    double taxAmount,
-    double paidAmount,
-    String? notes,
-  });
+Future<Sale> createSale({
+  required String companyId,
+  required String branchId,
+  String? customerId,           // ← nullable
+  required DateTime saleDate,
+  ...
+});
 
-  /// Replaces the header and items of an existing draft sale.
-  ///
-  /// All existing items are removed and replaced by [items]. Rejected with
-  /// [SalesFailureType.invalidStatusTransition] when the sale is not in
-  /// `draft`.
-  Future<Sale> updateDraft({
-    required String saleId,
-    required String companyId,
-    required String branchId,
-    required String customerId,
-    required DateTime saleDate,
-    required List<SaleItemDraft> items,
-    String? invoiceNumber,
-    double discount,
-    double taxAmount,
-    double paidAmount,
-    String? notes,
-  });
-
+Future<Sale> updateDraft({
+  required String saleId,
+  required String companyId,
+  required String branchId,
+  String? customerId,           // ← nullable
+  required DateTime saleDate,
+  ...
+});
   /// Confirms a draft sale.
   ///
   /// The database trigger inserts the corresponding `sale_out` stock
