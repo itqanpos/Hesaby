@@ -1,0 +1,1013 @@
+// lib/features/sales/presentation/pages/sales_page.dart
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
+
+import '../../../../app/router.dart';
+import '../../../../shared/layouts/app_shell.dart';
+import '../../../../shared/widgets/app_button.dart';
+import '../../../../shared/widgets/app_empty.dart';
+import '../../../../shared/widgets/app_error.dart';
+import '../../../../shared/widgets/app_loader.dart';
+import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/unit.dart';
+import '../../../products/presentation/providers/product_providers.dart';
+import '../../../products/presentation/providers/unit_providers.dart';
+import '../../domain/entities/sale_entities.dart';
+import '../../domain/repositories/sales_repository.dart';
+import '../providers/sales_providers.dart';
+
+/// Sales list page.
+///
+/// Displays the sales invoices of the currently selected company, with
+/// client-side filters on status and invoice number. The detail view is
+/// presented as a modal dialog (`_SaleDetailDialog`) rather than a separate
+/// route, keeping the whole sales workflow in a single page file.
+class SalesPage extends ConsumerStatefulWidget {
+  const SalesPage({super.key});
+
+  @override
+  ConsumerState<SalesPage> createState() => _SalesPageState();
+}
+
+class _SalesPageState extends ConsumerState<SalesPage> {
+  final TextEditingController _searchController = TextEditingController();
+  String _searchQuery = '';
+
+  /// `null` means "all statuses".
+  String? _statusFilter;
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final CompanyContextState contextState =
+        ref.watch(companyContextProvider);
+    final String? branchId = contextState.currentBranch?.id;
+
+    final AsyncValue<List<Sale>> salesAsync = ref.watch(salesProvider);
+    final AsyncValue<List<Customer>> customersAsync =
+        ref.watch(customersProvider);
+
+    final bool anyLoading =
+        salesAsync.isLoading || customersAsync.isLoading;
+    final Object? firstError = salesAsync.error ?? customersAsync.error;
+
+    return AppShell(
+      appBar: AppBar(
+        title: const Text('فواتير البيع'),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'إضافة فاتورة',
+            onPressed: anyLoading || firstError != null || branchId == null
+                ? null
+                : () => context.pushNamed(AppRouter.saleNewName),
+            icon: const Icon(Icons.add),
+          ),
+        ],
+      ),
+      body: Builder(
+        builder: (BuildContext context) {
+          if (anyLoading) {
+            return const AppLoader();
+          }
+
+          if (firstError != null) {
+            return AppErrorView(
+              title: 'تعذّر تحميل فواتير البيع',
+              message: _errorMessage(firstError),
+              retryLabel: 'إعادة المحاولة',
+              onRetry: () {
+                ref.invalidate(salesProvider);
+                ref.invalidate(customersProvider);
+              },
+            );
+          }
+
+          if (branchId == null) {
+            return const AppEmptyView(
+              icon: Icons.store_mall_directory_outlined,
+              title: 'لم يتم اختيار فرع',
+              message: 'اختر فرعًا من الصفحة الرئيسية لعرض فواتير البيع.',
+            );
+          }
+
+          final List<Sale> allSales = salesAsync.value ?? const <Sale>[];
+          final List<Customer> customers =
+              customersAsync.value ?? const <Customer>[];
+
+          final Map<String, String> customerNames = <String, String>{
+            for (final Customer customer in customers)
+              customer.id: customer.name,
+          };
+
+          final List<Sale> filtered =
+              _applyFilters(allSales, _statusFilter, _searchQuery);
+
+          return Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 8),
+                child: AppTextField(
+                  controller: _searchController,
+                  hint: 'ابحث برقم الفاتورة',
+                  prefixIcon: Icons.search,
+                  onChanged: (String value) {
+                    setState(() => _searchQuery = value);
+                  },
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.only(bottom: 12),
+                child: _StatusFilterChips(
+                  selected: _statusFilter,
+                  onChanged: (String? status) {
+                    setState(() => _statusFilter = status);
+                  },
+                ),
+              ),
+              Expanded(
+                child: allSales.isEmpty
+                    ? AppEmptyView(
+                        icon: Icons.point_of_sale_outlined,
+                        title: 'لا توجد فواتير بيع',
+                        message:
+                            'ابدأ بتسجيل أول فاتورة بيع لأحد العملاء.',
+                        action: AppButton(
+                          label: 'إضافة فاتورة',
+                          icon: Icons.add,
+                          onPressed: () =>
+                              context.pushNamed(AppRouter.saleNewName),
+                        ),
+                      )
+                    : filtered.isEmpty
+                        ? const AppEmptyView(
+                            icon: Icons.search_off_outlined,
+                            title: 'لا نتائج',
+                            message: 'لم تُطابق أي فاتورة معايير البحث.',
+                          )
+                        : ListView.separated(
+                            padding: const EdgeInsets.only(bottom: 24),
+                            itemCount: filtered.length,
+                            separatorBuilder: (_, __) =>
+                                const SizedBox(height: 8),
+                            itemBuilder:
+                                (BuildContext context, int index) {
+                              final Sale sale = filtered[index];
+                              final String customerName =
+                                  customerNames[sale.customerId] ??
+                                      'عميل محذوف';
+                              return _SaleCard(
+                                sale: sale,
+                                customerName: customerName,
+                                onTap: () => _openDetail(context, sale),
+                              );
+                            },
+                          ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Filtering
+  // ---------------------------------------------------------------------------
+
+  List<Sale> _applyFilters(
+    List<Sale> sales,
+    String? status,
+    String query,
+  ) {
+    final String trimmed = query.trim().toLowerCase();
+    return sales.where((Sale sale) {
+      if (status != null && sale.status != status) {
+        return false;
+      }
+      if (trimmed.isEmpty) {
+        return true;
+      }
+      final String invoice = (sale.invoiceNumber ?? '').toLowerCase();
+      return invoice.contains(trimmed);
+    }).toList(growable: false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
+  Future<void> _openDetail(BuildContext context, Sale sale) async {
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => _SaleDetailDialog(sale: sale),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Filter chips
+// -----------------------------------------------------------------------------
+
+class _StatusFilterChips extends StatelessWidget {
+  const _StatusFilterChips({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final String? selected;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: <Widget>[
+          _chip(context, 'الكل', null),
+          const SizedBox(width: 8),
+          _chip(context, 'مسودة', SaleStatus.draft),
+          const SizedBox(width: 8),
+          _chip(context, 'مؤكدة', SaleStatus.confirmed),
+          const SizedBox(width: 8),
+          _chip(context, 'ملغاة', SaleStatus.cancelled),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(BuildContext context, String label, String? value) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected == value,
+      onSelected: (_) => onChanged(value),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Sale card
+// -----------------------------------------------------------------------------
+
+class _SaleCard extends StatelessWidget {
+  const _SaleCard({
+    required this.sale,
+    required this.customerName,
+    required this.onTap,
+  });
+
+  final Sale sale;
+  final String customerName;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    final NumberFormat moneyFormat = NumberFormat.currency(
+      locale: 'ar_EG',
+      symbol: 'ج.م ',
+      decimalDigits: 2,
+    );
+    final DateFormat dateTimeFormat = DateFormat.yMd('ar_EG').add_Hm();
+
+    final (Color badgeBg, Color badgeFg) = _statusColors(
+      scheme,
+      sale.status,
+    );
+    final String statusLabel = _statusLabel(sale.status);
+
+    final String? invoice = sale.invoiceNumber;
+    final String headerTitle =
+        (invoice != null && invoice.isNotEmpty) ? invoice : 'بدون رقم فاتورة';
+
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(16),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(16),
+        onTap: onTap,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          child: Row(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              CircleAvatar(
+                backgroundColor: badgeBg,
+                foregroundColor: badgeFg,
+                child: const Icon(Icons.point_of_sale_outlined),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            headerTitle,
+                            style: theme.textTheme.titleMedium,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        DecoratedBox(
+                          decoration: BoxDecoration(
+                            color: badgeBg,
+                            borderRadius: BorderRadius.circular(999),
+                          ),
+                          child: Padding(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 10,
+                              vertical: 2,
+                            ),
+                            child: Text(
+                              statusLabel,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: badgeFg,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      customerName,
+                      style: theme.textTheme.bodyMedium,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: <Widget>[
+                        Text(
+                          dateTimeFormat.format(sale.saleDate.toLocal()),
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        const SizedBox(width: 12),
+                        Text(
+                          moneyFormat.format(sale.total),
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            color: scheme.primary,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                        if (sale.isUnpaid) ...<Widget>[
+                          const SizedBox(width: 8),
+                          _PaymentBadge(
+                            label: 'غير مدفوعة',
+                            background: scheme.errorContainer,
+                            foreground: scheme.onErrorContainer,
+                          ),
+                        ] else if (sale.isPartiallyPaid) ...<Widget>[
+                          const SizedBox(width: 8),
+                          _PaymentBadge(
+                            label:
+                                'مدفوع جزئيًا (${moneyFormat.format(sale.amountDue)} متبقٍ)',
+                            background: scheme.tertiaryContainer,
+                            foreground: scheme.onTertiaryContainer,
+                          ),
+                        ],
+                      ],
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _PaymentBadge extends StatelessWidget {
+  const _PaymentBadge({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Text(
+          label,
+          style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                color: foreground,
+              ),
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Sale detail dialog
+// -----------------------------------------------------------------------------
+
+class _SaleDetailDialog extends ConsumerStatefulWidget {
+  const _SaleDetailDialog({required this.sale});
+
+  final Sale sale;
+
+  @override
+  ConsumerState<_SaleDetailDialog> createState() => _SaleDetailDialogState();
+}
+
+class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
+  bool _isActing = false;
+
+  @override
+  Widget build(BuildContext context) {
+    // Re-read the sale from the current providers so that the dialog
+    // reflects any state change caused by confirm / cancel actions.
+    final AsyncValue<List<Sale>> salesAsync = ref.watch(salesProvider);
+    final AsyncValue<List<SaleItem>> itemsAsync =
+        ref.watch(saleItemsProvider(widget.sale.id));
+    final AsyncValue<List<Customer>> customersAsync =
+        ref.watch(customersProvider);
+    final AsyncValue<List<Product>> productsAsync =
+        ref.watch(productsProvider);
+    final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
+
+    final bool anyLoading = salesAsync.isLoading ||
+        itemsAsync.isLoading ||
+        customersAsync.isLoading ||
+        productsAsync.isLoading ||
+        unitsAsync.isLoading;
+
+    if (anyLoading) {
+      return AlertDialog(
+        content: const SizedBox(
+          width: 480,
+          height: 320,
+          child: AppLoader(),
+        ),
+        actions: <Widget>[
+          AppButton(
+            label: 'إغلاق',
+            variant: AppButtonVariant.text,
+            onPressed: _isActing
+                ? null
+                : () => Navigator.of(context).pop(),
+          ),
+        ],
+      );
+    }
+
+    final List<Sale> sales = salesAsync.value ?? const <Sale>[];
+    final Sale? current = _findSale(sales, widget.sale.id) ?? widget.sale;
+    final List<SaleItem> items =
+        itemsAsync.value ?? const <SaleItem>[];
+    final List<Customer> customers =
+        customersAsync.value ?? const <Customer>[];
+    final List<Product> products =
+        productsAsync.value ?? const <Product>[];
+    final List<Unit> units = unitsAsync.value ?? const <Unit>[];
+
+    final String customerName = _resolveCustomerName(
+      customers,
+      current.customerId,
+    );
+    final Map<String, String> productNames = <String, String>{
+      for (final Product product in products) product.id: product.name,
+    };
+    final Map<String, String> unitNames = <String, String>{
+      for (final Unit unit in units) unit.id: unit.name,
+    };
+
+    return AlertDialog(
+      title: Text(
+        (current.invoiceNumber != null &&
+                current.invoiceNumber!.isNotEmpty)
+            ? 'فاتورة: ${current.invoiceNumber}'
+            : 'تفاصيل الفاتورة',
+      ),
+      content: SizedBox(
+        width: 560,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              _HeaderBlock(sale: current, customerName: customerName),
+              const SizedBox(height: 16),
+              Text(
+                'البنود',
+                style: Theme.of(context).textTheme.titleMedium,
+              ),
+              const SizedBox(height: 8),
+              if (items.isEmpty)
+                Text(
+                  'لا توجد بنود.',
+                  style: Theme.of(context).textTheme.bodySmall,
+                )
+              else
+                for (final SaleItem item in items)
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 6),
+                    child: _ItemRow(
+                      item: item,
+                      productName:
+                          productNames[item.productId] ?? 'منتج محذوف',
+                      unitName: unitNames[item.unitId] ?? 'وحدة',
+                    ),
+                  ),
+              const SizedBox(height: 12),
+              const Divider(),
+              _TotalsBlock(sale: current),
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        if (current.canEdit)
+          AppButton(
+            label: 'تعديل',
+            icon: Icons.edit_outlined,
+            variant: AppButtonVariant.secondary,
+            onPressed: _isActing
+                ? null
+                : () {
+                    Navigator.of(context).pop();
+                    context.pushNamed(
+                      AppRouter.saleEditName,
+                      pathParameters: <String, String>{'id': current.id},
+                    );
+                  },
+          ),
+        if (current.isDraft)
+          AppButton(
+            label: 'تأكيد',
+            icon: Icons.check_circle_outline,
+            isLoading: _isActing,
+            onPressed: _isActing
+                ? null
+                : () => _confirmSale(current),
+          ),
+        if (current.canTransition)
+          AppButton(
+            label: 'إلغاء الفاتورة',
+            icon: Icons.cancel_outlined,
+            variant: AppButtonVariant.danger,
+            onPressed: _isActing
+                ? null
+                : () => _cancelSale(current),
+          ),
+        AppButton(
+          label: 'إغلاق',
+          variant: AppButtonVariant.text,
+          onPressed: _isActing
+              ? null
+              : () => Navigator.of(context).pop(),
+        ),
+      ],
+      backgroundColor: Theme.of(context).colorScheme.surface,
+      scrollable: false,
+    );
+  }
+
+  Future<void> _confirmSale(Sale sale) async {
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('تأكيد الفاتورة'),
+        content: const Text(
+          'سيتم تأكيد الفاتورة وخصم الكميات من المخزون. '
+          'لا يمكن التعديل بعد التأكيد.',
+        ),
+        actions: <Widget>[
+          AppButton(
+            label: 'رجوع',
+            variant: AppButtonVariant.text,
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+          ),
+          AppButton(
+            label: 'تأكيد',
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() => _isActing = true);
+
+    try {
+      await ref.read(salesProvider.notifier).confirmSale(sale.id);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم تأكيد الفاتورة')),
+      );
+    } on SaleException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showError(context, error);
+    } on Object {
+      if (!mounted) {
+        return;
+      }
+      _showError(
+        context,
+        const SaleException(type: SalesFailureType.unknown),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isActing = false);
+      }
+    }
+  }
+
+  Future<void> _cancelSale(Sale sale) async {
+    final bool wasConfirmed = sale.isConfirmed;
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('إلغاء الفاتورة'),
+        content: Text(
+          wasConfirmed
+              ? 'سيتم إلغاء الفاتورة وإرجاع الكميات إلى المخزون.'
+              : 'سيتم إلغاء الفاتورة. لا يمكن التراجع عن هذا الإجراء.',
+        ),
+        actions: <Widget>[
+          AppButton(
+            label: 'رجوع',
+            variant: AppButtonVariant.text,
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+          ),
+          AppButton(
+            label: 'إلغاء الفاتورة',
+            variant: AppButtonVariant.danger,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !mounted) {
+      return;
+    }
+
+    setState(() => _isActing = true);
+
+    try {
+      await ref.read(salesProvider.notifier).cancelSale(sale.id);
+      if (!mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تم إلغاء الفاتورة')),
+      );
+    } on SaleException catch (error) {
+      if (!mounted) {
+        return;
+      }
+      _showError(context, error);
+    } on Object {
+      if (!mounted) {
+        return;
+      }
+      _showError(
+        context,
+        const SaleException(type: SalesFailureType.unknown),
+      );
+    } finally {
+      if (mounted) {
+        setState(() => _isActing = false);
+      }
+    }
+  }
+
+  static Sale? _findSale(List<Sale> sales, String id) {
+    for (final Sale sale in sales) {
+      if (sale.id == id) {
+        return sale;
+      }
+    }
+    return null;
+  }
+
+  static String _resolveCustomerName(
+    List<Customer> customers,
+    String customerId,
+  ) {
+    for (final Customer customer in customers) {
+      if (customer.id == customerId) {
+        return customer.name;
+      }
+    }
+    return 'عميل محذوف';
+  }
+}
+
+class _HeaderBlock extends StatelessWidget {
+  const _HeaderBlock({required this.sale, required this.customerName});
+
+  final Sale sale;
+  final String customerName;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final DateFormat dateTimeFormat = DateFormat.yMd('ar_EG').add_Hm();
+
+    final (Color badgeBg, Color badgeFg) = _statusColors(
+      scheme,
+      sale.status,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: Text(
+                customerName,
+                style: theme.textTheme.titleMedium,
+              ),
+            ),
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: badgeBg,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 10,
+                  vertical: 3,
+                ),
+                child: Text(
+                  _statusLabel(sale.status),
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    color: badgeFg,
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          dateTimeFormat.format(sale.saleDate.toLocal()),
+          style: theme.textTheme.bodySmall,
+        ),
+        if (sale.hasNotes) ...<Widget>[
+          const SizedBox(height: 6),
+          Text(
+            sale.notes!,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontStyle: FontStyle.italic,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _ItemRow extends StatelessWidget {
+  const _ItemRow({
+    required this.item,
+    required this.productName,
+    required this.unitName,
+  });
+
+  final SaleItem item;
+  final String productName;
+  final String unitName;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final NumberFormat numberFormat = NumberFormat.decimalPattern('ar_EG');
+    final NumberFormat moneyFormat = NumberFormat.currency(
+      locale: 'ar_EG',
+      symbol: 'ج.م ',
+      decimalDigits: 2,
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    productName,
+                    style: theme.textTheme.titleSmall,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    '${numberFormat.format(item.quantity)} $unitName × '
+                    '${moneyFormat.format(item.unitPrice)}',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              moneyFormat.format(item.lineTotal),
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: theme.colorScheme.primary,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TotalsBlock extends StatelessWidget {
+  const _TotalsBlock({required this.sale});
+
+  final Sale sale;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final NumberFormat moneyFormat = NumberFormat.currency(
+      locale: 'ar_EG',
+      symbol: 'ج.م ',
+      decimalDigits: 2,
+    );
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _line(theme, 'المجموع الفرعي', moneyFormat.format(sale.subtotal)),
+        const SizedBox(height: 4),
+        _line(theme, 'الخصم', moneyFormat.format(sale.discount)),
+        const SizedBox(height: 4),
+        _line(theme, 'الضريبة', moneyFormat.format(sale.taxAmount)),
+        const Divider(height: 20),
+        _line(
+          theme,
+          'الإجمالي',
+          moneyFormat.format(sale.total),
+          emphasized: true,
+        ),
+        const SizedBox(height: 4),
+        _line(
+          theme,
+          'المدفوع',
+          moneyFormat.format(sale.paidAmount),
+        ),
+        if (sale.amountDue > 0) ...<Widget>[
+          const SizedBox(height: 4),
+          _line(
+            theme,
+            'المتبقي',
+            moneyFormat.format(sale.amountDue),
+            emphasized: true,
+            color: theme.colorScheme.error,
+          ),
+        ],
+      ],
+    );
+  }
+
+  Widget _line(
+    ThemeData theme,
+    String label,
+    String value, {
+    bool emphasized = false,
+    Color? color,
+  }) {
+    return Row(
+      children: <Widget>[
+        Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
+        Text(
+          value,
+          style: emphasized
+              ? theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: color ?? theme.colorScheme.primary,
+                )
+              : theme.textTheme.bodyMedium,
+        ),
+      ],
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Localization helpers
+// -----------------------------------------------------------------------------
+
+String _statusLabel(String status) {
+  switch (status) {
+    case SaleStatus.draft:
+      return 'مسودة';
+    case SaleStatus.confirmed:
+      return 'مؤكدة';
+    case SaleStatus.cancelled:
+      return 'ملغاة';
+    default:
+      return 'غير معروفة';
+  }
+}
+
+(Color background, Color foreground) _statusColors(
+  ColorScheme scheme,
+  String status,
+) {
+  switch (status) {
+    case SaleStatus.draft:
+      return (scheme.surfaceContainerHighest, scheme.onSurfaceVariant);
+    case SaleStatus.confirmed:
+      return (scheme.primaryContainer, scheme.onPrimaryContainer);
+    case SaleStatus.cancelled:
+      return (scheme.errorContainer, scheme.onErrorContainer);
+    default:
+      return (scheme.surfaceContainerHighest, scheme.onSurfaceVariant);
+  }
+}
+
+void _showError(BuildContext context, SaleException error) {
+  ScaffoldMessenger.of(context).showSnackBar(
+    SnackBar(content: Text(_failureMessage(error.type))),
+  );
+}
+
+String _errorMessage(Object error) {
+  if (error is SaleException) {
+    return _failureMessage(error.type);
+  }
+  return 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.';
+}
+
+String _failureMessage(SalesFailureType type) => switch (type) {
+      SalesFailureType.network =>
+        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+      SalesFailureType.unauthorized =>
+        'انتهت صلاحية الجلسة أو لا تملك صلاحية. يرجى تسجيل الدخول مجددًا.',
+      SalesFailureType.notFound =>
+        'الفاتورة المطلوبة غير موجودة أو تم حذفها.',
+      SalesFailureType.invalidStatusTransition =>
+        'لا يمكن إجراء هذه العملية على الفاتورة في حالتها الحالية.',
+      SalesFailureType.emptySale =>
+        'لا يمكن تأكيد فاتورة بدون بنود. أضف منتجًا واحدًا على الأقل.',
+      SalesFailureType.invoiceNumberConflict =>
+        'يوجد فاتورة أخرى بنفس الرقم في هذه الشركة.',
+      SalesFailureType.customerNotFound =>
+        'العميل المختار غير متاح. يرجى إعادة اختياره.',
+      SalesFailureType.branchNotFound =>
+        'الفرع المختار غير متاح. يرجى إعادة اختياره.',
+      SalesFailureType.productNotFound =>
+        'أحد المنتجات المختارة غير متاح.',
+      SalesFailureType.unitNotFound =>
+        'إحدى الوحدات المختارة غير متاحة.',
+      SalesFailureType.insufficientStock =>
+        'الرصيد غير كافٍ. لا يمكن إتمام الفاتورة.',
+      SalesFailureType.invalidPayment =>
+        'المبلغ المدفوع أكبر من إجمالي الفاتورة.',
+      SalesFailureType.invalidResponse =>
+        'تعذّر قراءة بيانات الفواتير. يرجى المحاولة لاحقًا.',
+      SalesFailureType.unknown =>
+        'تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.',
+    };
