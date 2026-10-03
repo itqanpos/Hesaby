@@ -15,14 +15,15 @@ import '../features/products/presentation/pages/units_page.dart';
 import '../features/purchases/presentation/pages/purchase_detail_page.dart';
 import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
+import '../features/sales/presentation/pages/customers_page.dart';
+import '../features/sales/presentation/pages/sale_form_page.dart';
+import '../features/sales/presentation/pages/sales_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
 import '../shared/widgets/app_loader.dart';
 
 /// Route paths and names used across the application.
-///
-/// Kept as a namespace of constants so no route is ever hard-coded twice.
 abstract final class AppRouter {
   static const String homePath = '/';
   static const String homeName = 'home';
@@ -54,35 +55,30 @@ abstract final class AppRouter {
   static const String purchasesPath = '/purchases';
   static const String purchasesName = 'purchases';
 
-  /// Full path of the "new purchase" page. Declared for completeness; the
-  /// route itself is defined as a child of `/purchases` to guarantee that
-  /// `new` is not interpreted as an `:id`.
   static const String purchaseNewPath = '/purchases/new';
   static const String purchaseNewName = 'purchase-new';
 
   static const String purchaseDetailPath = '/purchases/:id';
   static const String purchaseDetailName = 'purchase-detail';
 
-  /// Full path of the "edit purchase" page.
   static const String purchaseEditPath = '/purchases/:id/edit';
   static const String purchaseEditName = 'purchase-edit';
+
+  // ---- Phase 8 ----
+  static const String customersPath = '/customers';
+  static const String customersName = 'customers';
+
+  static const String salesPath = '/sales';
+  static const String salesName = 'sales';
+
+  static const String saleNewPath = '/sales/new';
+  static const String saleNewName = 'sale-new';
+
+  static const String saleEditPath = '/sales/:id/edit';
+  static const String saleEditName = 'sale-edit';
 }
 
 /// Provides the application router.
-///
-/// The router observes [authProvider] and applies authentication-based
-/// redirection:
-///
-/// * `AuthStatus.unknown`      → `/loading` (waiting for session restoration)
-/// * `AuthStatus.unauthenticated` → `/login`  (all other routes, including
-///   `/products`, `/inventory`, `/suppliers` and `/purchases`, are
-///   unreachable)
-/// * `AuthStatus.authenticated`  → every route except `/login` and
-///   `/loading` is reachable.
-///
-/// The redirect callback is intentionally synchronous: `go_router` requires
-/// a deterministic decision on every navigation. The current authentication
-/// state is read synchronously via `ref.read`.
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
   final GoRouter router = GoRouter(
     initialLocation: AppRouter.homePath,
@@ -98,7 +94,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         return location == AppRouter.loginPath ? null : AppRouter.loginPath;
       }
 
-      // Authenticated: the login and loading screens are no longer reachable.
       if (location == AppRouter.loginPath ||
           location == AppRouter.loadingPath) {
         return AppRouter.homePath;
@@ -161,9 +156,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const SuppliersPage(),
       ),
-      // -------------------------------------------------------------------------
-      // Purchases — nested so that `new` is matched before `:id`.
-      // -------------------------------------------------------------------------
       GoRoute(
         path: AppRouter.purchasesPath,
         name: AppRouter.purchasesName,
@@ -199,6 +191,39 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
+      // ---- Phase 8: Customers ----
+      GoRoute(
+        path: AppRouter.customersPath,
+        name: AppRouter.customersName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const CustomersPage(),
+      ),
+      // ---- Phase 8: Sales ----
+      GoRoute(
+        path: AppRouter.salesPath,
+        name: AppRouter.salesName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const SalesPage(),
+        routes: <RouteBase>[
+          GoRoute(
+            path: 'new',
+            name: AppRouter.saleNewName,
+            builder: (BuildContext context, GoRouterState state) =>
+                const SaleFormPage(),
+          ),
+          GoRoute(
+            path: ':id/edit',
+            name: AppRouter.saleEditName,
+            builder: (BuildContext context, GoRouterState state) {
+              final String? id = state.pathParameters['id'];
+              return SaleFormPage(
+                key: ValueKey<String>('sale-edit-${id ?? ''}'),
+                saleId: id,
+              );
+            },
+          ),
+        ],
+      ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {
       final AppLocalizations l10n = AppLocalizations.of(context);
@@ -213,9 +238,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
     },
   );
 
-  // Re-evaluate the redirect whenever the authentication status changes.
-  // Refreshing only on status transitions avoids redundant rebuilds when
-  // only session details (e.g. email) differ.
   ref.listen<AuthState>(authProvider, (AuthState? previous, AuthState next) {
     if (previous?.status != next.status) {
       router.refresh();
@@ -227,11 +249,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
   return router;
 });
 
-/// Minimal loading screen shown while session restoration is in flight.
-///
-/// It is private to the router because it carries no business meaning; it
-/// exists solely to bridge the `AuthStatus.unknown` state without flashing
-/// either [HomePage] or [LoginPage].
 class _AuthLoadingPage extends StatelessWidget {
   const _AuthLoadingPage();
 
