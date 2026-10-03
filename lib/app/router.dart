@@ -12,6 +12,7 @@ import '../features/inventory/presentation/pages/stock_movements_page.dart';
 import '../features/products/presentation/pages/categories_page.dart';
 import '../features/products/presentation/pages/products_page.dart';
 import '../features/products/presentation/pages/units_page.dart';
+import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
 import '../shared/widgets/app_loader.dart';
@@ -43,6 +44,9 @@ abstract final class AppRouter {
 
   static const String stockMovementsPath = '/inventory/movements';
   static const String stockMovementsName = 'stock-movements';
+
+  static const String suppliersPath = '/suppliers';
+  static const String suppliersName = 'suppliers';
 }
 
 /// Provides the application router.
@@ -52,10 +56,10 @@ abstract final class AppRouter {
 ///
 /// * `AuthStatus.unknown`      → `/loading` (waiting for session restoration)
 /// * `AuthStatus.unauthenticated` → `/login`  (all other routes, including
-///   `/products` and `/inventory`, are unreachable)
+///   `/products`, `/inventory` and `/suppliers`, are unreachable)
 /// * `AuthStatus.authenticated`  → every route except `/login` and
-///   `/loading` is reachable, including the product catalog and inventory
-///   pages.
+///   `/loading` is reachable, including the product catalog, inventory and
+///   supplier pages.
 ///
 /// The redirect callback is intentionally synchronous: `go_router` requires
 /// a deterministic decision on every navigation. The current authentication
@@ -131,6 +135,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.stockMovementsName,
         builder: (BuildContext context, GoRouterState state) =>
             const StockMovementsPage(),
+      ),
+      GoRoute(
+        path: AppRouter.suppliersPath,
+        name: AppRouter.suppliersName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const SuppliersPage(),
       ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {
