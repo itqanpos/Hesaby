@@ -24,6 +24,13 @@ import '../providers/sales_providers.dart';
 /// Pass [saleId] to edit an existing draft, or leave it `null` to create a
 /// new sale. Confirming from this page is a two-step action: save the
 /// draft, then trigger the confirm.
+///
+/// Rebuild strategy:
+/// The page listens directly to every item's `TextEditingController` (via
+/// [addListener]) instead of relying on the widgets' `onChanged` callbacks.
+/// This guarantees that the totals section is recomputed on every keystroke,
+/// regardless of focus, input method, or paste, and avoids stale line
+/// totals.
 class SaleFormPage extends ConsumerStatefulWidget {
   const SaleFormPage({super.key, this.saleId});
 
@@ -57,6 +64,11 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
   @override
   void initState() {
     super.initState();
+    // The header controllers drive the totals too.
+    _discountController.addListener(_onAnyInputChanged);
+    _taxController.addListener(_onAnyInputChanged);
+    _paidController.addListener(_onAnyInputChanged);
+
     if (_isEditMode) {
       _isLoadingExisting = true;
       WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -69,15 +81,41 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
 
   @override
   void dispose() {
+    _discountController.removeListener(_onAnyInputChanged);
+    _taxController.removeListener(_onAnyInputChanged);
+    _paidController.removeListener(_onAnyInputChanged);
+
     _invoiceNumberController.dispose();
     _discountController.dispose();
     _taxController.dispose();
     _paidController.dispose();
     _notesController.dispose();
+
     for (final _DraftItem item in _items) {
+      _detachItemListeners(item);
       item.dispose();
     }
     super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Controller listeners
+  // ---------------------------------------------------------------------------
+
+  void _onAnyInputChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _attachItemListeners(_DraftItem item) {
+    item.quantityController.addListener(_onAnyInputChanged);
+    item.unitPriceController.addListener(_onAnyInputChanged);
+  }
+
+  void _detachItemListeners(_DraftItem item) {
+    item.quantityController.removeListener(_onAnyInputChanged);
+    item.unitPriceController.removeListener(_onAnyInputChanged);
   }
 
   // ---------------------------------------------------------------------------
@@ -106,15 +144,23 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
         _taxController.text = sale.taxAmount.toString();
         _paidController.text = sale.paidAmount.toString();
         _notesController.text = sale.notes ?? '';
+
         for (final _DraftItem item in _items) {
+          _detachItemListeners(item);
           item.dispose();
         }
-        _items
-          ..clear()
-          ..addAll(items.map(_DraftItem.fromEntity));
-        if (_items.isEmpty) {
-          _addEmptyItem();
+        _items.clear();
+
+        for (final SaleItem entity in items) {
+          final _DraftItem item = _DraftItem.fromEntity(entity);
+          _attachItemListeners(item);
+          _items.add(item);
         }
+
+        if (_items.isEmpty) {
+          _addEmptyItemInternal();
+        }
+
         _isLoadingExisting = false;
       });
     } on SaleException catch (error) {
@@ -141,26 +187,28 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
   // ---------------------------------------------------------------------------
 
   void _addEmptyItem() {
-    setState(() {
-      _items.add(_DraftItem.empty());
-    });
+    setState(_addEmptyItemInternal);
+  }
+
+  /// Adds an empty item to [\_items] and attaches its listeners.
+  ///
+  /// Callers must ensure a `setState` wraps this call (or call it from inside
+  /// one) so that the page rebuilds.
+  void _addEmptyItemInternal() {
+    final _DraftItem item = _DraftItem.empty();
+    _attachItemListeners(item);
+    _items.add(item);
   }
 
   void _removeItem(int index) {
     setState(() {
       final _DraftItem removed = _items.removeAt(index);
+      _detachItemListeners(removed);
       removed.dispose();
       if (_items.isEmpty) {
-        _items.add(_DraftItem.empty());
+        _addEmptyItemInternal();
       }
     });
-  }
-
-  /// Called by each item row when its internal numeric values change.
-  /// Triggers a rebuild of the parent so that the totals section reflects
-  /// the new line values.
-  void _onItemChanged() {
-    setState(() {});
   }
 
   // ---------------------------------------------------------------------------
@@ -244,6 +292,10 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
     final double paidAmount =
         double.tryParse(_paidController.text.trim()) ?? 0;
     if (paidAmount < 0) {
+      setState(() => _failureType = SalesFailureType.invalidPayment);
+      return;
+    }
+    if (paidAmount > _total) {
       setState(() => _failureType = SalesFailureType.invalidPayment);
       return;
     }
@@ -542,7 +594,7 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
                   products: products,
                   units: units,
                   enabled: !_isSubmitting,
-                  onChanged: _onItemChanged,
+                  onChanged: _onAnyInputChanged,
                   onRemove:
                       _items.length > 1 ? () => _removeItem(i) : null,
                 ),
@@ -584,7 +636,6 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    onChanged: (String _) => setState(() {}),
                     validator: _validateNonNegative,
                   ),
                 ),
@@ -597,7 +648,6 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    onChanged: (String _) => setState(() {}),
                     validator: _validateNonNegative,
                   ),
                 ),
@@ -623,7 +673,6 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
               keyboardType: const TextInputType.numberWithOptions(
                 decimal: true,
               ),
-              onChanged: (String _) => setState(() {}),
               validator: (String? value) {
                 final String trimmed = value?.trim() ?? '';
                 if (trimmed.isEmpty) {
@@ -731,11 +780,9 @@ class _SaleFormPageState extends ConsumerState<SaleFormPage> {
 
 /// Mutable editing state for one sale line.
 ///
-/// Numeric values (`_quantity`, `_unitPrice`) are cached in dedicated fields
-/// and updated explicitly via [updateQuantity] / [updateUnitPrice]. This
-/// avoids the subtle bug where reading `controller.text` at an arbitrary
-/// moment could return the pre-typed value or the placeholder text, in
-/// either case producing an incorrect `lineTotal`.
+/// The numeric values are read **directly from the controllers** every time
+/// they are requested. This removes any possibility of stale values: if the
+/// widget displays "500", the getter returns 500.
 class _DraftItem {
   _DraftItem({
     this.productId,
@@ -743,11 +790,7 @@ class _DraftItem {
     required this.quantityController,
     required this.unitPriceController,
     this.notes,
-  }) {
-    // Initialise cached numeric values from the controllers.
-    _quantity = double.tryParse(quantityController.text.trim()) ?? 0;
-    _unitPrice = double.tryParse(unitPriceController.text.trim()) ?? 0;
-  }
+  });
 
   factory _DraftItem.empty() => _DraftItem(
         quantityController: TextEditingController(text: '1'),
@@ -772,20 +815,11 @@ class _DraftItem {
   final TextEditingController unitPriceController;
   String? notes;
 
-  late double _quantity;
-  late double _unitPrice;
+  double get quantity => double.tryParse(quantityController.text.trim()) ?? 0;
 
-  double get quantity => _quantity;
-  double get unitPrice => _unitPrice;
-  double get lineTotal => _quantity * _unitPrice;
+  double get unitPrice => double.tryParse(unitPriceController.text.trim()) ?? 0;
 
-  void updateQuantity(String text) {
-    _quantity = double.tryParse(text.trim()) ?? 0;
-  }
-
-  void updateUnitPrice(String text) {
-    _unitPrice = double.tryParse(text.trim()) ?? 0;
-  }
+  double get lineTotal => quantity * unitPrice;
 
   void dispose() {
     quantityController.dispose();
@@ -928,10 +962,6 @@ class _ItemRow extends StatelessWidget {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    onChanged: (String value) {
-                      item.updateQuantity(value);
-                      onChanged();
-                    },
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -944,10 +974,6 @@ class _ItemRow extends StatelessWidget {
                     keyboardType: const TextInputType.numberWithOptions(
                       decimal: true,
                     ),
-                    onChanged: (String value) {
-                      item.updateUnitPrice(value);
-                      onChanged();
-                    },
                   ),
                 ),
               ],
