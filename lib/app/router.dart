@@ -9,6 +9,7 @@ import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
 import '../features/inventory/presentation/pages/stock_movements_page.dart';
+import '../features/pos/pos_page.dart';
 import '../features/products/presentation/pages/categories_page.dart';
 import '../features/products/presentation/pages/products_page.dart';
 import '../features/products/presentation/pages/units_page.dart';
@@ -24,6 +25,8 @@ import '../shared/widgets/app_error.dart';
 import '../shared/widgets/app_loader.dart';
 
 /// Route paths and names used across the application.
+///
+/// Kept as a namespace of constants so no route is ever hard-coded twice.
 abstract final class AppRouter {
   static const String homePath = '/';
   static const String homeName = 'home';
@@ -64,7 +67,6 @@ abstract final class AppRouter {
   static const String purchaseEditPath = '/purchases/:id/edit';
   static const String purchaseEditName = 'purchase-edit';
 
-  // ---- Phase 8 ----
   static const String customersPath = '/customers';
   static const String customersName = 'customers';
 
@@ -76,9 +78,26 @@ abstract final class AppRouter {
 
   static const String saleEditPath = '/sales/:id/edit';
   static const String saleEditName = 'sale-edit';
+
+  // ---- Phase 9 ----
+  static const String posPath = '/pos';
+  static const String posName = 'pos';
 }
 
 /// Provides the application router.
+///
+/// The router observes [authProvider] and applies authentication-based
+/// redirection:
+///
+/// * `AuthStatus.unknown`      → `/loading` (waiting for session restoration)
+/// * `AuthStatus.unauthenticated` → `/login`  (all other routes are
+///   unreachable)
+/// * `AuthStatus.authenticated`  → every route except `/login` and
+///   `/loading` is reachable.
+///
+/// The redirect callback is intentionally synchronous: `go_router` requires
+/// a deterministic decision on every navigation. The current authentication
+/// state is read synchronously via `ref.read`.
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
   final GoRouter router = GoRouter(
     initialLocation: AppRouter.homePath,
@@ -94,6 +113,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         return location == AppRouter.loginPath ? null : AppRouter.loginPath;
       }
 
+      // Authenticated: the login and loading screens are no longer reachable.
       if (location == AppRouter.loginPath ||
           location == AppRouter.loadingPath) {
         return AppRouter.homePath;
@@ -191,14 +211,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
-      // ---- Phase 8: Customers ----
       GoRoute(
         path: AppRouter.customersPath,
         name: AppRouter.customersName,
         builder: (BuildContext context, GoRouterState state) =>
             const CustomersPage(),
       ),
-      // ---- Phase 8: Sales ----
       GoRoute(
         path: AppRouter.salesPath,
         name: AppRouter.salesName,
@@ -224,6 +242,13 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
+      // ---- Phase 9: POS ----
+      GoRoute(
+        path: AppRouter.posPath,
+        name: AppRouter.posName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const PosPage(),
+      ),
     ],
     errorBuilder: (BuildContext context, GoRouterState state) {
       final AppLocalizations l10n = AppLocalizations.of(context);
@@ -238,6 +263,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
     },
   );
 
+  // Re-evaluate the redirect whenever the authentication status changes.
   ref.listen<AuthState>(authProvider, (AuthState? previous, AuthState next) {
     if (previous?.status != next.status) {
       router.refresh();
@@ -249,6 +275,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
   return router;
 });
 
+/// Minimal loading screen shown while session restoration is in flight.
 class _AuthLoadingPage extends StatelessWidget {
   const _AuthLoadingPage();
 
