@@ -61,9 +61,6 @@ abstract interface class CustomerRepository {
     String? notes,
   });
 
-  /// Passing `null` for a nullable parameter leaves it unchanged, except for
-  /// the five nullable fields that carry an explicit `clear*` flag:
-  /// `code`, `phone`, `email`, `address`, `notes`.
   Future<Customer> updateCustomer({
     required String customerId,
     String? name,
@@ -80,10 +77,6 @@ abstract interface class CustomerRepository {
     bool? isActive,
   });
 
-  /// Deletes a customer.
-  ///
-  /// Throws [CustomerException] with type [CustomerFailureType.inUse] when
-  /// sales still reference the customer.
   Future<void> deleteCustomer(String customerId);
 }
 
@@ -142,11 +135,6 @@ abstract interface class SalesRepository {
   // Reads
   // ---------------------------------------------------------------------------
 
-  /// Returns sales of [companyId], most recent first.
-  ///
-  /// [branchId] and [status] narrow the result when supplied. [limit] caps
-  /// the number of rows returned; the data source applies a conservative
-  /// default when omitted.
   Future<List<Sale>> listSales(
     String companyId, {
     String? branchId,
@@ -154,48 +142,42 @@ abstract interface class SalesRepository {
     int? limit,
   });
 
-  /// Returns the header of a single sale.
   Future<Sale> getSale(String saleId);
 
-  /// Returns the line items of [saleId].
   Future<List<SaleItem>> listSaleItems(String saleId);
 
   // ---------------------------------------------------------------------------
   // Writes
   // ---------------------------------------------------------------------------
 
-  /// Creates a new draft sale with its items, in a single logical operation.
-  ///
-  /// The sale is always created with `status = draft`; the database enforces
-  /// this. [paidAmount] is validated by the database to never exceed the
-  /// computed [total]; the payment status is derived automatically.
-Future<Sale> createSale({
-  required String companyId,
-  required String branchId,
-  String? customerId,           // ← nullable
-  required DateTime saleDate,
-  ...
-});
+  Future<Sale> createSale({
+    required String companyId,
+    required String branchId,
+    String? customerId,
+    required DateTime saleDate,
+    List<SaleItemDraft> items,
+    String? invoiceNumber,
+    double discount,
+    double taxAmount,
+    double paidAmount,
+    String? notes,
+  });
 
-Future<Sale> updateDraft({
-  required String saleId,
-  required String companyId,
-  required String branchId,
-  String? customerId,           // ← nullable
-  required DateTime saleDate,
-  ...
-});
-  /// Confirms a draft sale.
-  ///
-  /// The database trigger inserts the corresponding `sale_out` stock
-  /// movements. A sale with no items is rejected with
-  /// [SalesFailureType.emptySale]. Insufficient stock aborts the operation
-  /// with [SalesFailureType.insufficientStock].
+  Future<Sale> updateDraft({
+    required String saleId,
+    required String companyId,
+    required String branchId,
+    String? customerId,
+    required DateTime saleDate,
+    required List<SaleItemDraft> items,
+    String? invoiceNumber,
+    double discount,
+    double taxAmount,
+    double paidAmount,
+    String? notes,
+  });
+
   Future<Sale> confirmSale(String saleId);
 
-  /// Cancels a sale.
-  ///
-  /// A draft sale is cancelled without touching stock. A confirmed sale has
-  /// its movements reversed (via `return_in`).
   Future<Sale> cancelSale(String saleId);
 }
