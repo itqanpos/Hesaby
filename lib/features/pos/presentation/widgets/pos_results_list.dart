@@ -72,7 +72,7 @@ class PosResultsList extends ConsumerWidget {
               product: product,
               unitName: unitName,
               onTap: () => _handleTap(context, ref, product),
-              onQuickAdd: () => _handleQuickAdd(context, ref, product),
+              onQuickAdd: () => _handleQuickAdd(ref, product),
             );
           },
         );
@@ -80,46 +80,15 @@ class PosResultsList extends ConsumerWidget {
     );
   }
 
-  void _handleQuickAdd(
-    BuildContext context,
-    WidgetRef ref,
-    Product product,
-  ) {
-    final CompanyContextState state = ref.read(companyContextProvider);
-    final String? branchId = state.currentBranch?.id;
-    if (branchId == null) {
-      return;
+  // ---------------------------------------------------------------------------
+  // Handlers
+  // ---------------------------------------------------------------------------
+
+  void _handleQuickAdd(WidgetRef ref, Product product) {
+    final bool added = posQuickAddProduct(ref, product);
+    if (added) {
+      ref.read(posSearchProvider.notifier).clear();
     }
-
-    final AsyncValue<List<Unit>> unitsAsync = ref.read(unitsProvider);
-    final String? unitName = unitsAsync.maybeWhen(
-      data: (List<Unit> units) {
-        for (final Unit unit in units) {
-          if (unit.id == product.defaultUnitId) {
-            return unit.name;
-          }
-        }
-        return null;
-      },
-      orElse: () => null,
-    );
-    if (unitName == null) {
-      return;
-    }
-
-    ref.read(posCartProvider.notifier).addLine(
-          productId: product.id,
-          productName: product.name,
-          unitId: product.defaultUnitId,
-          unitName: unitName,
-          conversionFactor: 1,
-          quantity: 1,
-          unitPrice: product.sellingPrice,
-          minSellingPrice: product.minSellingPrice,
-          maxSellingPrice: product.maxSellingPrice,
-        );
-
-    ref.read(posSearchProvider.notifier).clear();
   }
 
   Future<void> _handleTap(
@@ -129,4 +98,54 @@ class PosResultsList extends ConsumerWidget {
   ) async {
     await showPosUnitSelectorSheet(context: context, product: product);
   }
+}
+
+// ============================================================================
+// Public quick-add helper
+// ============================================================================
+
+/// Adds [product] to the POS cart at its default unit and catalogue price,
+/// with quantity 1.
+///
+/// Returns `true` when the line was accepted, `false` when the operation
+/// could not be performed (no branch selected, or the default unit could
+/// not be resolved yet because `unitsProvider` is still loading).
+///
+/// This helper is intentionally exported so that both
+/// [PosResultsList] and the barcode-scanning flow in `PosSearchField` can
+/// share the same add semantics without duplicating the cart-write logic.
+bool posQuickAddProduct(WidgetRef ref, Product product) {
+  final CompanyContextState state = ref.read(companyContextProvider);
+  final String? branchId = state.currentBranch?.id;
+  if (branchId == null) {
+    return false;
+  }
+
+  final AsyncValue<List<Unit>> unitsAsync = ref.read(unitsProvider);
+  final String? unitName = unitsAsync.maybeWhen(
+    data: (List<Unit> units) {
+      for (final Unit unit in units) {
+        if (unit.id == product.defaultUnitId) {
+          return unit.name;
+        }
+      }
+      return null;
+    },
+    orElse: () => null,
+  );
+  if (unitName == null) {
+    return false;
+  }
+
+  return ref.read(posCartProvider.notifier).addLine(
+        productId: product.id,
+        productName: product.name,
+        unitId: product.defaultUnitId,
+        unitName: unitName,
+        conversionFactor: 1,
+        quantity: 1,
+        unitPrice: product.sellingPrice,
+        minSellingPrice: product.minSellingPrice,
+        maxSellingPrice: product.maxSellingPrice,
+      );
 }
