@@ -191,7 +191,8 @@ class PosProductResultTile extends ConsumerWidget {
       parts.add('SKU: $sku');
     }
     if (barcode != null && barcode.trim().isNotEmpty) {
-      parts.add(barcode!);
+  parts.add(barcode);
+}
     }
     return parts.join('  •  ');
   }
