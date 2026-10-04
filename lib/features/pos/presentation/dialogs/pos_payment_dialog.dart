@@ -22,30 +22,30 @@ abstract final class PosPaymentMethod {
   static const String credit = 'credit';
 }
 
-/// Opens the POS payment dialog.
-///
-/// Returns `true` when the sale was created and confirmed, `false` or
-/// `null` when the dialog was dismissed without completing the sale.
+/// Opens the POS payment sheet.
 Future<bool?> showPosPaymentDialog({required BuildContext context}) {
-  return showDialog<bool>(
+  return showModalBottomSheet<bool>(
     context: context,
-    barrierDismissible: false,
-    builder: (BuildContext dialogContext) => const _PosPaymentDialog(),
+    isScrollControlled: true,
+    useSafeArea: true,
+    enableDrag: false,
+    backgroundColor: Colors.transparent,
+    builder: (BuildContext sheetContext) => const _PosPaymentSheet(),
   );
 }
 
 // ============================================================================
-// Payment dialog
+// Payment sheet
 // ============================================================================
 
-class _PosPaymentDialog extends ConsumerStatefulWidget {
-  const _PosPaymentDialog();
+class _PosPaymentSheet extends ConsumerStatefulWidget {
+  const _PosPaymentSheet();
 
   @override
-  ConsumerState<_PosPaymentDialog> createState() => _PosPaymentDialogState();
+  ConsumerState<_PosPaymentSheet> createState() => _PosPaymentSheetState();
 }
 
-class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
+class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   late final PosCart _cart;
   late final TextEditingController _amountController;
 
@@ -62,8 +62,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
   @override
   void initState() {
     super.initState();
-    // Snapshot the cart at open time. Any external mutation (for example a
-    // reset from another widget) must not disturb an in-flight payment.
     _cart = ref.read(posCartProvider);
     _amountController = TextEditingController(
       text: _formatAmount(_cart.total),
@@ -82,11 +80,7 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     if (!mounted) {
       return;
     }
-    if (_serverFailure != null) {
-      setState(() => _serverFailure = null);
-    } else {
-      setState(() {});
-    }
+    setState(() => _serverFailure = null);
   }
 
   static String _formatAmount(double value) {
@@ -103,8 +97,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
   double get _inputAmount =>
       double.tryParse(_amountController.text.trim()) ?? 0;
 
-  /// Amount actually applied to the current invoice. Capped at the invoice
-  /// total because of the database CHECK `paid_amount <= total`.
   double _appliedToSale() {
     if (_method == PosPaymentMethod.credit) {
       return 0;
@@ -116,8 +108,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     return _inputAmount >= total ? total : _inputAmount;
   }
 
-  /// Cash refunded to the customer when the input exceeds the invoice
-  /// total. Always zero for card and credit.
   double _changeToCustomer() {
     if (_method != PosPaymentMethod.cash) {
       return 0;
@@ -126,12 +116,9 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     return excess > 0 ? excess : 0;
   }
 
-  /// Amount added to the customer's outstanding balance.
   double _addedToBalance() => _cart.total - _appliedToSale();
 
-  /// Resulting balance after this sale.
-  double _resultingBalance() =>
-      _cart.customerBalance + _addedToBalance();
+  double _resultingBalance() => _cart.customerBalance + _addedToBalance();
 
   // ---------------------------------------------------------------------------
   // Validation
@@ -141,14 +128,12 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     if (_cart.isEmpty) {
       return 'السلة فارغة. أضف منتجاً قبل الدفع.';
     }
-
     if (_method == PosPaymentMethod.credit) {
       if (!_cart.hasCustomer) {
         return 'البيع الآجل يتطلب اختيار عميل مسجل.';
       }
       return null;
     }
-
     if (_method == PosPaymentMethod.card) {
       if (_inputAmount < _cart.total) {
         return 'الدفع بالبطاقة يجب أن يغطي كامل قيمة الفاتورة.';
@@ -158,12 +143,9 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
       }
       return null;
     }
-
-    // Cash: partial payments require a registered customer.
     if (_addedToBalance() > 0 && !_cart.hasCustomer) {
       return 'الدفع الجزئي يتطلب اختيار عميل مسجل.';
     }
-
     return null;
   }
 
@@ -218,8 +200,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
         return;
       }
 
-      // The cart is no longer needed; the receipt dialog works on the
-      // captured snapshot.
       ref.read(posCartProvider.notifier).reset();
 
       await showDialog<void>(
@@ -261,7 +241,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     setState(() {
       _method = method;
       _serverFailure = null;
-
       if (method == PosPaymentMethod.credit) {
         _amountController.text = '0';
       } else if (method == PosPaymentMethod.card) {
@@ -281,6 +260,7 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
 
     final String? validationError = _validationError();
     final String? failureMessage = _serverFailure != null
@@ -293,155 +273,171 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     final double addedToBalance = _addedToBalance();
     final double resultingBalance = _resultingBalance();
 
-    return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
-      backgroundColor: scheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.fromLTRB(16, 8, 16, 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                // ---- Title ----
-                Row(
-                  children: <Widget>[
-                    Text('الدفع', style: theme.textTheme.titleLarge),
-                    const Spacer(),
-                    IconButton(
-                      onPressed: _isSubmitting
-                          ? null
-                          : () => Navigator.of(context).pop(false),
-                      icon: const Icon(Icons.close),
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboardInset),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(20),
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  // ---- drag handle ----
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: scheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
                     ),
-                  ],
-                ),
-
-                const SizedBox(height: 4),
-
-                // ---- Customer ----
-                _CustomerRow(customerName: _cart.customerName),
-
-                // ---- Balance details or plain total ----
-                if (_cart.hasCustomer && _cart.customerBalance > 0) ...<Widget>[
-                  const SizedBox(height: 12),
-                  _BalanceDetails(
-                    previousBalance: _cart.customerBalance,
-                    currentInvoice: _cart.total,
-                    totalOwed: _cart.settlementTotal,
                   ),
-                ] else ...<Widget>[
                   const SizedBox(height: 12),
-                  _TotalBanner(total: _cart.total),
-                ],
 
-                const SizedBox(height: 16),
+                  // ---- Title ----
+                  Row(
+                    children: <Widget>[
+                      Text('الدفع', style: theme.textTheme.titleLarge),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: _isSubmitting
+                            ? null
+                            : () => Navigator.of(context).pop(false),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
 
-                // ---- Payment method ----
-                Text('طريقة الدفع', style: theme.textTheme.labelLarge),
-                const SizedBox(height: 8),
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: _MethodTile(
-                        label: 'نقدي',
-                        icon: Icons.payments_outlined,
-                        selected: _method == PosPaymentMethod.cash,
-                        enabled: !_isSubmitting,
-                        onTap: () => _selectMethod(PosPaymentMethod.cash),
-                      ),
+                  // ---- Customer ----
+                  _CustomerRow(customerName: _cart.customerName),
+
+                  const SizedBox(height: 12),
+
+                  // ---- Balance or total ----
+                  if (_cart.hasCustomer && _cart.customerBalance > 0) ...<Widget>[
+                    _BalanceDetails(
+                      previousBalance: _cart.customerBalance,
+                      currentInvoice: _cart.total,
+                      totalOwed: _cart.settlementTotal,
                     ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: _MethodTile(
-                        label: 'بطاقة',
-                        icon: Icons.credit_card,
-                        selected: _method == PosPaymentMethod.card,
-                        enabled: !_isSubmitting,
-                        onTap: () => _selectMethod(PosPaymentMethod.card),
-                      ),
-                    ),
-                    const SizedBox(width: 6),
-                    Expanded(
-                      child: _MethodTile(
-                        label: 'آجل',
-                        icon: Icons.schedule,
-                        selected: _method == PosPaymentMethod.credit,
-                        enabled: !_isSubmitting,
-                        onTap: () => _selectMethod(PosPaymentMethod.credit),
-                      ),
-                    ),
+                  ] else ...<Widget>[
+                    _TotalBanner(total: _cart.total),
                   ],
-                ),
 
-                // ---- Amount input (hidden for credit) ----
-                if (_method != PosPaymentMethod.credit) ...<Widget>[
                   const SizedBox(height: 16),
-                  Text(
-                    'المبلغ المدفوع',
-                    style: theme.textTheme.labelLarge,
-                  ),
+
+                  // ---- Method ----
+                  Text('طريقة الدفع', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 8),
-                  _AmountField(
-                    controller: _amountController,
-                    enabled: !_isSubmitting,
-                    hasError: displayError != null,
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: _MethodTile(
+                          label: 'نقدي',
+                          icon: Icons.payments_outlined,
+                          selected: _method == PosPaymentMethod.cash,
+                          enabled: !_isSubmitting,
+                          onTap: () => _selectMethod(PosPaymentMethod.cash),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _MethodTile(
+                          label: 'بطاقة',
+                          icon: Icons.credit_card,
+                          selected: _method == PosPaymentMethod.card,
+                          enabled: !_isSubmitting,
+                          onTap: () => _selectMethod(PosPaymentMethod.card),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _MethodTile(
+                          label: 'آجل',
+                          icon: Icons.schedule,
+                          selected: _method == PosPaymentMethod.credit,
+                          enabled: !_isSubmitting,
+                          onTap: () =>
+                              _selectMethod(PosPaymentMethod.credit),
+                        ),
+                      ),
+                    ],
+                  ),
+
+                  // ---- Amount ----
+                  if (_method != PosPaymentMethod.credit) ...<Widget>[
+                    const SizedBox(height: 16),
+                    Text(
+                      'المبلغ المدفوع',
+                      style: theme.textTheme.labelLarge,
+                    ),
+                    const SizedBox(height: 8),
+                    _AmountField(
+                      controller: _amountController,
+                      enabled: !_isSubmitting,
+                      hasError: displayError != null,
+                    ),
+                  ],
+
+                  // ---- Error ----
+                  if (displayError != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _ErrorBanner(message: displayError),
+                  ],
+
+                  // ---- Summary ----
+                  const SizedBox(height: 16),
+                  if (change > 0)
+                    _SummaryLine(
+                      label: 'الباقي للعميل',
+                      value: _money.format(change),
+                      emphasized: true,
+                      color: scheme.primary,
+                    ),
+                  if (addedToBalance > 0) ...<Widget>[
+                    _SummaryLine(
+                      label: 'سيُضاف للرصيد',
+                      value: _money.format(addedToBalance),
+                      color: scheme.error,
+                    ),
+                    _SummaryLine(
+                      label: 'الرصيد الجديد للعميل',
+                      value: _money.format(resultingBalance),
+                      emphasized: true,
+                      color: scheme.error,
+                    ),
+                  ],
+                  if (change == 0 && addedToBalance == 0)
+                    _SummaryLine(
+                      label: 'الحالة',
+                      value: 'مدفوع بالكامل',
+                      emphasized: true,
+                      color: scheme.primary,
+                    ),
+
+                  const SizedBox(height: 20),
+
+                  // ---- Submit ----
+                  AppButton(
+                    label: 'إتمام البيع',
+                    icon: Icons.check_circle_outline,
+                    expanded: true,
+                    size: AppButtonSize.large,
+                    isLoading: _isSubmitting,
+                    onPressed: canSubmit ? _submit : null,
                   ),
                 ],
-
-                // ---- Error ----
-                if (displayError != null) ...<Widget>[
-                  const SizedBox(height: 12),
-                  _ErrorBanner(message: displayError),
-                ],
-
-                // ---- Summary ----
-                const SizedBox(height: 16),
-                if (change > 0)
-                  _SummaryLine(
-                    label: 'الباقي للعميل',
-                    value: _money.format(change),
-                    emphasized: true,
-                    color: scheme.primary,
-                  ),
-                if (addedToBalance > 0) ...<Widget>[
-                  _SummaryLine(
-                    label: 'سيُضاف للرصيد',
-                    value: _money.format(addedToBalance),
-                    color: scheme.error,
-                  ),
-                  _SummaryLine(
-                    label: 'الرصيد الجديد للعميل',
-                    value: _money.format(resultingBalance),
-                    emphasized: true,
-                    color: scheme.error,
-                  ),
-                ],
-                if (change == 0 && addedToBalance == 0)
-                  _SummaryLine(
-                    label: 'الحالة',
-                    value: 'مدفوع بالكامل',
-                    emphasized: true,
-                    color: scheme.primary,
-                  ),
-
-                const SizedBox(height: 20),
-
-                // ---- Submit ----
-                AppButton(
-                  label: 'إتمام البيع',
-                  icon: Icons.check_circle_outline,
-                  expanded: true,
-                  size: AppButtonSize.large,
-                  isLoading: _isSubmitting,
-                  onPressed: canSubmit ? _submit : null,
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -526,17 +522,20 @@ class _BalanceDetails extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             _row(
+              context,
               label: 'الرصيد السابق',
               value: _money.format(previousBalance),
               color: scheme.error,
             ),
             const SizedBox(height: 6),
             _row(
+              context,
               label: 'قيمة الفاتورة',
               value: _money.format(currentInvoice),
             ),
             const Divider(height: 16),
             _row(
+              context,
               label: 'الإجمالي المطلوب',
               value: _money.format(totalOwed),
               emphasized: true,
@@ -548,13 +547,13 @@ class _BalanceDetails extends StatelessWidget {
     );
   }
 
-  Widget _row({
+  Widget _row(
+    BuildContext context, {
     required String label,
     required String value,
     bool emphasized = false,
     Color? color,
   }) {
-    final BuildContext context = _ctx!;
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
@@ -581,10 +580,8 @@ class _BalanceDetails extends StatelessWidget {
       ],
     );
   }
-
-  // Hack: to avoid threading a context through `_row`, we capture it here.
-  static BuildContext? _ctx;
 }
+
 class _TotalBanner extends StatelessWidget {
   const _TotalBanner({required this.total});
 
@@ -870,108 +867,105 @@ class _PosReceiptDialog extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
       ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 460),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Icon(Icons.check_circle,
-                        color: scheme.primary, size: 32),
-                    const SizedBox(width: 10),
-                    Text(
-                      'تم إتمام البيع',
-                      style: theme.textTheme.titleLarge,
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-                if (sale.invoiceNumber != null)
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.all(16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(Icons.check_circle,
+                      color: scheme.primary, size: 32),
+                  const SizedBox(width: 10),
                   Text(
-                    'الإيصال: ${sale.invoiceNumber}',
-                    style: theme.textTheme.bodyMedium,
+                    'تم إتمام البيع',
+                    style: theme.textTheme.titleLarge,
                   ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
+              if (sale.invoiceNumber != null)
                 Text(
-                  _dateTime.format(sale.saleDate.toLocal()),
-                  style: theme.textTheme.bodySmall,
-                ),
-                Text(
-                  customerName ?? 'عميل نقدي',
+                  'الإيصال: ${sale.invoiceNumber}',
                   style: theme.textTheme.bodyMedium,
                 ),
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
+              Text(
+                _dateTime.format(sale.saleDate.toLocal()),
+                style: theme.textTheme.bodySmall,
+              ),
+              Text(
+                customerName ?? 'عميل نقدي',
+                style: theme.textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 12),
+              const Divider(height: 1),
+              const SizedBox(height: 12),
 
-                for (final PosCartLine line in lines)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            line.productName,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                        Text(
-                          '${_fmtQty(line.quantity)} × '
-                          '${_money.format(line.unitPrice)}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          _money.format(line.lineTotal),
+              for (final PosCartLine line in lines)
+                Padding(
+                  padding: const EdgeInsets.symmetric(vertical: 4),
+                  child: Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          line.productName,
                           style: theme.textTheme.bodyMedium,
                         ),
-                      ],
-                    ),
+                      ),
+                      Text(
+                        '${_fmtQty(line.quantity)} × '
+                        '${_money.format(line.unitPrice)}',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        _money.format(line.lineTotal),
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ],
                   ),
-
-                const SizedBox(height: 8),
-                const Divider(height: 1),
-                const SizedBox(height: 8),
-
-                _row(theme, 'المجموع الفرعي',
-                    _money.format(sale.subtotal)),
-                if (sale.discount > 0)
-                  _row(theme, 'الخصم', _money.format(sale.discount)),
-                if (sale.taxAmount > 0)
-                  _row(theme, 'الضريبة', _money.format(sale.taxAmount)),
-                _row(theme, 'الإجمالي', _money.format(sale.total),
-                    emphasized: true),
-                _row(theme, 'المدفوع', _money.format(sale.paidAmount)),
-                if (change > 0)
-                  _row(theme, 'الباقي', _money.format(change),
-                      color: scheme.primary),
-                if (previousBalance > 0) ...<Widget>[
-                  const SizedBox(height: 6),
-                  _row(theme, 'الرصيد السابق',
-                      _money.format(previousBalance),
-                      color: scheme.error),
-                  _row(theme, 'الرصيد الجديد',
-                      _money.format(newBalance),
-                      color: scheme.error,
-                      emphasized: true),
-                ],
-
-                const SizedBox(height: 16),
-
-                AppButton(
-                  label: 'فاتورة جديدة',
-                  icon: Icons.add,
-                  expanded: true,
-                  onPressed: () => Navigator.of(context).pop(),
                 ),
+
+              const SizedBox(height: 8),
+              const Divider(height: 1),
+              const SizedBox(height: 8),
+
+              _row(theme, 'المجموع الفرعي',
+                  _money.format(sale.subtotal)),
+              if (sale.discount > 0)
+                _row(theme, 'الخصم', _money.format(sale.discount)),
+              if (sale.taxAmount > 0)
+                _row(theme, 'الضريبة', _money.format(sale.taxAmount)),
+              _row(theme, 'الإجمالي', _money.format(sale.total),
+                  emphasized: true),
+              _row(theme, 'المدفوع', _money.format(sale.paidAmount)),
+              if (change > 0)
+                _row(theme, 'الباقي', _money.format(change),
+                    color: scheme.primary),
+              if (previousBalance > 0) ...<Widget>[
+                const SizedBox(height: 6),
+                _row(theme, 'الرصيد السابق',
+                    _money.format(previousBalance),
+                    color: scheme.error),
+                _row(theme, 'الرصيد الجديد',
+                    _money.format(newBalance),
+                    color: scheme.error,
+                    emphasized: true),
               ],
-            ),
+
+              const SizedBox(height: 16),
+
+              AppButton(
+                label: 'فاتورة جديدة',
+                icon: Icons.add,
+                expanded: true,
+                onPressed: () => Navigator.of(context).pop(),
+              ),
+            ],
           ),
         ),
       ),
