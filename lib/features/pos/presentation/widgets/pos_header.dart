@@ -6,17 +6,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../companies/domain/entities/branch.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import 'pos_actions_sheet.dart';
 
 /// POS header — compact AppBar with the current branch as a subtitle.
 ///
 /// Layout:
 /// * First line: "نقطة البيع".
-/// * Second line: the active branch name (ellipsised if too long).
-/// * Action (only when the company has more than one branch): a small
-///   icon that opens a bottom sheet to pick another branch.
-///
-/// The back button is left to the default [AppBar] behaviour: it appears
-/// automatically when the route was pushed onto the stack.
+/// * Second line: the active branch name.
+/// * Trailing actions (visually on the left in RTL):
+///   * a three-dot menu that opens the actions sheet,
+///   * a branch picker (only when the company has more than one branch).
 class PosHeader extends ConsumerWidget implements PreferredSizeWidget {
   const PosHeader({super.key});
 
@@ -54,14 +53,20 @@ class PosHeader extends ConsumerWidget implements PreferredSizeWidget {
         ],
       ),
       actions: <Widget>[
+        // ---- Three-dot menu ----
+        IconButton(
+          tooltip: 'خيارات',
+          icon: const Icon(Icons.more_vert),
+          onPressed: () => showPosActionsSheet(context: context),
+        ),
+        // ---- Branch picker ----
         if (canSwitch)
           IconButton(
             tooltip: 'تغيير الفرع',
             icon: const Icon(Icons.store_outlined),
             onPressed: () => _openBranchPicker(context, ref),
-          )
-        else
-          const SizedBox(width: 8),
+          ),
+        const SizedBox(width: 4),
       ],
     );
   }
