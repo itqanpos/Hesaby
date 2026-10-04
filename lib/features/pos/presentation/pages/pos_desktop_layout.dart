@@ -217,7 +217,7 @@ class _ActionsButton extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     return OutlinedButton(
-      onPressed: () => showPosActionsSheet(context),
+    onPressed: () => showPosActionsSheet(context: context),
       style: OutlinedButton.styleFrom(
         minimumSize: const Size.fromHeight(48),
         shape: RoundedRectangleBorder(
