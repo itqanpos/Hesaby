@@ -24,7 +24,7 @@ import 'pos_payment_dialog.dart';
 ///
 /// Layout (top → bottom):
 /// * customer chip (tap to pick a registered customer or keep cash)
-/// * product search field (auto-focused)
+/// * product search field
 /// * suggestions overlay (appears while typing)
 /// * cart list (scrollable)
 /// * totals block
@@ -90,7 +90,7 @@ class _PosPageState extends ConsumerState<PosPage> {
           sku.contains(trimmed) ||
           barcode.contains(trimmed)) {
         matches.add(product);
-        if (matches.length >= 12) {
+        if (matches.length >= 20) {
           break;
         }
       }
@@ -288,7 +288,7 @@ class _ClientChip extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
@@ -376,7 +376,7 @@ class _SearchField extends StatelessWidget {
         focusNode: focusNode,
         hint: 'امسح باركود أو اكتب اسم/كود المنتج...',
         prefixIcon: Icons.search,
-        autofocus: true,
+        autofocus: false,
         enabled: true,
         suffixIcon: query.isEmpty
             ? null
@@ -410,7 +410,7 @@ class _SuggestionsOverlay extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
@@ -546,7 +546,7 @@ class _CartList extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
@@ -662,7 +662,7 @@ class _TotalsSection extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
@@ -793,8 +793,10 @@ class _ActionsSection extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final double bottomInset = MediaQuery.viewInsetsOf(context).bottom;
+
     return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: EdgeInsets.fromLTRB(16, 0, 16, 16 + bottomInset),
       child: Row(
         children: <Widget>[
           Expanded(
@@ -875,7 +877,7 @@ class _ClientPickerSheetState extends ConsumerState<_ClientPickerSheet> {
     final AsyncValue<List<Customer>> customersAsync =
         ref.watch(customersProvider);
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
@@ -943,7 +945,8 @@ class _ClientPickerSheetState extends ConsumerState<_ClientPickerSheet> {
               const Divider(height: 1),
               Expanded(
                 child: customersAsync.when(
-                  loading: () => const Center(child: CircularProgressIndicator()),
+                  loading: () =>
+                      const Center(child: CircularProgressIndicator()),
                   error: (_, __) => const Center(
                     child: Padding(
                       padding: EdgeInsets.all(24),
@@ -1050,12 +1053,19 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
   // Unit / price resolution
   // ---------------------------------------------------------------------------
 
-  List<Unit> _availableUnits(List<Unit> allUnits, List<ProductUnit> extras) {
+  /// Builds the ordered list of units selectable for the current product:
+  /// its default unit first, then any additional units registered through
+  /// `product_units`.
+  static List<Unit> _availableUnits(
+    Product product,
+    List<Unit> allUnits,
+    List<ProductUnit> extras,
+  ) {
     final List<Unit> result = <Unit>[];
     final Set<String> seen = <String>{};
 
     for (final Unit unit in allUnits) {
-      if (unit.id == widget.product.defaultUnitId) {
+      if (unit.id == product.defaultUnitId) {
         result.add(unit);
         seen.add(unit.id);
         break;
@@ -1072,7 +1082,7 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
     return result;
   }
 
-  ProductUnit? _extraFor(String unitId, List<ProductUnit> extras) {
+  static ProductUnit? _extraFor(String unitId, List<ProductUnit> extras) {
     for (final ProductUnit extra in extras) {
       if (extra.unitId == unitId) {
         return extra;
@@ -1081,7 +1091,6 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
     return null;
   }
 
-  /// Effective minimum price for [unitId], or `null` when unbounded.
   double? _effectiveMin(String unitId, List<ProductUnit> extras) {
     if (unitId == widget.product.defaultUnitId) {
       return widget.product.minSellingPrice;
@@ -1097,7 +1106,6 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
     return baseMin * extra.conversionFactor;
   }
 
-  /// Effective maximum price for [unitId], or `null` when unbounded.
   double? _effectiveMax(String unitId, List<ProductUnit> extras) {
     if (unitId == widget.product.defaultUnitId) {
       return widget.product.maxSellingPrice;
@@ -1113,7 +1121,6 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
     return baseMax * extra.conversionFactor;
   }
 
-  /// Suggested price for [unitId] when switching units.
   double _suggestedPrice(String unitId, List<ProductUnit> extras) {
     if (unitId == widget.product.defaultUnitId) {
       return widget.product.sellingPrice;
@@ -1132,12 +1139,20 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
   // Submit
   // ---------------------------------------------------------------------------
 
-  void _submit(List<ProductUnit> extras) {
+  void _submit({
+    required List<ProductUnit> extras,
+    required List<Unit> availableUnits,
+  }) {
     if (_quantity <= 0) {
       return;
     }
-    final double? minPrice = _effectiveMin(_selectedUnitId!, extras);
-    final double? maxPrice = _effectiveMax(_selectedUnitId!, extras);
+    final String? unitId = _selectedUnitId;
+    if (unitId == null) {
+      return;
+    }
+
+    final double? minPrice = _effectiveMin(unitId, extras);
+    final double? maxPrice = _effectiveMax(unitId, extras);
     if (minPrice != null && _unitPrice < minPrice) {
       return;
     }
@@ -1145,17 +1160,26 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
       return;
     }
 
-    final String unitId = _selectedUnitId!;
-    final Unit? unit = _resolveUnit(unitId);
+    // Resolve the selected unit from the available list.
+    Unit? selectedUnit;
+    for (final Unit unit in availableUnits) {
+      if (unit.id == unitId) {
+        selectedUnit = unit;
+        break;
+      }
+    }
+    if (selectedUnit == null) {
+      return;
+    }
+
     final ProductUnit? extra = _extraFor(unitId, extras);
     final double conversionFactor = extra?.conversionFactor ?? 1;
-    final String unitName = unit?.name ?? 'وحدة';
 
     ref.read(posCartProvider.notifier).addLine(
           productId: widget.product.id,
           productName: widget.product.name,
           unitId: unitId,
-          unitName: unitName,
+          unitName: selectedUnit.name,
           conversionFactor: conversionFactor,
           quantity: _quantity,
           unitPrice: _unitPrice,
@@ -1164,17 +1188,16 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
     Navigator.of(context).pop(true);
   }
 
-  Unit? _resolveUnit(String unitId) {
-    // Units are provided by the unitsProvider; resolved at build time.
-    return null;
-  }
+  // ---------------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
@@ -1184,7 +1207,7 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
     final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
 
     return DraggableScrollableSheet(
-      initialChildSize: 0.7,
+      initialChildSize: 0.75,
       minChildSize: 0.5,
       maxChildSize: 0.95,
       expand: false,
@@ -1206,10 +1229,14 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
                   extrasAsync.value ?? const <ProductUnit>[];
               final List<Unit> allUnits =
                   unitsAsync.value ?? const <Unit>[];
-              final List<Unit> available =
-                  _availableUnits(allUnits, extras);
+              final List<Unit> available = _availableUnits(
+                widget.product,
+                allUnits,
+                extras,
+              );
 
-              // Resolve the currently selected unit for display.
+              // Resolve the currently selected unit. If the stored id is no
+              // longer available, fall back to the first entry.
               Unit? currentUnit;
               for (final Unit unit in available) {
                 if (unit.id == _selectedUnitId) {
@@ -1222,15 +1249,16 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
                 _selectedUnitId = currentUnit.id;
               }
 
-              final double? minPrice = _selectedUnitId == null
+              final double? minPrice = currentUnit == null
                   ? null
-                  : _effectiveMin(_selectedUnitId!, extras);
-              final double? maxPrice = _selectedUnitId == null
+                  : _effectiveMin(currentUnit.id, extras);
+              final double? maxPrice = currentUnit == null
                   ? null
-                  : _effectiveMax(_selectedUnitId!, extras);
+                  : _effectiveMax(currentUnit.id, extras);
               final double lineTotal = _quantity * _unitPrice;
-              final bool priceValid = (minPrice == null || _unitPrice >= minPrice) &&
-                  (maxPrice == null || _unitPrice <= maxPrice);
+              final bool priceValid =
+                  (minPrice == null || _unitPrice >= minPrice) &&
+                      (maxPrice == null || _unitPrice <= maxPrice);
 
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1366,13 +1394,15 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
                             const Spacer(),
                             Text(
                               money.format(lineTotal),
-                              style: theme.textTheme.headlineSmall?.copyWith(
+                              style:
+                                  theme.textTheme.headlineSmall?.copyWith(
                                 color: scheme.primary,
                                 fontWeight: FontWeight.w800,
                               ),
                             ),
                           ],
                         ),
+                        const SizedBox(height: 12),
                       ],
                     ),
                   ),
@@ -1384,7 +1414,10 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
                       expanded: true,
                       size: AppButtonSize.large,
                       onPressed: _quantity > 0 && priceValid
-                          ? () => _submit(extras)
+                          ? () => _submit(
+                                extras: extras,
+                                availableUnits: available,
+                              )
                           : null,
                     ),
                   ),
