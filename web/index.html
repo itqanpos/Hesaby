@@ -37,6 +37,17 @@
   </style>
 </head>
 <body>
+  <!--
+    ZXing is used by the `mobile_scanner` Flutter plugin to decode
+    barcodes from a video stream on the web. It is loaded before the
+    Flutter bootstrap script so the library is available the first time
+    the POS opens the camera scanner.
+
+    The version is pinned to keep builds reproducible; bump it only after
+    verifying that `mobile_scanner` still works with the new release.
+  -->
+  <script src="https://unpkg.com/@zxing/library@0.20.0"></script>
+
   <script src="flutter_bootstrap.js" async></script>
 </body>
 </html>
