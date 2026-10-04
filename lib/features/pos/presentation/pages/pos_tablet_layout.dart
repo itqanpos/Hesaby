@@ -145,7 +145,7 @@ class _TabletActions extends StatelessWidget {
           children: <Widget>[
             Expanded(
               child: _ActionsButton(
-                onPressed: () => showPosActionsSheet(context),
+              onPressed: () => showPosActionsSheet(context: context),
               ),
             ),
             const SizedBox(width: 8),
