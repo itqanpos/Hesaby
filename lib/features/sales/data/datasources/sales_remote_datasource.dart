@@ -185,6 +185,13 @@ class SalesRemoteDataSource {
     return rows.map(SaleItemModel.fromMap).toList(growable: false);
   }
 
+  /// Creates a draft sale with its items.
+  ///
+  /// The header is inserted with `paid_amount = 0` because `total` is still
+  /// `0` at that moment (the items have not been inserted yet) and the
+  /// database enforces `paid_amount <= total`. Once the items are in place
+  /// the parent subtotal is recomputed by a trigger, and the effective
+  /// `paid_amount` is written in a follow-up update.
   Future<SaleModel> createSale({
     required String companyId,
     required String branchId,
@@ -208,7 +215,7 @@ class SalesRemoteDataSource {
       'sale_date': _formatTimestamp(saleDate),
       'discount': discount,
       'tax_amount': taxAmount,
-      'paid_amount': paidAmount,
+      'paid_amount': 0,
       if (invoiceNumber != null && invoiceNumber.trim().isNotEmpty)
         'invoice_number': invoiceNumber.trim(),
       if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
@@ -230,18 +237,27 @@ class SalesRemoteDataSource {
     }
     final String saleId = rawId;
 
-    if (items.isNotEmpty) {
-      try {
+    try {
+      if (items.isNotEmpty) {
         await _insertItems(
           client: client,
           companyId: companyId,
           saleId: saleId,
           items: items,
         );
-      } on Object {
-        await _bestEffortCancel(client, saleId);
-        rethrow;
       }
+
+      // The parent subtotal has now been recomputed by the AFTER-INSERT
+      // trigger on sale_items. We can safely set paid_amount (<= total).
+      if (paidAmount > 0) {
+        await client
+            .from('sales')
+            .update(<String, dynamic>{'paid_amount': paidAmount})
+            .eq('id', saleId);
+      }
+    } on Object {
+      await _bestEffortCancel(client, saleId);
+      rethrow;
     }
 
     final Map<String, dynamic> finalRow = await client
@@ -253,6 +269,10 @@ class SalesRemoteDataSource {
     return SaleModel.fromMap(finalRow);
   }
 
+  /// Replaces the header and items of an existing draft sale.
+  ///
+  /// Same reasoning as [createSale]: `paid_amount` is reset to `0` before
+  /// items are replaced, then written in a final update.
   Future<SaleModel> updateDraft({
     required String saleId,
     required String companyId,
@@ -274,7 +294,7 @@ class SalesRemoteDataSource {
       'sale_date': _formatTimestamp(saleDate),
       'discount': discount,
       'tax_amount': taxAmount,
-      'paid_amount': paidAmount,
+      'paid_amount': 0,
       'invoice_number':
           (invoiceNumber != null && invoiceNumber.trim().isNotEmpty)
               ? invoiceNumber.trim()
@@ -295,6 +315,13 @@ class SalesRemoteDataSource {
         saleId: saleId,
         items: items,
       );
+    }
+
+    if (paidAmount > 0) {
+      await client
+          .from('sales')
+          .update(<String, dynamic>{'paid_amount': paidAmount})
+          .eq('id', saleId);
     }
 
     final Map<String, dynamic> finalRow = await client
