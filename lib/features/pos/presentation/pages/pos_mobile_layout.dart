@@ -38,17 +38,10 @@ class PosMobileLayout extends ConsumerWidget {
         const PosCustomerBar(),
         const PosSearchField(),
         Expanded(
-          child: AnimatedSwitcher(
-            duration: const Duration(milliseconds: 180),
-            switchInCurve: Curves.easeOut,
-            switchOutCurve: Curves.easeIn,
-            child: isSearching
-                ? const PosResultsList(key: ValueKey<String>('results'))
-                : const PosCartList(key: ValueKey<String>('cart')),
-          ),
+          child: isSearching ? const PosResultsList() : const PosCartList(),
         ),
         const PosTotalsBar(),
-        _BottomActions(),
+        const _BottomActions(),
       ],
     );
   }
@@ -61,6 +54,8 @@ class PosMobileLayout extends ConsumerWidget {
 class _BottomActions extends StatelessWidget {
   const _BottomActions();
 
+  static const double _buttonHeight = 56;
+
   @override
   Widget build(BuildContext context) {
     final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
@@ -70,18 +65,23 @@ class _BottomActions extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Expanded(
               flex: 2,
-              child: _ActionsButton(
-          onPressed: () => showPosActionsSheet(context: context),
+              child: SizedBox(
+                height: _buttonHeight,
+                child: _ActionsButton(
+                  onPressed: () => showPosActionsSheet(context: context),
+                ),
               ),
             ),
             const SizedBox(width: 8),
-            Expanded(
+            const Expanded(
               flex: 3,
-              child: PosPayButton(),
+              child: SizedBox(
+                height: _buttonHeight,
+                child: PosPayButton(),
+              ),
             ),
           ],
         ),
@@ -103,7 +103,6 @@ class _ActionsButton extends StatelessWidget {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(52),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
