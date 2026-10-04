@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../state/pos_providers.dart';
 import '../state/pos_search_notifier.dart';
-import '../widgets/pos_actions_sheet.dart';
 import '../widgets/pos_cart_list.dart';
 import '../widgets/pos_customer_bar.dart';
 import '../widgets/pos_pay_button.dart';
@@ -47,7 +46,7 @@ class PosTabletLayout extends ConsumerWidget {
         const VerticalDivider(width: 1, thickness: 1),
 
         // ---------------------------------------------------------------------
-        // Right column — cart summary + totals + actions
+        // Right column — cart summary + totals + pay button
         // ---------------------------------------------------------------------
         Expanded(
           flex: 2,
@@ -56,7 +55,16 @@ class PosTabletLayout extends ConsumerWidget {
             children: <Widget>[
               const Expanded(child: PosCartList()),
               const PosTotalsBar(),
-              const _TabletActions(),
+              const Padding(
+                padding: EdgeInsets.fromLTRB(12, 8, 12, 12),
+                child: SafeArea(
+                  top: false,
+                  child: SizedBox(
+                    height: 56,
+                    child: PosPayButton(),
+                  ),
+                ),
+              ),
             ],
           ),
         ),
@@ -100,85 +108,6 @@ class _CartHint extends StatelessWidget {
             ),
           ],
         ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Bottom actions — إجراءات + دفع
-// ============================================================================
-
-class _TabletActions extends StatelessWidget {
-  const _TabletActions();
-
-  static const double _buttonHeight = 56;
-
-  @override
-  Widget build(BuildContext context) {
-    final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-
-    return Padding(
-      padding: EdgeInsets.fromLTRB(12, 8, 12, 12 + keyboardInset),
-      child: SafeArea(
-        top: false,
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: SizedBox(
-                height: _buttonHeight,
-                child: _ActionsButton(
-                  onPressed: () => showPosActionsSheet(context: context),
-                ),
-              ),
-            ),
-            const SizedBox(width: 8),
-            const Expanded(
-              child: SizedBox(
-                height: _buttonHeight,
-                child: PosPayButton(),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ActionsButton extends StatelessWidget {
-  const _ActionsButton({required this.onPressed});
-
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return OutlinedButton(
-      onPressed: onPressed,
-      style: OutlinedButton.styleFrom(
-        shape: RoundedRectangleBorder(
-          borderRadius: BorderRadius.circular(12),
-        ),
-        side: BorderSide(color: scheme.outline),
-        foregroundColor: scheme.onSurface,
-        padding: const EdgeInsets.symmetric(horizontal: 12),
-      ),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.center,
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          Icon(Icons.more_horiz, size: 20, color: scheme.onSurface),
-          const SizedBox(width: 6),
-          Text(
-            'إجراءات',
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
-          ),
-        ],
       ),
     );
   }
