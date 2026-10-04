@@ -2,7 +2,8 @@
 
 import 'dart:typed_data';
 
-import 'package:printing/printing.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
+import 'package:printing/printing.dart' show Printing;
 
 import '../../domain/entities/receipt.dart';
 import 'pdf_receipt_builder.dart';
