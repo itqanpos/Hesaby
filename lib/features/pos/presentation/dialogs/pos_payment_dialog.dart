@@ -13,7 +13,9 @@ import '../../../sales/domain/repositories/sales_repository.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
+import '../../domain/entities/receipt.dart';
 import '../state/pos_providers.dart';
+import 'pos_print_preview_dialog.dart';
 
 /// Payment methods supported by the POS.
 abstract final class PosPaymentMethod {
@@ -200,18 +202,20 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         return;
       }
 
+      // Build the receipt snapshot *before* clearing the cart, so the
+      // printed document matches exactly what the cashier just rang up.
+      final Receipt receipt = _buildReceipt(
+        sale: confirmed,
+        contextState: contextState,
+      );
+
       ref.read(posCartProvider.notifier).reset();
 
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
-        builder: (BuildContext dialogContext) => _PosReceiptDialog(
-          sale: confirmed,
-          lines: _cart.lines,
-          customerName: _cart.customerName,
-          previousBalance: _cart.customerBalance,
-          change: _changeToCustomer(),
-        ),
+        builder: (BuildContext dialogContext) =>
+            _PosReceiptDialog(receipt: receipt),
       );
 
       if (!mounted) {
@@ -235,6 +239,42 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         _serverFailure = SalesFailureType.unknown;
       });
     }
+  }
+
+  /// Builds a pure [Receipt] from the confirmed sale and the current
+  /// company / branch context.
+  Receipt _buildReceipt({
+    required Sale sale,
+    required CompanyContextState contextState,
+  }) {
+    final bool hasBalanceChange = _cart.hasCustomer && _cart.customerBalance > 0;
+
+    return Receipt(
+      saleId: sale.id,
+      invoiceNumber: sale.invoiceNumber,
+      dateTime: sale.saleDate,
+      companyName: contextState.currentCompany?.name ?? '—',
+      branchName: contextState.currentBranch?.name ?? '—',
+      lines: <ReceiptLine>[
+        for (final PosCartLine line in _cart.lines)
+          ReceiptLine(
+            productName: line.productName,
+            unitName: line.unitName,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            lineTotal: line.lineTotal,
+          ),
+      ],
+      subtotal: _cart.subtotal,
+      discount: _cart.discount,
+      taxAmount: _cart.taxAmount,
+      total: _cart.total,
+      paidAmount: _appliedToSale(),
+      change: _changeToCustomer(),
+      customerName: _cart.customerName,
+      previousBalance: hasBalanceChange ? _cart.customerBalance : null,
+      newBalance: hasBalanceChange ? _resultingBalance() : null,
+    );
   }
 
   void _selectMethod(String method) {
@@ -291,7 +331,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                 mainAxisSize: MainAxisSize.min,
                 crossAxisAlignment: CrossAxisAlignment.stretch,
                 children: <Widget>[
-                  // ---- drag handle ----
                   Center(
                     child: Container(
                       width: 40,
@@ -304,7 +343,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   ),
                   const SizedBox(height: 12),
 
-                  // ---- Title ----
                   Row(
                     children: <Widget>[
                       Text('الدفع', style: theme.textTheme.titleLarge),
@@ -318,12 +356,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                     ],
                   ),
 
-                  // ---- Customer ----
                   _CustomerRow(customerName: _cart.customerName),
 
                   const SizedBox(height: 12),
 
-                  // ---- Balance or total ----
                   if (_cart.hasCustomer && _cart.customerBalance > 0) ...<Widget>[
                     _BalanceDetails(
                       previousBalance: _cart.customerBalance,
@@ -336,7 +372,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
                   const SizedBox(height: 16),
 
-                  // ---- Method ----
                   Text('طريقة الدفع', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 8),
                   Row(
@@ -374,7 +409,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                     ],
                   ),
 
-                  // ---- Amount ----
                   if (_method != PosPaymentMethod.credit) ...<Widget>[
                     const SizedBox(height: 16),
                     Text(
@@ -389,13 +423,11 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                     ),
                   ],
 
-                  // ---- Error ----
                   if (displayError != null) ...<Widget>[
                     const SizedBox(height: 12),
                     _ErrorBanner(message: displayError),
                   ],
 
-                  // ---- Summary ----
                   const SizedBox(height: 16),
                   if (change > 0)
                     _SummaryLine(
@@ -427,7 +459,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
                   const SizedBox(height: 20),
 
-                  // ---- Submit ----
                   AppButton(
                     label: 'إتمام البيع',
                     icon: Icons.check_circle_outline,
@@ -833,19 +864,9 @@ class _ErrorBanner extends StatelessWidget {
 // ============================================================================
 
 class _PosReceiptDialog extends StatelessWidget {
-  const _PosReceiptDialog({
-    required this.sale,
-    required this.lines,
-    required this.customerName,
-    required this.previousBalance,
-    required this.change,
-  });
+  const _PosReceiptDialog({required this.receipt});
 
-  final Sale sale;
-  final List<PosCartLine> lines;
-  final String? customerName;
-  final double previousBalance;
-  final double change;
+  final Receipt receipt;
 
   static final NumberFormat _money = NumberFormat.currency(
     locale: 'en_US',
@@ -858,7 +879,6 @@ class _PosReceiptDialog extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final double newBalance = previousBalance + sale.amountDue;
 
     return Dialog(
       insetPadding:
@@ -867,105 +887,132 @@ class _PosReceiptDialog extends StatelessWidget {
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
       ),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.all(16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Icon(Icons.check_circle,
-                      color: scheme.primary, size: 32),
-                  const SizedBox(width: 10),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                // ---- Header ----
+                Row(
+                  children: <Widget>[
+                    Icon(Icons.check_circle,
+                        color: scheme.primary, size: 32),
+                    const SizedBox(width: 10),
+                    Text(
+                      'تم إتمام البيع',
+                      style: theme.textTheme.titleLarge,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                if (receipt.invoiceNumber != null)
                   Text(
-                    'تم إتمام البيع',
-                    style: theme.textTheme.titleLarge,
+                    'الإيصال: ${receipt.invoiceNumber}',
+                    style: theme.textTheme.bodyMedium,
                   ),
-                ],
-              ),
-              const SizedBox(height: 12),
-              const Divider(height: 1),
-              const SizedBox(height: 12),
-              if (sale.invoiceNumber != null)
                 Text(
-                  'الإيصال: ${sale.invoiceNumber}',
+                  _dateTime.format(receipt.dateTime.toLocal()),
+                  style: theme.textTheme.bodySmall,
+                ),
+                Text(
+                  receipt.customerName ?? 'عميل نقدي',
                   style: theme.textTheme.bodyMedium,
                 ),
-              Text(
-                _dateTime.format(sale.saleDate.toLocal()),
-                style: theme.textTheme.bodySmall,
-              ),
-              Text(
-                customerName ?? 'عميل نقدي',
-                style: theme.textTheme.bodyMedium,
-              ),
-              const SizedBox(height: 12),
-              const Divider(height: 1),
-              const SizedBox(height: 12),
 
-              for (final PosCartLine line in lines)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4),
-                  child: Row(
-                    children: <Widget>[
-                      Expanded(
-                        child: Text(
-                          line.productName,
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                // ---- Lines ----
+                for (final ReceiptLine line in receipt.lines)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            line.productName,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                        Text(
+                          '${_fmtQty(line.quantity)} × '
+                          '${_money.format(line.unitPrice)}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _money.format(line.lineTotal),
                           style: theme.textTheme.bodyMedium,
                         ),
-                      ),
-                      Text(
-                        '${_fmtQty(line.quantity)} × '
-                        '${_money.format(line.unitPrice)}',
-                        style: theme.textTheme.bodySmall,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        _money.format(line.lineTotal),
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ],
+                      ],
+                    ),
                   ),
-                ),
 
-              const SizedBox(height: 8),
-              const Divider(height: 1),
-              const SizedBox(height: 8),
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
 
-              _row(theme, 'المجموع الفرعي',
-                  _money.format(sale.subtotal)),
-              if (sale.discount > 0)
-                _row(theme, 'الخصم', _money.format(sale.discount)),
-              if (sale.taxAmount > 0)
-                _row(theme, 'الضريبة', _money.format(sale.taxAmount)),
-              _row(theme, 'الإجمالي', _money.format(sale.total),
-                  emphasized: true),
-              _row(theme, 'المدفوع', _money.format(sale.paidAmount)),
-              if (change > 0)
-                _row(theme, 'الباقي', _money.format(change),
-                    color: scheme.primary),
-              if (previousBalance > 0) ...<Widget>[
-                const SizedBox(height: 6),
-                _row(theme, 'الرصيد السابق',
-                    _money.format(previousBalance),
-                    color: scheme.error),
-                _row(theme, 'الرصيد الجديد',
-                    _money.format(newBalance),
-                    color: scheme.error,
+                // ---- Totals ----
+                _row(theme, 'المجموع الفرعي',
+                    _money.format(receipt.subtotal)),
+                if (receipt.discount > 0)
+                  _row(theme, 'الخصم', _money.format(receipt.discount)),
+                if (receipt.taxAmount > 0)
+                  _row(theme, 'الضريبة', _money.format(receipt.taxAmount)),
+                _row(theme, 'الإجمالي', _money.format(receipt.total),
                     emphasized: true),
+                _row(theme, 'المدفوع', _money.format(receipt.paidAmount)),
+                if (receipt.hasChange)
+                  _row(theme, 'الباقي', _money.format(receipt.change),
+                      color: scheme.primary),
+
+                if (receipt.hasBalanceChange) ...<Widget>[
+                  const SizedBox(height: 6),
+                  _row(theme, 'الرصيد السابق',
+                      _money.format(receipt.previousBalance!),
+                      color: scheme.error),
+                  _row(theme, 'الرصيد الجديد',
+                      _money.format(receipt.newBalance!),
+                      color: scheme.error,
+                      emphasized: true),
+                ],
+
+                const SizedBox(height: 16),
+
+                // ---- Actions ----
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: AppButton(
+                        label: 'طباعة',
+                        icon: Icons.print_outlined,
+                        onPressed: () => showPosPrintPreviewDialog(
+                          context: context,
+                          receipt: receipt,
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AppButton(
+                        label: 'فاتورة جديدة',
+                        icon: Icons.add,
+                        variant: AppButtonVariant.outline,
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ),
+                  ],
+                ),
               ],
-
-              const SizedBox(height: 16),
-
-              AppButton(
-                label: 'فاتورة جديدة',
-                icon: Icons.add,
-                expanded: true,
-                onPressed: () => Navigator.of(context).pop(),
-              ),
-            ],
+            ),
           ),
         ),
       ),
