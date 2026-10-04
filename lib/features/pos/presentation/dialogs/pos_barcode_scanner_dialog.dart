@@ -31,8 +31,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
   void initState() {
     super.initState();
     _controller = MobileScannerController(
-      // Prevent the same barcode from firing multiple times in rapid
-      // succession while the dialog is closing.
       detectionSpeed: DetectionSpeed.noDuplicates,
       facing: CameraFacing.back,
     );
@@ -98,68 +96,77 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
       ),
       body: Stack(
         children: <Widget>[
-          // ---- Camera / error placeholder ----
           Positioned.fill(
-            child: _cameraError != null
-                ? _CameraErrorView(
-                    error: _cameraError!,
-                    scheme: scheme,
-                  )
-               MobileScanner(
-  controller: _controller,
-  onDetect: _handleDetection,
-  errorBuilder: (
-    BuildContext context,
-    MobileScannerException error,
-    Widget? child,
-  ) {
-    _cameraError = error;
-    return _CameraErrorView(error: error, scheme: scheme);
-  },
-  placeholderBuilder: (
-    BuildContext context,
-    Widget? child,
-  ) =>
-      const _LoadingView(),
-),
-                  ),
+            child: _buildScannerArea(scheme),
           ),
-
-          // ---- Scan guide frame ----
           if (_cameraError == null)
             const IgnorePointer(child: _ScanFrameOverlay()),
-
-          // ---- Hint at the bottom ----
           if (_cameraError == null)
-            Positioned(
-              left: 0,
-              right: 0,
-              bottom: 32,
-              child: SafeArea(
-                top: false,
-                child: Center(
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 16,
-                      vertical: 8,
-                    ),
-                    decoration: BoxDecoration(
-                      color: Colors.black.withValues(alpha: 0.6),
-                      borderRadius: BorderRadius.circular(999),
-                    ),
-                    child: const Text(
-                      'وجّه الكاميرا نحو الباركود',
-                      style: TextStyle(
-                        color: Colors.white,
-                        fontSize: 14,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                  ),
+            const _BottomHint(),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildScannerArea(ColorScheme scheme) {
+    if (_cameraError != null) {
+      return _CameraErrorView(error: _cameraError!, scheme: scheme);
+    }
+
+    return MobileScanner(
+      controller: _controller,
+      onDetect: _handleDetection,
+      errorBuilder: (
+        BuildContext context,
+        MobileScannerException error,
+        Widget? child,
+      ) {
+        _cameraError = error;
+        return _CameraErrorView(error: error, scheme: scheme);
+      },
+      placeholderBuilder: (
+        BuildContext context,
+        Widget? child,
+      ) =>
+          const _LoadingView(),
+    );
+  }
+}
+
+// ============================================================================
+// Bottom hint
+// ============================================================================
+
+class _BottomHint extends StatelessWidget {
+  const _BottomHint();
+
+  @override
+  Widget build(BuildContext context) {
+    return Positioned(
+      left: 0,
+      right: 0,
+      bottom: 32,
+      child: SafeArea(
+        top: false,
+        child: Center(
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: Colors.black.withValues(alpha: 0.6),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+              child: Text(
+                'وجّه الكاميرا نحو الباركود',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w600,
                 ),
               ),
             ),
-        ],
+          ),
+        ),
       ),
     );
   }
@@ -188,18 +195,6 @@ class _ScanFrameOverlay extends StatelessWidget {
             height: frameSize,
             child: Stack(
               children: <Widget>[
-                // Dimmed background outside the frame
-                Positioned.fill(
-                  child: DecoratedBox(
-                    decoration: BoxDecoration(
-                      border: Border.all(
-                        color: Colors.white.withValues(alpha: 0.05),
-                        width: 0,
-                      ),
-                    ),
-                  ),
-                ),
-                // Top-left corner
                 Positioned(
                   top: 0,
                   left: 0,
@@ -210,7 +205,6 @@ class _ScanFrameOverlay extends StatelessWidget {
                     isLeft: true,
                   ),
                 ),
-                // Top-right corner
                 Positioned(
                   top: 0,
                   right: 0,
@@ -221,7 +215,6 @@ class _ScanFrameOverlay extends StatelessWidget {
                     isLeft: false,
                   ),
                 ),
-                // Bottom-left corner
                 Positioned(
                   bottom: 0,
                   left: 0,
@@ -232,7 +225,6 @@ class _ScanFrameOverlay extends StatelessWidget {
                     isLeft: true,
                   ),
                 ),
-                // Bottom-right corner
                 Positioned(
                   bottom: 0,
                   right: 0,
