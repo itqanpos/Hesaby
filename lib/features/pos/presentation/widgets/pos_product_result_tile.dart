@@ -17,8 +17,8 @@ import '../../../products/domain/entities/product.dart';
 /// * Stock badge (only when known): "متاح: 15", "آخر 3", or "غير متوفر".
 /// * Selling price in the company currency.
 /// * Default unit name.
-/// * A large `[+]` button that adds one default-unit unit to the cart at
-///   the catalogue price.
+/// * A large `[+]` button that adds one default-unit line at the
+///   catalogue price.
 ///
 /// Tapping anywhere else on the row opens the unit picker
 /// (`pos_unit_selector_sheet`). Tapping the `[+]` button is the
@@ -90,7 +90,8 @@ class PosProductResultTile extends ConsumerWidget {
     }
 
     final bool outOfStock = available != null && available <= 0;
-    final bool lowStock = available != null && available > 0 && available <= 3;
+    final bool lowStock =
+        available != null && available > 0 && available <= 3;
     final String? sku = product.sku;
     final String? barcode = product.barcode;
 
@@ -185,14 +186,21 @@ class PosProductResultTile extends ConsumerWidget {
   }
 
   /// Builds the small subtitle combining SKU and barcode when present.
-  static String _subtitle({required String? sku, required String? barcode}) {
+  ///
+  /// Returns an empty string when neither is available; callers should
+  /// guard the call with a null check on at least one of the two.
+  static String _subtitle({
+    required String? sku,
+    required String? barcode,
+  }) {
     final List<String> parts = <String>[];
-    if (sku != null && sku.trim().isNotEmpty) {
-      parts.add('SKU: $sku');
+    final String? skuValue = sku;
+    if (skuValue != null && skuValue.trim().isNotEmpty) {
+      parts.add('SKU: $skuValue');
     }
-    if (barcode != null && barcode.trim().isNotEmpty) {
-  parts.add(barcode);
-}
+    final String? barcodeValue = barcode;
+    if (barcodeValue != null && barcodeValue.trim().isNotEmpty) {
+      parts.add(barcodeValue);
     }
     return parts.join('  •  ');
   }
@@ -223,7 +231,8 @@ class _StockBadge extends StatelessWidget {
   Widget build(BuildContext context) {
     final (String label, Color color) = switch (true) {
       _ when outOfStock => ('غير متوفر', scheme.error),
-      _ when lowStock => ('آخر ${number.format(available)}', scheme.tertiary),
+      _ when lowStock =>
+        ('آخر ${number.format(available)}', scheme.tertiary),
       _ => ('متاح: ${number.format(available)}', scheme.onSurfaceVariant),
     };
 
