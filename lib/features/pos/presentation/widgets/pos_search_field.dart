@@ -4,24 +4,28 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../products/domain/entities/product.dart';
+import '../../domain/services/barcode_scanner_service.dart';
+import '../services/mobile_scanner_service.dart';
 import '../state/pos_providers.dart';
 import '../state/pos_search_notifier.dart';
+import 'pos_results_list.dart';
 
 /// POS search field — the cashier's primary input.
 ///
 /// Responsibilities:
 /// * Keep the local [TextEditingController] in sync with
 ///   `posSearchProvider`.
-/// * Provide a Scan affordance that will later be wired to a camera /
-///   Bluetooth / HID barcode reader. Until that is available, tapping the
-///   icon shows a short "قريبًا" notice.
+/// * Provide a Scan affordance backed by [BarcodeScannerService] when the
+///   current platform supports a camera.
+/// * Support HID scanners (USB / Bluetooth barcode readers) transparently:
+///   those devices type into the focused field and press Enter, so
+///   [TextField.onSubmitted] is used to trigger a quick-add when exactly
+///   one product matches the query.
 /// * Offer a clear button when the field is not empty.
 ///
 /// The field does **not** filter anything. Filtering lives in
-/// `posSearchResultsProvider`, which combines the current query with the
-/// products stream. Keeping the field dumb is intentional: it lets the
-/// notifier stay synchronous, testable, and independent of the widget
-/// tree.
+/// `posSearchResultsProvider`.
 class PosSearchField extends ConsumerStatefulWidget {
   const PosSearchField({super.key});
 
@@ -30,6 +34,8 @@ class PosSearchField extends ConsumerStatefulWidget {
 }
 
 class _PosSearchFieldState extends ConsumerState<PosSearchField> {
+  static const BarcodeScannerService _scanner = MobileScannerServiceImpl();
+
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
 
@@ -62,23 +68,87 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     _focusNode.requestFocus();
   }
 
+  /// Opens the camera scanner, then uses the scanned value as the query.
+  ///
+  /// If the scanned value matches exactly one product, that product is
+  /// added to the cart immediately.
   Future<void> _handleScan() async {
-    await showDialog<void>(
-      context: context,
-      builder: (BuildContext dialogContext) => AlertDialog(
-        title: const Text('مسح الباركود'),
-        content: const Text(
-          'ميزة مسح الباركود بالكاميرا أو القارئ الخارجي ستكون متاحة '
-          'قريبًا. حاليًا يمكنك كتابة رقم الباركود يدويًا في حقل البحث.',
-        ),
-        actions: <Widget>[
-          TextButton(
-            onPressed: () => Navigator.of(dialogContext).pop(),
-            child: const Text('حسنًا'),
-          ),
-        ],
-      ),
+    if (!_scanner.isSupported) {
+      _showUnsupportedMessage();
+      return;
+    }
+
+    final String? barcode = await _scanner.scan(context);
+    if (!mounted) {
+      return;
+    }
+    if (barcode == null || barcode.trim().isEmpty) {
+      return;
+    }
+
+    final String value = barcode.trim();
+
+    // Push the value into the search field and the notifier.
+    _controller.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
     );
+    ref.read(posSearchProvider.notifier).setQuery(value);
+
+    // Give the results provider a chance to react.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) {
+      return;
+    }
+
+    _quickAddIfSingleMatch();
+  }
+
+  /// Called when the user presses Enter in the field.
+  ///
+  /// HID scanners send `\n` after the barcode; this callback is what makes
+  /// them indistinguishable from a manual search plus Enter.
+  void _handleSubmitted(String value) {
+    _quickAddIfSingleMatch();
+  }
+
+  /// If the current search returns exactly one product, adds it to the
+  /// cart and clears the field.
+  ///
+  /// The check is deliberately conservative:
+  /// * zero results   → do nothing (the cashier can refine the query),
+  /// * one result     → quick-add it,
+  /// * two or more    → do nothing (require an explicit choice).
+  void _quickAddIfSingleMatch() {
+    final AsyncValue<List<Product>> results =
+        ref.read(posSearchResultsProvider);
+    final List<Product>? products = results.valueOrNull;
+    if (products == null || products.length != 1) {
+      return;
+    }
+
+    final bool added = posQuickAddProduct(ref, products.first);
+    if (!added) {
+      return;
+    }
+
+    _controller.clear();
+    ref.read(posSearchProvider.notifier).clear();
+    _focusNode.requestFocus();
+  }
+
+  void _showUnsupportedMessage() {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            'المسح بالكاميرا غير مدعوم على هذا الجهاز. '
+            'استخدم قارئ باركود خارجي أو اكتب الرقم يدويًا.',
+          ),
+          duration: Duration(seconds: 3),
+        ),
+      );
   }
 
   // ---------------------------------------------------------------------------
@@ -88,9 +158,7 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
   @override
   Widget build(BuildContext context) {
     // Keep the controller in sync if the notifier is cleared from outside
-    // (for example after a successful sale). The listener is attached here
-    // rather than in initState so that it always observes the latest
-    // notifier; provider rebuilds are cheap.
+    // (for example after a successful sale).
     final PosSearchState search = ref.watch(posSearchProvider);
     if (search.query != _controller.text) {
       _controller.value = TextEditingValue(
@@ -110,6 +178,7 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
         enabled: true,
         textInputAction: TextInputAction.search,
         onChanged: _handleQueryChanged,
+        onSubmitted: _handleSubmitted,
         suffixIcon: _SuffixActions(
           showClear: search.isNotEmpty,
           onScan: _handleScan,
