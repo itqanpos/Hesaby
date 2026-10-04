@@ -165,8 +165,10 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                                 (BuildContext context, int index) {
                               final Sale sale = filtered[index];
                               final String customerName =
-                                  customerNames[sale.customerId] ??
-                                      'عميل محذوف';
+                                  _resolveCardCustomerName(
+                                customerNames,
+                                sale.customerId,
+                              );
                               return _SaleCard(
                                 sale: sale,
                                 customerName: customerName,
@@ -214,6 +216,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       barrierDismissible: false,
       builder: (BuildContext dialogContext) => _SaleDetailDialog(sale: sale),
     );
+  }
+
+  /// Resolves the customer name for a card, handling the cash-sale case
+  /// where `customerId` is null.
+  static String _resolveCardCustomerName(
+    Map<String, String> customerNames,
+    String? customerId,
+  ) {
+    if (customerId == null) {
+      return 'عميل نقدي';
+    }
+    return customerNames[customerId] ?? 'عميل محذوف';
   }
 }
 
@@ -718,23 +732,30 @@ class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
     }
     return null;
   }
-static String _resolveCustomerName(
-  List<Customer> customers,
-  String? customerId,
-) {
-  if (customerId == null) {
-    return 'عميل نقدي';
-  }
-  for (final Customer customer in customers) {
-    if (customer.id == customerId) {
-      return customer.name;
+
+  /// Resolves a customer id to a display name.
+  ///
+  /// Returns "عميل نقدي" when [customerId] is null (cash sale), and
+  /// "عميل محذوف" when no matching customer exists in the loaded list.
+  static String _resolveCustomerName(
+    List<Customer> customers,
+    String? customerId,
+  ) {
+    if (customerId == null) {
+      return 'عميل نقدي';
     }
+    for (final Customer customer in customers) {
+      if (customer.id == customerId) {
+        return customer.name;
+      }
+    }
+    return 'عميل محذوف';
   }
-  return 'عميل محذوف';
 }
 
-  }
-}
+// -----------------------------------------------------------------------------
+// Header block
+// -----------------------------------------------------------------------------
 
 class _HeaderBlock extends StatelessWidget {
   const _HeaderBlock({required this.sale, required this.customerName});
@@ -803,6 +824,10 @@ class _HeaderBlock extends StatelessWidget {
   }
 }
 
+// -----------------------------------------------------------------------------
+// Item row
+// -----------------------------------------------------------------------------
+
 class _ItemRow extends StatelessWidget {
   const _ItemRow({
     required this.item,
@@ -865,6 +890,10 @@ class _ItemRow extends StatelessWidget {
     );
   }
 }
+
+// -----------------------------------------------------------------------------
+// Totals block
+// -----------------------------------------------------------------------------
 
 class _TotalsBlock extends StatelessWidget {
   const _TotalsBlock({required this.sale});
