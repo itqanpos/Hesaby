@@ -14,17 +14,6 @@ import '../widgets/pos_search_field.dart';
 import '../widgets/pos_totals_bar.dart';
 
 /// POS layout for tablet screens (600 ≤ width < 1024 dp).
-///
-/// Split view:
-/// * **Left column (60%)** — customer bar, search field, and either the
-///   search results or the cart, depending on the search query.
-/// * **Right column (40%)** — a persistent summary of the cart
-///   ([PosCartList] in compact form), followed by the totals bar and the
-///   action buttons.
-///
-/// Both columns share a single bottom action bar, but the buttons appear
-/// only inside the right column so the cashier does not have to cross the
-/// screen to pay.
 class PosTabletLayout extends ConsumerWidget {
   const PosTabletLayout({super.key});
 
@@ -65,9 +54,7 @@ class PosTabletLayout extends ConsumerWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              Expanded(
-                child: const PosCartList(),
-              ),
+              const Expanded(child: PosCartList()),
               const PosTotalsBar(),
               const _TabletActions(),
             ],
@@ -82,9 +69,6 @@ class PosTabletLayout extends ConsumerWidget {
 // Left column placeholder when not searching
 // ============================================================================
 
-/// Small, friendly hint shown in the left column when the cashier is not
-/// searching. It reuses the empty-cart visual language without duplicating
-/// the actual cart view (which lives on the right).
 class _CartHint extends StatelessWidget {
   const _CartHint();
 
@@ -99,11 +83,7 @@ class _CartHint extends StatelessWidget {
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(
-              Icons.search,
-              size: 56,
-              color: scheme.outline,
-            ),
+            Icon(Icons.search, size: 56, color: scheme.outline),
             const SizedBox(height: 12),
             Text(
               'ابحث عن منتج أو امسح الباركود',
@@ -132,6 +112,8 @@ class _CartHint extends StatelessWidget {
 class _TabletActions extends StatelessWidget {
   const _TabletActions();
 
+  static const double _buttonHeight = 56;
+
   @override
   Widget build(BuildContext context) {
     final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
@@ -141,16 +123,21 @@ class _TabletActions extends StatelessWidget {
       child: SafeArea(
         top: false,
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Expanded(
-              child: _ActionsButton(
-              onPressed: () => showPosActionsSheet(context: context),
+              child: SizedBox(
+                height: _buttonHeight,
+                child: _ActionsButton(
+                  onPressed: () => showPosActionsSheet(context: context),
+                ),
               ),
             ),
             const SizedBox(width: 8),
-            Expanded(
-              child: PosPayButton(),
+            const Expanded(
+              child: SizedBox(
+                height: _buttonHeight,
+                child: PosPayButton(),
+              ),
             ),
           ],
         ),
@@ -172,7 +159,6 @@ class _ActionsButton extends StatelessWidget {
     return OutlinedButton(
       onPressed: onPressed,
       style: OutlinedButton.styleFrom(
-        minimumSize: const Size.fromHeight(52),
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(12),
         ),
