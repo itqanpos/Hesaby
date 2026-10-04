@@ -104,11 +104,15 @@ class _PosPrintPreviewDialogState
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  void _onPaperSizeChanged(ReceiptPaperSize? value) {
-    if (value == null || _isBusy) {
+  /// Handles a new selection from the segmented button.
+  ///
+  /// Ignored while a print or share operation is in flight, so the paper
+  /// size cannot change mid-request.
+  void _onSizeSelected(Set<ReceiptPaperSize> selection) {
+    if (selection.isEmpty || _isBusy) {
       return;
     }
-    setState(() => _selectedSize = value);
+    setState(() => _selectedSize = selection.first);
   }
 
   // ---------------------------------------------------------------------------
@@ -178,30 +182,27 @@ class _PosPrintPreviewDialogState
               'مقاس الورق',
               style: theme.textTheme.labelLarge,
             ),
-            const SizedBox(height: 4),
-            RadioGroup<ReceiptPaperSize>(
-              groupValue: _selectedSize,
-              onChanged: _isBusy ? null : _onPaperSizeChanged,
-              child: const Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  RadioListTile<ReceiptPaperSize>(
-                    value: ReceiptPaperSize.mm58,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('58 مم (حراري صغير)'),
-                  ),
-                  RadioListTile<ReceiptPaperSize>(
-                    value: ReceiptPaperSize.mm80,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('80 مم (حراري قياسي)'),
-                  ),
-                  RadioListTile<ReceiptPaperSize>(
-                    value: ReceiptPaperSize.a4,
-                    contentPadding: EdgeInsets.zero,
-                    title: Text('A4 (ورق مكتبي)'),
-                  ),
-                ],
+            const SizedBox(height: 8),
+            SegmentedButton<ReceiptPaperSize>(
+              segments: const <ButtonSegment<ReceiptPaperSize>>[
+                ButtonSegment<ReceiptPaperSize>(
+                  value: ReceiptPaperSize.mm58,
+                  label: Text('58 مم'),
+                ),
+                ButtonSegment<ReceiptPaperSize>(
+                  value: ReceiptPaperSize.mm80,
+                  label: Text('80 مم'),
+                ),
+                ButtonSegment<ReceiptPaperSize>(
+                  value: ReceiptPaperSize.a4,
+                  label: Text('A4'),
+                ),
+              ],
+              selected: <ReceiptPaperSize>{_selectedSize},
+              onSelectionChanged: _isBusy ? null : _onSizeSelected,
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
               ),
             ),
           ],
