@@ -75,7 +75,7 @@ class _BottomActions extends StatelessWidget {
             Expanded(
               flex: 2,
               child: _ActionsButton(
-                onPressed: () => showPosActionsSheet(context),
+          onPressed: () => showPosActionsSheet(context: context),
               ),
             ),
             const SizedBox(width: 8),
