@@ -8,19 +8,6 @@ import '../models/sale_models.dart';
 
 /// Thin wrapper around the Supabase queries for `customers`, `sales` and
 /// `sale_items`.
-///
-/// This is the only file within the sales feature that talks to Supabase
-/// directly. Everything above this class deals with the models defined in
-/// `sale_models.dart` and never sees Supabase types.
-///
-/// Transactionality caveat:
-/// The Supabase client cannot issue multi-statement transactions. Creating a
-/// sale therefore proceeds as: insert header (status = draft), then
-/// batch-insert the items. If the second step fails, the header is
-/// best-effort cancelled so it does not linger as an orphan draft, and the
-/// original error is rethrown. The database trigger guarantees that any
-/// state transition performed inside a single statement (for example,
-/// confirming) is atomic.
 class SalesRemoteDataSource {
   const SalesRemoteDataSource(this._client);
 
@@ -201,7 +188,7 @@ class SalesRemoteDataSource {
   Future<SaleModel> createSale({
     required String companyId,
     required String branchId,
-    required String customerId,
+    String? customerId,
     required DateTime saleDate,
     required List<SaleItemDraft> items,
     String? invoiceNumber,
@@ -217,7 +204,7 @@ class SalesRemoteDataSource {
     final Map<String, dynamic> headerPayload = <String, dynamic>{
       'company_id': companyId,
       'branch_id': branchId,
-      'customer_id': customerId,
+      if (customerId != null) 'customer_id': customerId,
       'sale_date': _formatTimestamp(saleDate),
       'discount': discount,
       'tax_amount': taxAmount,
@@ -270,7 +257,7 @@ class SalesRemoteDataSource {
     required String saleId,
     required String companyId,
     required String branchId,
-    required String customerId,
+    String? customerId,
     required DateTime saleDate,
     required List<SaleItemDraft> items,
     String? invoiceNumber,
@@ -365,9 +352,6 @@ class SalesRemoteDataSource {
           'unit_id': item.unitId,
           'quantity': item.quantity,
           'unit_price': item.unitPrice,
-          // line_total is maintained by the database trigger; a placeholder
-          // is required because the column is NOT NULL. The BEFORE trigger
-          // overwrites it before the row is written.
           'line_total': item.quantity * item.unitPrice,
           if (item.notes != null && item.notes!.trim().isNotEmpty)
             'notes': item.notes!.trim(),
@@ -387,14 +371,12 @@ class SalesRemoteDataSource {
           .update(<String, dynamic>{'status': 'cancelled'})
           .eq('id', saleId);
     } on Object {
-      // Ignored by design: the caller is already handling the primary
-      // failure, and a secondary failure here must not mask it.
+      // Ignored by design.
     }
   }
 
-  /// Formats a [DateTime] as an ISO 8601 string suitable for a `timestamptz`
-  /// column. UTC is used so that PostgreSQL stores the exact instant.
-  static String _formatTimestamp(DateTime value) => value.toUtc().toIso8601String();
+  static String _formatTimestamp(DateTime value) =>
+      value.toUtc().toIso8601String();
 
   SupabaseClient _requireClient() {
     final SupabaseClient? client = _client;
