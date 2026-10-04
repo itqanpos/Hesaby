@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router.dart';
+import '../../domain/entities/pos_cart.dart';
 import '../state/pos_providers.dart';
 
 /// Opens the POS actions sheet.
