@@ -104,6 +104,13 @@ class _PosPrintPreviewDialogState
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
+  void _onPaperSizeChanged(ReceiptPaperSize? value) {
+    if (value == null || _isBusy) {
+      return;
+    }
+    setState(() => _selectedSize = value);
+  }
+
   // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
@@ -172,47 +179,30 @@ class _PosPrintPreviewDialogState
               style: theme.textTheme.labelLarge,
             ),
             const SizedBox(height: 4),
-            RadioListTile<ReceiptPaperSize>(
-              value: ReceiptPaperSize.mm58,
+            RadioGroup<ReceiptPaperSize>(
               groupValue: _selectedSize,
-              onChanged: _isBusy
-                  ? null
-                  : (ReceiptPaperSize? value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() => _selectedSize = value);
-                    },
-              contentPadding: EdgeInsets.zero,
-              title: const Text('58 مم (حراري صغير)'),
-            ),
-            RadioListTile<ReceiptPaperSize>(
-              value: ReceiptPaperSize.mm80,
-              groupValue: _selectedSize,
-              onChanged: _isBusy
-                  ? null
-                  : (ReceiptPaperSize? value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() => _selectedSize = value);
-                    },
-              contentPadding: EdgeInsets.zero,
-              title: const Text('80 مم (حراري قياسي)'),
-            ),
-            RadioListTile<ReceiptPaperSize>(
-              value: ReceiptPaperSize.a4,
-              groupValue: _selectedSize,
-              onChanged: _isBusy
-                  ? null
-                  : (ReceiptPaperSize? value) {
-                      if (value == null) {
-                        return;
-                      }
-                      setState(() => _selectedSize = value);
-                    },
-              contentPadding: EdgeInsets.zero,
-              title: const Text('A4 (ورق مكتبي)'),
+              onChanged: _isBusy ? null : _onPaperSizeChanged,
+              child: const Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  RadioListTile<ReceiptPaperSize>(
+                    value: ReceiptPaperSize.mm58,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('58 مم (حراري صغير)'),
+                  ),
+                  RadioListTile<ReceiptPaperSize>(
+                    value: ReceiptPaperSize.mm80,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('80 مم (حراري قياسي)'),
+                  ),
+                  RadioListTile<ReceiptPaperSize>(
+                    value: ReceiptPaperSize.a4,
+                    contentPadding: EdgeInsets.zero,
+                    title: Text('A4 (ورق مكتبي)'),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
