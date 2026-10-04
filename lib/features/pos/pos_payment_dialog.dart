@@ -21,8 +21,6 @@ abstract final class PosPaymentMethod {
 }
 
 /// Opens the POS payment dialog.
-///
-/// Returns `true` when a sale was completed, `false` or `null` otherwise.
 Future<bool?> showPosPaymentDialog({required BuildContext context}) {
   return showDialog<bool>(
     context: context,
@@ -49,11 +47,17 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
   bool _isSubmitting = false;
   SalesFailureType? _serverFailure;
 
+  static final NumberFormat _money = NumberFormat.currency(
+    locale: 'en_US',
+    symbol: 'ج.م ',
+    decimalDigits: 2,
+  );
+
   @override
   void initState() {
     super.initState();
     final PosCartState cart = ref.read(posCartProvider);
-    _amountController.text = _formatAmount(cart.total);
+    _amountController.text = _formatAmount(cart.settlementTotal);
     _amountController.addListener(_onAmountChanged);
   }
 
@@ -65,23 +69,11 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
   }
 
   void _onAmountChanged() {
-    // Clear the previous server error as soon as the user changes the amount.
-    if (_serverFailure != null) {
-      setState(() => _serverFailure = null);
-    } else {
-      setState(() {});
+    if (!mounted) {
+      return;
     }
+    setState(() => _serverFailure = null);
   }
-
-  // ---------------------------------------------------------------------------
-  // Formatting
-  // ---------------------------------------------------------------------------
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
 
   static String _formatAmount(double value) {
     if (value == value.roundToDouble()) {
@@ -91,12 +83,14 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
   }
 
   // ---------------------------------------------------------------------------
-  // Computed values
+  // Computed
   // ---------------------------------------------------------------------------
 
   double get _inputAmount =>
       double.tryParse(_amountController.text.trim()) ?? 0;
 
+  /// Amount applied to the current invoice. Capped at the invoice total
+  /// because of the database CHECK `paid_amount <= total`.
   double _appliedToSale(PosCartState cart) {
     if (_method == PosPaymentMethod.credit) {
       return 0;
@@ -105,10 +99,11 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     if (_inputAmount <= 0) {
       return 0;
     }
-    return _inputAmount > total ? total : _inputAmount;
+    return _inputAmount >= total ? total : _inputAmount;
   }
 
-  double _change(PosCartState cart) {
+  /// Cash refunded to the customer when the input exceeds the invoice total.
+  double _changeToCustomer(PosCartState cart) {
     if (_method != PosPaymentMethod.cash) {
       return 0;
     }
@@ -116,24 +111,46 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     return excess > 0 ? excess : 0;
   }
 
-  double _addedToBalance(PosCartState cart) =>
-      cart.total - _appliedToSale(cart);
+  /// Amount applied against the customer's previous balance (beyond the
+  /// current invoice).
+  double _appliedToOldBalance(PosCartState cart) {
+    if (!cart.hasCustomer) {
+      return 0;
+    }
+    if (_method == PosPaymentMethod.credit) {
+      return 0;
+    }
+    final double applied = _appliedToSale(cart);
+    final double towardOld = applied - cart.total;
+    // No old balance is settled here unless the input exceeds the invoice
+    // total AND the customer is registered. Cash already returns the
+    // excess, so the effective "settled against old balance" is only the
+    // portion the caller chooses to route to the balance. In the current
+    // flow, cash overpayment goes to the customer as change; only a
+    // partial/invoice amount below the total increases the balance.
+    return towardOld > 0 && cart.hasCustomer && _method == PosPaymentMethod.card
+        ? towardOld
+        : 0;
+  }
 
-  double _newBalance(PosCartState cart) =>
-      cart.customerBalance + _addedToBalance(cart);
+  /// Amount added to the customer balance after this sale.
+  double _addedToBalance(PosCartState cart) {
+    return cart.total - _appliedToSale(cart);
+  }
+
+  /// Resulting balance for the customer after this sale.
+  double _resultingBalance(PosCartState cart) {
+    return cart.customerBalance + _addedToBalance(cart);
+  }
 
   // ---------------------------------------------------------------------------
   // Validation
   // ---------------------------------------------------------------------------
 
-  /// Returns a localized error message when the current input cannot be
-  /// submitted, or `null` when the dialog is ready.
   String? _validationError(PosCartState cart) {
     if (cart.isEmpty) {
       return 'السلة فارغة. أضف منتجاً قبل الدفع.';
     }
-
-    final double addedToBalance = _addedToBalance(cart);
 
     if (_method == PosPaymentMethod.credit) {
       if (!cart.hasCustomer) {
@@ -144,7 +161,7 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
 
     if (_method == PosPaymentMethod.card) {
       if (_inputAmount < cart.total) {
-        return 'الدفع بالبطاقة يجب أن يغطي كامل المبلغ.';
+        return 'الدفع بالبطاقة يجب أن يغطي كامل قيمة الفاتورة.';
       }
       if (_inputAmount > cart.total) {
         return 'الدفع بالبطاقة لا يُعيد باقياً.';
@@ -152,8 +169,8 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
       return null;
     }
 
-    // Cash: partial payments require a registered customer.
-    if (addedToBalance > 0 && !cart.hasCustomer) {
+    // Cash: partial payment requires a registered customer.
+    if (_addedToBalance(cart) > 0 && !cart.hasCustomer) {
       return 'الدفع الجزئي يتطلب اختيار عميل مسجل.';
     }
 
@@ -168,8 +185,7 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     FocusScope.of(context).unfocus();
 
     final PosCartState cart = ref.read(posCartProvider);
-    final String? validationError = _validationError(cart);
-    if (validationError != null) {
+    if (_validationError(cart) != null) {
       return;
     }
 
@@ -221,7 +237,7 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
           lines: cart.lines,
           customerName: cart.customerName,
           previousBalance: cart.customerBalance,
-          change: _change(cart),
+          change: _changeToCustomer(cart),
         ),
       );
 
@@ -248,32 +264,20 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Quick amounts
-  // ---------------------------------------------------------------------------
+  void _selectMethod(String method, PosCartState cart) {
+    setState(() {
+      _method = method;
+      _serverFailure = null;
 
-  List<double> _quickAmounts(double total) {
-    if (total <= 0) {
-      return const <double>[];
-    }
-    final Set<double> set = <double>{total};
-    set.add(_roundUp(total, 100));
-    set.add(_roundUp(total, 500));
-    set.add(_roundUp(total, 1000));
-    final List<double> list = set.toList()..sort();
-    return list.take(4).toList(growable: false);
-  }
-
-  static double _roundUp(double value, int step) {
-    final double result = (value / step).ceil() * step.toDouble();
-    return result == value ? value + step : result;
-  }
-
-  void _setAmount(double value) {
-    _amountController.text = _formatAmount(value);
-    _amountController.selection = TextSelection.collapsed(
-      offset: _amountController.text.length,
-    );
+      if (method == PosPaymentMethod.credit) {
+        _amountController.text = '0';
+      } else if (method == PosPaymentMethod.card) {
+        _amountController.text = _formatAmount(cart.total);
+      } else if (_amountController.text.trim() == '0' ||
+          _amountController.text.trim().isEmpty) {
+        _amountController.text = _formatAmount(cart.settlementTotal);
+      }
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -291,15 +295,14 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
         ? _failureMessageFor(_serverFailure!)
         : null;
     final String? displayError = failureMessage ?? validationError;
-
     final bool canSubmit = !_isSubmitting && validationError == null;
 
-    final double change = _change(cart);
+    final double changeToCustomer = _changeToCustomer(cart);
     final double addedToBalance = _addedToBalance(cart);
-    final double newBalance = _newBalance(cart);
+    final double resultingBalance = _resultingBalance(cart);
 
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
       backgroundColor: scheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
@@ -327,17 +330,29 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
                   ],
                 ),
 
-                // ---- Customer + balance ----
+                const SizedBox(height: 4),
+
+                // ---- Customer ----
                 _CustomerRow(
                   customerName: cart.customerName,
-                  balance: cart.customerBalance,
                   money: _money,
                 ),
 
-                const SizedBox(height: 16),
-
-                // ---- Total ----
-                _TotalBanner(total: cart.total, money: _money),
+                // ---- Balance details (only when customer has balance) ----
+                if (cart.hasCustomer && cart.customerBalance > 0) ...<Widget>[
+                  const SizedBox(height: 12),
+                  _BalanceDetails(
+                    previousBalance: cart.customerBalance,
+                    currentInvoice: cart.total,
+                    totalOwed: cart.settlementTotal,
+                    money: _money,
+                    theme: theme,
+                    scheme: scheme,
+                  ),
+                ] else ...<Widget>[
+                  const SizedBox(height: 12),
+                  _TotalBanner(total: cart.total, money: _money),
+                ],
 
                 const SizedBox(height: 16),
 
@@ -350,10 +365,10 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
                       child: _MethodTile(
                         label: 'نقدي',
                         icon: Icons.payments_outlined,
-                        value: PosPaymentMethod.cash,
                         selected: _method == PosPaymentMethod.cash,
                         enabled: !_isSubmitting,
-                        onTap: () => _selectMethod(PosPaymentMethod.cash, cart),
+                        onTap: () =>
+                            _selectMethod(PosPaymentMethod.cash, cart),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -361,10 +376,10 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
                       child: _MethodTile(
                         label: 'بطاقة',
                         icon: Icons.credit_card,
-                        value: PosPaymentMethod.card,
                         selected: _method == PosPaymentMethod.card,
                         enabled: !_isSubmitting,
-                        onTap: () => _selectMethod(PosPaymentMethod.card, cart),
+                        onTap: () =>
+                            _selectMethod(PosPaymentMethod.card, cart),
                       ),
                     ),
                     const SizedBox(width: 6),
@@ -372,7 +387,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
                       child: _MethodTile(
                         label: 'آجل',
                         icon: Icons.schedule,
-                        value: PosPaymentMethod.credit,
                         selected: _method == PosPaymentMethod.credit,
                         enabled: !_isSubmitting,
                         onTap: () =>
@@ -393,13 +407,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
                     enabled: !_isSubmitting,
                     hasError: displayError != null,
                   ),
-                  const SizedBox(height: 8),
-                  _QuickAmounts(
-                    amounts: _quickAmounts(cart.total),
-                    money: _money,
-                    enabled: !_isSubmitting,
-                    onSelect: _setAmount,
-                  ),
                 ],
 
                 // ---- Error ----
@@ -410,10 +417,10 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
 
                 // ---- Summary ----
                 const SizedBox(height: 16),
-                if (change > 0)
+                if (changeToCustomer > 0)
                   _SummaryLine(
                     label: 'الباقي للعميل',
-                    value: _money.format(change),
+                    value: _money.format(changeToCustomer),
                     emphasized: true,
                     color: scheme.primary,
                   ),
@@ -424,16 +431,17 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
                     color: scheme.error,
                   ),
                   _SummaryLine(
-                    label: 'الرصيد الجديد',
-                    value: _money.format(newBalance),
+                    label: 'الرصيد الجديد للعميل',
+                    value: _money.format(resultingBalance),
                     emphasized: true,
                     color: scheme.error,
                   ),
                 ],
-                if (change == 0 && addedToBalance == 0)
+                if (changeToCustomer == 0 && addedToBalance == 0)
                   _SummaryLine(
                     label: 'الحالة',
                     value: 'مدفوع بالكامل',
+                    emphasized: true,
                     color: scheme.primary,
                   ),
 
@@ -455,22 +463,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
       ),
     );
   }
-
-  void _selectMethod(String method, PosCartState cart) {
-    setState(() {
-      _method = method;
-      _serverFailure = null;
-
-      if (method == PosPaymentMethod.credit) {
-        _amountController.text = '0';
-      } else if (method == PosPaymentMethod.card) {
-        _amountController.text = _formatAmount(cart.total);
-      } else if (_amountController.text.trim() == '0' ||
-          _amountController.text.trim().isEmpty) {
-        _amountController.text = _formatAmount(cart.total);
-      }
-    });
-  }
 }
 
 // ============================================================================
@@ -478,14 +470,9 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
 // ============================================================================
 
 class _CustomerRow extends StatelessWidget {
-  const _CustomerRow({
-    required this.customerName,
-    required this.balance,
-    required this.money,
-  });
+  const _CustomerRow({required this.customerName, required this.money});
 
   final String? customerName;
-  final double balance;
   final NumberFormat money;
 
   @override
@@ -493,7 +480,6 @@ class _CustomerRow extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final bool hasCustomer = customerName != null;
-    final bool hasBalance = hasCustomer && balance > 0;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -516,17 +502,92 @@ class _CustomerRow extends StatelessWidget {
                 overflow: TextOverflow.ellipsis,
               ),
             ),
-            if (hasBalance)
-              Text(
-                money.format(balance),
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: scheme.error,
-                  fontWeight: FontWeight.w700,
-                ),
-              ),
           ],
         ),
       ),
+    );
+  }
+}
+
+class _BalanceDetails extends StatelessWidget {
+  const _BalanceDetails({
+    required this.previousBalance,
+    required this.currentInvoice,
+    required this.totalOwed,
+    required this.money,
+    required this.theme,
+    required this.scheme,
+  });
+
+  final double previousBalance;
+  final double currentInvoice;
+  final double totalOwed;
+  final NumberFormat money;
+  final ThemeData theme;
+  final ColorScheme scheme;
+
+  @override
+  Widget build(BuildContext context) {
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _row(
+              label: 'الرصيد السابق',
+              value: money.format(previousBalance),
+              color: scheme.error,
+            ),
+            const SizedBox(height: 6),
+            _row(
+              label: 'قيمة الفاتورة',
+              value: money.format(currentInvoice),
+            ),
+            const Divider(height: 16),
+            _row(
+              label: 'الإجمالي المطلوب',
+              value: money.format(totalOwed),
+              emphasized: true,
+              color: scheme.primary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row({
+    required String label,
+    required String value,
+    bool emphasized = false,
+    Color? color,
+  }) {
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            label,
+            style: emphasized
+                ? theme.textTheme.titleMedium
+                : theme.textTheme.bodyMedium,
+          ),
+        ),
+        Text(
+          value,
+          style: (emphasized
+                  ? theme.textTheme.headlineSmall
+                  : theme.textTheme.bodyLarge)
+              ?.copyWith(
+            color: color ?? scheme.onSurface,
+            fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+      ],
     );
   }
 }
@@ -579,7 +640,6 @@ class _MethodTile extends StatelessWidget {
   const _MethodTile({
     required this.label,
     required this.icon,
-    required this.value,
     required this.selected,
     required this.enabled,
     required this.onTap,
@@ -587,7 +647,6 @@ class _MethodTile extends StatelessWidget {
 
   final String label;
   final IconData icon;
-  final String value;
   final bool selected;
   final bool enabled;
   final VoidCallback onTap;
@@ -598,9 +657,7 @@ class _MethodTile extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     return Material(
-      color: selected
-          ? scheme.primary
-          : scheme.surfaceContainerHighest,
+      color: selected ? scheme.primary : scheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(12),
       child: InkWell(
         borderRadius: BorderRadius.circular(12),
@@ -649,7 +706,6 @@ class _AmountField extends StatelessWidget {
     return TextField(
       controller: controller,
       enabled: enabled,
-      autofocus: true,
       textAlign: TextAlign.center,
       style: theme.textTheme.headlineMedium?.copyWith(
         fontWeight: FontWeight.w700,
@@ -682,45 +738,6 @@ class _AmountField extends StatelessWidget {
           ),
         ),
       ),
-    );
-  }
-}
-
-class _QuickAmounts extends StatelessWidget {
-  const _QuickAmounts({
-    required this.amounts,
-    required this.money,
-    required this.enabled,
-    required this.onSelect,
-  });
-
-  final List<double> amounts;
-  final NumberFormat money;
-  final bool enabled;
-  final ValueChanged<double> onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    if (amounts.isEmpty) {
-      return const SizedBox.shrink();
-    }
-    return Wrap(
-      spacing: 8,
-      runSpacing: 8,
-      children: <Widget>[
-        for (final double amount in amounts)
-          OutlinedButton(
-            onPressed: enabled ? () => onSelect(amount) : null,
-            style: OutlinedButton.styleFrom(
-              minimumSize: const Size(72, 42),
-              padding: const EdgeInsets.symmetric(horizontal: 14),
-            ),
-            child: Text(
-              money.format(amount),
-              style: const TextStyle(fontWeight: FontWeight.w600),
-            ),
-          ),
-      ],
     );
   }
 }
@@ -848,7 +865,7 @@ class _PosReceiptDialog extends StatelessWidget {
     final double newBalance = previousBalance + sale.amountDue;
 
     return Dialog(
-      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 16),
+      insetPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
       backgroundColor: scheme.surface,
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(20),
