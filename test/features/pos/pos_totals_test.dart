@@ -1,10 +1,9 @@
 // test/features/pos/pos_totals_test.dart
-
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hesabi/features/pos/domain/entities/pos_cart_line.dart';
+import 'package:hesabi/features/pos/presentation/state/pos_cart_notifier.dart';
 import 'package:hesabi/features/pos/presentation/state/pos_providers.dart';
-
 void main() {
   // ---------------------------------------------------------------------------
   // Value object
