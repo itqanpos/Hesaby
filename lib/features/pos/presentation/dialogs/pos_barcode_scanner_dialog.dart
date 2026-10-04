@@ -105,15 +105,23 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
                     error: _cameraError!,
                     scheme: scheme,
                   )
-                : MobileScanner(
-                    controller: _controller,
-                    onDetect: _handleDetection,
-                    errorBuilder: (BuildContext context, MobileScannerException error) {
-                      _cameraError = error;
-                      return _CameraErrorView(error: error, scheme: scheme);
-                    },
-                    placeholderBuilder: (BuildContext context) =>
-                        const _LoadingView(),
+               MobileScanner(
+  controller: _controller,
+  onDetect: _handleDetection,
+  errorBuilder: (
+    BuildContext context,
+    MobileScannerException error,
+    Widget? child,
+  ) {
+    _cameraError = error;
+    return _CameraErrorView(error: error, scheme: scheme);
+  },
+  placeholderBuilder: (
+    BuildContext context,
+    Widget? child,
+  ) =>
+      const _LoadingView(),
+),
                   ),
           ),
 
