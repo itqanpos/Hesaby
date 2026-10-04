@@ -9,7 +9,7 @@ import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
 import '../features/inventory/presentation/pages/stock_movements_page.dart';
-import '../features/pos/pos_page.dart';
+import '../features/pos/presentation/pages/pos_page.dart';
 import '../features/products/presentation/pages/categories_page.dart';
 import '../features/products/presentation/pages/products_page.dart';
 import '../features/products/presentation/pages/units_page.dart';
@@ -79,7 +79,7 @@ abstract final class AppRouter {
   static const String saleEditPath = '/sales/:id/edit';
   static const String saleEditName = 'sale-edit';
 
-  // ---- Phase 9 ----
+  // ---- Phase 6 (POS Foundation) ----
   static const String posPath = '/pos';
   static const String posName = 'pos';
 }
@@ -242,7 +242,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
-      // ---- Phase 9: POS ----
+      // ---- Phase 6: POS Foundation ----
       GoRoute(
         path: AppRouter.posPath,
         name: AppRouter.posName,
