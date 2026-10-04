@@ -111,28 +111,6 @@ class _PosPaymentDialogState extends ConsumerState<_PosPaymentDialog> {
     return excess > 0 ? excess : 0;
   }
 
-  /// Amount applied against the customer's previous balance (beyond the
-  /// current invoice).
-  double _appliedToOldBalance(PosCartState cart) {
-    if (!cart.hasCustomer) {
-      return 0;
-    }
-    if (_method == PosPaymentMethod.credit) {
-      return 0;
-    }
-    final double applied = _appliedToSale(cart);
-    final double towardOld = applied - cart.total;
-    // No old balance is settled here unless the input exceeds the invoice
-    // total AND the customer is registered. Cash already returns the
-    // excess, so the effective "settled against old balance" is only the
-    // portion the caller chooses to route to the balance. In the current
-    // flow, cash overpayment goes to the customer as change; only a
-    // partial/invoice amount below the total increases the balance.
-    return towardOld > 0 && cart.hasCustomer && _method == PosPaymentMethod.card
-        ? towardOld
-        : 0;
-  }
-
   /// Amount added to the customer balance after this sale.
   double _addedToBalance(PosCartState cart) {
     return cart.total - _appliedToSale(cart);
