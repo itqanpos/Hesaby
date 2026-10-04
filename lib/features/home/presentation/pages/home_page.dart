@@ -17,12 +17,11 @@ import '../../../companies/presentation/widgets/company_selector.dart';
 /// Home screen — dashboard-style entry point.
 ///
 /// Layout (top to bottom):
-/// * compact hero with brand + environment
-/// * unified business-context card (company + branch)
-/// * prominent POS banner
-/// * "البيع" section with two primary tiles
-/// * "الإدارة" section with six administration tiles
-/// * compact infrastructure status card
+/// * Compact context card with company and branch selectors.
+/// * Prominent POS banner (main call to action when a company is chosen).
+/// * "البيع" section with two primary tiles (sales, purchases).
+/// * "الإدارة" section with six administration tiles.
+/// * Compact infrastructure status card.
 ///
 /// Contains no business logic: every action is navigation or a state read.
 class HomePage extends ConsumerWidget {
@@ -62,11 +61,11 @@ class HomePage extends ConsumerWidget {
                   const SizedBox(height: 16),
                   const _PosBanner(),
                   const SizedBox(height: 24),
-                  _SectionHeader(title: 'البيع'),
+                  const _SectionHeader(title: 'البيع'),
                   const SizedBox(height: 12),
                   _PrimaryTilesRow(availableWidth: availableWidth),
                   const SizedBox(height: 24),
-                  _SectionHeader(title: 'الإدارة'),
+                  const _SectionHeader(title: 'الإدارة'),
                   const SizedBox(height: 12),
                   _AdminGrid(availableWidth: availableWidth),
                   const SizedBox(height: 24),
@@ -75,7 +74,7 @@ class HomePage extends ConsumerWidget {
                   _EmptyCompanyHint(textTheme: textTheme),
                   const SizedBox(height: 24),
                 ],
-                _SectionHeader(title: 'حالة البنية التحتية'),
+                const _SectionHeader(title: 'حالة البنية التحتية'),
                 const SizedBox(height: 12),
                 _StatusCard(config: config),
                 const SizedBox(height: 24),
@@ -112,7 +111,10 @@ class _ContextCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Padding(
-              padding: const EdgeInsetsDirectional.only(start: 4, bottom: 8),
+              padding: const EdgeInsetsDirectional.only(
+                start: 4,
+                bottom: 8,
+              ),
               child: Text(
                 'سياق العمل',
                 style: theme.textTheme.labelMedium?.copyWith(
@@ -269,21 +271,21 @@ class _PrimaryTilesRow extends StatelessWidget {
       children: <Widget>[
         SizedBox(
           width: tileWidth,
-          child: _PrimaryTile(
+          child: const _PrimaryTile(
             icon: Icons.receipt_long_outlined,
             title: 'فواتير البيع',
             subtitle: 'الطلبات والفواتير',
-            color: const Color(0xFF0F7B6C),
+            color: Color(0xFF0F7B6C),
             routeName: AppRouter.salesName,
           ),
         ),
         SizedBox(
           width: tileWidth,
-          child: _PrimaryTile(
+          child: const _PrimaryTile(
             icon: Icons.shopping_bag_outlined,
             title: 'فواتير الشراء',
             subtitle: 'استلام المخزون',
-            color: const Color(0xFF0288D1),
+            color: Color(0xFF0288D1),
             routeName: AppRouter.purchasesName,
           ),
         ),
@@ -489,7 +491,7 @@ class _AdminTile extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// Status card (مضغوط)
+// Status card
 // -----------------------------------------------------------------------------
 
 class _StatusCard extends StatelessWidget {
@@ -653,7 +655,7 @@ class _EmptyCompanyHint extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// Environment pill (in AppBar)
+// Environment pill (AppBar action)
 // -----------------------------------------------------------------------------
 
 class _EnvironmentPill extends StatelessWidget {
