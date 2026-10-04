@@ -585,3 +585,465 @@ class _BalanceDetails extends StatelessWidget {
   // Hack: to avoid threading a context through `_row`, we capture it here.
   static BuildContext? _ctx;
 }
+class _TotalBanner extends StatelessWidget {
+  const _TotalBanner({required this.total});
+
+  final double total;
+
+  static final NumberFormat _money = NumberFormat.currency(
+    locale: 'en_US',
+    symbol: 'ج.م ',
+    decimalDigits: 2,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text(
+              'الإجمالي المطلوب',
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: scheme.onPrimaryContainer,
+              ),
+              textAlign: TextAlign.center,
+            ),
+            const SizedBox(height: 4),
+            Text(
+              _money.format(total),
+              style: theme.textTheme.headlineMedium?.copyWith(
+                color: scheme.onPrimaryContainer,
+                fontWeight: FontWeight.w800,
+              ),
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MethodTile extends StatelessWidget {
+  const _MethodTile({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: selected ? scheme.primary : scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: enabled ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                icon,
+                color: selected ? scheme.onPrimary : scheme.onSurface,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: selected ? scheme.onPrimary : scheme.onSurface,
+                  fontWeight:
+                      selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AmountField extends StatelessWidget {
+  const _AmountField({
+    required this.controller,
+    required this.enabled,
+    required this.hasError,
+  });
+
+  final TextEditingController controller;
+  final bool enabled;
+  final bool hasError;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return TextField(
+      controller: controller,
+      enabled: enabled,
+      textAlign: TextAlign.center,
+      style: theme.textTheme.headlineMedium?.copyWith(
+        fontWeight: FontWeight.w700,
+      ),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: <TextInputFormatter>[
+        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+      ],
+      decoration: InputDecoration(
+        hintText: '0',
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 18,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: hasError ? scheme.error : scheme.outline,
+            width: hasError ? 2 : 1,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: hasError ? scheme.error : scheme.primary,
+            width: 2,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _SummaryLine extends StatelessWidget {
+  const _SummaryLine({
+    required this.label,
+    required this.value,
+    this.emphasized = false,
+    this.color,
+  });
+
+  final String label;
+  final String value;
+  final bool emphasized;
+  final Color? color;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    final TextStyle? labelStyle = emphasized
+        ? theme.textTheme.titleMedium
+        : theme.textTheme.bodyMedium;
+    final TextStyle? valueStyle = emphasized
+        ? theme.textTheme.headlineSmall
+        : theme.textTheme.bodyLarge;
+
+    final Color effectiveColor = color ?? scheme.onSurface;
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              label,
+              style: labelStyle?.copyWith(color: effectiveColor),
+            ),
+          ),
+          Text(
+            value,
+            style: valueStyle?.copyWith(
+              color: effectiveColor,
+              fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.error_outline,
+              color: scheme.onErrorContainer,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                  color: scheme.onErrorContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Receipt dialog
+// ============================================================================
+
+class _PosReceiptDialog extends StatelessWidget {
+  const _PosReceiptDialog({
+    required this.sale,
+    required this.lines,
+    required this.customerName,
+    required this.previousBalance,
+    required this.change,
+  });
+
+  final Sale sale;
+  final List<PosCartLine> lines;
+  final String? customerName;
+  final double previousBalance;
+  final double change;
+
+  static final NumberFormat _money = NumberFormat.currency(
+    locale: 'en_US',
+    symbol: 'ج.م ',
+    decimalDigits: 2,
+  );
+  static final DateFormat _dateTime = DateFormat.yMd('ar_EG').add_Hm();
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final double newBalance = previousBalance + sale.amountDue;
+
+    return Dialog(
+      insetPadding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      backgroundColor: scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 460),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(Icons.check_circle,
+                        color: scheme.primary, size: 32),
+                    const SizedBox(width: 10),
+                    Text(
+                      'تم إتمام البيع',
+                      style: theme.textTheme.titleLarge,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+                if (sale.invoiceNumber != null)
+                  Text(
+                    'الإيصال: ${sale.invoiceNumber}',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                Text(
+                  _dateTime.format(sale.saleDate.toLocal()),
+                  style: theme.textTheme.bodySmall,
+                ),
+                Text(
+                  customerName ?? 'عميل نقدي',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                for (final PosCartLine line in lines)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            line.productName,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                        Text(
+                          '${_fmtQty(line.quantity)} × '
+                          '${_money.format(line.unitPrice)}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          _money.format(line.lineTotal),
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
+
+                _row(theme, 'المجموع الفرعي',
+                    _money.format(sale.subtotal)),
+                if (sale.discount > 0)
+                  _row(theme, 'الخصم', _money.format(sale.discount)),
+                if (sale.taxAmount > 0)
+                  _row(theme, 'الضريبة', _money.format(sale.taxAmount)),
+                _row(theme, 'الإجمالي', _money.format(sale.total),
+                    emphasized: true),
+                _row(theme, 'المدفوع', _money.format(sale.paidAmount)),
+                if (change > 0)
+                  _row(theme, 'الباقي', _money.format(change),
+                      color: scheme.primary),
+                if (previousBalance > 0) ...<Widget>[
+                  const SizedBox(height: 6),
+                  _row(theme, 'الرصيد السابق',
+                      _money.format(previousBalance),
+                      color: scheme.error),
+                  _row(theme, 'الرصيد الجديد',
+                      _money.format(newBalance),
+                      color: scheme.error,
+                      emphasized: true),
+                ],
+
+                const SizedBox(height: 16),
+
+                AppButton(
+                  label: 'فاتورة جديدة',
+                  icon: Icons.add,
+                  expanded: true,
+                  onPressed: () => Navigator.of(context).pop(),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  static String _fmtQty(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toStringAsFixed(2);
+  }
+
+  Widget _row(
+    ThemeData theme,
+    String label,
+    String value, {
+    bool emphasized = false,
+    Color? color,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(label, style: theme.textTheme.bodyMedium),
+          ),
+          Text(
+            value,
+            style: (emphasized
+                    ? theme.textTheme.titleMedium
+                    : theme.textTheme.bodyMedium)
+                ?.copyWith(
+              color: color ??
+                  (emphasized ? theme.colorScheme.primary : null),
+              fontWeight: emphasized ? FontWeight.w700 : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Localization
+// ============================================================================
+
+String _failureMessageFor(SalesFailureType type) => switch (type) {
+      SalesFailureType.network =>
+        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+      SalesFailureType.unauthorized =>
+        'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجددًا.',
+      SalesFailureType.notFound => 'الفاتورة غير موجودة.',
+      SalesFailureType.invalidStatusTransition =>
+        'لا يمكن إتمام العملية في الحالة الحالية.',
+      SalesFailureType.emptySale => 'لا يمكن إتمام بيع بدون بنود.',
+      SalesFailureType.invoiceNumberConflict =>
+        'رقم الفاتورة مستخدم بالفعل.',
+      SalesFailureType.customerNotFound =>
+        'البيع الآجل يتطلب اختيار عميل مسجل.',
+      SalesFailureType.branchNotFound =>
+        'الفرع غير متاح. يرجى إعادة اختياره.',
+      SalesFailureType.productNotFound =>
+        'أحد المنتجات غير متاح. يرجى إزالته وإعادة المحاولة.',
+      SalesFailureType.unitNotFound => 'إحدى الوحدات غير متاحة.',
+      SalesFailureType.insufficientStock =>
+        'الرصيد غير كافٍ. يرجى تقليل الكمية أو تحديث المخزون.',
+      SalesFailureType.invalidPayment =>
+        'قيمة الدفع غير صحيحة. يرجى مراجعة المبلغ والطريقة.',
+      SalesFailureType.invalidResponse =>
+        'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.',
+      SalesFailureType.unknown =>
+        'تعذّر إتمام البيع. يرجى المحاولة مرة أخرى.',
+    };
