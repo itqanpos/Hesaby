@@ -164,6 +164,10 @@ final AsyncNotifierProvider<CustomersNotifier, List<Customer>>
 /// Note on naming: [AsyncNotifier] already declares `update`. Business
 /// operations are therefore named `createSale`, `updateDraft`,
 /// `confirmSale` and `cancelSale`.
+///
+/// A sale may be associated with a registered customer (`customerId` not
+/// null) or with no customer at all — a cash sale. The POS uses the latter
+/// by default.
 class SalesNotifier extends AsyncNotifier<List<Sale>> {
   @override
   Future<List<Sale>> build() async {
@@ -182,7 +186,7 @@ class SalesNotifier extends AsyncNotifier<List<Sale>> {
 
   Future<Sale> createSale({
     required String branchId,
-    required String customerId,
+    String? customerId,
     required DateTime saleDate,
     List<SaleItemDraft> items = const <SaleItemDraft>[],
     String? invoiceNumber,
@@ -215,7 +219,7 @@ class SalesNotifier extends AsyncNotifier<List<Sale>> {
   Future<Sale> updateDraft({
     required String saleId,
     required String branchId,
-    required String customerId,
+    String? customerId,
     required DateTime saleDate,
     required List<SaleItemDraft> items,
     String? invoiceNumber,
