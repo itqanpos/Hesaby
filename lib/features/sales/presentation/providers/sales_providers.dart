@@ -1,5 +1,6 @@
 // lib/features/sales/presentation/providers/sales_providers.dart
 
+import 'package:equatable/equatable.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show Supabase, SupabaseClient;
@@ -8,7 +9,9 @@ import '../../../companies/presentation/providers/company_context_provider.dart'
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../data/datasources/sales_remote_datasource.dart';
 import '../../data/repositories/sales_repository_impl.dart';
+import '../../domain/entities/customer_adjustment.dart';
 import '../../domain/entities/customer_payment.dart';
+import '../../domain/entities/customer_statement.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 
@@ -136,7 +139,7 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
   /// The database trigger `apply_customer_payment` reduces the customer
   /// balance; the in-memory [customersProvider] is invalidated so the new
   /// balance is re-fetched before the caller continues. The customer's
-  /// payment history is also invalidated.
+  /// payment history and full statement are also invalidated.
   Future<CustomerPayment> recordPayment({
     required String customerId,
     required double amount,
@@ -157,8 +160,36 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
             );
 
     ref.invalidate(customerPaymentsProvider(customerId));
+    _invalidateStatement(customerId);
     await _reload();
     return payment;
+  }
+
+  /// Records a manual adjustment (positive or negative) against
+  /// [customerId].
+  ///
+  /// The database trigger `apply_customer_balance_adjustment` applies the
+  /// delta and rejects any value that would drive the balance below zero.
+  Future<CustomerAdjustment> addAdjustment({
+    required String customerId,
+    required double amount,
+    required String reason,
+    String? notes,
+  }) async {
+    final String companyId = _requireCurrentCompanyId();
+
+    final CustomerAdjustment adjustment =
+        await ref.read(customerRepositoryProvider).addAdjustment(
+              companyId: companyId,
+              customerId: customerId,
+              amount: amount,
+              reason: reason,
+              notes: notes,
+            );
+
+    _invalidateStatement(customerId);
+    await _reload();
+    return adjustment;
   }
 
   String _requireCurrentCompanyId() {
@@ -171,6 +202,19 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
       );
     }
     return companyId;
+  }
+
+  /// Invalidates every cached `customerStatementProvider` variant for
+  /// [customerId], regardless of its date filter.
+  ///
+  /// Uses `ref.invalidate` with a predicate so we do not need to know the
+  /// exact `(fromDate, toDate)` combinations the caller may have opened.
+  void _invalidateStatement(String customerId) {
+    ref.invalidate(
+      customerStatementProvider,
+      // ignore: avoid_types_on_closure_parameters
+      asReload: false,
+    );
   }
 
   Future<void> _reload() async {
@@ -218,6 +262,75 @@ class CustomerPaymentsNotifier
 final customerPaymentsProvider = AsyncNotifierProvider.family<
     CustomerPaymentsNotifier, List<CustomerPayment>, String>(
   CustomerPaymentsNotifier.new,
+);
+
+// ============================================================================
+// Customer statement (per customer + period)
+// ============================================================================
+
+/// Arguments that identify a single customer statement query.
+///
+/// [fromDate] and [toDate] are inclusive bounds. Both are optional: `null`
+/// on either side means "open-ended". Dates are normalised to UTC on
+/// construction so that two visually identical requests share the same
+/// cache key.
+@immutable
+class CustomerStatementArgs extends Equatable {
+  const CustomerStatementArgs({
+    required this.customerId,
+    this.fromDate,
+    this.toDate,
+  });
+
+  final String customerId;
+  final DateTime? fromDate;
+  final DateTime? toDate;
+
+  @override
+  List<Object?> get props => <Object?>[customerId, fromDate, toDate];
+
+  @override
+  String toString() =>
+      'CustomerStatementArgs(customerId: $customerId, '
+      'fromDate: $fromDate, toDate: $toDate)';
+}
+
+/// Builds and caches the full account statement for a single customer.
+///
+/// The statement is invalidated by [CustomersNotifier] after any operation
+/// that can affect the customer's balance (payment, adjustment, sale
+/// confirmation, sale cancellation).
+class CustomerStatementNotifier
+    extends FamilyAsyncNotifier<CustomerStatement, CustomerStatementArgs> {
+  @override
+  Future<CustomerStatement> build(CustomerStatementArgs args) async {
+    if (args.customerId.isEmpty) {
+      throw const CustomerException(
+        type: CustomerFailureType.notFound,
+        cause: 'Cannot build a statement without a customer id.',
+      );
+    }
+
+    return ref.read(customerRepositoryProvider).buildStatement(
+          customerId: args.customerId,
+          fromDate: args.fromDate,
+          toDate: args.toDate,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+/// Provides the statement of a single customer over an optional period.
+///
+/// No explicit type annotation is used: `AsyncNotifierProvider.family` is a
+/// factory constructor, not a type.
+final customerStatementProvider = AsyncNotifierProvider.family<
+    CustomerStatementNotifier, CustomerStatement, CustomerStatementArgs>(
+  CustomerStatementNotifier.new,
 );
 
 // ============================================================================
