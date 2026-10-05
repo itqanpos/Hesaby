@@ -336,7 +336,6 @@ class _CustomerPaymentSheetState
                     label: 'المرجع — اختياري',
                     hint: 'مثال: RC-2026-001',
                     enabled: !_isSubmitting,
-                    maxLength: 100,
                   ),
 
                   const SizedBox(height: 12),
@@ -346,7 +345,6 @@ class _CustomerPaymentSheetState
                     label: 'ملاحظات — اختياري',
                     enabled: !_isSubmitting,
                     maxLines: 2,
-                    maxLength: 1000,
                   ),
 
                   if (displayError != null) ...<Widget>[
