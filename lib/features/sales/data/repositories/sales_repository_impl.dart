@@ -3,10 +3,13 @@
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../../../../core/utils/logger.dart';
+import '../../domain/entities/customer_adjustment.dart';
 import '../../domain/entities/customer_payment.dart';
+import '../../domain/entities/customer_statement.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../datasources/sales_remote_datasource.dart';
+import '../models/customer_adjustment_model.dart';
 import '../models/customer_payment_model.dart';
 import '../models/sale_models.dart';
 
@@ -288,6 +291,170 @@ class CustomerRepositoryImpl implements CustomerRepository {
       throw _mapCustomerUnknown(error, stackTrace, operation: 'recordPayment');
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Adjustments
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<List<CustomerAdjustment>> listAdjustments(
+    String customerId, {
+    DateTime? fromDate,
+    DateTime? toDate,
+  }) async {
+    try {
+      final List<CustomerAdjustmentModel> models =
+          await _remoteDataSource.listCustomerAdjustments(
+        customerId,
+        fromDate: fromDate,
+        toDate: toDate,
+      );
+      return models
+          .map((CustomerAdjustmentModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapCustomerInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'listAdjustments',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapCustomerPostgrest(
+        error,
+        stackTrace,
+        operation: 'listAdjustments',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapCustomerAuth(error, stackTrace, operation: 'listAdjustments');
+    } on CustomerException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapCustomerUnknown(
+        error,
+        stackTrace,
+        operation: 'listAdjustments',
+      );
+    }
+  }
+
+  @override
+  Future<CustomerAdjustment> addAdjustment({
+    required String companyId,
+    required String customerId,
+    required double amount,
+    required String reason,
+    String? notes,
+  }) async {
+    try {
+      final CustomerAdjustmentModel model =
+          await _remoteDataSource.addCustomerAdjustment(
+        companyId: companyId,
+        customerId: customerId,
+        amount: amount,
+        reason: reason,
+        notes: notes,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapCustomerInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'addAdjustment',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapCustomerPostgrest(
+        error,
+        stackTrace,
+        operation: 'addAdjustment',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapCustomerAuth(error, stackTrace, operation: 'addAdjustment');
+    } on CustomerException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapCustomerUnknown(
+        error,
+        stackTrace,
+        operation: 'addAdjustment',
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Statement
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<CustomerStatement> buildStatement({
+    required String customerId,
+    DateTime? fromDate,
+    DateTime? toDate,
+  }) async {
+    try {
+      // Fetch everything in parallel.
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.getCustomer(customerId),
+        _remoteDataSource.listCustomerSales(customerId),
+        _remoteDataSource.listCustomerPayments(customerId, limit: 1000),
+        _remoteDataSource.listCustomerAdjustments(customerId),
+      ]);
+
+      final CustomerModel customer = results[0] as CustomerModel;
+      final List<SaleModel> sales = (results[1] as List<SaleModel>);
+      final List<CustomerPaymentModel> payments =
+          (results[2] as List<CustomerPaymentModel>);
+      final List<CustomerAdjustmentModel> adjustments =
+          (results[3] as List<CustomerAdjustmentModel>);
+
+      final List<CustomerStatementEntry> allEntries =
+          <CustomerStatementEntry>[
+        ..._buildSaleEntries(sales),
+        ..._buildPaymentEntries(payments),
+        ..._buildAdjustmentEntries(adjustments),
+      ];
+
+      final List<CustomerStatementEntry> visible =
+          _filterEntriesByWindow(allEntries, fromDate, toDate);
+
+      // Opening balance = current balance − net delta of the visible window.
+      // This keeps closingBalance == customer.balance, no matter the filter.
+      final double visibleDelta = visible.fold<double>(
+        0,
+        (double sum, CustomerStatementEntry e) => sum + e.debit - e.credit,
+      );
+      final double openingBalance = customer.balance - visibleDelta;
+
+      return CustomerStatement.build(
+        customer: customer.toEntity(),
+        entries: visible,
+        openingBalance: openingBalance,
+        fromDate: fromDate,
+        toDate: toDate,
+      );
+    } on FormatException catch (error, stackTrace) {
+      throw _mapCustomerInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'buildStatement',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapCustomerPostgrest(
+        error,
+        stackTrace,
+        operation: 'buildStatement',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapCustomerAuth(error, stackTrace, operation: 'buildStatement');
+    } on CustomerException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapCustomerUnknown(
+        error,
+        stackTrace,
+        operation: 'buildStatement',
+      );
+    }
+  }
 }
 
 // ============================================================================
@@ -505,6 +672,173 @@ class SalesRepositoryImpl implements SalesRepository {
 }
 
 // ============================================================================
+// Statement entry builders
+// ============================================================================
+
+/// Converts confirmed / cancelled sales into statement entries.
+///
+/// A confirmed sale contributes a **debit** equal to `total - paid_amount`
+/// (the portion left on credit at confirmation time). A sale that was
+/// confirmed and then cancelled contributes a **credit** of the same amount
+/// at its cancellation timestamp, so both events appear on the statement
+/// and their net effect is zero.
+///
+/// Sales that were cancelled without ever being confirmed (`confirmed_at`
+/// is null) are skipped: they never touched the balance.
+List<CustomerStatementEntry> _buildSaleEntries(List<SaleModel> sales) {
+  final List<CustomerStatementEntry> entries = <CustomerStatementEntry>[];
+
+  for (final SaleModel sale in sales) {
+    final double deferred = sale.total - sale.paidAmount;
+    if (deferred <= 0) {
+      continue;
+    }
+
+    if (sale.status == SaleStatus.confirmed) {
+      entries.add(
+        CustomerStatementEntry(
+          id: '${sale.id}::confirm',
+          type: StatementEntryType.sale,
+          date: sale.confirmedAt ?? sale.saleDate,
+          debit: deferred,
+          credit: 0,
+          reference: sale.invoiceNumber,
+          description: 'فاتورة بيع آجلة',
+        ),
+      );
+    } else if (sale.status == SaleStatus.cancelled &&
+        sale.confirmedAt != null &&
+        sale.cancelledAt != null) {
+      entries.add(
+        CustomerStatementEntry(
+          id: '${sale.id}::confirm',
+          type: StatementEntryType.sale,
+          date: sale.confirmedAt!,
+          debit: deferred,
+          credit: 0,
+          reference: sale.invoiceNumber,
+          description: 'فاتورة بيع آجلة',
+        ),
+      );
+      entries.add(
+        CustomerStatementEntry(
+          id: '${sale.id}::cancel',
+          type: StatementEntryType.saleReversal,
+          date: sale.cancelledAt!,
+          debit: 0,
+          credit: deferred,
+          reference: sale.invoiceNumber,
+          description: 'إلغاء فاتورة آجلة',
+        ),
+      );
+    }
+  }
+
+  return entries;
+}
+
+/// Converts payments into statement entries (all of them are **credits**).
+List<CustomerStatementEntry> _buildPaymentEntries(
+  List<CustomerPaymentModel> payments,
+) {
+  return payments
+      .map(
+        (CustomerPaymentModel payment) => CustomerStatementEntry(
+          id: payment.id,
+          type: StatementEntryType.payment,
+          date: payment.createdAt,
+          debit: 0,
+          credit: payment.amount,
+          reference: payment.reference,
+          description: 'دفعة — ${_methodLabel(payment.method)}',
+        ),
+      )
+      .toList(growable: false);
+}
+
+/// Converts manual adjustments into statement entries.
+///
+/// A positive amount becomes a **debit**; a negative amount becomes a
+/// **credit** of its absolute value, so [CustomerStatementEntry.debit] and
+/// [CustomerStatementEntry.credit] stay non-negative.
+List<CustomerStatementEntry> _buildAdjustmentEntries(
+  List<CustomerAdjustmentModel> adjustments,
+) {
+  return adjustments.map((CustomerAdjustmentModel adjustment) {
+    final bool isIncrease = adjustment.amount > 0;
+    final double magnitude =
+        isIncrease ? adjustment.amount : -adjustment.amount;
+
+    return CustomerStatementEntry(
+      id: adjustment.id,
+      type: StatementEntryType.adjustment,
+      date: adjustment.createdAt,
+      debit: isIncrease ? magnitude : 0,
+      credit: isIncrease ? 0 : magnitude,
+      reference: null,
+      description: _reasonLabel(adjustment.reason),
+      notes: adjustment.notes,
+    );
+  }).toList(growable: false);
+}
+
+/// Keeps only entries inside the `[fromDate, toDate]` window (inclusive).
+///
+/// `null` on either side means "open-ended" on that side.
+List<CustomerStatementEntry> _filterEntriesByWindow(
+  List<CustomerStatementEntry> entries,
+  DateTime? fromDate,
+  DateTime? toDate,
+) {
+  if (fromDate == null && toDate == null) {
+    return entries;
+  }
+  final DateTime? fromUtc = fromDate?.toUtc();
+  final DateTime? toUtc = toDate?.toUtc();
+  return entries.where((CustomerStatementEntry entry) {
+    if (fromUtc != null && entry.date.isBefore(fromUtc)) {
+      return false;
+    }
+    if (toUtc != null && entry.date.isAfter(toUtc)) {
+      return false;
+    }
+    return true;
+  }).toList(growable: false);
+}
+
+/// Localised label for [CustomerPayment.method].
+String _methodLabel(String method) {
+  switch (method) {
+    case PaymentMethod.cash:
+      return 'نقدي';
+    case PaymentMethod.card:
+      return 'بطاقة';
+    case PaymentMethod.transfer:
+      return 'تحويل';
+    default:
+      return method;
+  }
+}
+
+/// Localised label for [CustomerAdjustment.reason].
+String _reasonLabel(String reason) {
+  switch (reason) {
+    case AdjustmentReason.openingBalance:
+      return 'رصيد افتتاحي';
+    case AdjustmentReason.correction:
+      return 'تصحيح رصيد';
+    case AdjustmentReason.discount:
+      return 'خصم على العميل';
+    case AdjustmentReason.penalty:
+      return 'غرامة';
+    case AdjustmentReason.other:
+      return 'تعديل يدوي';
+    default:
+      return 'تعديل يدوي';
+  }
+}
+
+// ============================================================================
 // Customer error mapping
 // ============================================================================
 
@@ -585,12 +919,16 @@ CustomerException _mapCustomerUnknown(
 
 /// Classifies a PostgREST error into a safe [CustomerFailureType].
 ///
-/// Constraint names referenced below are declared in the Phase 8 migration:
-/// * `customers_company_name_unique` → nameConflict
-/// * `uniq_customers_company_code`   → codeConflict
-/// * `uniq_customers_company_phone`  → phoneConflict
-/// * `sales_customer_company_fk`     → inUse (customer referenced by a sale)
-/// * `customer_payments_amount_positive` → invalidAmount
+/// Constraint names referenced below are declared in the Phase 8 and
+/// Phase 9 migrations:
+/// * `customers_company_name_unique`                    → nameConflict
+/// * `uniq_customers_company_code`                      → codeConflict
+/// * `uniq_customers_company_phone`                     → phoneConflict
+/// * `sales_customer_company_fk`                        → inUse
+/// * `customer_payments_amount_positive`                → invalidAmount
+/// * `customer_balance_adjustments_amount_non_zero`     → invalidAmount
+/// * `apply_customer_balance_adjustment` (negative)     → insufficientBalance
+/// * `apply_customer_balance_adjustment` (not found)    → notFound
 CustomerFailureType _classifyCustomerPostgrest(
   supabase.PostgrestException error,
 ) {
@@ -609,13 +947,23 @@ CustomerFailureType _classifyCustomerPostgrest(
   }
 
   if (code == '23503') {
+    // The adjustment trigger raises 23503 when the customer row is
+    // missing (should not happen in practice, but is safe to map).
+    if (message.contains('not found') ||
+        full.contains('customer') && message.contains('not found')) {
+      return CustomerFailureType.notFound;
+    }
     return CustomerFailureType.inUse;
   }
 
   if (code == '23514') {
     if (full.contains('customer_payments_amount_positive') ||
-        message.contains('customer_payments_amount_positive')) {
+        full.contains('customer_balance_adjustments_amount_non_zero')) {
       return CustomerFailureType.invalidAmount;
+    }
+    if (message.contains('negative') ||
+        full.contains('make customer balance negative')) {
+      return CustomerFailureType.insufficientBalance;
     }
     return CustomerFailureType.invalidResponse;
   }
