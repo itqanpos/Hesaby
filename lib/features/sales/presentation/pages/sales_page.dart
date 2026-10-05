@@ -14,12 +14,14 @@ import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../pos/domain/entities/receipt.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
+import '../dialogs/sale_print_dialog.dart';
 import '../providers/sales_providers.dart';
 
 /// Sales list page.
@@ -560,6 +562,21 @@ class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
         ),
       ),
       actions: <Widget>[
+        AppButton(
+          label: 'طباعة',
+          icon: Icons.print_outlined,
+          variant: AppButtonVariant.secondary,
+          onPressed: _isActing || items.isEmpty
+              ? null
+              : () => _printSale(
+                    current,
+                    items,
+                    customerName,
+                    productNames,
+                    unitNames,
+                    customers,
+                  ),
+        ),
         if (current.canEdit)
           AppButton(
             label: 'تعديل',
@@ -722,6 +739,112 @@ class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
         setState(() => _isActing = false);
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Print
+  // ---------------------------------------------------------------------------
+
+  /// Builds a [Receipt] snapshot from the current sale and opens the
+  /// 80 mm / A4 print dialog.
+  Future<void> _printSale(
+    Sale sale,
+    List<SaleItem> items,
+    String customerName,
+    Map<String, String> productNames,
+    Map<String, String> unitNames,
+    List<Customer> customers,
+  ) async {
+    if (items.isEmpty) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('لا يمكن طباعة فاتورة بدون بنود.'),
+          ),
+        );
+      return;
+    }
+
+    final CompanyContextState contextState =
+        ref.read(companyContextProvider);
+
+    final Receipt receipt = _buildReceipt(
+      sale: sale,
+      items: items,
+      customerName: customerName,
+      productNames: productNames,
+      unitNames: unitNames,
+      customers: customers,
+      contextState: contextState,
+    );
+
+    await showSalePrintDialog(context: context, receipt: receipt);
+  }
+
+  /// Builds the [Receipt] value object passed to the print dialog.
+  ///
+  /// The balance-evolution block is only populated when the sale is
+  /// attached to a registered customer and still has an outstanding amount.
+  /// Otherwise both `previousBalance` and `newBalance` stay `null` and the
+  /// PDF printer renders the standard receipt layout.
+  Receipt _buildReceipt({
+    required Sale sale,
+    required List<SaleItem> items,
+    required String customerName,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+    required List<Customer> customers,
+    required CompanyContextState contextState,
+  }) {
+    // Resolve the customer's current balance from the loaded list (if any).
+    double? currentBalance;
+    if (sale.customerId != null) {
+      for (final Customer c in customers) {
+        if (c.id == sale.customerId) {
+          currentBalance = c.balance;
+          break;
+        }
+      }
+    }
+
+    // The amount still owed on this invoice.
+    final double amountDue = sale.amountDue;
+
+    // Show the balance evolution only when we know the customer's balance
+    // AND the sale actually added something to what they owe.
+    final bool hasBalanceChange =
+        currentBalance != null && amountDue > 0;
+    final double? previousBalance =
+        hasBalanceChange ? currentBalance - amountDue : null;
+    final double? newBalance = hasBalanceChange ? currentBalance : null;
+
+    return Receipt(
+      saleId: sale.id,
+      invoiceNumber: sale.invoiceNumber,
+      dateTime: sale.saleDate,
+      companyName: contextState.currentCompany?.name ?? '—',
+      branchName: contextState.currentBranch?.name ?? '—',
+      lines: <ReceiptLine>[
+        for (final SaleItem item in items)
+          ReceiptLine(
+            productName: productNames[item.productId] ?? 'منتج محذوف',
+            unitName: unitNames[item.unitId] ?? 'وحدة',
+            quantity: item.quantity,
+            unitPrice: item.unitPrice,
+            lineTotal: item.lineTotal,
+          ),
+      ],
+      subtotal: sale.subtotal,
+      discount: sale.discount,
+      taxAmount: sale.taxAmount,
+      total: sale.total,
+      paidAmount: sale.paidAmount,
+      change: 0, // The sales form enforces paid ≤ total.
+      customerName: sale.customerId != null ? customerName : null,
+      previousBalance: previousBalance,
+      newBalance: newBalance,
+    );
   }
 
   static Sale? _findSale(List<Sale> sales, String id) {
