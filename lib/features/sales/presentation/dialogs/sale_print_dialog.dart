@@ -49,12 +49,6 @@ class _SalePrintDialog extends StatefulWidget {
 class _SalePrintDialogState extends State<_SalePrintDialog> {
   static const ReceiptPrinter _printer = ReceiptPrinterImpl();
 
-  /// Only two values are exposed; `mm58` is intentionally excluded.
-  static const List<ReceiptPaperSize> _supportedSizes = <ReceiptPaperSize>[
-    ReceiptPaperSize.mm80,
-    ReceiptPaperSize.a4,
-  ];
-
   ReceiptPaperSize _selectedSize = ReceiptPaperSize.mm80;
   bool _isPrinting = false;
   bool _isSharing = false;
