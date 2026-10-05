@@ -1,0 +1,27 @@
+# Configuration for `dart run flutter_native_splash:create`.
+#
+# Run from the repository root:
+#   flutter pub get
+#   dart run flutter_native_splash:create
+#
+# The generated assets land in android/, ios/ and web/ — commit them
+# alongside this file so CI does not need to re-run the tool.
+
+flutter_native_splash:
+  color: "#FFFFFF"
+  color_dark: "#121212"
+  image: assets/images/logo.png
+  image_dark: assets/images/logo.png
+
+  android: true
+  ios: true
+  web: true
+
+  # Android 12+ shows a centred icon on a solid background.
+  android_12:
+    image: assets/images/logo.png
+    icon_background_color: "#0A4F8C"
+    image_dark: assets/images/logo.png
+    icon_background_color_dark: "#0A4F8C"
+
+  fullscreen: true
