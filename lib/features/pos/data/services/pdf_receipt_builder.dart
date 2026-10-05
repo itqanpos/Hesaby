@@ -203,7 +203,7 @@ abstract final class PdfReceiptBuilder {
           baseFont,
         ),
 
-      // ---- Balance evolution (credit / partial sales) ----
+            // ---- Balance evolution (credit / partial sales) ----
       if (receipt.hasBalanceChange) ...<pw.Widget>[
         pw.SizedBox(height: 4),
         _divider(),
@@ -213,6 +213,14 @@ abstract final class PdfReceiptBuilder {
           _formatMoney(receipt.previousBalance!),
           baseFont,
         ),
+        if (receipt.previousBalance! > receipt.newBalance!)
+          _keyValue(
+            'مدفوع على الرصيد',
+            _formatMoney(
+              receipt.previousBalance! - receipt.newBalance!,
+            ),
+            baseFont,
+          ),
         _keyValue(
           'الرصيد الجديد',
           _formatMoney(receipt.newBalance!),
@@ -220,19 +228,6 @@ abstract final class PdfReceiptBuilder {
           bold: true,
         ),
       ],
-
-      pw.SizedBox(height: 10),
-
-      // ---- Footer ----
-      pw.Center(
-        child: pw.Text(
-          'شكرًا لتعاملكم معنا',
-          style: pw.TextStyle(fontSize: baseFont),
-          textAlign: pw.TextAlign.center,
-        ),
-      ),
-    ];
-  }
 
   // ---------------------------------------------------------------------------
   // Line item
