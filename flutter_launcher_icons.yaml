@@ -1,0 +1,29 @@
+# Configuration for `dart run flutter_launcher_icons`.
+#
+# Run from the repository root:
+#   flutter pub get
+#   dart run flutter_launcher_icons
+#
+# The generated assets land in android/, ios/ and web/ — commit them
+# alongside this file so CI does not need to re-run the tool.
+
+flutter_launcher_icons:
+  android: true
+  ios: true
+  image_path: "assets/images/logo.png"
+
+  # Android 8+ adaptive icon.
+  # The source image already contains a rounded square, so a solid white
+  # background keeps the outer corners visually clean.
+  adaptive_icon_background: "#FFFFFF"
+  adaptive_icon_foreground: "assets/images/logo.png"
+
+  # Web favicons (32, 192, 512 + apple-touch-icon).
+  web:
+    generate: true
+    image_path: "assets/images/logo.png"
+    background_color: "#FFFFFF"
+    theme_color: "#0A4F8C"
+
+  # iOS: strip alpha because iOS icons must be opaque.
+  remove_alpha_ios: true
