@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
-import '../../data/services/receipt_printer.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../dialogs/pos_print_settings_sheet.dart';
 import '../state/pos_providers.dart';
