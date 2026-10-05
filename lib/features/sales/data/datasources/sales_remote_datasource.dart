@@ -4,11 +4,13 @@ import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
 
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
+import '../models/customer_adjustment_model.dart';
 import '../models/customer_payment_model.dart';
 import '../models/sale_models.dart';
 
-/// Thin wrapper around the Supabase queries for `customers`, `customer_payments`,
-/// `sales` and `sale_items`.
+/// Thin wrapper around the Supabase queries for `customers`,
+/// `customer_payments`, `customer_balance_adjustments`, `sales` and
+/// `sale_items`.
 class SalesRemoteDataSource {
   const SalesRemoteDataSource(this._client);
 
@@ -194,6 +196,76 @@ class SalesRemoteDataSource {
   }
 
   // ===========================================================================
+  // CUSTOMER ADJUSTMENTS
+  // ===========================================================================
+
+  /// Lists the manual adjustments recorded for [customerId], newest first.
+  ///
+  /// When [fromDate] / [toDate] are provided they act as an inclusive
+  /// window on `created_at`.
+  Future<List<CustomerAdjustmentModel>> listCustomerAdjustments(
+    String customerId, {
+    DateTime? fromDate,
+    DateTime? toDate,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    var query = client
+        .from('customer_balance_adjustments')
+        .select()
+        .eq('customer_id', customerId);
+
+    if (fromDate != null) {
+      query = query.gte('created_at', _formatTimestamp(fromDate));
+    }
+    if (toDate != null) {
+      query = query.lte('created_at', _formatTimestamp(toDate));
+    }
+
+    final List<Map<String, dynamic>> rows =
+        await query.order('created_at', ascending: false);
+
+    return rows
+        .map(CustomerAdjustmentModel.fromMap)
+        .toList(growable: false);
+  }
+
+  /// Inserts a manual adjustment for [customerId].
+  ///
+  /// The database trigger `apply_customer_balance_adjustment` runs
+  /// immediately after the insert and applies the signed delta to
+  /// `customers.balance`. A negative delta that would drive the balance
+  /// below zero is rejected by the trigger with SQLSTATE `23514`.
+  Future<CustomerAdjustmentModel> addCustomerAdjustment({
+    required String companyId,
+    required String customerId,
+    required double amount,
+    required String reason,
+    String? notes,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final String? createdBy = client.auth.currentUser?.id;
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'company_id': companyId,
+      'customer_id': customerId,
+      'amount': amount,
+      'reason': reason,
+      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      if (createdBy != null) 'created_by': createdBy,
+    };
+
+    final Map<String, dynamic> row = await client
+        .from('customer_balance_adjustments')
+        .insert(payload)
+        .select()
+        .single();
+
+    return CustomerAdjustmentModel.fromMap(row);
+  }
+
+  // ===========================================================================
   // SALES
   // ===========================================================================
 
@@ -221,6 +293,24 @@ class SalesRemoteDataSource {
         .order('sale_date', ascending: false)
         .order('created_at', ascending: false)
         .limit(effectiveLimit);
+
+    return rows.map(SaleModel.fromMap).toList(growable: false);
+  }
+
+  /// Lists sales that involve [customerId], across the whole company.
+  ///
+  /// Used by the statement builder to reconstruct a customer's balance
+  /// history. Only `confirmed` and `cancelled` sales are relevant — a
+  /// `draft` sale has not affected the balance yet.
+  Future<List<SaleModel>> listCustomerSales(String customerId) async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('sales')
+        .select()
+        .eq('customer_id', customerId)
+        .neq('status', 'draft')
+        .order('sale_date', ascending: true);
 
     return rows.map(SaleModel.fromMap).toList(growable: false);
   }
