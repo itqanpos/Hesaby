@@ -765,6 +765,8 @@ String _failureMessage(CustomerFailureType type) => switch (type) {
         'يوجد عميل آخر بنفس رقم الهاتف في هذه الشركة.',
       CustomerFailureType.inUse =>
         'لا يمكن حذف العميل لوجود فواتير مرتبطة به. يمكنك تعطيله بدلًا من ذلك.',
+      CustomerFailureType.invalidAmount =>
+        'المبلغ غير صالح. يجب أن يكون أكبر من صفر.',
       CustomerFailureType.invalidResponse =>
         'تعذّر قراءة بيانات العملاء. يرجى المحاولة لاحقًا.',
       CustomerFailureType.unknown =>
