@@ -749,7 +749,6 @@ String _errorMessage(Object error) {
   }
   return 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.';
 }
-
 String _failureMessage(CustomerFailureType type) => switch (type) {
       CustomerFailureType.network =>
         'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
@@ -767,10 +766,13 @@ String _failureMessage(CustomerFailureType type) => switch (type) {
         'لا يمكن حذف العميل لوجود فواتير مرتبطة به. يمكنك تعطيله بدلًا من ذلك.',
       CustomerFailureType.invalidAmount =>
         'المبلغ غير صالح. يجب أن يكون أكبر من صفر.',
+      CustomerFailureType.insufficientBalance =>
+        'الرصيد غير كافٍ لإتمام العملية.',
       CustomerFailureType.invalidResponse =>
         'تعذّر قراءة بيانات العملاء. يرجى المحاولة لاحقًا.',
       CustomerFailureType.unknown =>
         'تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.',
+    };
     };
 
 String _validationMessage(ValidationError error) => switch (error) {
