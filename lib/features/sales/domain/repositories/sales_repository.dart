@@ -107,6 +107,7 @@ abstract interface class CustomerRepository {
   /// `CHECK` constraint, and callers are expected to validate it before
   /// submitting.
   Future<CustomerPayment> recordPayment({
+    required String companyId,
     required String customerId,
     required double amount,
     required String method,
