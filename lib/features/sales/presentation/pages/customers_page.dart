@@ -13,6 +13,7 @@ import '../../../../shared/widgets/app_text_field.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../providers/sales_providers.dart';
+import 'customer_statement_page.dart';
 
 /// Customer management page.
 ///
@@ -107,6 +108,8 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
                               final Customer customer = filtered[index];
                               return _CustomerCard(
                                 customer: customer,
+                                onStatement: () =>
+                                    _openStatement(context, customer),
                                 onEdit: () => _openCustomerForm(
                                   context,
                                   existing: customer,
@@ -148,6 +151,19 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
+
+  Future<void> _openStatement(
+    BuildContext context,
+    Customer customer,
+  ) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (BuildContext routeContext) => CustomerStatementPage(
+          customer: customer,
+        ),
+      ),
+    );
+  }
 
   Future<void> _openCustomerForm(
     BuildContext context, {
@@ -255,12 +271,14 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
 class _CustomerCard extends StatelessWidget {
   const _CustomerCard({
     required this.customer,
+    required this.onStatement,
     required this.onEdit,
     required this.onToggleActive,
     required this.onDelete,
   });
 
   final Customer customer;
+  final VoidCallback onStatement;
   final VoidCallback onEdit;
   final VoidCallback onToggleActive;
   final VoidCallback onDelete;
@@ -348,6 +366,8 @@ class _CustomerCard extends StatelessWidget {
                 tooltip: 'خيارات',
                 onSelected: (_CustomerAction action) {
                   switch (action) {
+                    case _CustomerAction.statement:
+                      onStatement();
                     case _CustomerAction.edit:
                       onEdit();
                     case _CustomerAction.toggleActive:
@@ -358,6 +378,14 @@ class _CustomerCard extends StatelessWidget {
                 },
                 itemBuilder: (BuildContext context) =>
                     <PopupMenuEntry<_CustomerAction>>[
+                  const PopupMenuItem<_CustomerAction>(
+                    value: _CustomerAction.statement,
+                    child: ListTile(
+                      leading: Icon(Icons.receipt_long_outlined),
+                      title: Text('كشف حساب'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
                   const PopupMenuItem<_CustomerAction>(
                     value: _CustomerAction.edit,
                     child: ListTile(
@@ -396,7 +424,7 @@ class _CustomerCard extends StatelessWidget {
   }
 }
 
-enum _CustomerAction { edit, toggleActive, delete }
+enum _CustomerAction { statement, edit, toggleActive, delete }
 
 // -----------------------------------------------------------------------------
 // Form dialog
