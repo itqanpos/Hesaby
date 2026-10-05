@@ -13,6 +13,12 @@
 #   * Repository → Settings → Pages → Source = "GitHub Actions"
 #   * Repository secrets SUPABASE_URL and SUPABASE_ANON_KEY are configured.
 #
+# Branding assets:
+#   `flutter_launcher_icons` and `flutter_native_splash` regenerate the
+#   launcher icon and splash screen from assets/images/logo.png on every
+#   deploy. They are idempotent and cheap, so we run them here instead of
+#   committing generated binaries to the repository.
+#
 # Formatting policy: informational (see flutter_ci.yml for rationale).
 # ============================================================================
 
@@ -67,6 +73,12 @@ jobs:
 
       - name: Test
         run: flutter test
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Generate native splash
+        run: dart run flutter_native_splash:create
 
       - name: Build Flutter Web
         env:
