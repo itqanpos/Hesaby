@@ -4,10 +4,11 @@ import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
 
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
+import '../models/customer_payment_model.dart';
 import '../models/sale_models.dart';
 
-/// Thin wrapper around the Supabase queries for `customers`, `sales` and
-/// `sale_items`.
+/// Thin wrapper around the Supabase queries for `customers`, `customer_payments`,
+/// `sales` and `sale_items`.
 class SalesRemoteDataSource {
   const SalesRemoteDataSource(this._client);
 
@@ -127,6 +128,69 @@ class SalesRemoteDataSource {
   Future<void> deleteCustomer(String customerId) async {
     final SupabaseClient client = _requireClient();
     await client.from('customers').delete().eq('id', customerId);
+  }
+
+  // ===========================================================================
+  // CUSTOMER PAYMENTS
+  // ===========================================================================
+
+  /// Lists the most recent payments for [customerId], newest first.
+  ///
+  /// Falls back to [defaultLimit] when [limit] is null or non-positive.
+  Future<List<CustomerPaymentModel>> listCustomerPayments(
+    String customerId, {
+    int? limit,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final int effectiveLimit =
+        (limit == null || limit <= 0) ? defaultLimit : limit;
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('customer_payments')
+        .select()
+        .eq('customer_id', customerId)
+        .order('created_at', ascending: false)
+        .limit(effectiveLimit);
+
+    return rows.map(CustomerPaymentModel.fromMap).toList(growable: false);
+  }
+
+  /// Inserts a standalone payment for [customerId].
+  ///
+  /// The database trigger `apply_customer_payment` runs immediately after
+  /// the insert and reduces `customers.balance` by [amount]. The row is
+  /// returned so the caller can update its in-memory copy of the customer.
+  Future<CustomerPaymentModel> recordCustomerPayment({
+    required String companyId,
+    required String customerId,
+    required double amount,
+    required String method,
+    String? reference,
+    String? notes,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final String? createdBy = client.auth.currentUser?.id;
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'company_id': companyId,
+      'customer_id': customerId,
+      'amount': amount,
+      'method': method,
+      if (reference != null && reference.trim().isNotEmpty)
+        'reference': reference.trim(),
+      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      if (createdBy != null) 'created_by': createdBy,
+    };
+
+    final Map<String, dynamic> row = await client
+        .from('customer_payments')
+        .insert(payload)
+        .select()
+        .single();
+
+    return CustomerPaymentModel.fromMap(row);
   }
 
   // ===========================================================================
