@@ -749,31 +749,33 @@ String _errorMessage(Object error) {
   }
   return 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.';
 }
-String _failureMessage(CustomerFailureType type) => switch (type) {
-      CustomerFailureType.network =>
-        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
-      CustomerFailureType.unauthorized =>
-        'انتهت صلاحية الجلسة أو لا تملك صلاحية. يرجى تسجيل الدخول مجددًا.',
-      CustomerFailureType.notFound =>
-        'العميل المطلوب غير موجود أو تم حذفه.',
-      CustomerFailureType.nameConflict =>
-        'يوجد عميل آخر بنفس الاسم في هذه الشركة.',
-      CustomerFailureType.codeConflict =>
-        'يوجد عميل آخر بنفس الكود في هذه الشركة.',
-      CustomerFailureType.phoneConflict =>
-        'يوجد عميل آخر بنفس رقم الهاتف في هذه الشركة.',
-      CustomerFailureType.inUse =>
-        'لا يمكن حذف العميل لوجود فواتير مرتبطة به. يمكنك تعطيله بدلًا من ذلك.',
-      CustomerFailureType.invalidAmount =>
-        'المبلغ غير صالح. يجب أن يكون أكبر من صفر.',
-      CustomerFailureType.insufficientBalance =>
-        'الرصيد غير كافٍ لإتمام العملية.',
-      CustomerFailureType.invalidResponse =>
-        'تعذّر قراءة بيانات العملاء. يرجى المحاولة لاحقًا.',
-      CustomerFailureType.unknown =>
-        'تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.',
-    };
-    };
+
+String _failureMessage(CustomerFailureType type) {
+  switch (type) {
+    case CustomerFailureType.network:
+      return 'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.';
+    case CustomerFailureType.unauthorized:
+      return 'انتهت صلاحية الجلسة أو لا تملك صلاحية. يرجى تسجيل الدخول مجددًا.';
+    case CustomerFailureType.notFound:
+      return 'العميل المطلوب غير موجود أو تم حذفه.';
+    case CustomerFailureType.nameConflict:
+      return 'يوجد عميل آخر بنفس الاسم في هذه الشركة.';
+    case CustomerFailureType.codeConflict:
+      return 'يوجد عميل آخر بنفس الكود في هذه الشركة.';
+    case CustomerFailureType.phoneConflict:
+      return 'يوجد عميل آخر بنفس رقم الهاتف في هذه الشركة.';
+    case CustomerFailureType.inUse:
+      return 'لا يمكن حذف العميل لوجود فواتير مرتبطة به. يمكنك تعطيله بدلًا من ذلك.';
+    case CustomerFailureType.invalidAmount:
+      return 'المبلغ غير صالح. يجب أن يكون أكبر من صفر.';
+    case CustomerFailureType.insufficientBalance:
+      return 'الرصيد غير كافٍ لإتمام العملية.';
+    case CustomerFailureType.invalidResponse:
+      return 'تعذّر قراءة بيانات العملاء. يرجى المحاولة لاحقًا.';
+    case CustomerFailureType.unknown:
+      return 'تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.';
+  }
+}
 
 String _validationMessage(ValidationError error) => switch (error) {
       ValidationError.required => 'هذا الحقل مطلوب',
