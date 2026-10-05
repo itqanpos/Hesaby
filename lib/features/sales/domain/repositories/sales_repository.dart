@@ -3,7 +3,9 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
+import '../entities/customer_adjustment.dart';
 import '../entities/customer_payment.dart';
+import '../entities/customer_statement.dart';
 import '../entities/sale_entities.dart';
 
 // ============================================================================
@@ -20,6 +22,7 @@ enum CustomerFailureType {
   phoneConflict,
   inUse,
   invalidAmount,
+  insufficientBalance,
   invalidResponse,
   unknown,
 }
@@ -46,9 +49,9 @@ class CustomerException extends Equatable implements Exception {
 
 /// Contract for customer operations.
 ///
-/// Payment operations are grouped here (rather than in a dedicated
-/// repository) because they mutate `customers.balance` directly via the
-/// `apply_customer_payment` trigger and are always scoped to a single
+/// Payment and adjustment operations are grouped here (rather than in a
+/// dedicated repository) because they mutate `customers.balance` directly
+/// via dedicated database triggers and are always scoped to a single
 /// customer.
 abstract interface class CustomerRepository {
   Future<List<Customer>> listCustomers(
@@ -113,6 +116,59 @@ abstract interface class CustomerRepository {
     required String method,
     String? reference,
     String? notes,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Adjustments
+  // ---------------------------------------------------------------------------
+
+  /// Returns the manual adjustments recorded for [customerId].
+  ///
+  /// When [fromDate] / [toDate] are provided they act as an inclusive
+  /// window on `created_at`. The list is ordered by `created_at DESC`.
+  Future<List<CustomerAdjustment>> listAdjustments(
+    String customerId, {
+    DateTime? fromDate,
+    DateTime? toDate,
+  });
+
+  /// Records a manual adjustment (positive or negative) to the customer
+  /// balance.
+  ///
+  /// The database trigger `apply_customer_balance_adjustment` applies the
+  /// delta. A negative amount that would drive the balance below zero is
+  /// rejected by the trigger, which raises a `23514` error that the
+  /// repository maps to [CustomerFailureType.insufficientBalance].
+  Future<CustomerAdjustment> addAdjustment({
+    required String companyId,
+    required String customerId,
+    required double amount,
+    required String reason,
+    String? notes,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Statement
+  // ---------------------------------------------------------------------------
+
+  /// Builds a full account statement for [customerId].
+  ///
+  /// The statement merges three sources:
+  /// * confirmed sales (and their reversal on cancellation),
+  /// * standalone payments,
+  /// * manual adjustments,
+  ///
+  /// then computes the running balance and derives the opening balance so
+  /// that `closingBalance - openingBalance = totalDebit - totalCredit`.
+  ///
+  /// When [fromDate] / [toDate] are provided they restrict the **visible
+  /// entries**; the opening balance continues to reflect everything that
+  /// happened before [fromDate], so the final `closingBalance` always
+  /// matches the customer's current balance.
+  Future<CustomerStatement> buildStatement({
+    required String customerId,
+    DateTime? fromDate,
+    DateTime? toDate,
   });
 }
 
