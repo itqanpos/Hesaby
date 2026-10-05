@@ -1,6 +1,7 @@
 // lib/features/sales/presentation/providers/sales_providers.dart
 
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show Supabase, SupabaseClient;
@@ -139,7 +140,7 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
   /// The database trigger `apply_customer_payment` reduces the customer
   /// balance; the in-memory [customersProvider] is invalidated so the new
   /// balance is re-fetched before the caller continues. The customer's
-  /// payment history and full statement are also invalidated.
+  /// payment history and cached statements are also invalidated.
   Future<CustomerPayment> recordPayment({
     required String customerId,
     required double amount,
@@ -160,7 +161,7 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
             );
 
     ref.invalidate(customerPaymentsProvider(customerId));
-    _invalidateStatement(customerId);
+    _invalidateStatements();
     await _reload();
     return payment;
   }
@@ -187,7 +188,7 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
               notes: notes,
             );
 
-    _invalidateStatement(customerId);
+    _invalidateStatements();
     await _reload();
     return adjustment;
   }
@@ -204,17 +205,14 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
     return companyId;
   }
 
-  /// Invalidates every cached `customerStatementProvider` variant for
-  /// [customerId], regardless of its date filter.
+  /// Invalidates every cached customer statement.
   ///
-  /// Uses `ref.invalidate` with a predicate so we do not need to know the
-  /// exact `(fromDate, toDate)` combinations the caller may have opened.
-  void _invalidateStatement(String customerId) {
-    ref.invalidate(
-      customerStatementProvider,
-      // ignore: avoid_types_on_closure_parameters
-      asReload: false,
-    );
+  /// Riverpod 2.x does not support predicate-based invalidation on a
+  /// family, so we invalidate the family as a whole. The set of cached
+  /// statements is small (one per open customer/period), and re-fetching
+  /// them is cheap — correctness beats micro-optimisation here.
+  void _invalidateStatements() {
+    ref.invalidate(customerStatementProvider);
   }
 
   Future<void> _reload() async {
