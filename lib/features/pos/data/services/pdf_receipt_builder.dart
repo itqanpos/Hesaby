@@ -34,7 +34,19 @@ enum ReceiptPaperSize {
 /// Arabic text is rendered right-to-left with the Cairo font, downloaded
 /// on demand via the `printing` package. The font is cached by the package
 /// after the first download, so subsequent calls are cheap.
+///
+/// Thermal page sizing:
+///   `PdfPageFormat.roll57` and `PdfPageFormat.roll80` both use an infinite
+///   height, which `MultiPage` cannot paginate on. We therefore build the
+///   thermal page formats from first principles, using a bounded height
+///   (the A4 height, 297 mm) that is more than enough for any realistic
+///   receipt, and letting `MultiPage` split long receipts into as many
+///   pages as needed.
 abstract final class PdfReceiptBuilder {
+  /// A4 height, in PDF points. Used as the finite height for thermal roll
+  /// formats so that `MultiPage` can paginate normally.
+  static final double _boundedRollHeight = PdfPageFormat.a4.height;
+
   /// Builds the PDF and returns its bytes.
   ///
   /// The receipt is assumed to be non-empty by the caller. An empty line
@@ -49,10 +61,18 @@ abstract final class PdfReceiptBuilder {
     final double padding;
     switch (size) {
       case ReceiptPaperSize.mm58:
-        pageFormat = PdfPageFormat.roll57;
+        pageFormat = PdfPageFormat(
+          58 * PdfPageFormat.mm,
+          _boundedRollHeight,
+          marginAll: 0,
+        );
         padding = 4;
       case ReceiptPaperSize.mm80:
-        pageFormat = PdfPageFormat.roll80;
+        pageFormat = PdfPageFormat(
+          80 * PdfPageFormat.mm,
+          _boundedRollHeight,
+          marginAll: 0,
+        );
         padding = 6;
       case ReceiptPaperSize.a4:
         pageFormat = PdfPageFormat.a4;
@@ -236,16 +256,21 @@ abstract final class PdfReceiptBuilder {
                 fontSize: baseFont,
                 fontWeight: pw.FontWeight.bold,
               ),
+              softWrap: true,
             ),
             pw.SizedBox(height: 2),
             pw.Row(
-              mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+              crossAxisAlignment: pw.CrossAxisAlignment.start,
               children: <pw.Widget>[
-                pw.Text(
-                  '${_formatQuantity(line.quantity)} ${line.unitName} '
-                  '× ${_formatMoney(line.unitPrice)}',
-                  style: pw.TextStyle(fontSize: smallFont),
+                pw.Expanded(
+                  child: pw.Text(
+                    '${_formatQuantity(line.quantity)} ${line.unitName} '
+                    '× ${_formatMoney(line.unitPrice)}',
+                    style: pw.TextStyle(fontSize: smallFont),
+                    softWrap: true,
+                  ),
                 ),
+                pw.SizedBox(width: 4),
                 pw.Text(
                   _formatMoney(line.lineTotal),
                   style: pw.TextStyle(
@@ -271,6 +296,7 @@ abstract final class PdfReceiptBuilder {
             child: pw.Text(
               line.productName,
               style: pw.TextStyle(fontSize: baseFont),
+              softWrap: true,
             ),
           ),
           pw.Expanded(
@@ -329,19 +355,23 @@ abstract final class PdfReceiptBuilder {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 1),
       child: pw.Row(
-        mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: <pw.Widget>[
-          pw.Text(
-            label,
-            style: pw.TextStyle(fontSize: fontSize),
+          pw.Expanded(
+            child: pw.Text(
+              label,
+              style: pw.TextStyle(fontSize: fontSize),
+              softWrap: true,
+            ),
           ),
+          pw.SizedBox(width: 8),
           pw.Text(
             value,
             style: pw.TextStyle(
               fontSize: fontSize,
-              fontWeight:
-                  bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
             ),
+            textAlign: pw.TextAlign.right,
           ),
         ],
       ),
