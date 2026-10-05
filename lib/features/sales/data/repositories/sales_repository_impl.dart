@@ -3,9 +3,11 @@
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../../../../core/utils/logger.dart';
+import '../../domain/entities/customer_payment.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../datasources/sales_remote_datasource.dart';
+import '../models/customer_payment_model.dart';
 import '../models/sale_models.dart';
 
 // ============================================================================
@@ -204,6 +206,86 @@ class CustomerRepositoryImpl implements CustomerRepository {
         stackTrace,
         operation: 'deleteCustomer',
       );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Payments
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<List<CustomerPayment>> listPayments(
+    String customerId, {
+    int? limit,
+  }) async {
+    try {
+      final List<CustomerPaymentModel> models =
+          await _remoteDataSource.listCustomerPayments(
+        customerId,
+        limit: limit,
+      );
+      return models
+          .map((CustomerPaymentModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapCustomerInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'listPayments',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapCustomerPostgrest(
+        error,
+        stackTrace,
+        operation: 'listPayments',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapCustomerAuth(error, stackTrace, operation: 'listPayments');
+    } on CustomerException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapCustomerUnknown(error, stackTrace, operation: 'listPayments');
+    }
+  }
+
+  @override
+  Future<CustomerPayment> recordPayment({
+    required String companyId,
+    required String customerId,
+    required double amount,
+    required String method,
+    String? reference,
+    String? notes,
+  }) async {
+    try {
+      final CustomerPaymentModel model =
+          await _remoteDataSource.recordCustomerPayment(
+        companyId: companyId,
+        customerId: customerId,
+        amount: amount,
+        method: method,
+        reference: reference,
+        notes: notes,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapCustomerInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'recordPayment',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapCustomerPostgrest(
+        error,
+        stackTrace,
+        operation: 'recordPayment',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapCustomerAuth(error, stackTrace, operation: 'recordPayment');
+    } on CustomerException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapCustomerUnknown(error, stackTrace, operation: 'recordPayment');
     }
   }
 }
@@ -508,6 +590,7 @@ CustomerException _mapCustomerUnknown(
 /// * `uniq_customers_company_code`   → codeConflict
 /// * `uniq_customers_company_phone`  → phoneConflict
 /// * `sales_customer_company_fk`     → inUse (customer referenced by a sale)
+/// * `customer_payments_amount_positive` → invalidAmount
 CustomerFailureType _classifyCustomerPostgrest(
   supabase.PostgrestException error,
 ) {
@@ -527,6 +610,14 @@ CustomerFailureType _classifyCustomerPostgrest(
 
   if (code == '23503') {
     return CustomerFailureType.inUse;
+  }
+
+  if (code == '23514') {
+    if (full.contains('customer_payments_amount_positive') ||
+        message.contains('customer_payments_amount_positive')) {
+      return CustomerFailureType.invalidAmount;
+    }
+    return CustomerFailureType.invalidResponse;
   }
 
   if (code == 'PGRST116') {
