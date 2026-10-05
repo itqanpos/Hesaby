@@ -4,8 +4,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/logger.dart';
+import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
-import '../../data/services/receipt_printer.dart';
 
 /// Opens the POS print-settings bottom sheet.
 ///
