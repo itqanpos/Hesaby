@@ -51,5 +51,29 @@ dev_dependencies:
     sdk: flutter
   flutter_lints: ^5.0.0
 
+  # App icon + splash generators.
+  #
+  # Both tools read their own YAML config at the repository root and write
+  # native assets into android/, ios/ and web/. They are only needed when
+  # the icons or splash change, so they live as dev_dependencies and are
+  # not pulled into production builds.
+  #
+  # Regenerate with:
+  #   flutter pub get
+  #   dart run flutter_launcher_icons
+  #   dart run flutter_native_splash:create
+  flutter_launcher_icons: ^0.14.1
+  flutter_native_splash: ^2.4.3
+
 flutter:
   uses-material-design: true
+
+  # Assets
+  #
+  # `assets/images/logo.png` is the master 1024×1024 image used by both
+  # `flutter_launcher_icons` (launcher icon) and `flutter_native_splash`
+  # (native splash screen). It is also kept in the bundle so future
+  # in-app usages (login header, receipt header) can reference it with
+  # `Image.asset('assets/images/logo.png')`.
+  assets:
+    - assets/images/
