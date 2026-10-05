@@ -655,7 +655,6 @@ class _ErrorBanner extends StatelessWidget {
 // ============================================================================
 // Localization
 // ============================================================================
-
 String _failureMessageFor(CustomerFailureType type) => switch (type) {
       CustomerFailureType.network =>
         'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
@@ -671,8 +670,11 @@ String _failureMessageFor(CustomerFailureType type) => switch (type) {
         'العميل مرتبط بفواتير ولا يمكن تعديل بياناته.',
       CustomerFailureType.invalidAmount =>
         'المبلغ غير صالح. يرجى مراجعة القيمة.',
+      CustomerFailureType.insufficientBalance =>
+        'الرصيد غير كافٍ لإتمام العملية.',
       CustomerFailureType.invalidResponse =>
         'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.',
       CustomerFailureType.unknown =>
         'تعذّر تسجيل الدفعة. يرجى المحاولة مرة أخرى.',
+    };
     };
