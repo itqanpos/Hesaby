@@ -2,7 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart';
 
+import '../../../sales/domain/entities/sale_entities.dart';
+import '../../../sales/presentation/dialogs/customer_payment_dialog.dart';
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
 import '../../domain/entities/pos_cart.dart';
@@ -13,8 +16,12 @@ import '../state/pos_providers.dart';
 ///
 /// The menu is presented as a bottom sheet anchored to the bottom of the
 /// screen. Most entries are navigation contracts or explicit "قريبًا"
-/// placeholders; the print-settings entry is the only one that currently
-/// performs a real action — it opens `showPosPrintSettingsSheet`.
+/// placeholders; two entries are functional:
+///
+/// * **إعدادات الطباعة**   — opens `showPosPrintSettingsSheet`.
+/// * **تحصيل من العميل**   — opens `showCustomerPaymentDialog` and keeps
+///   the POS cart's balance snapshot in sync with the fresh value returned
+///   by the dialog.
 Future<void> showPosActionsSheet({required BuildContext context}) {
   return showModalBottomSheet<void>(
     context: context,
@@ -28,6 +35,12 @@ Future<void> showPosActionsSheet({required BuildContext context}) {
 class _PosActionsSheet extends ConsumerWidget {
   const _PosActionsSheet();
 
+  static final NumberFormat _money = NumberFormat.currency(
+    locale: 'en_US',
+    symbol: 'ج.م ',
+    decimalDigits: 2,
+  );
+
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
@@ -39,6 +52,18 @@ class _PosActionsSheet extends ConsumerWidget {
         ref.watch(posPaperSizeProvider);
     final ReceiptPaperSize currentSize = asyncSize.valueOrNull ??
         PosPreferences.defaultPaperSize;
+
+    final bool canCollect =
+        customerName != null && cart.customerBalance > 0;
+    final String collectSubtitle;
+    if (customerName == null) {
+      collectSubtitle = 'يتطلب اختيار عميل أولًا';
+    } else if (cart.customerBalance <= 0) {
+      collectSubtitle = 'لا يوجد رصيد مستحق على $customerName';
+    } else {
+      collectSubtitle =
+          'الرصيد الحالي: ${_money.format(cart.customerBalance)}';
+    }
 
     return SafeArea(
       top: false,
@@ -80,8 +105,15 @@ class _PosActionsSheet extends ConsumerWidget {
             ],
 
             // -------------------------------------------------------------------
-            // Active action — print settings
+            // Active actions
             // -------------------------------------------------------------------
+            _ActionTile(
+              icon: Icons.payments_outlined,
+              title: 'تحصيل من العميل',
+              subtitle: collectSubtitle,
+              enabled: canCollect,
+              onTap: () => _openCustomerPayment(context, ref, cart),
+            ),
             _ActionTile(
               icon: Icons.print_outlined,
               title: 'إعدادات الطباعة',
@@ -97,14 +129,6 @@ class _PosActionsSheet extends ConsumerWidget {
             // -------------------------------------------------------------------
             // Placeholder actions — available in later phases
             // -------------------------------------------------------------------
-            _ActionTile(
-              icon: Icons.payments_outlined,
-              title: 'تحصيل من العميل',
-              subtitle: customerName == null
-                  ? 'يتطلب اختيار عميل أولًا'
-                  : 'تسجيل دفعة على رصيد $customerName',
-              enabled: false,
-            ),
             _ActionTile(
               icon: Icons.receipt_long_outlined,
               title: 'الفاتورة الحالية',
@@ -142,7 +166,7 @@ class _PosActionsSheet extends ConsumerWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // Helpers
+  // Actions
   // ---------------------------------------------------------------------------
 
   /// Closes this sheet, then opens the print-settings sheet.
@@ -154,6 +178,44 @@ class _PosActionsSheet extends ConsumerWidget {
   void _openPrintSettings(BuildContext context) {
     Navigator.of(context).pop();
     showPosPrintSettingsSheet(context: context);
+  }
+
+  /// Opens the customer-payment dialog on top of this sheet.
+  ///
+  /// The sheet is kept open while the dialog is active; when the dialog
+  /// returns a non-null [Customer], the POS cart's balance snapshot is
+  /// refreshed (so the "الرصيد الحالي" subtitle reflects the new value)
+  /// and a confirmation snack bar is shown. The sheet is intentionally
+  /// **not** popped so the cashier can continue from where they were.
+  Future<void> _openCustomerPayment(
+    BuildContext context,
+    WidgetRef ref,
+    PosCart cart,
+  ) async {
+    final String? customerId = cart.customerId;
+    final String? customerName = cart.customerName;
+    if (customerId == null || customerName == null) {
+      return;
+    }
+
+    final Customer? updated = await showCustomerPaymentDialog(
+      context: context,
+      customerId: customerId,
+      customerName: customerName,
+      currentBalance: cart.customerBalance,
+    );
+
+    if (updated == null || !context.mounted) {
+      return;
+    }
+
+    ref.read(posCartProvider.notifier).updateCustomerBalance(updated.balance);
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('تم تسجيل الدفعة بنجاح.')),
+      );
   }
 
   static String _labelOf(ReceiptPaperSize size) {
