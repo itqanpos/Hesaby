@@ -8,6 +8,7 @@ import '../../../companies/presentation/providers/company_context_provider.dart'
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../data/datasources/sales_remote_datasource.dart';
 import '../../data/repositories/sales_repository_impl.dart';
+import '../../domain/entities/customer_payment.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 
@@ -130,6 +131,36 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
     await _reload();
   }
 
+  /// Records a standalone payment against [customerId].
+  ///
+  /// The database trigger `apply_customer_payment` reduces the customer
+  /// balance; the in-memory [customersProvider] is invalidated so the new
+  /// balance is re-fetched before the caller continues. The customer's
+  /// payment history is also invalidated.
+  Future<CustomerPayment> recordPayment({
+    required String customerId,
+    required double amount,
+    required String method,
+    String? reference,
+    String? notes,
+  }) async {
+    final String companyId = _requireCurrentCompanyId();
+
+    final CustomerPayment payment =
+        await ref.read(customerRepositoryProvider).recordPayment(
+              companyId: companyId,
+              customerId: customerId,
+              amount: amount,
+              method: method,
+              reference: reference,
+              notes: notes,
+            );
+
+    ref.invalidate(customerPaymentsProvider(customerId));
+    await _reload();
+    return payment;
+  }
+
   String _requireCurrentCompanyId() {
     final CompanyContextState context = ref.read(companyContextProvider);
     final String? companyId = context.currentCompany?.id;
@@ -153,6 +184,40 @@ final AsyncNotifierProvider<CustomersNotifier, List<Customer>>
     customersProvider =
     AsyncNotifierProvider<CustomersNotifier, List<Customer>>(
   CustomersNotifier.new,
+);
+
+// ============================================================================
+// Customer payments (per customer)
+// ============================================================================
+
+/// Provides the payment history of a single customer, keyed by `customerId`.
+///
+/// This is a read-only derived view over `customer_payments`. It is
+/// invalidated explicitly by [CustomersNotifier.recordPayment] after a
+/// successful insert.
+class CustomerPaymentsNotifier
+    extends FamilyAsyncNotifier<List<CustomerPayment>, String> {
+  @override
+  Future<List<CustomerPayment>> build(String customerId) async {
+    if (customerId.isEmpty) {
+      return const <CustomerPayment>[];
+    }
+    return ref.read(customerRepositoryProvider).listPayments(customerId);
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+/// Provides the payment history of a single customer, keyed by `customerId`.
+///
+/// No explicit type annotation is used: `AsyncNotifierProvider.family` is a
+/// factory constructor, not a type.
+final customerPaymentsProvider = AsyncNotifierProvider.family<
+    CustomerPaymentsNotifier, List<CustomerPayment>, String>(
+  CustomerPaymentsNotifier.new,
 );
 
 // ============================================================================
