@@ -286,6 +286,23 @@ class PosCartNotifier extends Notifier<PosCart> {
     );
   }
 
+  /// Updates only the balance of the currently attached customer.
+  ///
+  /// Used after a payment is recorded elsewhere (for example from the POS
+  /// actions sheet) so the payment dialog and the printed receipt reflect
+  /// the fresh balance without detaching the customer.
+  ///
+  /// No-op when no customer is attached, or when the value is unchanged.
+  void updateCustomerBalance(double customerBalance) {
+    if (state.customerId == null) {
+      return;
+    }
+    if (state.customerBalance == customerBalance) {
+      return;
+    }
+    state = state.copyWith(customerBalance: customerBalance);
+  }
+
   /// Detaches the current customer, reverting to a cash sale.
   void clearCustomer() {
     state = state.copyWith(clearCustomer: true);
