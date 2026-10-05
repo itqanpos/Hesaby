@@ -4,16 +4,18 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/app_button.dart';
-import '../../data/services/pdf_receipt_builder.dart';
+import '../../data/services/pos_preferences.dart';
 import '../../data/services/receipt_printer.dart';
 import '../../domain/entities/receipt.dart';
 
 /// Opens the print preview dialog for [receipt].
 ///
-/// The dialog lets the cashier choose the paper size (58 mm, 80 mm or A4)
-/// and then either print the receipt or share it as a PDF file. Failures
-/// are surfaced as a short snack bar; the dialog stays open so the cashier
-/// can retry.
+/// The dialog only performs two actions — print or share as PDF — and
+/// shows which paper size will be used. **The paper size itself is no
+/// longer selectable here**; the cashier changes it from
+/// `PosActionsSheet → إعدادات الطباعة`, and the choice is persisted in
+/// `PreferencesStorage`. This keeps the print flow one-tap for the common
+/// case (roll of 80 mm) and avoids repeating the picker on every sale.
 Future<void> showPosPrintPreviewDialog({
   required BuildContext context,
   required Receipt receipt,
@@ -44,7 +46,6 @@ class _PosPrintPreviewDialogState
     extends ConsumerState<_PosPrintPreviewDialog> {
   static const ReceiptPrinter _printer = ReceiptPrinterImpl();
 
-  ReceiptPaperSize _selectedSize = ReceiptPaperSize.mm80;
   bool _isPrinting = false;
   bool _isSharing = false;
 
@@ -59,7 +60,7 @@ class _PosPrintPreviewDialogState
 
     final bool ok = await _printer.printReceipt(
       receipt: widget.receipt,
-      size: _selectedSize,
+      size: _currentPaperSize(),
     );
 
     if (!mounted) {
@@ -81,7 +82,7 @@ class _PosPrintPreviewDialogState
 
     final bool ok = await _printer.shareReceipt(
       receipt: widget.receipt,
-      size: _selectedSize,
+      size: _currentPaperSize(),
     );
 
     if (!mounted) {
@@ -104,15 +105,29 @@ class _PosPrintPreviewDialogState
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  /// Handles a new selection from the segmented button.
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  /// Reads the persisted paper size at the exact moment an action runs.
   ///
-  /// Ignored while a print or share operation is in flight, so the paper
-  /// size cannot change mid-request.
-  void _onSizeSelected(Set<ReceiptPaperSize> selection) {
-    if (selection.isEmpty || _isBusy) {
-      return;
+  /// Falls back to [PosPreferences.defaultPaperSize] while the async
+  /// provider is still loading or when it has errored out, so the cashier
+  /// can always complete a sale.
+  ReceiptPaperSize _currentPaperSize() {
+    return ref.read(posPaperSizeProvider).valueOrNull ??
+        PosPreferences.defaultPaperSize;
+  }
+
+  static String _labelOf(ReceiptPaperSize size) {
+    switch (size) {
+      case ReceiptPaperSize.mm58:
+        return '58 مم';
+      case ReceiptPaperSize.mm80:
+        return '80 مم';
+      case ReceiptPaperSize.a4:
+        return 'A4';
     }
-    setState(() => _selectedSize = selection.first);
   }
 
   // ---------------------------------------------------------------------------
@@ -124,6 +139,11 @@ class _PosPrintPreviewDialogState
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final Receipt receipt = widget.receipt;
+
+    final AsyncValue<ReceiptPaperSize> asyncSize =
+        ref.watch(posPaperSizeProvider);
+    final ReceiptPaperSize currentSize = asyncSize.valueOrNull ??
+        PosPreferences.defaultPaperSize;
 
     return AlertDialog(
       title: Row(
@@ -175,35 +195,53 @@ class _PosPrintPreviewDialogState
               ),
             ),
 
-            const SizedBox(height: 16),
+            const SizedBox(height: 12),
 
-            // ---- Paper size ----
-            Text(
-              'مقاس الورق',
-              style: theme.textTheme.labelLarge,
-            ),
-            const SizedBox(height: 8),
-            SegmentedButton<ReceiptPaperSize>(
-              segments: const <ButtonSegment<ReceiptPaperSize>>[
-                ButtonSegment<ReceiptPaperSize>(
-                  value: ReceiptPaperSize.mm58,
-                  label: Text('58 مم'),
-                ),
-                ButtonSegment<ReceiptPaperSize>(
-                  value: ReceiptPaperSize.mm80,
-                  label: Text('80 مم'),
-                ),
-                ButtonSegment<ReceiptPaperSize>(
-                  value: ReceiptPaperSize.a4,
-                  label: Text('A4'),
-                ),
-              ],
-              selected: <ReceiptPaperSize>{_selectedSize},
-              onSelectionChanged: _isBusy ? null : _onSizeSelected,
-              showSelectedIcon: false,
-              style: SegmentedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
+            // ---- Current paper size (read-only) ----
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
               ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                child: Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.description_outlined,
+                      size: 18,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        'مقاس الورق',
+                        style: theme.textTheme.bodyMedium,
+                      ),
+                    ),
+                    Text(
+                      _labelOf(currentSize),
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 8),
+
+            Text(
+              'لتغيير المقاس: قائمة الخيارات (⋮) ← إعدادات الطباعة',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+              textAlign: TextAlign.center,
             ),
           ],
         ),
@@ -239,7 +277,7 @@ class _PosPrintPreviewDialogState
   }
 
   // ---------------------------------------------------------------------------
-  // Helpers
+  // Summary row helper
   // ---------------------------------------------------------------------------
 
   Widget _summaryRow(
