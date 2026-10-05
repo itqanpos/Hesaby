@@ -1,5 +1,7 @@
 // lib/features/sales/presentation/pages/customer_statement_page.dart
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -17,7 +19,6 @@ import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/customer_adjustment_dialog.dart';
 import '../providers/sales_providers.dart';
-
 /// Period presets shown as chips above the statement table.
 enum _PeriodPreset {
   all,
