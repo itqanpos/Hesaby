@@ -3,6 +3,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
+import '../entities/customer_payment.dart';
 import '../entities/sale_entities.dart';
 
 // ============================================================================
@@ -18,6 +19,7 @@ enum CustomerFailureType {
   codeConflict,
   phoneConflict,
   inUse,
+  invalidAmount,
   invalidResponse,
   unknown,
 }
@@ -43,6 +45,11 @@ class CustomerException extends Equatable implements Exception {
 }
 
 /// Contract for customer operations.
+///
+/// Payment operations are grouped here (rather than in a dedicated
+/// repository) because they mutate `customers.balance` directly via the
+/// `apply_customer_payment` trigger and are always scoped to a single
+/// customer.
 abstract interface class CustomerRepository {
   Future<List<Customer>> listCustomers(
     String companyId, {
@@ -78,6 +85,34 @@ abstract interface class CustomerRepository {
   });
 
   Future<void> deleteCustomer(String customerId);
+
+  // ---------------------------------------------------------------------------
+  // Payments
+  // ---------------------------------------------------------------------------
+
+  /// Returns the most recent payments recorded for [customerId].
+  ///
+  /// The list is ordered by `created_at DESC`. When [limit] is null or
+  /// non-positive, a sensible default is applied by the data source.
+  Future<List<CustomerPayment>> listPayments(
+    String customerId, {
+    int? limit,
+  });
+
+  /// Records a standalone payment against the customer's balance.
+  ///
+  /// The database trigger `apply_customer_payment` reduces
+  /// `customers.balance` by [amount] immediately after the row is inserted.
+  /// The amount must be strictly positive; the DB enforces this with a
+  /// `CHECK` constraint, and callers are expected to validate it before
+  /// submitting.
+  Future<CustomerPayment> recordPayment({
+    required String customerId,
+    required double amount,
+    required String method,
+    String? reference,
+    String? notes,
+  });
 }
 
 // ============================================================================
