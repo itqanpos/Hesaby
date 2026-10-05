@@ -3,7 +3,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/storage/preferences_storage.dart';
-import 'receipt_printer.dart';
+import 'pdf_receipt_builder.dart';
 
 /// Centralises the POS-related preference keys and their typed accessors.
 ///
