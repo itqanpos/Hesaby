@@ -655,26 +655,30 @@ class _ErrorBanner extends StatelessWidget {
 // ============================================================================
 // Localization
 // ============================================================================
-String _failureMessageFor(CustomerFailureType type) => switch (type) {
-      CustomerFailureType.network =>
-        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
-      CustomerFailureType.unauthorized =>
-        'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجددًا.',
-      CustomerFailureType.notFound =>
-        'العميل المطلوب غير موجود أو تم حذفه.',
-      CustomerFailureType.nameConflict => 'يوجد عميل آخر بنفس الاسم.',
-      CustomerFailureType.codeConflict => 'يوجد عميل آخر بنفس الكود.',
-      CustomerFailureType.phoneConflict =>
-        'يوجد عميل آخر بنفس رقم الهاتف.',
-      CustomerFailureType.inUse =>
-        'العميل مرتبط بفواتير ولا يمكن تعديل بياناته.',
-      CustomerFailureType.invalidAmount =>
-        'المبلغ غير صالح. يرجى مراجعة القيمة.',
-      CustomerFailureType.insufficientBalance =>
-        'الرصيد غير كافٍ لإتمام العملية.',
-      CustomerFailureType.invalidResponse =>
-        'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.',
-      CustomerFailureType.unknown =>
-        'تعذّر تسجيل الدفعة. يرجى المحاولة مرة أخرى.',
-    };
-    };
+
+String _failureMessageFor(CustomerFailureType type) {
+  switch (type) {
+    case CustomerFailureType.network:
+      return 'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.';
+    case CustomerFailureType.unauthorized:
+      return 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجددًا.';
+    case CustomerFailureType.notFound:
+      return 'العميل المطلوب غير موجود أو تم حذفه.';
+    case CustomerFailureType.nameConflict:
+      return 'يوجد عميل آخر بنفس الاسم.';
+    case CustomerFailureType.codeConflict:
+      return 'يوجد عميل آخر بنفس الكود.';
+    case CustomerFailureType.phoneConflict:
+      return 'يوجد عميل آخر بنفس رقم الهاتف.';
+    case CustomerFailureType.inUse:
+      return 'العميل مرتبط بفواتير ولا يمكن تعديل بياناته.';
+    case CustomerFailureType.invalidAmount:
+      return 'المبلغ غير صالح. يرجى مراجعة القيمة.';
+    case CustomerFailureType.insufficientBalance:
+      return 'الرصيد غير كافٍ لإتمام العملية.';
+    case CustomerFailureType.invalidResponse:
+      return 'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.';
+    case CustomerFailureType.unknown:
+      return 'تعذّر تسجيل الدفعة. يرجى المحاولة مرة أخرى.';
+  }
+}
