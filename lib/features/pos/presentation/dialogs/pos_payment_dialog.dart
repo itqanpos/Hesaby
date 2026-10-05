@@ -103,11 +103,29 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     if (_method == PosPaymentMethod.credit) {
       return 0;
     }
-    final double total = _cart.total;
     if (_inputAmount <= 0) {
       return 0;
     }
+    final double total = _cart.total;
     return _inputAmount >= total ? total : _inputAmount;
+  }
+
+  /// Portion of the payment that goes to reducing the customer's
+  /// outstanding balance (only when a customer is attached and the
+  /// payment exceeds the invoice total).
+  double _appliedToBalance() {
+    if (_method == PosPaymentMethod.credit) {
+      return 0;
+    }
+    if (!_cart.hasCustomer) {
+      return 0;
+    }
+    final double excess = _inputAmount - _cart.total;
+    if (excess <= 0) {
+      return 0;
+    }
+    final double balance = _cart.customerBalance;
+    return excess >= balance ? balance : excess;
   }
 
   double _changeToCustomer() {
@@ -115,12 +133,21 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       return 0;
     }
     final double excess = _inputAmount - _cart.total;
-    return excess > 0 ? excess : 0;
+    if (excess <= 0) {
+      return 0;
+    }
+    final double remaining = excess - _appliedToBalance();
+    return remaining > 0 ? remaining : 0;
   }
 
   double _addedToBalance() => _cart.total - _appliedToSale();
 
-  double _resultingBalance() => _cart.customerBalance + _addedToBalance();
+  /// Resulting customer balance after applying this payment.
+  ///
+  /// `+addedToBalance` covers the unpaid part of the invoice;
+  /// `-appliedToBalance` accounts for the overpayment that clears debt.
+  double _resultingBalance() =>
+      _cart.customerBalance + _addedToBalance() - _appliedToBalance();
 
   // ---------------------------------------------------------------------------
   // Validation
@@ -140,8 +167,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (_inputAmount < _cart.total) {
         return 'الدفع بالبطاقة يجب أن يغطي كامل قيمة الفاتورة.';
       }
-      if (_inputAmount > _cart.total) {
-        return 'الدفع بالبطاقة لا يُعيد باقياً.';
+      final double maxAllowed = _cart.total +
+          (_cart.hasCustomer ? _cart.customerBalance : 0);
+      if (_inputAmount > maxAllowed) {
+        return 'المبلغ يتجاوز قيمة الفاتورة + الرصيد المستحق.';
       }
       return null;
     }
@@ -178,6 +207,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     final SalesNotifier notifier = ref.read(salesProvider.notifier);
 
     try {
+      final double appliedToSale = _appliedToSale();
+      final double appliedToBalance = _appliedToBalance();
+
       final Sale sale = await notifier.createSale(
         branchId: branchId,
         customerId: _cart.customerId,
@@ -193,10 +225,23 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         ],
         discount: _cart.discount,
         taxAmount: _cart.taxAmount,
-        paidAmount: _appliedToSale(),
+        paidAmount: appliedToSale,
       );
 
       final Sale confirmed = await notifier.confirmSale(sale.id);
+
+      // If the customer overpaid, apply the excess to their outstanding
+      // balance. This reduces the debt in a single, server-visible
+      // customer_payments row, keeping the statement consistent.
+      if (appliedToBalance > 0 && _cart.customerId != null) {
+        await ref.read(customersProvider.notifier).recordPayment(
+              customerId: _cart.customerId!,
+              amount: appliedToBalance,
+              method: _method == PosPaymentMethod.card ? 'card' : 'cash',
+              notes: 'دفعة زيادة من فاتورة '
+                  '${confirmed.invoiceNumber ?? confirmed.id}',
+            );
+      }
 
       if (!mounted) {
         return;
@@ -247,7 +292,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     required Sale sale,
     required CompanyContextState contextState,
   }) {
-    final bool hasBalanceChange = _cart.hasCustomer && _cart.customerBalance > 0;
+    final double newBalance = _resultingBalance();
+    final bool hasBalanceChange = _cart.hasCustomer &&
+        newBalance != _cart.customerBalance;
 
     return Receipt(
       saleId: sale.id,
@@ -273,7 +320,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       change: _changeToCustomer(),
       customerName: _cart.customerName,
       previousBalance: hasBalanceChange ? _cart.customerBalance : null,
-      newBalance: hasBalanceChange ? _resultingBalance() : null,
+      newBalance: hasBalanceChange ? newBalance : null,
     );
   }
 
@@ -311,6 +358,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
     final double change = _changeToCustomer();
     final double addedToBalance = _addedToBalance();
+    final double appliedToBalance = _appliedToBalance();
     final double resultingBalance = _resultingBalance();
 
     return Padding(
@@ -436,6 +484,19 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                       emphasized: true,
                       color: scheme.primary,
                     ),
+                  if (appliedToBalance > 0) ...<Widget>[
+                    _SummaryLine(
+                      label: 'مدفوع على الرصيد',
+                      value: _money.format(appliedToBalance),
+                      color: scheme.primary,
+                    ),
+                    _SummaryLine(
+                      label: 'الرصيد الجديد للعميل',
+                      value: _money.format(resultingBalance),
+                      emphasized: true,
+                      color: scheme.primary,
+                    ),
+                  ],
                   if (addedToBalance > 0) ...<Widget>[
                     _SummaryLine(
                       label: 'سيُضاف للرصيد',
@@ -449,7 +510,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                       color: scheme.error,
                     ),
                   ],
-                  if (change == 0 && addedToBalance == 0)
+                  if (change == 0 &&
+                      addedToBalance == 0 &&
+                      appliedToBalance == 0)
                     _SummaryLine(
                       label: 'الحالة',
                       value: 'مدفوع بالكامل',
@@ -979,6 +1042,15 @@ class _PosReceiptDialog extends StatelessWidget {
                   _row(theme, 'الرصيد السابق',
                       _money.format(receipt.previousBalance!),
                       color: scheme.error),
+                  if (receipt.previousBalance! > receipt.newBalance!)
+                    _row(
+                      theme,
+                      'مدفوع على الرصيد',
+                      _money.format(
+                        receipt.previousBalance! - receipt.newBalance!,
+                      ),
+                      color: scheme.primary,
+                    ),
                   _row(theme, 'الرصيد الجديد',
                       _money.format(receipt.newBalance!),
                       color: scheme.error,
