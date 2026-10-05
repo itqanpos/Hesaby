@@ -1,0 +1,304 @@
+// lib/features/sales/presentation/dialogs/sale_print_dialog.dart
+
+import 'package:flutter/material.dart';
+
+import '../../../../shared/widgets/app_button.dart';
+import '../../../pos/data/services/pdf_receipt_builder.dart';
+import '../../../pos/data/services/receipt_printer.dart';
+import '../../../pos/domain/entities/receipt.dart';
+
+/// Opens the sale-print dialog for [receipt].
+///
+/// The dialog offers two paper sizes only:
+/// * **80 mm** — the common thermal receipt roll (default).
+/// * **A4**    — a full-page invoice for archiving or e-mailing.
+///
+/// The dialog is deliberately separate from `PosPrintPreviewDialog`
+/// because the POS flow also exposes 58 mm and a persisted preference.
+/// Here we keep the choice local to each print action, which matches the
+/// way invoices are printed: occasionally and per customer request.
+///
+/// Reuses the existing `ReceiptPrinterImpl` and `PdfReceiptBuilder` from
+/// the POS feature — printing a receipt is not POS-specific, and
+/// duplicating the renderer would drift over time.
+Future<void> showSalePrintDialog({
+  required BuildContext context,
+  required Receipt receipt,
+}) {
+  return showDialog<void>(
+    context: context,
+    barrierDismissible: true,
+    builder: (BuildContext dialogContext) =>
+        _SalePrintDialog(receipt: receipt),
+  );
+}
+
+// ============================================================================
+// Dialog
+// ============================================================================
+
+class _SalePrintDialog extends StatefulWidget {
+  const _SalePrintDialog({required this.receipt});
+
+  final Receipt receipt;
+
+  @override
+  State<_SalePrintDialog> createState() => _SalePrintDialogState();
+}
+
+class _SalePrintDialogState extends State<_SalePrintDialog> {
+  static const ReceiptPrinter _printer = ReceiptPrinterImpl();
+
+  /// Only two values are exposed; `mm58` is intentionally excluded.
+  static const List<ReceiptPaperSize> _supportedSizes = <ReceiptPaperSize>[
+    ReceiptPaperSize.mm80,
+    ReceiptPaperSize.a4,
+  ];
+
+  ReceiptPaperSize _selectedSize = ReceiptPaperSize.mm80;
+  bool _isPrinting = false;
+  bool _isSharing = false;
+
+  bool get _isBusy => _isPrinting || _isSharing;
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
+  Future<void> _print() async {
+    setState(() => _isPrinting = true);
+
+    final bool ok = await _printer.printReceipt(
+      receipt: widget.receipt,
+      size: _selectedSize,
+    );
+
+    if (!mounted) {
+      return;
+    }
+    setState(() => _isPrinting = false);
+
+    if (ok) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _showFailure('تعذّرت الطباعة. يرجى المحاولة مرة أخرى.');
+  }
+
+  Future<void> _share() async {
+    setState(() => _isSharing = true);
+
+    final bool ok = await _printer.shareReceipt(
+      receipt: widget.receipt,
+      size: _selectedSize,
+    );
+
+    if (!mounted) {
+      return;
+    }
+    setState(() => _isSharing = false);
+
+    if (ok) {
+      Navigator.of(context).pop();
+      return;
+    }
+    _showFailure('تعذّرت مشاركة الإيصال.');
+  }
+
+  void _showFailure(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _onSizeSelected(Set<ReceiptPaperSize> selection) {
+    if (selection.isEmpty || _isBusy) {
+      return;
+    }
+    setState(() => _selectedSize = selection.first);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final Receipt receipt = widget.receipt;
+
+    return AlertDialog(
+      title: Row(
+        children: <Widget>[
+          Icon(Icons.print_outlined, color: scheme.primary),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('طباعة الفاتورة')),
+          IconButton(
+            onPressed: _isBusy ? null : () => Navigator.of(context).pop(),
+            icon: const Icon(Icons.close),
+          ),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            // ---- Receipt summary ----
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    _summaryRow(
+                      theme,
+                      label: 'رقم الفاتورة',
+                      value: receipt.invoiceNumber ?? '—',
+                    ),
+                    _summaryRow(
+                      theme,
+                      label: 'عدد البنود',
+                      value: receipt.lineCount.toString(),
+                    ),
+                    _summaryRow(
+                      theme,
+                      label: 'الإجمالي',
+                      value: _formatMoney(receipt.total),
+                      emphasized: true,
+                    ),
+                    if (receipt.hasBalanceChange) ...<Widget>[
+                      const SizedBox(height: 6),
+                      const Divider(height: 1),
+                      const SizedBox(height: 6),
+                      _summaryRow(
+                        theme,
+                        label: 'المتبقي على العميل (سابق)',
+                        value: _formatMoney(receipt.previousBalance!),
+                        color: scheme.error,
+                      ),
+                      _summaryRow(
+                        theme,
+                        label: 'المتبقي على العميل (بعد الفاتورة)',
+                        value: _formatMoney(receipt.newBalance!),
+                        color: scheme.error,
+                        emphasized: true,
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
+
+            const SizedBox(height: 16),
+
+            // ---- Paper size ----
+            Text(
+              'مقاس الورق',
+              style: theme.textTheme.labelLarge,
+            ),
+            const SizedBox(height: 8),
+            SegmentedButton<ReceiptPaperSize>(
+              segments: const <ButtonSegment<ReceiptPaperSize>>[
+                ButtonSegment<ReceiptPaperSize>(
+                  value: ReceiptPaperSize.mm80,
+                  label: Text('80 مم'),
+                  icon: Icon(Icons.receipt_outlined),
+                ),
+                ButtonSegment<ReceiptPaperSize>(
+                  value: ReceiptPaperSize.a4,
+                  label: Text('A4'),
+                  icon: Icon(Icons.description_outlined),
+                ),
+              ],
+              selected: <ReceiptPaperSize>{_selectedSize},
+              onSelectionChanged: _isBusy ? null : _onSizeSelected,
+              showSelectedIcon: false,
+              style: SegmentedButton.styleFrom(
+                visualDensity: VisualDensity.compact,
+              ),
+            ),
+          ],
+        ),
+      ),
+      actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      actions: <Widget>[
+        Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            AppButton(
+              label: 'طباعة',
+              icon: Icons.print_outlined,
+              expanded: true,
+              size: AppButtonSize.large,
+              isLoading: _isPrinting,
+              onPressed: _isBusy ? null : _print,
+            ),
+            const SizedBox(height: 8),
+            AppButton(
+              label: 'مشاركة PDF',
+              icon: Icons.ios_share,
+              variant: AppButtonVariant.outline,
+              expanded: true,
+              isLoading: _isSharing,
+              onPressed: _isBusy ? null : _share,
+            ),
+          ],
+        ),
+      ],
+      backgroundColor: scheme.surface,
+      scrollable: false,
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Summary helper
+  // ---------------------------------------------------------------------------
+
+  Widget _summaryRow(
+    ThemeData theme, {
+    required String label,
+    required String value,
+    bool emphasized = false,
+    Color? color,
+  }) {
+    final ColorScheme scheme = theme.colorScheme;
+    final Color effective = color ??
+        (emphasized ? scheme.primary : scheme.onSurface);
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 3),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(
+              label,
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
+          Text(
+            value,
+            style: (emphasized
+                    ? theme.textTheme.titleMedium
+                    : theme.textTheme.bodyLarge)
+                ?.copyWith(
+              color: effective,
+              fontWeight: emphasized ? FontWeight.w700 : FontWeight.w500,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _formatMoney(double value) {
+    final String fixed = value.toStringAsFixed(2);
+    return '$fixed ج.م';
+  }
+}
