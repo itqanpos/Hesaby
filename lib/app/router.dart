@@ -16,6 +16,7 @@ import '../features/products/presentation/pages/units_page.dart';
 import '../features/purchases/presentation/pages/purchase_detail_page.dart';
 import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
+import '../features/reports/presentation/pages/reports_hub_page.dart';
 import '../features/sales/presentation/pages/customers_page.dart';
 import '../features/sales/presentation/pages/returns_page.dart';
 import '../features/sales/presentation/pages/sale_detail_page.dart';
@@ -86,6 +87,10 @@ abstract final class AppRouter {
 
   static const String returnsPath = '/returns';
   static const String returnsName = 'returns';
+
+  // ---- Phase 9: Reports ----
+  static const String reportsPath = '/reports';
+  static const String reportsName = 'reports';
 
   // ---- Phase 6 (POS Foundation) ----
   static const String posPath = '/pos';
@@ -268,6 +273,13 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.returnsName,
         builder: (BuildContext context, GoRouterState state) =>
             const ReturnsPage(),
+      ),
+      // ---- Phase 9: Reports ----
+      GoRoute(
+        path: AppRouter.reportsPath,
+        name: AppRouter.reportsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const ReportsHubPage(),
       ),
       // ---- Phase 6: POS Foundation ----
       GoRoute(
