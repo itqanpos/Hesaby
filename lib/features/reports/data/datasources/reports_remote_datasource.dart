@@ -2,12 +2,12 @@
 
 import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
 
-import '../../../sales/domain/repositories/sales_repository.dart';
+import '../../domain/repositories/reports_repository.dart';
 
 /// Thin wrapper over the Supabase queries the reports feature needs.
 ///
 /// The heavy lifting (aggregation, grouping) happens client-side in
-/// [ReportsRepositoryImpl]; this datasource only fetches narrow slices of
+/// `ReportsRepositoryImpl`; this datasource only fetches narrow slices of
 /// the underlying tables with the correct filters.
 class ReportsRemoteDataSource {
   const ReportsRemoteDataSource(this._client);
@@ -17,12 +17,11 @@ class ReportsRemoteDataSource {
   bool get isAvailable => _client != null;
 
   /// Safety cap for report queries. Reports over longer periods fetch this
-  /// many rows at most; the UI can communicate that the result is truncated
-  /// if needed.
+  /// many rows at most.
   static const int safetyLimit = 5000;
 
-  /// How many ids to pass to a single `IN (...)` filter. PostgREST has a URL
-  /// length limit, so larger sets are chunked.
+  /// How many ids to pass to a single `IN (...)` filter. PostgREST has a
+  /// URL length limit, so larger sets are chunked.
   static const int inFilterChunkSize = 150;
 
   // ===========================================================================
@@ -30,10 +29,6 @@ class ReportsRemoteDataSource {
   // ===========================================================================
 
   /// Fetches the fields of every sale in the company over the period.
-  ///
-  /// Returns raw maps so the repository can decide which aggregate to
-  /// compute. Draft, confirmed and cancelled sales are all returned; the
-  /// repository filters by status.
   Future<List<Map<String, dynamic>>> fetchSales({
     required String companyId,
     required DateTime? fromDate,
@@ -64,8 +59,7 @@ class ReportsRemoteDataSource {
     return rows;
   }
 
-  /// Returns the ids of every confirmed sale in the period. Used to fetch
-  /// the corresponding `sale_items` in a second query.
+  /// Returns the ids of every confirmed sale in the period.
   Future<List<String>> fetchConfirmedSaleIds({
     required String companyId,
     required DateTime? fromDate,
@@ -86,8 +80,7 @@ class ReportsRemoteDataSource {
       query = query.lte('sale_date', _formatTimestamp(toDate));
     }
 
-    final List<Map<String, dynamic>> rows =
-        await query.limit(safetyLimit);
+    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
 
     return rows
         .map((Map<String, dynamic> r) => r['id'])
@@ -96,9 +89,6 @@ class ReportsRemoteDataSource {
   }
 
   /// Fetches the `sale_items` belonging to the given sales.
-  ///
-  /// The ids are chunked to keep each request URL below the PostgREST
-  /// length limit.
   Future<List<Map<String, dynamic>>> fetchSaleItems({
     required List<String> saleIds,
   }) async {
@@ -130,8 +120,7 @@ class ReportsRemoteDataSource {
   // RETURNS
   // ===========================================================================
 
-  /// Fetches confirmed returns for the period. Only the header fields that
-  /// contribute to the summary are selected.
+  /// Fetches confirmed returns for the period.
   Future<List<Map<String, dynamic>>> fetchReturns({
     required String companyId,
     required DateTime? fromDate,
