@@ -24,12 +24,23 @@ import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/sale_print_dialog.dart';
 import '../providers/sales_providers.dart';
 
+/// Date presets exposed as chips above the sales list.
+enum _SalesDateFilter {
+  all,
+  today,
+  thisWeek,
+  thisMonth,
+  thisYear,
+  custom,
+}
+
 /// Sales list page.
 ///
 /// Displays the sales invoices of the currently selected company, with
-/// client-side filters on status and invoice number. The detail view is
-/// presented as a modal dialog (`_SaleDetailDialog`) rather than a separate
-/// route, keeping the whole sales workflow in a single page file.
+/// client-side filters on date, status, payment status and a free-text
+/// search across invoice number and customer name. The detail view is
+/// presented as a modal dialog (`_SaleDetailDialog`) rather than a
+/// separate route.
 class SalesPage extends ConsumerStatefulWidget {
   const SalesPage({super.key});
 
@@ -44,11 +55,169 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   /// `null` means "all statuses".
   String? _statusFilter;
 
+  /// `null` means "all payment states".
+  String? _paymentFilter;
+
+  _SalesDateFilter _dateFilter = _SalesDateFilter.all;
+  DateTimeRange? _customDateRange;
+
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
   }
+
+  // ---------------------------------------------------------------------------
+  // Filter state helpers
+  // ---------------------------------------------------------------------------
+
+  bool get _hasActiveFilters {
+    return _searchQuery.trim().isNotEmpty ||
+        _statusFilter != null ||
+        _paymentFilter != null ||
+        _dateFilter != _SalesDateFilter.all;
+  }
+
+  DateTime? _computeFromDate() {
+    final DateTime now = DateTime.now();
+    switch (_dateFilter) {
+      case _SalesDateFilter.all:
+        return null;
+      case _SalesDateFilter.today:
+        return DateTime(now.year, now.month, now.day);
+      case _SalesDateFilter.thisWeek:
+        // ISO 8601: Monday is the first day of the week (`weekday == 1`).
+        return DateTime(now.year, now.month, now.day)
+            .subtract(Duration(days: now.weekday - 1));
+      case _SalesDateFilter.thisMonth:
+        return DateTime(now.year, now.month, 1);
+      case _SalesDateFilter.thisYear:
+        return DateTime(now.year, 1, 1);
+      case _SalesDateFilter.custom:
+        final DateTime? start = _customDateRange?.start;
+        if (start == null) {
+          return null;
+        }
+        return DateTime(start.year, start.month, start.day);
+    }
+  }
+
+  DateTime? _computeToDate() {
+    final DateTime now = DateTime.now();
+    switch (_dateFilter) {
+      case _SalesDateFilter.all:
+        return null;
+      case _SalesDateFilter.today:
+        return DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
+      case _SalesDateFilter.thisWeek:
+      case _SalesDateFilter.thisMonth:
+      case _SalesDateFilter.thisYear:
+        return now;
+      case _SalesDateFilter.custom:
+        final DateTime? end = _customDateRange?.end;
+        if (end == null) {
+          return null;
+        }
+        return DateTime(end.year, end.month, end.day, 23, 59, 59, 999);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Filter actions
+  // ---------------------------------------------------------------------------
+
+  Future<void> _selectDateFilter(_SalesDateFilter next) async {
+    if (next != _SalesDateFilter.custom) {
+      setState(() {
+        _dateFilter = next;
+        _customDateRange = null;
+      });
+      return;
+    }
+
+    // Custom range: open a date-range picker. Keep the previous custom
+    // range as the initial selection if the user has one already.
+    final DateTime now = DateTime.now();
+    final DateTimeRange? picked = await showDateRangePicker(
+      context: context,
+      firstDate: DateTime(now.year - 5),
+      lastDate: now,
+      initialDateRange: _customDateRange,
+      helpText: 'اختر الفترة',
+      saveText: 'تطبيق',
+    );
+
+    if (picked == null || !mounted) {
+      return;
+    }
+    setState(() {
+      _dateFilter = _SalesDateFilter.custom;
+      _customDateRange = picked;
+    });
+  }
+
+  void _clearAllFilters() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _statusFilter = null;
+      _paymentFilter = null;
+      _dateFilter = _SalesDateFilter.all;
+      _customDateRange = null;
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // Filtering
+  // ---------------------------------------------------------------------------
+
+  bool _matchesFilters(Sale sale, Map<String, String> customerNames) {
+    // 1) Status
+    if (_statusFilter != null && sale.status != _statusFilter) {
+      return false;
+    }
+
+    // 2) Payment status
+    if (_paymentFilter != null && sale.paymentStatus != _paymentFilter) {
+      return false;
+    }
+
+    // 3) Date window (inclusive)
+    final DateTime localDate = sale.saleDate.toLocal();
+    final DateTime? fromDate = _computeFromDate();
+    final DateTime? toDate = _computeToDate();
+    if (fromDate != null && localDate.isBefore(fromDate)) {
+      return false;
+    }
+    if (toDate != null && localDate.isAfter(toDate)) {
+      return false;
+    }
+
+    // 4) Free-text search: invoice number OR customer name
+    final String trimmed = _searchQuery.trim().toLowerCase();
+    if (trimmed.isEmpty) {
+      return true;
+    }
+
+    final String invoice = (sale.invoiceNumber ?? '').toLowerCase();
+    if (invoice.contains(trimmed)) {
+      return true;
+    }
+
+    final String? customerId = sale.customerId;
+    if (customerId != null) {
+      final String name = customerNames[customerId] ?? '';
+      if (name.toLowerCase().contains(trimmed)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -112,25 +281,49 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               customer.id: customer.name,
           };
 
-          final List<Sale> filtered =
-              _applyFilters(allSales, _statusFilter, _searchQuery);
+          final List<Sale> filtered = allSales
+              .where((Sale s) => _matchesFilters(s, customerNames))
+              .toList(growable: false);
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              // ---- Search field ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: AppTextField(
                   controller: _searchController,
-                  hint: 'ابحث برقم الفاتورة',
+                  hint: 'ابحث برقم الفاتورة أو اسم العميل',
                   prefixIcon: Icons.search,
+                  suffixIcon: _searchQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'مسح البحث',
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        ),
                   onChanged: (String value) {
                     setState(() => _searchQuery = value);
                   },
                 ),
               ),
+
+              // ---- Date filter chips ----
               Padding(
-                padding: const EdgeInsets.only(bottom: 12),
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _DateFilterChips(
+                  selected: _dateFilter,
+                  customRange: _customDateRange,
+                  onChanged: _selectDateFilter,
+                ),
+              ),
+
+              // ---- Status filter chips ----
+              Padding(
+                padding: const EdgeInsets.only(bottom: 6),
                 child: _StatusFilterChips(
                   selected: _statusFilter,
                   onChanged: (String? status) {
@@ -138,6 +331,34 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   },
                 ),
               ),
+
+              // ---- Payment filter chips ----
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
+                child: _PaymentFilterChips(
+                  selected: _paymentFilter,
+                  onChanged: (String? payment) {
+                    setState(() => _paymentFilter = payment);
+                  },
+                ),
+              ),
+
+              // ---- Clear all filters ----
+              if (_hasActiveFilters)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 8),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: ActionChip(
+                      avatar: const Icon(Icons.filter_alt_off_outlined,
+                          size: 16),
+                      label: const Text('مسح الفلاتر'),
+                      onPressed: _clearAllFilters,
+                    ),
+                  ),
+                ),
+
+              // ---- List ----
               Expanded(
                 child: allSales.isEmpty
                     ? AppEmptyView(
@@ -153,10 +374,18 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                         ),
                       )
                     : filtered.isEmpty
-                        ? const AppEmptyView(
+                        ? AppEmptyView(
                             icon: Icons.search_off_outlined,
                             title: 'لا نتائج',
-                            message: 'لم تُطابق أي فاتورة معايير البحث.',
+                            message: 'لم تُطابق أي فاتورة الفلاتر المحددة.',
+                            action: _hasActiveFilters
+                                ? AppButton(
+                                    label: 'مسح الفلاتر',
+                                    icon: Icons.filter_alt_off_outlined,
+                                    variant: AppButtonVariant.secondary,
+                                    onPressed: _clearAllFilters,
+                                  )
+                                : null,
                           )
                         : ListView.separated(
                             padding: const EdgeInsets.only(bottom: 24),
@@ -187,28 +416,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Filtering
-  // ---------------------------------------------------------------------------
-
-  List<Sale> _applyFilters(
-    List<Sale> sales,
-    String? status,
-    String query,
-  ) {
-    final String trimmed = query.trim().toLowerCase();
-    return sales.where((Sale sale) {
-      if (status != null && sale.status != status) {
-        return false;
-      }
-      if (trimmed.isEmpty) {
-        return true;
-      }
-      final String invoice = (sale.invoiceNumber ?? '').toLowerCase();
-      return invoice.contains(trimmed);
-    }).toList(growable: false);
-  }
-
-  // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
 
@@ -234,7 +441,66 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 }
 
 // -----------------------------------------------------------------------------
-// Filter chips
+// Date filter chips
+// -----------------------------------------------------------------------------
+
+class _DateFilterChips extends StatelessWidget {
+  const _DateFilterChips({
+    required this.selected,
+    required this.customRange,
+    required this.onChanged,
+  });
+
+  final _SalesDateFilter selected;
+  final DateTimeRange? customRange;
+  final Future<void> Function(_SalesDateFilter) onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: <Widget>[
+          _chip(context, 'الكل', _SalesDateFilter.all),
+          const SizedBox(width: 8),
+          _chip(context, 'اليوم', _SalesDateFilter.today),
+          const SizedBox(width: 8),
+          _chip(context, 'هذا الأسبوع', _SalesDateFilter.thisWeek),
+          const SizedBox(width: 8),
+          _chip(context, 'هذا الشهر', _SalesDateFilter.thisMonth),
+          const SizedBox(width: 8),
+          _chip(context, 'هذا العام', _SalesDateFilter.thisYear),
+          const SizedBox(width: 8),
+          _chip(context, _customLabel(), _SalesDateFilter.custom),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(
+    BuildContext context,
+    String label,
+    _SalesDateFilter value,
+  ) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected == value,
+      onSelected: (_) => onChanged(value),
+    );
+  }
+
+  String _customLabel() {
+    if (selected == _SalesDateFilter.custom && customRange != null) {
+      final DateFormat fmt = DateFormat('yy/MM/dd');
+      return '${fmt.format(customRange!.start)} → '
+          '${fmt.format(customRange!.end)}';
+    }
+    return 'نطاق مخصص';
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Status filter chips
 // -----------------------------------------------------------------------------
 
 class _StatusFilterChips extends StatelessWidget {
@@ -252,13 +518,53 @@ class _StatusFilterChips extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: <Widget>[
-          _chip(context, 'الكل', null),
+          _chip(context, 'كل الحالات', null),
           const SizedBox(width: 8),
           _chip(context, 'مسودة', SaleStatus.draft),
           const SizedBox(width: 8),
           _chip(context, 'مؤكدة', SaleStatus.confirmed),
           const SizedBox(width: 8),
           _chip(context, 'ملغاة', SaleStatus.cancelled),
+        ],
+      ),
+    );
+  }
+
+  Widget _chip(BuildContext context, String label, String? value) {
+    return ChoiceChip(
+      label: Text(label),
+      selected: selected == value,
+      onSelected: (_) => onChanged(value),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Payment filter chips
+// -----------------------------------------------------------------------------
+
+class _PaymentFilterChips extends StatelessWidget {
+  const _PaymentFilterChips({
+    required this.selected,
+    required this.onChanged,
+  });
+
+  final String? selected;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: <Widget>[
+          _chip(context, 'كل المدفوعات', null),
+          const SizedBox(width: 8),
+          _chip(context, 'غير مدفوع', PaymentStatus.unpaid),
+          const SizedBox(width: 8),
+          _chip(context, 'مدفوع جزئيًا', PaymentStatus.partial),
+          const SizedBox(width: 8),
+          _chip(context, 'مدفوع', PaymentStatus.paid),
         ],
       ),
     );
@@ -775,7 +1081,6 @@ class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
       customerName: customerName,
       productNames: productNames,
       unitNames: unitNames,
-      customers: customers,
       contextState: contextState,
     );
 
@@ -784,41 +1089,19 @@ class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
 
   /// Builds the [Receipt] value object passed to the print dialog.
   ///
-  /// The balance-evolution block is only populated when the sale is
-  /// attached to a registered customer and still has an outstanding amount.
-  /// Otherwise both `previousBalance` and `newBalance` stay `null` and the
-  /// PDF printer renders the standard receipt layout.
+  /// The customer's *current* balance is informational only. For a sale
+  /// that may have been printed long after it was confirmed, we cannot
+  /// reconstruct the balance that existed before the sale — payments,
+  /// later sales and adjustments since then would all be invisible.
+  /// We therefore do not pass `previousBalance` / `newBalance`.
   Receipt _buildReceipt({
     required Sale sale,
     required List<SaleItem> items,
     required String customerName,
     required Map<String, String> productNames,
     required Map<String, String> unitNames,
-    required List<Customer> customers,
     required CompanyContextState contextState,
   }) {
-    // Resolve the customer's current balance from the loaded list (if any).
-    double? currentBalance;
-    if (sale.customerId != null) {
-      for (final Customer c in customers) {
-        if (c.id == sale.customerId) {
-          currentBalance = c.balance;
-          break;
-        }
-      }
-    }
-
-    // The amount still owed on this invoice.
-    final double amountDue = sale.amountDue;
-
-    // Show the balance evolution only when we know the customer's balance
-    // AND the sale actually added something to what they owe.
-    final bool hasBalanceChange =
-        currentBalance != null && amountDue > 0;
-    final double? previousBalance =
-        hasBalanceChange ? currentBalance - amountDue : null;
-    final double? newBalance = hasBalanceChange ? currentBalance : null;
-
     return Receipt(
       saleId: sale.id,
       invoiceNumber: sale.invoiceNumber,
@@ -840,10 +1123,10 @@ class _SaleDetailDialogState extends ConsumerState<_SaleDetailDialog> {
       taxAmount: sale.taxAmount,
       total: sale.total,
       paidAmount: sale.paidAmount,
-      change: 0, // The sales form enforces paid ≤ total.
+      change: 0,
       customerName: sale.customerId != null ? customerName : null,
-      previousBalance: previousBalance,
-      newBalance: newBalance,
+      previousBalance: null,
+      newBalance: null,
     );
   }
 
