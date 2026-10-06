@@ -23,6 +23,7 @@ import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/sale_print_dialog.dart';
 import '../providers/sales_providers.dart';
+import '../widgets/sales_kpi_row.dart';
 
 /// Date presets exposed as chips above the sales list.
 enum _SalesDateFilter {
@@ -288,6 +289,12 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              // ---- KPI overview (unaffected by filters) ----
+              Padding(
+                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                child: SalesKpiRow(sales: allSales),
+              ),
+
               // ---- Search field ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
