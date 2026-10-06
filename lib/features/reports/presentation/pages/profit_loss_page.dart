@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/financial_reports.dart';
+import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
+import '../widgets/report_print_action.dart';
 
-/// Profit & Loss report page.
 class ProfitLossPage extends ConsumerStatefulWidget {
   const ProfitLossPage({super.key});
 
@@ -37,6 +38,108 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
         .catchError((_) => ProfitLossSummary.empty(p));
   }
 
+  ReportDocument? _buildDocument(
+    ReportPeriod period,
+    ProfitLossSummary report,
+  ) {
+    if (report.grossRevenue == 0 &&
+        report.returnTotal == 0 &&
+        report.costOfGoodsSold == 0) {
+      return null;
+    }
+
+    return ReportDocument(
+      title: 'الأرباح والخسائر',
+      periodLabel: period.label,
+      companyName: '—',
+      generatedAt: DateTime.now(),
+      sections: <ReportSection>[
+        ReportSection(
+          kpis: <ReportKpi>[
+            ReportKpi(
+              label: report.isProfitable ? 'صافي الربح' : 'صافي الخسارة',
+              value: _money.format(report.netProfit.abs()),
+              emphasized: true,
+            ),
+            ReportKpi(
+              label: 'صافي الإيرادات',
+              value: _money.format(report.netRevenue),
+            ),
+            ReportKpi(
+              label: 'تكلفة المبيعات',
+              value: _money.format(report.costOfGoodsSold),
+            ),
+            ReportKpi(
+              label: 'هامش الربح',
+              value: report.netRevenue > 0
+                  ? _percent.format(report.netMargin)
+                  : '—',
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'الإيرادات',
+          lines: <ReportLine>[
+            ReportLine(
+              label: 'إجمالي المبيعات',
+              value: _money.format(report.grossRevenue),
+            ),
+            if (report.returnTotal > 0)
+              ReportLine(
+                label: 'المرتجعات',
+                value: '−${_money.format(report.returnTotal)}',
+              ),
+            ReportLine(
+              label: 'صافي الإيرادات',
+              value: _money.format(report.netRevenue),
+              emphasized: true,
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'التكاليف',
+          lines: <ReportLine>[
+            ReportLine(
+              label: 'تكلفة المبيعات (COGS)',
+              value: _money.format(report.costOfGoodsSold),
+            ),
+            ReportLine(
+              label: 'المصروفات التشغيلية',
+              value: _money.format(report.operatingExpenses),
+            ),
+            ReportLine(
+              label: 'إجمالي التكاليف',
+              value: _money.format(
+                report.costOfGoodsSold + report.operatingExpenses,
+              ),
+              emphasized: true,
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'النتيجة',
+          lines: <ReportLine>[
+            ReportLine(
+              label: 'الربح الإجمالي',
+              value: _money.format(report.grossProfit),
+            ),
+            ReportLine(
+              label: 'صافي الربح',
+              value: _money.format(report.netProfit),
+              emphasized: true,
+            ),
+            ReportLine(
+              label: 'هامش الربح الإجمالي',
+              value: report.netRevenue > 0
+                  ? _percent.format(report.grossMargin)
+                  : '—',
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ReportPeriod period = ref.watch(reportPagePeriodProvider);
@@ -51,6 +154,13 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
       errorMessage:
           reportAsync.hasError ? _errorMessage(reportAsync.error!) : null,
       onRetry: () => ref.invalidate(profitLossProvider(period)),
+      trailing: ReportPrintAction(
+        documentBuilder: () {
+          final ProfitLossSummary? report = reportAsync.valueOrNull;
+          if (report == null) return null;
+          return _buildDocument(period, report);
+        },
+      ),
       body: reportAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
@@ -104,11 +214,7 @@ class _Body extends StatelessWidget {
       children: <Widget>[
         _PeriodHeader(period: report.period),
         const SizedBox(height: 12),
-        _HeroCard(
-          report: report,
-          money: money,
-          percent: percent,
-        ),
+        _HeroCard(report: report, money: money, percent: percent),
         const SizedBox(height: 16),
         _BreakdownCard(
           title: 'الإيرادات',
@@ -178,20 +284,14 @@ class _Body extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Period header
-// ============================================================================
-
 class _PeriodHeader extends StatelessWidget {
   const _PeriodHeader({required this.period});
-
   final ReportPeriod period;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
@@ -211,10 +311,6 @@ class _PeriodHeader extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Hero card
-// ============================================================================
 
 class _HeroCard extends StatelessWidget {
   const _HeroCard({
@@ -242,10 +338,7 @@ class _HeroCard extends StatelessWidget {
                   const Color(0xFF2E7D32),
                   const Color(0xFF66BB6A),
                 ]
-              : <Color>[
-                  scheme.error,
-                  scheme.errorContainer,
-                ],
+              : <Color>[scheme.error, scheme.errorContainer],
           begin: AlignmentDirectional.topStart,
           end: AlignmentDirectional.bottomEnd,
         ),
@@ -307,10 +400,6 @@ class _HeroCard extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Breakdown card
-// ============================================================================
 
 class _BreakdownCard extends StatelessWidget {
   const _BreakdownCard({
