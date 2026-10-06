@@ -16,33 +16,52 @@ import '../providers/unit_providers.dart';
 
 /// Opens the product create / edit dialog.
 ///
-/// Pass [existing] to edit an existing product, or leave it `null` to create
-/// a new one. Returns `true` when the product was saved, `false` when the
-/// user cancelled, and `null` when the dialog was dismissed.
+/// * Pass [existing] to edit an existing product, or leave it `null` to
+///   create a new one.
+/// * [initialBarcode] is used to pre-fill the barcode field in **create**
+///   mode only; it is ignored in edit mode.
+/// * [onSaved] is invoked with the saved [Product] just before the dialog
+///   returns `true`. Used by the POS quick-create flow to add the newly
+///   created product to the cart without an extra lookup.
 ///
-/// The dialog obtains its [WidgetRef] from its own [ConsumerState]; a
-/// caller-supplied ref is therefore not required (and would be redundant,
-/// producing an unused-parameter lint).
+/// Returns `true` when the product was saved, `false` when the user
+/// cancelled, and `null` when the dialog was dismissed.
 Future<bool?> showProductFormDialog({
   required BuildContext context,
   Product? existing,
+  String? initialBarcode,
+  ValueChanged<Product>? onSaved,
 }) {
   return showDialog<bool>(
     context: context,
     barrierDismissible: false,
-    builder: (BuildContext dialogContext) =>
-        _ProductFormDialog(existing: existing),
+    builder: (BuildContext dialogContext) => _ProductFormDialog(
+      existing: existing,
+      initialBarcode: initialBarcode,
+      onSaved: onSaved,
+    ),
   );
 }
 
 class _ProductFormDialog extends ConsumerStatefulWidget {
-  const _ProductFormDialog({this.existing});
+  const _ProductFormDialog({
+    this.existing,
+    this.initialBarcode,
+    this.onSaved,
+  });
 
   /// When non-null, the dialog is in edit mode.
   final Product? existing;
 
+  /// Barcode to pre-fill in create mode.
+  final String? initialBarcode;
+
+  /// Called with the saved product just before the dialog closes.
+  final ValueChanged<Product>? onSaved;
+
   @override
-  ConsumerState<_ProductFormDialog> createState() => _ProductFormDialogState();
+  ConsumerState<_ProductFormDialog> createState() =>
+      _ProductFormDialogState();
 }
 
 class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
@@ -70,7 +89,9 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     final Product? existing = widget.existing;
     _nameController = TextEditingController(text: existing?.name ?? '');
     _skuController = TextEditingController(text: existing?.sku ?? '');
-    _barcodeController = TextEditingController(text: existing?.barcode ?? '');
+    _barcodeController = TextEditingController(
+      text: existing?.barcode ?? widget.initialBarcode ?? '',
+    );
     _sellingPriceController = TextEditingController(
       text: existing == null ? '' : _formatNumber(existing.sellingPrice),
     );
@@ -128,7 +149,8 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
 
     final double? sellingPrice =
         double.tryParse(_sellingPriceController.text.trim());
-    final double? costPrice = double.tryParse(_costPriceController.text.trim());
+    final double? costPrice =
+        double.tryParse(_costPriceController.text.trim());
     if (sellingPrice == null || costPrice == null) {
       setState(() => _failureType = ProductFailureType.invalidResponse);
       return;
@@ -143,8 +165,9 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
     final String? description = _emptyToNull(_descriptionController.text);
 
     try {
+      final Product saved;
       if (widget.existing == null) {
-        await notifier.createProduct(
+        saved = await notifier.createProduct(
           name: name,
           defaultUnitId: unitId,
           costPrice: costPrice,
@@ -155,7 +178,7 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
           description: description,
         );
       } else {
-        await notifier.updateProduct(
+        saved = await notifier.updateProduct(
           productId: widget.existing!.id,
           name: name,
           defaultUnitId: unitId,
@@ -172,6 +195,8 @@ class _ProductFormDialogState extends ConsumerState<_ProductFormDialog> {
           isActive: _isActive,
         );
       }
+
+      widget.onSaved?.call(saved);
 
       if (!mounted) {
         return;
@@ -495,7 +520,11 @@ class _FailureBanner extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Icon(Icons.error_outline, color: scheme.onErrorContainer, size: 20),
+            Icon(
+              Icons.error_outline,
+              color: scheme.onErrorContainer,
+              size: 20,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
