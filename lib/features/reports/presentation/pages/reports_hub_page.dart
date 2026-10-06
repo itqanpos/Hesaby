@@ -8,8 +8,9 @@ import '../../../../shared/layouts/app_shell.dart';
 
 /// Reports hub — a single entry point that groups every report by theme.
 ///
-/// No data is loaded here; the tiles only navigate to the individual
-/// report pages, each of which owns its own period selector.
+/// Each tile that is not yet implemented points to `null` and shows a
+/// "قريبًا" snack bar instead of navigating. As the actual report pages
+/// land in later phases, their `routeName` is filled in.
 class ReportsHubPage extends StatelessWidget {
   const ReportsHubPage({super.key});
 
@@ -28,21 +29,18 @@ class ReportsHubPage extends StatelessWidget {
                 color: Color(0xFF0F7B6C),
                 title: 'ملخص المبيعات',
                 subtitle: 'إجماليات، مدفوع، متبقٍ، مرتجعات',
-                routeName: AppRouter.reportSalesSummaryName,
               ),
               const _ReportTile(
                 icon: Icons.local_fire_department_outlined,
                 color: Color(0xFFE65100),
                 title: 'المنتجات الأكثر مبيعًا',
                 subtitle: 'Top 20 حسب الكمية والقيمة',
-                routeName: AppRouter.reportTopProductsName,
               ),
               const _ReportTile(
                 icon: Icons.star_outline,
                 color: Color(0xFF0288D1),
                 title: 'العملاء الأكثر شراءً',
                 subtitle: 'Top 20 حسب القيمة',
-                routeName: AppRouter.reportTopCustomersName,
               ),
             ],
           ),
@@ -55,21 +53,18 @@ class ReportsHubPage extends StatelessWidget {
                 color: Color(0xFF6A1B9A),
                 title: 'تقييم المخزون',
                 subtitle: 'قيمة المخزون الحالي لكل منتج',
-                routeName: AppRouter.reportStockValuationName,
               ),
               const _ReportTile(
                 icon: Icons.warning_amber_outlined,
                 color: Color(0xFFC62828),
                 title: 'المخزون المنخفض',
                 subtitle: 'منتجات تحت حد الطلب',
-                routeName: AppRouter.reportLowStockName,
               ),
               const _ReportTile(
                 icon: Icons.hourglass_empty,
                 color: Color(0xFF5D4037),
                 title: 'المنتجات الراكدة',
                 subtitle: 'لم تُبَع خلال 30 / 60 / 90 يومًا',
-                routeName: AppRouter.reportDeadStockName,
               ),
             ],
           ),
@@ -82,14 +77,12 @@ class ReportsHubPage extends StatelessWidget {
                 color: Color(0xFF2E7D32),
                 title: 'الأرباح والخسائر',
                 subtitle: 'إيرادات − تكلفة المبيعات − مرتجعات',
-                routeName: AppRouter.reportProfitLossName,
               ),
               const _ReportTile(
                 icon: Icons.account_balance_wallet_outlined,
                 color: Color(0xFFEF6C00),
                 title: 'المدينون',
                 subtitle: 'أرصدة العملاء المستحقة',
-                routeName: AppRouter.reportReceivablesName,
               ),
             ],
           ),
@@ -158,26 +151,43 @@ class _ReportTile extends StatelessWidget {
     required this.color,
     required this.title,
     required this.subtitle,
-    required this.routeName,
+    this.routeName,
   });
 
   final IconData icon;
   final Color color;
   final String title;
   final String subtitle;
-  final String routeName;
+
+  /// When `null`, the tile is not yet wired to a route and shows a
+  /// "قريبًا" snack bar instead of navigating.
+  final String? routeName;
+
+  void _handleTap(BuildContext context) {
+    final String? route = routeName;
+    if (route == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('هذا التقرير قريبًا.')),
+        );
+      return;
+    }
+    context.pushNamed(route);
+  }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final bool isEnabled = routeName != null;
 
     return Material(
       color: scheme.surface,
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: () => context.pushNamed(routeName),
+        onTap: () => _handleTap(context),
         child: DecoratedBox(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
@@ -221,10 +231,32 @@ class _ReportTile extends StatelessWidget {
                     ],
                   ),
                 ),
-                Icon(
-                  Icons.chevron_left,
-                  color: scheme.onSurfaceVariant,
-                ),
+                const SizedBox(width: 8),
+                if (!isEnabled)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(999),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      child: Text(
+                        'قريبًا',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                    ),
+                  )
+                else
+                  Icon(
+                    Icons.chevron_left,
+                    color: scheme.onSurfaceVariant,
+                  ),
               ],
             ),
           ),
