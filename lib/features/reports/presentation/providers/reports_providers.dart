@@ -12,8 +12,11 @@ import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
+import '../../../suppliers/domain/entities/supplier.dart';
+import '../../../suppliers/presentation/providers/supplier_providers.dart';
 import '../../data/datasources/reports_remote_datasource.dart';
 import '../../data/repositories/reports_repository_impl.dart';
+import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
@@ -49,9 +52,6 @@ Map<String, String> _buildProductNames(Ref ref) {
 }
 
 /// Builds `{productId: defaultUnitName}` from the current catalogue.
-///
-/// A product's display unit is its `defaultUnitId`; when that unit is
-/// missing from the units list, the entry is omitted.
 Map<String, String> _buildUnitNamesByProduct(Ref ref) {
   final List<Product> products =
       ref.watch(productsProvider).value ?? const <Product>[];
@@ -77,7 +77,6 @@ Map<String, String> _buildUnitNamesByProduct(Ref ref) {
 // Sales summary
 // ============================================================================
 
-/// Sales summary for the currently selected company over [period].
 class SalesSummaryNotifier
     extends FamilyAsyncNotifier<SalesSummary, ReportPeriod> {
   @override
@@ -226,11 +225,6 @@ final salesByCashierProvider = AsyncNotifierProvider.family<
 // Stock valuation
 // ============================================================================
 
-/// Current stock valuation for the selected company (and current branch,
-/// when one is selected).
-///
-/// This is a *state* report, not a time-window report: no [ReportPeriod] is
-/// involved.
 class StockValuationNotifier extends AsyncNotifier<StockValuationReport> {
   @override
   Future<StockValuationReport> build() async {
@@ -274,8 +268,6 @@ final stockValuationProvider =
 // Low stock
 // ============================================================================
 
-/// Current list of products whose on-hand stock is at or below their
-/// configured minimum.
 class LowStockNotifier extends AsyncNotifier<List<LowStockItem>> {
   @override
   Future<List<LowStockItem>> build() async {
@@ -319,7 +311,6 @@ final lowStockProvider =
 // Dead stock
 // ============================================================================
 
-/// Products with stock on hand that have not sold within [DeadStockWindow].
 class DeadStockNotifier
     extends FamilyAsyncNotifier<List<DeadStockItem>, DeadStockWindow> {
   @override
@@ -359,6 +350,119 @@ class DeadStockNotifier
 final deadStockProvider = AsyncNotifierProvider.family<
     DeadStockNotifier, List<DeadStockItem>, DeadStockWindow>(
   DeadStockNotifier.new,
+);
+
+// ============================================================================
+// Profit & Loss
+// ============================================================================
+
+/// Profit & loss summary for the current company over [period].
+class ProfitLossNotifier
+    extends FamilyAsyncNotifier<ProfitLossSummary, ReportPeriod> {
+  @override
+  Future<ProfitLossSummary> build(ReportPeriod period) async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return ProfitLossSummary.empty(period);
+    }
+
+    return ref.read(reportsRepositoryProvider).getProfitLoss(
+          companyId: companyId,
+          period: period,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final profitLossProvider = AsyncNotifierProvider.family<
+    ProfitLossNotifier, ProfitLossSummary, ReportPeriod>(
+  ProfitLossNotifier.new,
+);
+
+// ============================================================================
+// Receivables
+// ============================================================================
+
+/// Current accounts receivable for the selected company.
+///
+/// This is a *state* report, not a time-window report: no [ReportPeriod] is
+/// involved.
+class ReceivablesNotifier extends AsyncNotifier<ReceivablesReport> {
+  @override
+  Future<ReceivablesReport> build() async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return ReceivablesReport.empty();
+    }
+
+    return ref.read(reportsRepositoryProvider).getReceivables(
+          companyId: companyId,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final receivablesProvider =
+    AsyncNotifierProvider<ReceivablesNotifier, ReceivablesReport>(
+  ReceivablesNotifier.new,
+);
+
+// ============================================================================
+// Payables
+// ============================================================================
+
+/// Accounts payable for the current company over [period].
+class PayablesNotifier
+    extends FamilyAsyncNotifier<PayablesReport, ReportPeriod> {
+  @override
+  Future<PayablesReport> build(ReportPeriod period) async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return PayablesReport.empty(period);
+    }
+
+    final List<Supplier> suppliers =
+        ref.watch(suppliersProvider).value ?? const <Supplier>[];
+    final Map<String, String> supplierNames = <String, String>{
+      for (final Supplier s in suppliers) s.id: s.name,
+    };
+
+    return ref.read(reportsRepositoryProvider).getPayables(
+          companyId: companyId,
+          period: period,
+          supplierNames: supplierNames,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final payablesProvider = AsyncNotifierProvider.family<
+    PayablesNotifier, PayablesReport, ReportPeriod>(
+  PayablesNotifier.new,
 );
 
 // ============================================================================
