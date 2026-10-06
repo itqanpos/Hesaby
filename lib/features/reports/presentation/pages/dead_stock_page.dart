@@ -108,10 +108,22 @@ class _DeadStockPageState extends ConsumerState<DeadStockPage> {
       errorMessage:
           itemsAsync.hasError ? _errorMessage(itemsAsync.error!) : null,
       onRetry: () => ref.invalidate(deadStockProvider(window)),
-      trailing: _WindowSelector(
-        window: window,
-        onChanged: (DeadStockWindow w) =>
-            ref.read(deadStockWindowProvider.notifier).setWindow(w),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          ReportPrintAction(
+            documentBuilder: () {
+              final List<DeadStockItem>? list = itemsAsync.valueOrNull;
+              if (list == null) return null;
+              return _buildDocument(window, list);
+            },
+          ),
+          _WindowSelector(
+            window: window,
+            onChanged: (DeadStockWindow w) =>
+                ref.read(deadStockWindowProvider.notifier).setWindow(w),
+          ),
+        ],
       ),
       body: itemsAsync.when(
         loading: () => const SizedBox.shrink(),
