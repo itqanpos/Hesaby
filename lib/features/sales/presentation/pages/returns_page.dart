@@ -10,9 +10,18 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/unit.dart';
+import '../../../products/presentation/providers/product_providers.dart';
+import '../../../products/presentation/providers/unit_providers.dart';
+import '../../data/services/pdf_return_builder.dart';
+import '../../domain/entities/return_receipt.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/entities/sale_return.dart';
 import '../../domain/repositories/sales_repository.dart';
+import '../dialogs/return_print_dialog.dart';
 import '../dialogs/sales_filter_sheet.dart';
 import '../providers/sales_providers.dart';
 
@@ -22,6 +31,7 @@ import '../providers/sales_providers.dart';
 /// * Search by return number, sale invoice, or customer name.
 /// * Compact filter button with an active-count badge.
 /// * Tapping a return opens a bottom sheet with its items.
+/// * Each card exposes a print action (80 mm / A4).
 class ReturnsPage extends ConsumerStatefulWidget {
   const ReturnsPage({super.key});
 
@@ -253,6 +263,8 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
                                 saleInvoice:
                                     invoiceBySaleId[r.saleId] ?? '—',
                                 onTap: () => _openDetail(context, r),
+                                onPrint: () =>
+                                    _printReturn(context, r),
                               );
                             },
                           ),
@@ -273,6 +285,100 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
       builder: (BuildContext sheetContext) =>
           _ReturnDetailSheet(saleReturn: r),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Print
+  // ---------------------------------------------------------------------------
+
+  Future<void> _printReturn(
+    BuildContext context,
+    SaleReturn saleReturn,
+  ) async {
+    try {
+      // 1) Load the return items + product/unit names.
+      final List<SaleReturnItem> items =
+          await ref.read(returnsRepositoryProvider).listReturnItems(
+                saleReturn.id,
+              );
+
+      final List<Product> products =
+          ref.read(productsProvider).value ?? const <Product>[];
+      final List<Unit> units =
+          ref.read(unitsProvider).value ?? const <Unit>[];
+      final List<Customer> customers =
+          ref.read(customersProvider).value ?? const <Customer>[];
+      final List<Sale> sales =
+          ref.read(salesProvider).value ?? const <Sale>[];
+
+      final Map<String, String> productNames = <String, String>{
+        for (final Product p in products) p.id: p.name,
+      };
+      final Map<String, String> unitNames = <String, String>{
+        for (final Unit u in units) u.id: u.name,
+      };
+
+      String? customerName;
+      if (saleReturn.customerId != null) {
+        for (final Customer c in customers) {
+          if (c.id == saleReturn.customerId) {
+            customerName = c.name;
+            break;
+          }
+        }
+      }
+
+      String? saleInvoice;
+      for (final Sale s in sales) {
+        if (s.id == saleReturn.saleId) {
+          saleInvoice = s.invoiceNumber;
+          break;
+        }
+      }
+
+      final CompanyContextState contextState =
+          ref.read(companyContextProvider);
+
+      final ReturnReceipt receipt = ReturnReceipt(
+        returnId: saleReturn.id,
+        returnNumber: saleReturn.returnNumber,
+        dateTime: saleReturn.returnDate,
+        companyName: contextState.currentCompany?.name ?? '—',
+        branchName: contextState.currentBranch?.name ?? '—',
+        lines: <ReturnReceiptLine>[
+          for (final SaleReturnItem it in items)
+            ReturnReceiptLine(
+              productName:
+                  productNames[it.productId] ?? 'منتج محذوف',
+              unitName: unitNames[it.unitId] ?? 'وحدة',
+              quantity: it.quantity,
+              unitPrice: it.unitPrice,
+              lineTotal: it.lineTotal,
+            ),
+        ],
+        total: saleReturn.total,
+        refundMethodLabel:
+            _refundMethodLabel(saleReturn.refundMethod),
+        saleInvoiceNumber: saleInvoice,
+        customerName: customerName,
+      );
+
+      if (!context.mounted) {
+        return;
+      }
+      await showReturnPrintDialog(context: context, receipt: receipt);
+    } on Object {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('تعذّر تجهيز المرتجع للطباعة.'),
+          ),
+        );
+    }
   }
 
   static String _resolveCustomerName(
@@ -632,12 +738,14 @@ class _ReturnCard extends StatelessWidget {
     required this.customerName,
     required this.saleInvoice,
     required this.onTap,
+    required this.onPrint,
   });
 
   final SaleReturn saleReturn;
   final String customerName;
   final String saleInvoice;
   final VoidCallback onTap;
+  final VoidCallback onPrint;
 
   @override
   Widget build(BuildContext context) {
@@ -747,6 +855,12 @@ class _ReturnCard extends StatelessWidget {
                   ],
                 ),
               ),
+              IconButton(
+                tooltip: 'طباعة',
+                icon: const Icon(Icons.print_outlined),
+                color: scheme.primary,
+                onPressed: onPrint,
+              ),
             ],
           ),
         ),
@@ -776,6 +890,17 @@ class _ReturnDetailSheet extends ConsumerWidget {
     final NumberFormat qty = NumberFormat.decimalPattern('ar_EG');
     final AsyncValue<List<SaleReturnItem>> itemsAsync =
         ref.watch(returnItemsProvider(saleReturn.id));
+    final List<Product> products =
+        ref.watch(productsProvider).value ?? const <Product>[];
+    final List<Unit> units =
+        ref.watch(unitsProvider).value ?? const <Unit>[];
+
+    final Map<String, String> productNames = <String, String>{
+      for (final Product p in products) p.id: p.name,
+    };
+    final Map<String, String> unitNames = <String, String>{
+      for (final Unit u in units) u.id: u.name,
+    };
 
     return SafeArea(
       top: false,
@@ -858,12 +983,32 @@ class _ReturnDetailSheet extends ConsumerWidget {
                             child: Row(
                               children: <Widget>[
                                 Expanded(
-                                  child: Text(
-                                    '${qty.format(it.quantity)} × '
-                                    '${money.format(it.unitPrice)}',
-                                    style: theme.textTheme.bodyMedium,
+                                  child: Column(
+                                    crossAxisAlignment:
+                                        CrossAxisAlignment.start,
+                                    mainAxisSize: MainAxisSize.min,
+                                    children: <Widget>[
+                                      Text(
+                                        productNames[it.productId] ??
+                                            'منتج محذوف',
+                                        style:
+                                            theme.textTheme.bodyMedium,
+                                        overflow: TextOverflow.ellipsis,
+                                      ),
+                                      const SizedBox(height: 2),
+                                      Text(
+                                        '${qty.format(it.quantity)} '
+                                        '${unitNames[it.unitId] ?? 'وحدة'} × '
+                                        '${money.format(it.unitPrice)}',
+                                        style: theme.textTheme.bodySmall
+                                            ?.copyWith(
+                                          color: scheme.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
                                   ),
                                 ),
+                                const SizedBox(width: 8),
                                 Text(
                                   money.format(it.lineTotal),
                                   style: theme.textTheme.titleSmall
