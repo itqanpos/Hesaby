@@ -18,6 +18,8 @@ import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
 import '../features/reports/presentation/pages/reports_hub_page.dart';
 import '../features/reports/presentation/pages/sales_summary_page.dart';
+import '../features/reports/presentation/pages/top_customers_page.dart';
+import '../features/reports/presentation/pages/top_products_page.dart';
 import '../features/sales/presentation/pages/customers_page.dart';
 import '../features/sales/presentation/pages/returns_page.dart';
 import '../features/sales/presentation/pages/sale_detail_page.dart';
@@ -95,6 +97,12 @@ abstract final class AppRouter {
 
   static const String reportSalesSummaryPath = '/reports/sales-summary';
   static const String reportSalesSummaryName = 'report-sales-summary';
+
+  static const String reportTopProductsPath = '/reports/top-products';
+  static const String reportTopProductsName = 'report-top-products';
+
+  static const String reportTopCustomersPath = '/reports/top-customers';
+  static const String reportTopCustomersName = 'report-top-customers';
 
   // ---- Phase 6 (POS Foundation) ----
   static const String posPath = '/pos';
@@ -290,6 +298,18 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.reportSalesSummaryName,
         builder: (BuildContext context, GoRouterState state) =>
             const SalesSummaryPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportTopProductsPath,
+        name: AppRouter.reportTopProductsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const TopProductsPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportTopCustomersPath,
+        name: AppRouter.reportTopCustomersName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const TopCustomersPage(),
       ),
       // ---- Phase 6: POS Foundation ----
       GoRoute(
