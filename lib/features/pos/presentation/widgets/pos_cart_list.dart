@@ -16,9 +16,12 @@ import 'pos_cart_line_tile.dart';
 /// * Otherwise, one [PosCartLineTile] is rendered per line, separated by a
 ///   thin divider.
 ///
-/// Incrementing a line is subject to the line's known available stock
-/// (`PosCartLine.canIncrease`). When the notifier rejects the increment,
-/// a short snack bar is displayed explaining why.
+/// Quantity and price are edited **by typing** inside each tile. The tile
+/// commits a new value by calling [PosCartNotifier.setLineQuantity] /
+/// [PosCartNotifier.setLinePrice], which enforce the available-stock cap
+/// and the price bounds respectively. When a value is rejected, the tile
+/// resets its field and shows a small inline hint — no snack bar is
+/// involved.
 class PosCartList extends ConsumerWidget {
   const PosCartList({super.key});
 
@@ -43,76 +46,28 @@ class PosCartList extends ConsumerWidget {
 
         return PosCartLineTile(
           line: line,
-          onIncrement: () => _handleIncrement(context, ref, line),
-          onDecrement: () => _handleDecrement(context, ref, line),
-          onRemove: () => _handleRemove(context, ref, line),
+          onSetQuantity: (double quantity) {
+            return ref.read(posCartProvider.notifier).setLineQuantity(
+                  productId: line.productId,
+                  unitId: line.unitId,
+                  quantity: quantity,
+                );
+          },
+          onSetPrice: (double price) {
+            return ref.read(posCartProvider.notifier).setLinePrice(
+                  productId: line.productId,
+                  unitId: line.unitId,
+                  unitPrice: price,
+                );
+          },
+          onRemove: () {
+            ref.read(posCartProvider.notifier).removeLine(
+                  productId: line.productId,
+                  unitId: line.unitId,
+                );
+          },
         );
       },
     );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------------------
-
-  void _handleIncrement(
-    BuildContext context,
-    WidgetRef ref,
-    PosCartLine line,
-  ) {
-    final bool applied = ref.read(posCartProvider.notifier).incrementLine(
-          productId: line.productId,
-          unitId: line.unitId,
-        );
-
-    if (!applied && context.mounted) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          SnackBar(
-            duration: const Duration(seconds: 2),
-            content: Text(
-              'لا يمكن زيادة الكمية. الرصيد المتاح: '
-              '${_formatStock(line.availableStock)}',
-            ),
-          ),
-        );
-    }
-  }
-
-  void _handleDecrement(
-    BuildContext context,
-    WidgetRef ref,
-    PosCartLine line,
-  ) {
-    ref.read(posCartProvider.notifier).decrementLine(
-          productId: line.productId,
-          unitId: line.unitId,
-        );
-  }
-
-  void _handleRemove(
-    BuildContext context,
-    WidgetRef ref,
-    PosCartLine line,
-  ) {
-    ref.read(posCartProvider.notifier).removeLine(
-          productId: line.productId,
-          unitId: line.unitId,
-        );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
-  static String _formatStock(double? available) {
-    if (available == null) {
-      return '—';
-    }
-    if (available == available.roundToDouble()) {
-      return available.toInt().toString();
-    }
-    return available.toStringAsFixed(2);
   }
 }
