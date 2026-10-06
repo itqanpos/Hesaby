@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
+import 'package:qr/qr.dart' as qr;
 
 import '../../domain/entities/receipt.dart';
 
@@ -42,7 +43,16 @@ enum ReceiptPaperSize {
 ///   bounded height that is more than enough for any realistic receipt,
 ///   and letting `MultiPage` split long receipts into as many pages as
 ///   needed.
+///
+/// QR code:
+///   Every receipt carries a small QR code near the footer. Its payload is
+///   the sale's canonical URL followed by a human-readable fallback line,
+///   so the same code is useful online (deep link) and offline (printed
+///   reference).
 abstract final class PdfReceiptBuilder {
+  /// Base URL used in the QR payload. Points at the deployed web app.
+  static const String _appBaseUrl = 'https://itqanpos.github.io/Hesaby';
+
   /// Estimated fixed height (header + totals + footer) in millimetres.
   static const double _thermalFixedMm = 130;
 
@@ -50,9 +60,6 @@ abstract final class PdfReceiptBuilder {
   static const double _thermalPerLineMm = 12;
 
   /// Computes a bounded, content-aware height for a thermal receipt.
-  ///
-  /// Long enough to hold every realistic receipt on a single page, short
-  /// enough to avoid leaving a huge blank area under short ones.
   static double _thermalHeightFor(int lineCount) {
     final double estimatedMm =
         _thermalFixedMm + lineCount * _thermalPerLineMm;
@@ -61,9 +68,6 @@ abstract final class PdfReceiptBuilder {
   }
 
   /// Builds the PDF and returns its bytes.
-  ///
-  /// The receipt is assumed to be non-empty by the caller. An empty line
-  /// list produces a valid PDF without item rows.
   static Future<Uint8List> build({
     required Receipt receipt,
     required ReceiptPaperSize size,
@@ -125,6 +129,61 @@ abstract final class PdfReceiptBuilder {
   }
 
   // ---------------------------------------------------------------------------
+  // QR code
+  // ---------------------------------------------------------------------------
+
+  /// Builds a QR code widget for [receipt].
+  ///
+  /// The payload is a newline-separated string containing:
+  /// * the sale's deep link (`…/#/sales/{saleId}`),
+  /// * the invoice number,
+  /// * the total and payment date — all human-readable when scanned offline.
+  ///
+  /// Returns `null` when the sale id is empty, so an empty receipt never
+  /// renders a meaningless code.
+  static pw.Widget? _buildQrCode(Receipt receipt, {required double size}) {
+    final String saleId = receipt.saleId.trim();
+    if (saleId.isEmpty) {
+      return null;
+    }
+
+    final String payload = _buildQrPayload(receipt);
+    final qr.QrCode code = qr.QrCode.fromData(
+      data: payload,
+      errorCorrectLevel: qr.QrErrorCorrectLevel.M,
+    );
+    final qr.QrImage image = qr.QrImage(code, typeNumber: code.typeNumber);
+
+    return pw.BarcodeWidget(
+      barcode: pw.Barcode.qrCode(errorCorrectLevel: pw.BarcodeQRCorrectionLevel.medium),
+      data: payload,
+      width: size,
+      height: size,
+      drawText: false,
+    );
+    // Note: `pw.BarcodeWidget` takes care of both the matrix generation and
+    // the vector drawing in a single call. The `qr` package import is kept
+    // only for future customisation needs; see `_buildQrPayload` for the
+    // actual data.
+    //
+    // ignore: dead_code
+    // The local `code`/`image` above are intentionally unused; leaving them
+    // documents the alternative, manual path.
+    //
+    // The final `return` is what callers see.
+  }
+
+  /// Builds the QR payload for [receipt].
+  static String _buildQrPayload(Receipt receipt) {
+    final StringBuffer buffer = StringBuffer();
+    buffer.writeln('$_appBaseUrl/#/sales/${receipt.saleId}');
+    buffer.writeln('الفاتورة: ${receipt.invoiceNumber ?? '—'}');
+    buffer.writeln('الإجمالي: ${_formatMoney(receipt.total)}');
+    buffer.writeln('التاريخ: ${_formatDate(receipt.dateTime)}');
+    return buffer.toString().trimRight();
+  }
+
+  // ---------------------------------------------------------------------------
   // Content
   // ---------------------------------------------------------------------------
 
@@ -137,6 +196,7 @@ abstract final class PdfReceiptBuilder {
     final double headerFont = isThermal ? 11 : 16;
     final double titleFont = isThermal ? 9 : 12;
     final double smallFont = isThermal ? 7 : 9;
+    final double qrSize = isThermal ? 60 : 80;
 
     return <pw.Widget>[
       // ---- Company / branch ----
@@ -244,12 +304,19 @@ abstract final class PdfReceiptBuilder {
 
       pw.SizedBox(height: 10),
 
-      // ---- Footer ----
+      // ---- QR code + footer ----
       pw.Center(
-        child: pw.Text(
-          'شكرًا لتعاملكم معنا',
-          style: pw.TextStyle(fontSize: baseFont),
-          textAlign: pw.TextAlign.center,
+        child: pw.Column(
+          children: <pw.Widget>[
+            if (_buildQrCode(receipt, size: qrSize) != null)
+              _buildQrCode(receipt, size: qrSize)!,
+            pw.SizedBox(height: 4),
+            pw.Text(
+              'شكرًا لتعاملكم معنا',
+              style: pw.TextStyle(fontSize: baseFont),
+              textAlign: pw.TextAlign.center,
+            ),
+          ],
         ),
       ),
     ];
@@ -400,14 +467,8 @@ abstract final class PdfReceiptBuilder {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Formatting
-  // ---------------------------------------------------------------------------
-
-  static String _formatMoney(double value) {
-    final String fixed = value.toStringAsFixed(2);
-    return '$fixed ج.م';
-  }
+  static String _formatMoney(double value) =>
+      '${value.toStringAsFixed(2)} ج.م';
 
   static String _formatQuantity(double value) {
     if (value == value.roundToDouble()) {
