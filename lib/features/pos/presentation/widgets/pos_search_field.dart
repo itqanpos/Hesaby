@@ -9,6 +9,7 @@ import '../../../../shared/widgets/app_text_field.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../domain/services/barcode_scanner_service.dart';
 import '../services/mobile_scanner_service.dart';
+import '../state/pos_focus_providers.dart';
 import '../state/pos_providers.dart';
 import '../state/pos_search_notifier.dart';
 import 'pos_results_list.dart';
@@ -20,6 +21,8 @@ import 'pos_results_list.dart';
 ///   `posSearchProvider`.
 /// * **Debounce the notifier update** (see [_debounceDelay]) so a large
 ///   catalogue is not filtered on every keystroke.
+/// * Use the shared [posSearchFocusNodeProvider] so the POS page can
+///   focus this field via keyboard shortcuts (F2).
 /// * Provide a Scan affordance backed by [BarcodeScannerService] when the
 ///   current platform supports a camera.
 /// * Support HID scanners (USB / Bluetooth barcode readers) transparently:
@@ -27,19 +30,6 @@ import 'pos_results_list.dart';
 ///   [TextField.onSubmitted] is used to trigger a quick-add when exactly
 ///   one product matches the query.
 /// * Offer a clear button when the field is not empty.
-///
-/// The field does **not** filter anything. Filtering lives in
-/// `posSearchResultsProvider`.
-///
-/// Debounce design:
-/// * The debounce is scoped to this widget only; the notifier stays
-///   synchronous and unaware of it.
-/// * Both Scan and Enter **cancel the pending timer and commit the query
-///   immediately**, so the quick-add path never reads results computed
-///   against a stale query.
-/// * The controller is synced from the notifier via `ref.listen` (not
-///   `ref.watch`), so that while a debounce is in flight — and the notifier
-///   still holds the previous query — the controller is not reset.
 class PosSearchField extends ConsumerStatefulWidget {
   const PosSearchField({super.key});
 
@@ -65,14 +55,15 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     super.initState();
     final String initial = ref.read(posSearchProvider).query;
     _controller = TextEditingController(text: initial);
-    _focusNode = FocusNode();
+    _focusNode = ref.read(posSearchFocusNodeProvider);
   }
 
   @override
   void dispose() {
     _debounce?.cancel();
     _controller.dispose();
-    _focusNode.dispose();
+    // The FocusNode is owned by `posSearchFocusNodeProvider` and must not
+    // be disposed here.
     super.dispose();
   }
 
@@ -80,8 +71,6 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
   // Debounce helpers
   // ---------------------------------------------------------------------------
 
-  /// Schedules a query commit after [_debounceDelay]. Any previously
-  /// scheduled commit is discarded.
   void _scheduleQuery(String value) {
     _debounce?.cancel();
     _debounce = Timer(_debounceDelay, () {
@@ -93,10 +82,6 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     });
   }
 
-  /// Cancels any pending debounce and commits [value] immediately.
-  ///
-  /// Used by the Scan flow and the Enter (HID) flow, where waiting for the
-  /// debounce would compute results against a stale query.
   void _commitQueryNow(String value) {
     _debounce?.cancel();
     _debounce = null;
@@ -119,10 +104,6 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     _focusNode.requestFocus();
   }
 
-  /// Opens the camera scanner, then uses the scanned value as the query.
-  ///
-  /// If the scanned value matches exactly one product, that product is
-  /// added to the cart immediately.
   Future<void> _handleScan() async {
     if (!_scanner.isSupported) {
       _showUnsupportedMessage();
@@ -145,7 +126,6 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     );
     _commitQueryNow(value);
 
-    // Give the results provider a chance to react.
     await Future<void>.delayed(Duration.zero);
     if (!mounted) {
       return;
@@ -154,15 +134,9 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     _quickAddIfSingleMatch();
   }
 
-  /// Called when the user presses Enter in the field.
-  ///
-  /// HID scanners send `\n` after the barcode; Enter commits the current
-  /// text immediately (skipping the debounce) before attempting a
-  /// quick-add.
   Future<void> _handleSubmitted(String value) async {
     _commitQueryNow(value);
 
-    // Give the results provider a chance to react before reading it.
     await Future<void>.delayed(Duration.zero);
     if (!mounted) {
       return;
@@ -171,13 +145,6 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     _quickAddIfSingleMatch();
   }
 
-  /// If the current search returns exactly one product, adds it to the
-  /// cart and clears the field.
-  ///
-  /// The check is deliberately conservative:
-  /// * zero results   → do nothing (the cashier can refine the query),
-  /// * one result     → quick-add it,
-  /// * two or more    → do nothing (require an explicit choice).
   void _quickAddIfSingleMatch() {
     final AsyncValue<List<Product>> results =
         ref.read(posSearchResultsProvider);
@@ -218,12 +185,6 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
 
   @override
   Widget build(BuildContext context) {
-    // Mirror the notifier's query into the controller whenever it changes
-    // from *outside* this field (e.g. after a successful sale cleared the
-    // search, or after an explicit `.clear()` call). Using `listen`
-    // instead of `watch` means we do not fight the debounce: while the
-    // user is typing, the notifier still holds the previous value, and we
-    // do not want to reset the controller back to it.
     ref.listen<PosSearchState>(
       posSearchProvider,
       (PosSearchState? previous, PosSearchState next) {
