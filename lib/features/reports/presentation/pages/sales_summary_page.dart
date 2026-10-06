@@ -4,18 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
 import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
+import '../widgets/report_print_action.dart';
 
-/// Sales summary report page.
-///
-/// Shows aggregated KPIs for the selected company over the selected period:
-/// gross sales, net sales (after returns), collected, outstanding, drafts,
-/// cancellations, returns, and derived metrics (average invoice, collection
-/// ratio).
 class SalesSummaryPage extends ConsumerStatefulWidget {
   const SalesSummaryPage({super.key});
 
@@ -36,11 +32,101 @@ class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
 
   Future<void> _changePeriod(ReportPeriod newPeriod) async {
     ref.read(reportPagePeriodProvider.notifier).setPeriod(newPeriod);
-    // Force refresh of the summary with the new period.
     final ReportPeriod p = ref.read(reportPagePeriodProvider);
     await ref
         .read(salesSummaryProvider(p).future)
         .catchError((_) => SalesSummary.empty(p));
+  }
+
+  ReportDocument? _buildDocument(
+    ReportPeriod period,
+    SalesSummary summary,
+  ) {
+    if (summary.confirmedCount == 0 && summary.draftCount == 0) {
+      return null;
+    }
+
+    return ReportDocument(
+      title: 'ملخص المبيعات',
+      periodLabel: period.label,
+      companyName: '—',
+      generatedAt: DateTime.now(),
+      sections: <ReportSection>[
+        ReportSection(
+          kpis: <ReportKpi>[
+            ReportKpi(
+              label: 'صافي المبيعات',
+              value: _money.format(summary.netSales),
+              emphasized: true,
+            ),
+            ReportKpi(
+              label: 'إجمالي المبيعات',
+              value: _money.format(summary.totalSales),
+            ),
+            ReportKpi(
+              label: 'المحصَّل',
+              value: _money.format(summary.totalPaid),
+            ),
+            ReportKpi(
+              label: 'غير محصَّل',
+              value: _money.format(summary.totalDue),
+            ),
+            ReportKpi(
+              label: 'متوسط الفاتورة',
+              value: _money.format(summary.averageInvoice),
+            ),
+            ReportKpi(
+              label: 'عدد الفواتير',
+              value: '${summary.confirmedCount}',
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'تفاصيل الفواتير',
+          lines: <ReportLine>[
+            ReportLine(label: 'مؤكدة', value: '${summary.confirmedCount}'),
+            ReportLine(label: 'مسودة', value: '${summary.draftCount}'),
+            ReportLine(label: 'ملغاة', value: '${summary.cancelledCount}'),
+          ],
+        ),
+        ReportSection(
+          title: 'الإيرادات والخصومات',
+          lines: <ReportLine>[
+            ReportLine(
+              label: 'إجمالي المبيعات',
+              value: _money.format(summary.totalSales),
+            ),
+            ReportLine(
+              label: 'إجمالي الخصومات',
+              value: _money.format(summary.totalDiscount),
+            ),
+            ReportLine(
+              label: 'إجمالي الضريبة',
+              value: _money.format(summary.totalTax),
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'المرتجعات',
+          lines: <ReportLine>[
+            ReportLine(
+              label: 'عدد المرتجعات',
+              value: '${summary.returnCount}',
+            ),
+            ReportLine(
+              label: 'قيمة المرتجعات',
+              value: _money.format(summary.returnTotal),
+            ),
+            ReportLine(
+              label: 'نسبة المرتجعات',
+              value: summary.totalSales > 0
+                  ? _percent.format(summary.returnTotal / summary.totalSales)
+                  : '—',
+            ),
+          ],
+        ),
+      ],
+    );
   }
 
   @override
@@ -58,6 +144,13 @@ class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
           ? _errorMessage(summaryAsync.error!)
           : null,
       onRetry: () => ref.invalidate(salesSummaryProvider(period)),
+      trailing: ReportPrintAction(
+        documentBuilder: () {
+          final SalesSummary? summary = summaryAsync.valueOrNull;
+          if (summary == null) return null;
+          return _buildDocument(period, summary);
+        },
+      ),
       body: summaryAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
@@ -117,10 +210,7 @@ class _SummaryBody extends StatelessWidget {
           subtitle: 'من ${summary.confirmedCount} فاتورة مؤكدة',
         ),
         const SizedBox(height: 12),
-        _StatsGrid(
-          summary: summary,
-          money: money,
-        ),
+        _StatsGrid(summary: summary, money: money),
         const SizedBox(height: 16),
         _SectionCard(
           title: 'تفاصيل الفواتير',
@@ -158,20 +248,14 @@ class _SummaryBody extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Period header
-// ============================================================================
-
 class _PeriodHeader extends StatelessWidget {
   const _PeriodHeader({required this.period});
-
   final ReportPeriod period;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
@@ -192,10 +276,6 @@ class _PeriodHeader extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Hero card
-// ============================================================================
-
 class _HeroCard extends StatelessWidget {
   const _HeroCard({
     required this.title,
@@ -211,15 +291,11 @@ class _HeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         gradient: LinearGradient(
-          colors: <Color>[
-            scheme.primary,
-            scheme.primaryContainer,
-          ],
+          colors: <Color>[scheme.primary, scheme.primaryContainer],
           begin: AlignmentDirectional.topStart,
           end: AlignmentDirectional.bottomEnd,
         ),
@@ -268,15 +344,8 @@ class _HeroCard extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Stats grid (2x2)
-// ============================================================================
-
 class _StatsGrid extends StatelessWidget {
-  const _StatsGrid({
-    required this.summary,
-    required this.money,
-  });
+  const _StatsGrid({required this.summary, required this.money});
 
   final SalesSummary summary;
   final NumberFormat money;
@@ -353,7 +422,6 @@ class _StatCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surface,
@@ -411,10 +479,6 @@ class _StatCard extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Section card
-// ============================================================================
-
 class _SectionCard extends StatelessWidget {
   const _SectionCard({required this.title, required this.rows});
 
@@ -425,7 +489,6 @@ class _SectionCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surface,
