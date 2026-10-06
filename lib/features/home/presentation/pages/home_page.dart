@@ -20,7 +20,7 @@ import '../../../companies/presentation/widgets/company_selector.dart';
 /// * Compact context card with company and branch selectors.
 /// * Prominent POS banner (main call to action when a company is chosen).
 /// * "البيع" section with two primary tiles (sales, purchases).
-/// * "الإدارة" section with six administration tiles.
+/// * "الإدارة" section with seven administration tiles.
 /// * Compact infrastructure status card.
 ///
 /// Contains no business logic: every action is navigation or a state read.
@@ -396,6 +396,11 @@ class _AdminGrid extends StatelessWidget {
         icon: Icons.local_shipping_outlined,
         title: 'الموردون',
         routeName: AppRouter.suppliersName,
+      ),
+      const _AdminTileData(
+        icon: Icons.assignment_return_outlined,
+        title: 'المرتجعات',
+        routeName: AppRouter.returnsName,
       ),
       const _AdminTileData(
         icon: Icons.warehouse_outlined,
