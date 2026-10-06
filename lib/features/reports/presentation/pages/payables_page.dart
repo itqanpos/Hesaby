@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/financial_reports.dart';
+import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
+import '../widgets/report_print_action.dart';
 
-/// Accounts payable report — purchases grouped by supplier over a period.
 class PayablesPage extends ConsumerStatefulWidget {
   const PayablesPage({super.key});
 
@@ -33,6 +34,68 @@ class _PayablesPageState extends ConsumerState<PayablesPage> {
         .catchError((_) => PayablesReport.empty(p));
   }
 
+  ReportDocument? _buildDocument(
+    ReportPeriod period,
+    PayablesReport report,
+  ) {
+    if (report.isEmpty) return null;
+
+    return ReportDocument(
+      title: 'الموردون',
+      periodLabel: period.label,
+      companyName: '—',
+      generatedAt: DateTime.now(),
+      sections: <ReportSection>[
+        ReportSection(
+          kpis: <ReportKpi>[
+            ReportKpi(
+              label: 'إجمالي المشتريات',
+              value: _money.format(report.totalPurchases),
+              emphasized: true,
+            ),
+            ReportKpi(
+              label: 'المدفوع',
+              value: _money.format(report.totalPaid),
+            ),
+            ReportKpi(
+              label: 'المتبقي',
+              value: _money.format(report.totalDue),
+            ),
+            ReportKpi(
+              label: 'عدد الموردين',
+              value: '${report.supplierCount}',
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'التفاصيل',
+          table: ReportTable(
+            headers: <String>[
+              '#',
+              'المورد',
+              'الفواتير',
+              'إجمالي',
+              'المدفوع',
+              'المستحق',
+            ],
+            flex: <double>[0.4, 2.2, 0.8, 1.2, 1.2, 1.2],
+            rows: <List<String>>[
+              for (int i = 0; i < report.items.length; i++)
+                <String>[
+                  '${i + 1}',
+                  report.items[i].supplierName,
+                  '${report.items[i].invoiceCount}',
+                  _money.format(report.items[i].totalPurchases),
+                  _money.format(report.items[i].totalPaid),
+                  _money.format(report.items[i].totalDue),
+                ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ReportPeriod period = ref.watch(reportPagePeriodProvider);
@@ -47,6 +110,13 @@ class _PayablesPageState extends ConsumerState<PayablesPage> {
       errorMessage:
           reportAsync.hasError ? _errorMessage(reportAsync.error!) : null,
       onRetry: () => ref.invalidate(payablesProvider(period)),
+      trailing: ReportPrintAction(
+        documentBuilder: () {
+          final PayablesReport? report = reportAsync.valueOrNull;
+          if (report == null) return null;
+          return _buildDocument(period, report);
+        },
+      ),
       body: reportAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
@@ -102,7 +172,6 @@ class _SummaryCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
@@ -222,7 +291,6 @@ class _PayableRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surface,
@@ -320,7 +388,6 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
