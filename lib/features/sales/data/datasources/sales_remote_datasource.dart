@@ -3,14 +3,16 @@
 import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
 
 import '../../domain/entities/sale_entities.dart';
+import '../../domain/entities/sale_return.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../models/customer_adjustment_model.dart';
 import '../models/customer_payment_model.dart';
 import '../models/sale_models.dart';
+import '../models/sale_return_model.dart';
 
 /// Thin wrapper around the Supabase queries for `customers`,
-/// `customer_payments`, `customer_balance_adjustments`, `sales` and
-/// `sale_items`.
+/// `customer_payments`, `customer_balance_adjustments`, `sales`,
+/// `sale_items`, `sale_returns` and `sale_return_items`.
 class SalesRemoteDataSource {
   const SalesRemoteDataSource(this._client);
 
@@ -514,6 +516,222 @@ class SalesRemoteDataSource {
   }
 
   // ===========================================================================
+  // RETURNS
+  // ===========================================================================
+
+  /// Lists sale returns for a company, newest first.
+  Future<List<SaleReturnModel>> listReturns(
+    String companyId, {
+    String? branchId,
+    String? saleId,
+    String? status,
+    int? limit,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final int effectiveLimit =
+        (limit == null || limit <= 0) ? defaultLimit : limit;
+
+    var query =
+        client.from('sale_returns').select().eq('company_id', companyId);
+
+    if (branchId != null) {
+      query = query.eq('branch_id', branchId);
+    }
+    if (saleId != null) {
+      query = query.eq('sale_id', saleId);
+    }
+    if (status != null) {
+      query = query.eq('status', status);
+    }
+
+    final List<Map<String, dynamic>> rows = await query
+        .order('return_date', ascending: false)
+        .order('created_at', ascending: false)
+        .limit(effectiveLimit);
+
+    return rows.map(SaleReturnModel.fromMap).toList(growable: false);
+  }
+
+  Future<SaleReturnModel> getReturn(String returnId) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> row = await client
+        .from('sale_returns')
+        .select()
+        .eq('id', returnId)
+        .single();
+
+    return SaleReturnModel.fromMap(row);
+  }
+
+  Future<List<SaleReturnItemModel>> listReturnItems(String returnId) async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('sale_return_items')
+        .select()
+        .eq('return_id', returnId)
+        .order('created_at', ascending: true);
+
+    return rows.map(SaleReturnItemModel.fromMap).toList(growable: false);
+  }
+
+  /// Lists every return recorded against [saleId] (any status).
+  Future<List<SaleReturnModel>> listReturnsForSale(String saleId) async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('sale_returns')
+        .select()
+        .eq('sale_id', saleId)
+        .order('created_at', ascending: true);
+
+    return rows.map(SaleReturnModel.fromMap).toList(growable: false);
+  }
+
+  Future<SaleReturnModel> createReturn({
+    required String companyId,
+    required String branchId,
+    required String saleId,
+    String? customerId,
+    required DateTime returnDate,
+    required List<SaleReturnItemDraft> items,
+    required String refundMethod,
+    String? notes,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final String? createdBy = client.auth.currentUser?.id;
+
+    final Map<String, dynamic> headerPayload = <String, dynamic>{
+      'company_id': companyId,
+      'branch_id': branchId,
+      'sale_id': saleId,
+      if (customerId != null) 'customer_id': customerId,
+      'return_date': _formatDateOnly(returnDate),
+      'refund_method': refundMethod,
+      if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
+      if (createdBy != null) 'created_by': createdBy,
+    };
+
+    final Map<String, dynamic> headerRow = await client
+        .from('sale_returns')
+        .insert(headerPayload)
+        .select()
+        .single();
+
+    final Object? rawId = headerRow['id'];
+    if (rawId is! String || rawId.isEmpty) {
+      throw const ReturnException(
+        type: ReturnFailureType.invalidResponse,
+        cause: 'Inserted return is missing an id.',
+      );
+    }
+    final String returnId = rawId;
+
+    try {
+      if (items.isNotEmpty) {
+        await _insertReturnItems(
+          client: client,
+          companyId: companyId,
+          returnId: returnId,
+          items: items,
+        );
+      }
+    } on Object {
+      await _bestEffortDeleteReturn(client, returnId);
+      rethrow;
+    }
+
+    final Map<String, dynamic> finalRow = await client
+        .from('sale_returns')
+        .select()
+        .eq('id', returnId)
+        .single();
+
+    return SaleReturnModel.fromMap(finalRow);
+  }
+
+  Future<SaleReturnModel> updateReturnDraft({
+    required String returnId,
+    required String companyId,
+    required String branchId,
+    required String saleId,
+    String? customerId,
+    required DateTime returnDate,
+    required List<SaleReturnItemDraft> items,
+    required String refundMethod,
+    String? notes,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> headerPayload = <String, dynamic>{
+      'branch_id': branchId,
+      'sale_id': saleId,
+      'customer_id': customerId,
+      'return_date': _formatDateOnly(returnDate),
+      'refund_method': refundMethod,
+      'notes': (notes != null && notes.trim().isNotEmpty)
+          ? notes.trim()
+          : null,
+    };
+
+    await client
+        .from('sale_returns')
+        .update(headerPayload)
+        .eq('id', returnId);
+
+    await client
+        .from('sale_return_items')
+        .delete()
+        .eq('return_id', returnId);
+
+    if (items.isNotEmpty) {
+      await _insertReturnItems(
+        client: client,
+        companyId: companyId,
+        returnId: returnId,
+        items: items,
+      );
+    }
+
+    final Map<String, dynamic> finalRow = await client
+        .from('sale_returns')
+        .select()
+        .eq('id', returnId)
+        .single();
+
+    return SaleReturnModel.fromMap(finalRow);
+  }
+
+  Future<SaleReturnModel> confirmReturn(String returnId) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> row = await client
+        .from('sale_returns')
+        .update(<String, dynamic>{'status': 'confirmed'})
+        .eq('id', returnId)
+        .select()
+        .single();
+
+    return SaleReturnModel.fromMap(row);
+  }
+
+  Future<SaleReturnModel> cancelReturn(String returnId) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> row = await client
+        .from('sale_returns')
+        .update(<String, dynamic>{'status': 'cancelled'})
+        .eq('id', returnId)
+        .select()
+        .single();
+
+    return SaleReturnModel.fromMap(row);
+  }
+
+  // ===========================================================================
   // Internal helpers
   // ===========================================================================
 
@@ -542,6 +760,32 @@ class SalesRemoteDataSource {
     await client.from('sale_items').insert(payloads);
   }
 
+  static Future<void> _insertReturnItems({
+    required SupabaseClient client,
+    required String companyId,
+    required String returnId,
+    required List<SaleReturnItemDraft> items,
+  }) async {
+    final List<Map<String, dynamic>> payloads =
+        <Map<String, dynamic>>[
+      for (final SaleReturnItemDraft item in items)
+        <String, dynamic>{
+          'company_id': companyId,
+          'return_id': returnId,
+          'sale_item_id': item.saleItemId,
+          'product_id': item.productId,
+          'unit_id': item.unitId,
+          'quantity': item.quantity,
+          'unit_price': item.unitPrice,
+          'line_total': item.lineTotal,
+          if (item.notes != null && item.notes!.trim().isNotEmpty)
+            'notes': item.notes!.trim(),
+        },
+    ];
+
+    await client.from('sale_return_items').insert(payloads);
+  }
+
   static Future<void> _bestEffortCancel(
     SupabaseClient client,
     String saleId,
@@ -556,8 +800,28 @@ class SalesRemoteDataSource {
     }
   }
 
+  static Future<void> _bestEffortDeleteReturn(
+    SupabaseClient client,
+    String returnId,
+  ) async {
+    try {
+      await client.from('sale_returns').delete().eq('id', returnId);
+    } on Object {
+      // Ignored by design.
+    }
+  }
+
   static String _formatTimestamp(DateTime value) =>
       value.toUtc().toIso8601String();
+
+  /// Formats a [DateTime] as `YYYY-MM-DD` for `date` columns.
+  static String _formatDateOnly(DateTime value) {
+    final DateTime local = value.toLocal();
+    final String y = local.year.toString().padLeft(4, '0');
+    final String m = local.month.toString().padLeft(2, '0');
+    final String d = local.day.toString().padLeft(2, '0');
+    return '$y-$m-$d';
+  }
 
   SupabaseClient _requireClient() {
     final SupabaseClient? client = _client;
