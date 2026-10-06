@@ -17,6 +17,7 @@ import '../features/purchases/presentation/pages/purchase_detail_page.dart';
 import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
 import '../features/reports/presentation/pages/reports_hub_page.dart';
+import '../features/reports/presentation/pages/sales_summary_page.dart';
 import '../features/sales/presentation/pages/customers_page.dart';
 import '../features/sales/presentation/pages/returns_page.dart';
 import '../features/sales/presentation/pages/sale_detail_page.dart';
@@ -91,6 +92,9 @@ abstract final class AppRouter {
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
   static const String reportsName = 'reports';
+
+  static const String reportSalesSummaryPath = '/reports/sales-summary';
+  static const String reportSalesSummaryName = 'report-sales-summary';
 
   // ---- Phase 6 (POS Foundation) ----
   static const String posPath = '/pos';
@@ -280,6 +284,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.reportsName,
         builder: (BuildContext context, GoRouterState state) =>
             const ReportsHubPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportSalesSummaryPath,
+        name: AppRouter.reportSalesSummaryName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const SalesSummaryPage(),
       ),
       // ---- Phase 6: POS Foundation ----
       GoRoute(
