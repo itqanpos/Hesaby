@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/inventory_reports.dart';
+import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
+import '../widgets/report_print_action.dart';
 
-/// Current stock valuation report page.
 class StockValuationPage extends ConsumerStatefulWidget {
   const StockValuationPage({super.key});
 
@@ -27,6 +28,58 @@ class _StockValuationPageState extends ConsumerState<StockValuationPage> {
   );
   static final NumberFormat _qty = NumberFormat.decimalPattern('ar_EG');
 
+  ReportDocument? _buildDocument(StockValuationReport report) {
+    if (report.isEmpty) return null;
+
+    return ReportDocument(
+      title: 'تقييم المخزون',
+      companyName: '—',
+      generatedAt: DateTime.now(),
+      sections: <ReportSection>[
+        ReportSection(
+          kpis: <ReportKpi>[
+            ReportKpi(
+              label: 'إجمالي القيمة',
+              value: _money.format(report.totalValue),
+              emphasized: true,
+            ),
+            ReportKpi(
+              label: 'عدد المنتجات',
+              value: '${report.itemCount}',
+            ),
+            ReportKpi(
+              label: 'إجمالي الكميات',
+              value: _qty.format(report.totalQuantity),
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'تفاصيل المخزون',
+          table: ReportTable(
+            headers: <String>[
+              '#',
+              'المنتج',
+              'الكمية',
+              'متوسط التكلفة',
+              'القيمة',
+            ],
+            flex: <double>[0.4, 2.4, 1.0, 1.3, 1.4],
+            rows: <List<String>>[
+              for (int i = 0; i < report.items.length; i++)
+                <String>[
+                  '${i + 1}',
+                  report.items[i].productName,
+                  _qty.format(report.items[i].quantityOnHand),
+                  _money.format(report.items[i].averageCost),
+                  _money.format(report.items[i].totalValue),
+                ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final AsyncValue<StockValuationReport> reportAsync =
@@ -40,6 +93,13 @@ class _StockValuationPageState extends ConsumerState<StockValuationPage> {
       errorMessage:
           reportAsync.hasError ? _errorMessage(reportAsync.error!) : null,
       onRetry: () => ref.invalidate(stockValuationProvider),
+      trailing: ReportPrintAction(
+        documentBuilder: () {
+          final StockValuationReport? report = reportAsync.valueOrNull;
+          if (report == null) return null;
+          return _buildDocument(report);
+        },
+      ),
       body: reportAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
@@ -54,18 +114,7 @@ class _StockValuationPageState extends ConsumerState<StockValuationPage> {
 
   static String _errorMessage(Object error) {
     if (error is ReportException) {
-      switch (error.type) {
-        case ReportFailureType.network:
-          return 'تعذّر الاتصال بالخادم.';
-        case ReportFailureType.unauthorized:
-          return 'انتهت صلاحية الجلسة.';
-        case ReportFailureType.notFound:
-          return 'البيانات المطلوبة غير متوفرة.';
-        case ReportFailureType.invalidResponse:
-          return 'تعذّر قراءة البيانات.';
-        case ReportFailureType.unknown:
-          return 'تعذّر تحميل التقرير.';
-      }
+      return 'تعذّر تحميل التقرير.';
     }
     return 'تعذّر تحميل التقرير.';
   }
@@ -112,7 +161,6 @@ class _SummaryStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(16),
@@ -232,7 +280,6 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
