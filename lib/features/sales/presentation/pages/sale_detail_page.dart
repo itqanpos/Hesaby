@@ -18,20 +18,13 @@ import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
 import '../../domain/entities/sale_entities.dart';
+import '../../domain/entities/sale_return.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/sale_print_dialog.dart';
+import '../dialogs/sale_return_dialog.dart';
 import '../providers/sales_providers.dart';
 
 /// Full-page view of a single sale invoice.
-///
-/// Shows the invoice header, its line items, the totals, and — depending
-/// on the invoice status — the actions that can be taken on it:
-///
-/// * **draft**     — edit, confirm, cancel.
-/// * **confirmed** — cancel.
-/// * **cancelled** — read-only.
-///
-/// Printing (80 mm / A4) is always available from the app bar.
 class SaleDetailPage extends ConsumerStatefulWidget {
   const SaleDetailPage({super.key, required this.saleId});
 
@@ -43,10 +36,6 @@ class SaleDetailPage extends ConsumerStatefulWidget {
 
 class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
   bool _isActing = false;
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -135,6 +124,20 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
               : 'تفاصيل الفاتورة',
         ),
         actions: <Widget>[
+          if (sale.isConfirmed)
+            IconButton(
+              tooltip: 'إنشاء مرتجع',
+              icon: const Icon(Icons.assignment_return_outlined),
+              onPressed: _isActing || items.isEmpty
+                  ? null
+                  : () => _openReturnDialog(
+                        sale,
+                        items,
+                        customers,
+                        products,
+                        units,
+                      ),
+            ),
           IconButton(
             tooltip: 'طباعة',
             icon: const Icon(Icons.print_outlined),
@@ -170,6 +173,8 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
           ),
           const SizedBox(height: 12),
           _TotalsCard(sale: sale),
+          const SizedBox(height: 12),
+          _ReturnsCard(sale: sale),
         ],
       ),
     );
@@ -300,6 +305,37 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
         setState(() => _isActing = false);
       }
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Return dialog
+  // ---------------------------------------------------------------------------
+
+  Future<void> _openReturnDialog(
+    Sale sale,
+    List<SaleItem> items,
+    List<Customer> customers,
+    List<Product> products,
+    List<Unit> units,
+  ) async {
+    final bool? created = await showSaleReturnDialog(
+      context: context,
+      sale: sale,
+      saleItems: items,
+      customers: customers,
+      products: products,
+      units: units,
+    );
+
+    if (created != true || !mounted) {
+      return;
+    }
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('تم تسجيل المرتجع بنجاح.')),
+      );
   }
 
   // ---------------------------------------------------------------------------
@@ -547,7 +583,6 @@ class _ActionsCard extends StatelessWidget {
       );
     }
 
-    // Interleave spacing between buttons.
     final List<Widget> spaced = <Widget>[];
     for (int i = 0; i < buttons.length; i++) {
       if (i > 0) {
@@ -780,6 +815,267 @@ class _TotalsCard extends StatelessWidget {
 }
 
 // ============================================================================
+// Returns card
+// ============================================================================
+
+/// Lists every sale return recorded against the current sale.
+///
+/// The card is a no-op when no returns exist yet.
+class _ReturnsCard extends ConsumerWidget {
+  const _ReturnsCard({required this.sale});
+
+  final Sale sale;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AsyncValue<List<SaleReturn>> returnsAsync =
+        ref.watch(saleReturnsProvider(sale.id));
+
+    return returnsAsync.when(
+      loading: () => const SizedBox.shrink(),
+      error: (Object error, StackTrace _) => const SizedBox.shrink(),
+      data: (List<SaleReturn> returns) {
+        if (returns.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final ThemeData theme = Theme.of(context);
+        final ColorScheme scheme = theme.colorScheme;
+
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surface,
+            borderRadius: BorderRadius.circular(16),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.assignment_return_outlined,
+                      size: 20,
+                      color: scheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Text(
+                      'المرتجعات (${returns.length})',
+                      style: theme.textTheme.titleMedium,
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 10),
+                for (int i = 0; i < returns.length; i++) ...<Widget>[
+                  _ReturnRow(
+                    saleReturn: returns[i],
+                    onCancel: () => _cancelReturn(
+                      context,
+                      ref,
+                      returns[i],
+                    ),
+                  ),
+                  if (i < returns.length - 1) const SizedBox(height: 6),
+                ],
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Future<void> _cancelReturn(
+    BuildContext context,
+    WidgetRef ref,
+    SaleReturn saleReturn,
+  ) async {
+    final bool wasConfirmed = saleReturn.isConfirmed;
+
+    final bool? confirmed = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext dialogContext) => AlertDialog(
+        title: const Text('إلغاء المرتجع'),
+        content: Text(
+          wasConfirmed
+              ? 'سيتم إلغاء المرتجع وإرجاع الكميات للمخزون، '
+                  'وسيُعاد أي رصيد مُخصَّص للعميل.'
+              : 'سيتم إلغاء المرتجع. لا يمكن التراجع عن هذا الإجراء.',
+        ),
+        actions: <Widget>[
+          AppButton(
+            label: 'رجوع',
+            variant: AppButtonVariant.text,
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+          ),
+          AppButton(
+            label: 'إلغاء المرتجع',
+            variant: AppButtonVariant.danger,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirmed != true || !context.mounted) {
+      return;
+    }
+
+    try {
+      await ref.read(returnsProvider.notifier).cancelReturn(
+            returnId: saleReturn.id,
+            saleId: saleReturn.saleId,
+          );
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('تم إلغاء المرتجع.')),
+        );
+    } on ReturnException catch (error) {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(content: Text(_returnFailureMessage(error.type))),
+        );
+    } on Object {
+      if (!context.mounted) {
+        return;
+      }
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('تعذّر إلغاء المرتجع. حاول مرة أخرى.'),
+          ),
+        );
+    }
+  }
+}
+
+// ============================================================================
+// Return row
+// ============================================================================
+
+class _ReturnRow extends StatelessWidget {
+  const _ReturnRow({
+    required this.saleReturn,
+    required this.onCancel,
+  });
+
+  final SaleReturn saleReturn;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    final NumberFormat money = NumberFormat.currency(
+      locale: 'ar_EG',
+      symbol: 'ج.م ',
+      decimalDigits: 2,
+    );
+    final DateFormat date = DateFormat.yMd('ar_EG');
+
+    final (Color badgeBg, Color badgeFg) =
+        _returnStatusColors(scheme, saleReturn.status);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          saleReturn.returnNumber ?? '—',
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w700,
+                          ),
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: badgeBg,
+                          borderRadius: BorderRadius.circular(999),
+                        ),
+                        child: Padding(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
+                          ),
+                          child: Text(
+                            _returnStatusLabel(saleReturn.status),
+                            style: theme.textTheme.labelSmall?.copyWith(
+                              color: badgeFg,
+                              fontWeight: FontWeight.w700,
+                            ),
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: <Widget>[
+                      Text(
+                        date.format(saleReturn.returnDate.toLocal()),
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const SizedBox(width: 12),
+                      Text(
+                        money.format(saleReturn.total),
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w700,
+                        ),
+                      ),
+                      const SizedBox(width: 8),
+                      Text(
+                        '· ${_refundMethodLabel(saleReturn.refundMethod)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+            if (saleReturn.canTransition)
+              IconButton(
+                tooltip: 'إلغاء المرتجع',
+                icon: const Icon(Icons.cancel_outlined),
+                color: scheme.error,
+                onPressed: onCancel,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
 // Localization helpers
 // ============================================================================
 
@@ -809,6 +1105,50 @@ String _statusLabel(String status) {
       return (scheme.errorContainer, scheme.onErrorContainer);
     default:
       return (scheme.surfaceContainerHighest, scheme.onSurfaceVariant);
+  }
+}
+
+String _returnStatusLabel(String status) {
+  switch (status) {
+    case ReturnStatus.draft:
+      return 'مسودة';
+    case ReturnStatus.confirmed:
+      return 'مؤكد';
+    case ReturnStatus.cancelled:
+      return 'ملغى';
+    default:
+      return 'غير معروف';
+  }
+}
+
+(Color background, Color foreground) _returnStatusColors(
+  ColorScheme scheme,
+  String status,
+) {
+  switch (status) {
+    case ReturnStatus.draft:
+      return (scheme.surfaceContainerHighest, scheme.onSurfaceVariant);
+    case ReturnStatus.confirmed:
+      return (scheme.primaryContainer, scheme.onPrimaryContainer);
+    case ReturnStatus.cancelled:
+      return (scheme.errorContainer, scheme.onErrorContainer);
+    default:
+      return (scheme.surfaceContainerHighest, scheme.onSurfaceVariant);
+  }
+}
+
+String _refundMethodLabel(String method) {
+  switch (method) {
+    case RefundMethod.cash:
+      return 'نقدي';
+    case RefundMethod.card:
+      return 'بطاقة';
+    case RefundMethod.creditNote:
+      return 'رصيد';
+    case RefundMethod.none:
+      return 'بدون استرداد';
+    default:
+      return method;
   }
 }
 
@@ -855,3 +1195,32 @@ String _failureMessage(SalesFailureType type) => switch (type) {
       SalesFailureType.unknown =>
         'تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.',
     };
+
+String _returnFailureMessage(ReturnFailureType type) {
+  switch (type) {
+    case ReturnFailureType.network:
+      return 'تعذّر الاتصال بالخادم.';
+    case ReturnFailureType.unauthorized:
+      return 'انتهت صلاحية الجلسة أو لا تملك صلاحية.';
+    case ReturnFailureType.notFound:
+      return 'المرتجع غير موجود.';
+    case ReturnFailureType.saleNotConfirmed:
+      return 'الفاتورة الأصلية غير مؤكدة.';
+    case ReturnFailureType.emptyReturn:
+      return 'المرتجع بدون بنود.';
+    case ReturnFailureType.excessiveQuantity:
+      return 'الكمية تتجاوز المتاح.';
+    case ReturnFailureType.creditNoteRequiresCustomer:
+      return 'استرداد الرصيد يتطلب عميلًا.';
+    case ReturnFailureType.invalidStatusTransition:
+      return 'لا يمكن التعديل في الحالة الحالية.';
+    case ReturnFailureType.immutableConfirmedReturn:
+      return 'المرتجع المؤكد غير قابل للتعديل.';
+    case ReturnFailureType.referenceNotFound:
+      return 'أحد المراجع غير موجود.';
+    case ReturnFailureType.invalidResponse:
+      return 'تعذّر قراءة البيانات.';
+    case ReturnFailureType.unknown:
+      return 'تعذّر إتمام العملية.';
+  }
+}
