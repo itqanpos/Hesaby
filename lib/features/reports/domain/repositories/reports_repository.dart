@@ -3,6 +3,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
+import '../entities/inventory_reports.dart';
 import '../entities/report_period.dart';
 import '../entities/sales_reports.dart';
 
@@ -49,30 +50,23 @@ class ReportException extends Equatable implements Exception {
 /// database (aggregations, grouping, ordering) rather than fetch full
 /// tables and reduce them client-side.
 ///
-/// Every method takes a [ReportPeriod] describing the window to aggregate
-/// over. `null` bounds inside the period mean "open-ended" (all-time).
+/// Every sales method takes a [ReportPeriod] describing the window to
+/// aggregate over. `null` bounds inside the period mean "open-ended"
+/// (all-time). Inventory reports operate on the *current* state, so they
+/// do not take a period — except the dead-stock report, which takes a
+/// lookback window.
 abstract interface class ReportsRepository {
   // ---------------------------------------------------------------------------
   // Sales
   // ---------------------------------------------------------------------------
 
   /// Returns the aggregated sales figures for the company over [period].
-  ///
-  /// The result combines `sales` (confirmed / draft / cancelled counts and
-  /// totals) with `sale_returns` (confirmed return count and amount).
   Future<SalesSummary> getSalesSummary({
     required String companyId,
     required ReportPeriod period,
   });
 
   /// Returns the top [limit] products by revenue over [period].
-  ///
-  /// Only confirmed sales are counted; cancelled sales and draft sales are
-  /// ignored. The result is ordered by `total_revenue DESC`.
-  ///
-  /// `productNames` is a map from product id to display name, used to
-  /// resolve the [TopProduct.productName] field. Missing ids fall back to
-  /// "منتج محذوف".
   Future<List<TopProduct>> getTopProducts({
     required String companyId,
     required ReportPeriod period,
@@ -81,10 +75,6 @@ abstract interface class ReportsRepository {
   });
 
   /// Returns the top [limit] customers by spending over [period].
-  ///
-  /// Only confirmed sales with a non-null customer are considered.
-  /// `customerNames` maps a customer id to its display name; missing ids
-  /// fall back to "عميل محذوف".
   Future<List<TopCustomer>> getTopCustomers({
     required String companyId,
     required ReportPeriod period,
@@ -93,13 +83,52 @@ abstract interface class ReportsRepository {
   });
 
   /// Returns sales grouped by cashier (`created_by`) over [period].
-  ///
-  /// `cashierNames` maps a Supabase user id to a display name. When the
-  /// caller cannot resolve a name, the implementation should fall back to
-  /// a short suffix of the id.
   Future<List<CashierSales>> getSalesByCashier({
     required String companyId,
     required ReportPeriod period,
     required Map<String, String> cashierNames,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Inventory
+  // ---------------------------------------------------------------------------
+
+  /// Returns the current inventory valuation for [companyId].
+  ///
+  /// The report is derived from `inventory_balances` (per branch and
+  /// product) and aggregated per product. When [branchId] is `null` the
+  /// report covers every branch the user can see.
+  ///
+  /// `productNames` and `unitNames` are passed from the UI to resolve ids
+  /// to display strings; missing entries fall back to placeholder text.
+  Future<StockValuationReport> getStockValuation({
+    required String companyId,
+    String? branchId,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+  });
+
+  /// Returns every product whose current on-hand quantity is at or below
+  /// its configured `min_stock` level.
+  ///
+  /// Products without a `min_stock` value are ignored.
+  Future<List<LowStockItem>> getLowStockItems({
+    required String companyId,
+    String? branchId,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+  });
+
+  /// Returns every product that still has stock on hand but has not been
+  /// sold within the last [window] days.
+  ///
+  /// Products that have *never* been sold are also included and flagged
+  /// via [DeadStockItem.neverSold].
+  Future<List<DeadStockItem>> getDeadStockItems({
+    required String companyId,
+    String? branchId,
+    required DeadStockWindow window,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
   });
 }
