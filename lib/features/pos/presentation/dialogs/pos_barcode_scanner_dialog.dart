@@ -98,7 +98,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
       if (mounted) {
         setState(() {
           _cameraError = MobileScannerException(
-            errorCode: MobileScannerErrorCode.generic,
+            errorCode: MobileScannerErrorCode.unknown,
             errorDetails: const MobileScannerErrorDetails(
               message: 'Unknown camera error',
             ),
