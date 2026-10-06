@@ -40,17 +40,7 @@ final Provider<ReportsRepository> reportsRepositoryProvider =
 ///
 /// Reports are only meaningful with a company; the page-level providers
 /// translate this exception into an error state.
-String _requireCompanyId(Ref ref) {
-  final CompanyContextState context = ref.read(companyContextProvider);
-  final String? id = context.currentCompany?.id;
-  if (id == null) {
-    throw const ReportException(
-      type: ReportFailureType.unauthorized,
-      cause: 'No company is currently selected.',
-    );
-  }
-  return id;
-}
+
 
 // ============================================================================
 // Sales summary
