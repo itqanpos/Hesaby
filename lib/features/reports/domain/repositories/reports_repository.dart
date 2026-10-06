@@ -3,6 +3,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
+import '../entities/financial_reports.dart';
 import '../entities/inventory_reports.dart';
 import '../entities/report_period.dart';
 import '../entities/sales_reports.dart';
@@ -50,11 +51,9 @@ class ReportException extends Equatable implements Exception {
 /// database (aggregations, grouping, ordering) rather than fetch full
 /// tables and reduce them client-side.
 ///
-/// Every sales method takes a [ReportPeriod] describing the window to
-/// aggregate over. `null` bounds inside the period mean "open-ended"
-/// (all-time). Inventory reports operate on the *current* state, so they
-/// do not take a period — except the dead-stock report, which takes a
-/// lookback window.
+/// Sales and financial reports take a [ReportPeriod]. Inventory reports
+/// operate on the *current* state, so they do not take a period — except
+/// the dead-stock report, which takes a lookback window.
 abstract interface class ReportsRepository {
   // ---------------------------------------------------------------------------
   // Sales
@@ -94,13 +93,6 @@ abstract interface class ReportsRepository {
   // ---------------------------------------------------------------------------
 
   /// Returns the current inventory valuation for [companyId].
-  ///
-  /// The report is derived from `inventory_balances` (per branch and
-  /// product) and aggregated per product. When [branchId] is `null` the
-  /// report covers every branch the user can see.
-  ///
-  /// `productNames` and `unitNames` are passed from the UI to resolve ids
-  /// to display strings; missing entries fall back to placeholder text.
   Future<StockValuationReport> getStockValuation({
     required String companyId,
     String? branchId,
@@ -110,8 +102,6 @@ abstract interface class ReportsRepository {
 
   /// Returns every product whose current on-hand quantity is at or below
   /// its configured `min_stock` level.
-  ///
-  /// Products without a `min_stock` value are ignored.
   Future<List<LowStockItem>> getLowStockItems({
     required String companyId,
     String? branchId,
@@ -121,14 +111,39 @@ abstract interface class ReportsRepository {
 
   /// Returns every product that still has stock on hand but has not been
   /// sold within the last [window] days.
-  ///
-  /// Products that have *never* been sold are also included and flagged
-  /// via [DeadStockItem.neverSold].
   Future<List<DeadStockItem>> getDeadStockItems({
     required String companyId,
     String? branchId,
     required DeadStockWindow window,
     required Map<String, String> productNames,
     required Map<String, String> unitNames,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Financial
+  // ---------------------------------------------------------------------------
+
+  /// Returns the profit & loss summary for [period].
+  ///
+  /// The cost of goods sold is derived from the `sale_out` stock movements
+  /// whose parent sale was confirmed within [period]: their historical
+  /// `unit_cost` is preserved even if the product's cost changed since.
+  Future<ProfitLossSummary> getProfitLoss({
+    required String companyId,
+    required ReportPeriod period,
+  });
+
+  /// Returns the current accounts receivable: customers with a positive
+  /// balance, ordered by descending balance.
+  Future<ReceivablesReport> getReceivables({
+    required String companyId,
+  });
+
+  /// Returns the accounts payable summary for confirmed purchases over
+  /// [period], grouped by supplier.
+  Future<PayablesReport> getPayables({
+    required String companyId,
+    required ReportPeriod period,
+    required Map<String, String> supplierNames,
   });
 }
