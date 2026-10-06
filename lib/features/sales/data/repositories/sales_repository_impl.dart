@@ -7,11 +7,13 @@ import '../../domain/entities/customer_adjustment.dart';
 import '../../domain/entities/customer_payment.dart';
 import '../../domain/entities/customer_statement.dart';
 import '../../domain/entities/sale_entities.dart';
+import '../../domain/entities/sale_return.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../datasources/sales_remote_datasource.dart';
 import '../models/customer_adjustment_model.dart';
 import '../models/customer_payment_model.dart';
 import '../models/sale_models.dart';
+import '../models/sale_return_model.dart';
 
 // ============================================================================
 // CustomerRepositoryImpl
@@ -672,6 +674,264 @@ class SalesRepositoryImpl implements SalesRepository {
 }
 
 // ============================================================================
+// ReturnsRepositoryImpl
+// ============================================================================
+
+/// Concrete implementation of [ReturnsRepository] backed by Supabase.
+class ReturnsRepositoryImpl implements ReturnsRepository {
+  const ReturnsRepositoryImpl(this._remoteDataSource);
+
+  final SalesRemoteDataSource _remoteDataSource;
+
+  @override
+  Future<List<SaleReturn>> listReturns(
+    String companyId, {
+    String? branchId,
+    String? saleId,
+    String? status,
+    int? limit,
+  }) async {
+    try {
+      final List<SaleReturnModel> models =
+          await _remoteDataSource.listReturns(
+        companyId,
+        branchId: branchId,
+        saleId: saleId,
+        status: status,
+        limit: limit,
+      );
+      return models
+          .map((SaleReturnModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapReturnInvalidResponse(error, stackTrace, operation: 'listReturns');
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapReturnPostgrest(error, stackTrace, operation: 'listReturns');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapReturnAuth(error, stackTrace, operation: 'listReturns');
+    } on ReturnException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapReturnUnknown(error, stackTrace, operation: 'listReturns');
+    }
+  }
+
+  @override
+  Future<SaleReturn> getReturn(String returnId) async {
+    try {
+      final SaleReturnModel model =
+          await _remoteDataSource.getReturn(returnId);
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapReturnInvalidResponse(error, stackTrace, operation: 'getReturn');
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapReturnPostgrest(error, stackTrace, operation: 'getReturn');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapReturnAuth(error, stackTrace, operation: 'getReturn');
+    } on ReturnException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapReturnUnknown(error, stackTrace, operation: 'getReturn');
+    }
+  }
+
+  @override
+  Future<List<SaleReturnItem>> listReturnItems(String returnId) async {
+    try {
+      final List<SaleReturnItemModel> models =
+          await _remoteDataSource.listReturnItems(returnId);
+      return models
+          .map((SaleReturnItemModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapReturnInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'listReturnItems',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapReturnPostgrest(error, stackTrace, operation: 'listReturnItems');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapReturnAuth(error, stackTrace, operation: 'listReturnItems');
+    } on ReturnException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapReturnUnknown(error, stackTrace, operation: 'listReturnItems');
+    }
+  }
+
+  @override
+  Future<List<SaleReturn>> listReturnsForSale(String saleId) async {
+    try {
+      final List<SaleReturnModel> models =
+          await _remoteDataSource.listReturnsForSale(saleId);
+      return models
+          .map((SaleReturnModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapReturnInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'listReturnsForSale',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapReturnPostgrest(
+        error,
+        stackTrace,
+        operation: 'listReturnsForSale',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapReturnAuth(error, stackTrace, operation: 'listReturnsForSale');
+    } on ReturnException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapReturnUnknown(
+        error,
+        stackTrace,
+        operation: 'listReturnsForSale',
+      );
+    }
+  }
+
+  @override
+  Future<SaleReturn> createReturn({
+    required String companyId,
+    required String branchId,
+    required String saleId,
+    String? customerId,
+    required DateTime returnDate,
+    required List<SaleReturnItemDraft> items,
+    String refundMethod = 'credit_note',
+    String? notes,
+  }) async {
+    try {
+      final SaleReturnModel model = await _remoteDataSource.createReturn(
+        companyId: companyId,
+        branchId: branchId,
+        saleId: saleId,
+        customerId: customerId,
+        returnDate: returnDate,
+        items: items,
+        refundMethod: refundMethod,
+        notes: notes,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapReturnInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'createReturn',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapReturnPostgrest(error, stackTrace, operation: 'createReturn');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapReturnAuth(error, stackTrace, operation: 'createReturn');
+    } on ReturnException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapReturnUnknown(error, stackTrace, operation: 'createReturn');
+    }
+  }
+
+  @override
+  Future<SaleReturn> updateDraft({
+    required String returnId,
+    required String companyId,
+    required String branchId,
+    required String saleId,
+    String? customerId,
+    required DateTime returnDate,
+    required List<SaleReturnItemDraft> items,
+    String refundMethod = 'credit_note',
+    String? notes,
+  }) async {
+    try {
+      final SaleReturnModel model =
+          await _remoteDataSource.updateReturnDraft(
+        returnId: returnId,
+        companyId: companyId,
+        branchId: branchId,
+        saleId: saleId,
+        customerId: customerId,
+        returnDate: returnDate,
+        items: items,
+        refundMethod: refundMethod,
+        notes: notes,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapReturnInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'updateReturnDraft',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapReturnPostgrest(
+        error,
+        stackTrace,
+        operation: 'updateReturnDraft',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapReturnAuth(error, stackTrace, operation: 'updateReturnDraft');
+    } on ReturnException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapReturnUnknown(
+        error,
+        stackTrace,
+        operation: 'updateReturnDraft',
+      );
+    }
+  }
+
+  @override
+  Future<SaleReturn> confirmReturn(String returnId) async {
+    try {
+      final SaleReturnModel model =
+          await _remoteDataSource.confirmReturn(returnId);
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapReturnInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'confirmReturn',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapReturnPostgrest(error, stackTrace, operation: 'confirmReturn');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapReturnAuth(error, stackTrace, operation: 'confirmReturn');
+    } on ReturnException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapReturnUnknown(error, stackTrace, operation: 'confirmReturn');
+    }
+  }
+
+  @override
+  Future<SaleReturn> cancelReturn(String returnId) async {
+    try {
+      final SaleReturnModel model =
+          await _remoteDataSource.cancelReturn(returnId);
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapReturnInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'cancelReturn',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapReturnPostgrest(error, stackTrace, operation: 'cancelReturn');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapReturnAuth(error, stackTrace, operation: 'cancelReturn');
+    } on ReturnException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapReturnUnknown(error, stackTrace, operation: 'cancelReturn');
+    }
+  }
+}
+
+// ============================================================================
 // Statement entry builders
 // ============================================================================
 
@@ -918,17 +1178,6 @@ CustomerException _mapCustomerUnknown(
 }
 
 /// Classifies a PostgREST error into a safe [CustomerFailureType].
-///
-/// Constraint names referenced below are declared in the Phase 8 and
-/// Phase 9 migrations:
-/// * `customers_company_name_unique`                    → nameConflict
-/// * `uniq_customers_company_code`                      → codeConflict
-/// * `uniq_customers_company_phone`                     → phoneConflict
-/// * `sales_customer_company_fk`                        → inUse
-/// * `customer_payments_amount_positive`                → invalidAmount
-/// * `customer_balance_adjustments_amount_non_zero`     → invalidAmount
-/// * `apply_customer_balance_adjustment` (negative)     → insufficientBalance
-/// * `apply_customer_balance_adjustment` (not found)    → notFound
 CustomerFailureType _classifyCustomerPostgrest(
   supabase.PostgrestException error,
 ) {
@@ -947,10 +1196,8 @@ CustomerFailureType _classifyCustomerPostgrest(
   }
 
   if (code == '23503') {
-    // The adjustment trigger raises 23503 when the customer row is
-    // missing (should not happen in practice, but is safe to map).
     if (message.contains('not found') ||
-        full.contains('customer') && message.contains('not found')) {
+        (full.contains('customer') && message.contains('not found'))) {
       return CustomerFailureType.notFound;
     }
     return CustomerFailureType.inUse;
@@ -1093,17 +1340,6 @@ SaleException _mapSaleUnknown(
 }
 
 /// Classifies a PostgREST error into a safe [SalesFailureType].
-///
-/// Codes handled explicitly:
-/// * `23505` unique_violation              → invoiceNumberConflict
-/// * `23503` foreign_key_violation         → customerNotFound /
-///   branchNotFound / productNotFound / unitNotFound
-/// * `23514` check_violation               → invalidStatusTransition /
-///   emptySale / insufficientStock / invalidPayment
-///   (message-based; the triggers raise specific sentences)
-/// * `PGRST116` no rows / multiple for single() → notFound
-/// * `42501` / `28xxx`                     → unauthorized
-/// * `42xxx`                               → invalidResponse
 SalesFailureType _classifySalePostgrest(
   supabase.PostgrestException error,
 ) {
@@ -1111,7 +1347,6 @@ SalesFailureType _classifySalePostgrest(
   final String message = error.message.toLowerCase();
   final String full = error.toString().toLowerCase();
 
-  // --- Integrity: unique violations -----------------------------------------
   if (code == '23505') {
     if (full.contains('uniq_sales_company_invoice_number') ||
         message.contains('invoice_number')) {
@@ -1120,7 +1355,6 @@ SalesFailureType _classifySalePostgrest(
     return SalesFailureType.invalidResponse;
   }
 
-  // --- Integrity: foreign key violations ------------------------------------
   if (code == '23503') {
     if (full.contains('sales_customer_company_fk')) {
       return SalesFailureType.customerNotFound;
@@ -1140,7 +1374,6 @@ SalesFailureType _classifySalePostgrest(
     return SalesFailureType.notFound;
   }
 
-  // --- Integrity: check violations (business rules) -------------------------
   if (code == '23514') {
     if (message.contains('insufficient stock') ||
         full.contains('insufficient stock')) {
@@ -1163,22 +1396,18 @@ SalesFailureType _classifySalePostgrest(
     return SalesFailureType.invalidStatusTransition;
   }
 
-  // --- Not found ------------------------------------------------------------
   if (code == 'PGRST116') {
     return SalesFailureType.notFound;
   }
 
-  // --- Authorization --------------------------------------------------------
   if (code.startsWith('42501') || code.startsWith('28')) {
     return SalesFailureType.unauthorized;
   }
 
-  // --- Syntax / undefined objects -------------------------------------------
   if (code.startsWith('42')) {
     return SalesFailureType.invalidResponse;
   }
 
-  // --- Textual fallbacks ----------------------------------------------------
   if (message.contains('permission denied') ||
       message.contains('row level security') ||
       message.contains('jwt')) {
@@ -1231,6 +1460,175 @@ SalesFailureType _classifySalePostgrest(
   }
 
   return SalesFailureType.unknown;
+}
+
+// ============================================================================
+// Return error mapping
+// ============================================================================
+
+ReturnException _mapReturnInvalidResponse(
+  FormatException error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  AppLogger.error(
+    'Return invalid response during "$operation" (FormatException).',
+    error,
+    stackTrace,
+  );
+  return ReturnException(
+    type: ReturnFailureType.invalidResponse,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReturnException _mapReturnPostgrest(
+  supabase.PostgrestException error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  final ReturnFailureType type = _classifyReturnPostgrest(error);
+
+  AppLogger.warning(
+    'Return PostgREST error during "$operation" mapped to ${type.name} '
+    '(code: ${error.code ?? 'n/a'}).',
+  );
+
+  return ReturnException(
+    type: type,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReturnException _mapReturnAuth(
+  supabase.AuthException error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  AppLogger.warning(
+    'Return auth error during "$operation" mapped to unauthorized '
+    '(code: ${error.code ?? 'n/a'}).',
+  );
+  return ReturnException(
+    type: ReturnFailureType.unauthorized,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReturnException _mapReturnUnknown(
+  Object error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  final ReturnFailureType type = _looksLikeNetworkFailure(error)
+      ? ReturnFailureType.network
+      : ReturnFailureType.unknown;
+
+  AppLogger.error(
+    'Unhandled return error during "$operation" '
+    '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
+    error,
+    stackTrace,
+  );
+
+  return ReturnException(
+    type: type,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+/// Classifies a PostgREST error into a safe [ReturnFailureType].
+ReturnFailureType _classifyReturnPostgrest(supabase.PostgrestException error) {
+  final String code = (error.code ?? '').toUpperCase();
+  final String message = error.message.toLowerCase();
+  final String full = error.toString().toLowerCase();
+
+  if (code == '23505') {
+    return ReturnFailureType.invalidResponse;
+  }
+
+  if (code == '23503') {
+    if (full.contains('sale_return_items_sale_item_company_fk') ||
+        message.contains('original sale item not found')) {
+      return ReturnFailureType.referenceNotFound;
+    }
+    if (full.contains('sale_returns_sale_company_fk')) {
+      return ReturnFailureType.referenceNotFound;
+    }
+    if (full.contains('sale_returns_customer_company_fk')) {
+      return ReturnFailureType.referenceNotFound;
+    }
+    return ReturnFailureType.referenceNotFound;
+  }
+
+  if (code == '23514') {
+    if (message.contains('exceeds remaining returnable quantity')) {
+      return ReturnFailureType.excessiveQuantity;
+    }
+    if (message.contains('without items')) {
+      return ReturnFailureType.emptyReturn;
+    }
+    if (message.contains('credit_note refund requires a customer')) {
+      return ReturnFailureType.creditNoteRequiresCustomer;
+    }
+    if (message.contains('non-confirmed sale')) {
+      return ReturnFailureType.saleNotConfirmed;
+    }
+    if (message.contains('cannot modify items of a')) {
+      return ReturnFailureType.invalidStatusTransition;
+    }
+    if (message.contains('cannot modify a confirmed return')) {
+      return ReturnFailureType.immutableConfirmedReturn;
+    }
+    if (message.contains('cannot modify a cancelled return')) {
+      return ReturnFailureType.invalidStatusTransition;
+    }
+    if (message.contains('cannot delete a')) {
+      return ReturnFailureType.invalidStatusTransition;
+    }
+    return ReturnFailureType.invalidStatusTransition;
+  }
+
+  if (code == 'PGRST116') {
+    return ReturnFailureType.notFound;
+  }
+
+  if (code.startsWith('42501') || code.startsWith('28')) {
+    return ReturnFailureType.unauthorized;
+  }
+
+  if (code.startsWith('42')) {
+    return ReturnFailureType.invalidResponse;
+  }
+
+  if (message.contains('permission denied') ||
+      message.contains('row level security') ||
+      message.contains('jwt')) {
+    return ReturnFailureType.unauthorized;
+  }
+
+  if (message.contains('exceeds remaining returnable quantity')) {
+    return ReturnFailureType.excessiveQuantity;
+  }
+  if (message.contains('without items')) {
+    return ReturnFailureType.emptyReturn;
+  }
+  if (message.contains('credit_note refund requires a customer')) {
+    return ReturnFailureType.creditNoteRequiresCustomer;
+  }
+  if (message.contains('non-confirmed sale')) {
+    return ReturnFailureType.saleNotConfirmed;
+  }
+
+  if (_messageLooksLikeNetwork(message)) {
+    return ReturnFailureType.network;
+  }
+
+  return ReturnFailureType.unknown;
 }
 
 // ============================================================================
