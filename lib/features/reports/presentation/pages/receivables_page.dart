@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/financial_reports.dart';
+import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
+import '../widgets/report_print_action.dart';
 
-/// Accounts receivable report — customers with an outstanding balance.
 class ReceivablesPage extends ConsumerStatefulWidget {
   const ReceivablesPage({super.key});
 
@@ -25,6 +26,56 @@ class _ReceivablesPageState extends ConsumerState<ReceivablesPage> {
     decimalDigits: 2,
   );
 
+  ReportDocument? _buildDocument(ReceivablesReport report) {
+    if (report.isEmpty) return null;
+
+    return ReportDocument(
+      title: 'المدينون',
+      companyName: '—',
+      generatedAt: DateTime.now(),
+      sections: <ReportSection>[
+        ReportSection(
+          kpis: <ReportKpi>[
+            ReportKpi(
+              label: 'إجمالي المديونيات',
+              value: _money.format(report.totalBalance),
+              emphasized: true,
+            ),
+            ReportKpi(
+              label: 'عدد العملاء',
+              value: '${report.customerCount}',
+            ),
+            ReportKpi(
+              label: 'متوسط الرصيد',
+              value: _money.format(report.averageBalance),
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'التفاصيل',
+          table: ReportTable(
+            headers: <String>[
+              '#',
+              'العميل',
+              'الهاتف',
+              'الرصيد',
+            ],
+            flex: <double>[0.4, 2.6, 1.4, 1.4],
+            rows: <List<String>>[
+              for (int i = 0; i < report.items.length; i++)
+                <String>[
+                  '${i + 1}',
+                  report.items[i].customerName,
+                  report.items[i].phone ?? '—',
+                  _money.format(report.items[i].balance),
+                ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final AsyncValue<ReceivablesReport> reportAsync =
@@ -38,6 +89,13 @@ class _ReceivablesPageState extends ConsumerState<ReceivablesPage> {
       errorMessage:
           reportAsync.hasError ? _errorMessage(reportAsync.error!) : null,
       onRetry: () => ref.invalidate(receivablesProvider),
+      trailing: ReportPrintAction(
+        documentBuilder: () {
+          final ReceivablesReport? report = reportAsync.valueOrNull;
+          if (report == null) return null;
+          return _buildDocument(report);
+        },
+      ),
       body: reportAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
@@ -93,7 +151,6 @@ class _HeroCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
@@ -171,7 +228,6 @@ class _ReceivableRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surface,
@@ -235,30 +291,17 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(
-              Icons.check_circle_outline,
-              size: 48,
-              color: scheme.primary,
-            ),
+            Icon(Icons.check_circle_outline, size: 48, color: scheme.primary),
             const SizedBox(height: 12),
             Text(
               'لا توجد مديونيات',
               style: theme.textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'جميع العملاء مسددون بالكامل.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
               textAlign: TextAlign.center,
             ),
           ],
