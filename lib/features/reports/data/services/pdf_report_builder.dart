@@ -10,15 +10,12 @@ import '../../domain/entities/report_document.dart';
 
 /// Builds an A4 PDF from a [ReportDocument].
 ///
-/// The layout is intentionally uniform across every report:
-/// * company header (name + branch),
-/// * report title,
-/// * period + generation timestamp,
-/// * one or more sections (KPIs / lines / tables),
-/// * page footer with `صفحة X من Y`.
-///
-/// Arabic text is rendered RTL with the Cairo font, downloaded on demand
-/// by the `printing` package.
+/// A note on digit normalization:
+///   `NumberFormat.currency(locale: 'ar_EG')` produces Eastern Arabic-Indic
+///   digits (٠–٩) plus invisible BIDI marks (LRM/RLM). Cairo font lacks
+///   glyphs for those marks, so PDF viewers render them as tofu boxes.
+///   We normalize every string before drawing it: Arabic-Indic digits
+///   become Western digits, and BIDI marks are stripped.
 abstract final class PdfReportBuilder {
   /// Builds the PDF and returns its bytes.
   static Future<Uint8List> build({
@@ -48,6 +45,78 @@ abstract final class PdfReportBuilder {
   }
 
   // ---------------------------------------------------------------------------
+  // Digit normalization
+  // ---------------------------------------------------------------------------
+
+  /// Normalizes a string so Cairo can render it.
+  ///
+  /// * Eastern Arabic-Indic digits ٠–٩ → 0–9.
+  /// * Arabic decimal separator ٫ (U+066B) → `.`.
+  /// * Arabic thousands separator ٬ (U+066C) → `,`.
+  /// * BIDI control marks (U+200E, U+200F, U+202A–U+202E) are dropped.
+  static String _norm(String input) {
+    final StringBuffer out = StringBuffer();
+    for (int i = 0; i < input.length; i++) {
+      final int c = input.codeUnitAt(i);
+      switch (c) {
+        case 0x0660:
+          out.write('0');
+          break;
+        case 0x0661:
+          out.write('1');
+          break;
+        case 0x0662:
+          out.write('2');
+          break;
+        case 0x0663:
+          out.write('3');
+          break;
+        case 0x0664:
+          out.write('4');
+          break;
+        case 0x0665:
+          out.write('5');
+          break;
+        case 0x0666:
+          out.write('6');
+          break;
+        case 0x0667:
+          out.write('7');
+          break;
+        case 0x0668:
+          out.write('8');
+          break;
+        case 0x0669:
+          out.write('9');
+          break;
+        case 0x066B:
+          out.write('.');
+          break;
+        case 0x066C:
+          out.write(',');
+          break;
+        case 0x200E:
+          break;
+        case 0x200F:
+          break;
+        case 0x202A:
+          break;
+        case 0x202B:
+          break;
+        case 0x202C:
+          break;
+        case 0x202D:
+          break;
+        case 0x202E:
+          break;
+        default:
+          out.writeCharCode(c);
+      }
+    }
+    return out.toString();
+  }
+
+  // ---------------------------------------------------------------------------
   // Fonts
   // ---------------------------------------------------------------------------
 
@@ -66,17 +135,18 @@ abstract final class PdfReportBuilder {
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
         pw.Text(
-          document.companyName,
+          _norm(document.companyName),
           style: pw.TextStyle(
             fontSize: 13,
             fontWeight: pw.FontWeight.bold,
           ),
           textAlign: pw.TextAlign.center,
         ),
-        if (document.branchName != null) ...<pw.Widget>[
+        if (document.branchName != null &&
+            document.branchName!.isNotEmpty) ...<pw.Widget>[
           pw.SizedBox(height: 1),
           pw.Text(
-            document.branchName!,
+            _norm(document.branchName!),
             style: const pw.TextStyle(
               fontSize: 9,
               color: PdfColors.grey700,
@@ -129,7 +199,7 @@ abstract final class PdfReportBuilder {
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: <pw.Widget>[
           pw.Text(
-            document.title,
+            _norm(document.title),
             style: pw.TextStyle(
               fontSize: 16,
               fontWeight: pw.FontWeight.bold,
@@ -142,12 +212,14 @@ abstract final class PdfReportBuilder {
             children: <pw.Widget>[
               pw.Text(
                 document.periodLabel != null
-                    ? 'الفترة: ${document.periodLabel}'
+                    ? _norm('الفترة: ${document.periodLabel}')
                     : 'الفترة: الكل',
                 style: const pw.TextStyle(fontSize: 9),
               ),
               pw.Text(
-                'تاريخ الإصدار: ${_formatDateTime(document.generatedAt)}',
+                _norm(
+                  'تاريخ الإصدار: ${_formatDateTime(document.generatedAt)}',
+                ),
                 style: const pw.TextStyle(fontSize: 9),
               ),
             ],
@@ -178,7 +250,7 @@ abstract final class PdfReportBuilder {
             ),
           ),
           child: pw.Text(
-            section.title!,
+            _norm(section.title!),
             style: pw.TextStyle(
               fontSize: 12,
               fontWeight: pw.FontWeight.bold,
@@ -247,7 +319,9 @@ abstract final class PdfReportBuilder {
         color: PdfColors.grey100,
         borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
         border: pw.Border.all(
-          color: kpi.emphasized ? PdfColors.blueGrey600 : PdfColors.grey400,
+          color: kpi.emphasized
+              ? PdfColors.blueGrey600
+              : PdfColors.grey400,
           width: kpi.emphasized ? 0.8 : 0.4,
         ),
       ),
@@ -255,7 +329,7 @@ abstract final class PdfReportBuilder {
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: <pw.Widget>[
           pw.Text(
-            kpi.label,
+            _norm(kpi.label),
             style: const pw.TextStyle(
               fontSize: 9,
               color: PdfColors.grey700,
@@ -263,7 +337,7 @@ abstract final class PdfReportBuilder {
           ),
           pw.SizedBox(height: 3),
           pw.Text(
-            kpi.value,
+            _norm(kpi.value),
             style: pw.TextStyle(
               fontSize: kpi.emphasized ? 12 : 11,
               fontWeight: pw.FontWeight.bold,
@@ -286,18 +360,19 @@ abstract final class PdfReportBuilder {
         children: <pw.Widget>[
           pw.Expanded(
             child: pw.Text(
-              line.label,
+              _norm(line.label),
               style: const pw.TextStyle(fontSize: 10),
               softWrap: true,
             ),
           ),
           pw.SizedBox(width: 8),
           pw.Text(
-            line.value,
+            _norm(line.value),
             style: pw.TextStyle(
               fontSize: line.emphasized ? 11 : 10,
-              fontWeight:
-                  line.emphasized ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontWeight: line.emphasized
+                  ? pw.FontWeight.bold
+                  : pw.FontWeight.normal,
             ),
             textAlign: pw.TextAlign.right,
           ),
@@ -359,7 +434,7 @@ abstract final class PdfReportBuilder {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(horizontal: 4, vertical: 3),
       child: pw.Text(
-        text,
+        _norm(text),
         style: pw.TextStyle(
           fontSize: fontSize,
           fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
