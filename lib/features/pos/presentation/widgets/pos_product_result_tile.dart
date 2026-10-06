@@ -13,7 +13,7 @@ import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
-import '../state/pos_providers.dart';
+import '../dialogs/pos_unit_quick_add_sheet.dart';
 
 /// A single search-result tile in the POS.
 ///
@@ -22,12 +22,12 @@ import '../state/pos_providers.dart';
 /// * One row per available unit:
 ///   `unit name | price | stock badge | [+]`
 ///
-/// Tapping any unit row (or its `[+]` button) adds **one** line with
-/// quantity 1 and the unit's own price to the cart. Quantity and price
-/// can then be refined inside the cart itself.
+/// Tapping a unit row (or its `[+]` button) opens the compact
+/// `showPosUnitQuickAddSheet` dialog, where the cashier confirms the
+/// quantity and price. The bottom sheet that used to occupy 75% of the
+/// screen has been removed.
 ///
-/// No product images are used anywhere in this widget. No bottom sheet
-/// is opened from here.
+/// No product images are used anywhere in this widget.
 class PosProductResultTile extends ConsumerWidget {
   const PosProductResultTile({
     super.key,
@@ -151,7 +151,7 @@ class PosProductResultTile extends ConsumerWidget {
                 padding: const EdgeInsets.only(bottom: 4),
                 child: _UnitRow(
                   choice: c,
-                  onAdd: () => _handleAdd(ref, c),
+                  onTap: () => _openQuickAdd(context, ref, c),
                 ),
               ),
           ],
@@ -164,20 +164,24 @@ class PosProductResultTile extends ConsumerWidget {
   // Handlers
   // ---------------------------------------------------------------------------
 
-  void _handleAdd(WidgetRef ref, _UnitChoice choice) {
-    final bool added = ref.read(posCartProvider.notifier).addLine(
-          productId: product.id,
-          productName: product.name,
-          unitId: choice.unitId,
-          unitName: choice.unitName,
-          conversionFactor: choice.conversionFactor,
-          quantity: 1,
-          unitPrice: choice.unitPrice,
-          minSellingPrice: choice.minSellingPrice,
-          maxSellingPrice: choice.maxSellingPrice,
-          availableStock: choice.availableStock,
-        );
-    if (added) {
+  Future<void> _openQuickAdd(
+    BuildContext context,
+    WidgetRef ref,
+    _UnitChoice choice,
+  ) async {
+    final bool? added = await showPosUnitQuickAddSheet(
+      context: context,
+      product: product,
+      unitId: choice.unitId,
+      unitName: choice.unitName,
+      conversionFactor: choice.conversionFactor,
+      defaultPrice: choice.unitPrice,
+      minSellingPrice: choice.minSellingPrice,
+      maxSellingPrice: choice.maxSellingPrice,
+      availableStock: choice.availableStock,
+    );
+
+    if (added == true) {
       onAdded();
     }
   }
@@ -239,10 +243,10 @@ class _UnitChoice {
 // ============================================================================
 
 class _UnitRow extends StatelessWidget {
-  const _UnitRow({required this.choice, required this.onAdd});
+  const _UnitRow({required this.choice, required this.onTap});
 
   final _UnitChoice choice;
-  final VoidCallback onAdd;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
@@ -265,7 +269,7 @@ class _UnitRow extends StatelessWidget {
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
-        onTap: out ? null : onAdd,
+        onTap: out ? null : onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           child: Row(
@@ -324,7 +328,7 @@ class _UnitRow extends StatelessWidget {
                   borderRadius: BorderRadius.circular(10),
                   child: InkWell(
                     borderRadius: BorderRadius.circular(10),
-                    onTap: out ? null : onAdd,
+                    onTap: out ? null : onTap,
                     child: Icon(
                       Icons.add,
                       size: 18,
