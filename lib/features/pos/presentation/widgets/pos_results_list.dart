@@ -15,13 +15,11 @@ import '../../../products/presentation/providers/unit_providers.dart';
 import '../state/pos_providers.dart';
 import '../state/pos_search_notifier.dart';
 import 'pos_product_result_tile.dart';
-import 'pos_unit_selector_sheet.dart';
 
 /// The list of products matching the current POS search query.
 ///
-/// The list is driven entirely by `posSearchResultsProvider`, which
-/// combines the query string with the products stream. This widget only
-/// resolves unit names once and renders one tile per result.
+/// Every tile shows all units of its product at once; adding a line is a
+/// single tap on the desired unit. No bottom sheet is involved.
 class PosResultsList extends ConsumerWidget {
   const PosResultsList({super.key});
 
@@ -30,14 +28,6 @@ class PosResultsList extends ConsumerWidget {
     final AsyncValue<List<Product>> results =
         ref.watch(posSearchResultsProvider);
     final PosSearchState search = ref.watch(posSearchProvider);
-
-    final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
-    final Map<String, String> unitNames = unitsAsync.maybeWhen(
-      data: (List<Unit> units) => <String, String>{
-        for (final Unit unit in units) unit.id: unit.name,
-      },
-      orElse: () => const <String, String>{},
-    );
 
     return results.when(
       loading: () => const AppLoader(),
@@ -50,9 +40,7 @@ class PosResultsList extends ConsumerWidget {
       data: (List<Product> products) {
         if (products.isEmpty) {
           return AppEmptyView(
-            icon: search.isEmpty
-                ? Icons.search
-                : Icons.search_off_outlined,
+            icon: search.isEmpty ? Icons.search : Icons.search_off_outlined,
             title: search.isEmpty ? 'ابحث عن منتج' : 'لا نتائج',
             message: search.isEmpty
                 ? 'اكتب اسم المنتج أو الكود أو امسح الباركود.'
@@ -66,37 +54,19 @@ class PosResultsList extends ConsumerWidget {
           separatorBuilder: (_, __) => const Divider(height: 1),
           itemBuilder: (BuildContext context, int index) {
             final Product product = products[index];
-            final String? unitName = unitNames[product.defaultUnitId];
-
             return PosProductResultTile(
               product: product,
-              unitName: unitName,
-              onTap: () => _handleTap(context, ref, product),
-              onQuickAdd: () => _handleQuickAdd(ref, product),
+              onAdded: () {
+                // The cart is always visible above the bottom panel, so no
+                // additional feedback is needed here. Intentionally do NOT
+                // clear the search, so the cashier can add more units from
+                // the same product.
+              },
             );
           },
         );
       },
     );
-  }
-
-  // ---------------------------------------------------------------------------
-  // Handlers
-  // ---------------------------------------------------------------------------
-
-  void _handleQuickAdd(WidgetRef ref, Product product) {
-    final bool added = posQuickAddProduct(ref, product);
-    if (added) {
-      ref.read(posSearchProvider.notifier).clear();
-    }
-  }
-
-  Future<void> _handleTap(
-    BuildContext context,
-    WidgetRef ref,
-    Product product,
-  ) async {
-    await showPosUnitSelectorSheet(context: context, product: product);
   }
 }
 
@@ -107,13 +77,9 @@ class PosResultsList extends ConsumerWidget {
 /// Adds [product] to the POS cart at its default unit and catalogue price,
 /// with quantity 1.
 ///
-/// Returns `true` when the line was accepted, `false` when the operation
-/// could not be performed (no branch selected, or the default unit could
-/// not be resolved yet because `unitsProvider` is still loading).
-///
-/// This helper is intentionally exported so that both
-/// [PosResultsList] and the barcode-scanning flow in `PosSearchField` can
-/// share the same add semantics without duplicating the cart-write logic.
+/// Used by the barcode-scanning flow in `PosSearchField`, which adds a
+/// product immediately when the scanned barcode matches exactly one
+/// product. Returns `true` when the line was accepted.
 bool posQuickAddProduct(WidgetRef ref, Product product) {
   final CompanyContextState state = ref.read(companyContextProvider);
   final String? branchId = state.currentBranch?.id;
