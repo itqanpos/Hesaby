@@ -38,14 +38,27 @@ enum ReceiptPaperSize {
 /// Thermal page sizing:
 ///   `PdfPageFormat.roll57` and `PdfPageFormat.roll80` both use an infinite
 ///   height, which `MultiPage` cannot paginate on. We therefore build the
-///   thermal page formats from first principles, using a bounded height
-///   (the A4 height, 297 mm) that is more than enough for any realistic
-///   receipt, and letting `MultiPage` split long receipts into as many
-///   pages as needed.
+///   thermal page formats from first principles, using a content-aware,
+///   bounded height that is more than enough for any realistic receipt,
+///   and letting `MultiPage` split long receipts into as many pages as
+///   needed.
 abstract final class PdfReceiptBuilder {
-  /// A4 height, in PDF points. Used as the finite height for thermal roll
-  /// formats so that `MultiPage` can paginate normally.
-  static final double _boundedRollHeight = PdfPageFormat.a4.height;
+  /// Estimated fixed height (header + totals + footer) in millimetres.
+  static const double _thermalFixedMm = 130;
+
+  /// Estimated per-item height in millimetres (name + quantity/price rows).
+  static const double _thermalPerLineMm = 12;
+
+  /// Computes a bounded, content-aware height for a thermal receipt.
+  ///
+  /// Long enough to hold every realistic receipt on a single page, short
+  /// enough to avoid leaving a huge blank area under short ones.
+  static double _thermalHeightFor(int lineCount) {
+    final double estimatedMm =
+        _thermalFixedMm + lineCount * _thermalPerLineMm;
+    final double clampedMm = estimatedMm.clamp(150.0, 400.0);
+    return clampedMm * PdfPageFormat.mm;
+  }
 
   /// Builds the PDF and returns its bytes.
   ///
@@ -63,14 +76,14 @@ abstract final class PdfReceiptBuilder {
       case ReceiptPaperSize.mm58:
         pageFormat = PdfPageFormat(
           58 * PdfPageFormat.mm,
-          _boundedRollHeight,
+          _thermalHeightFor(receipt.lines.length),
           marginAll: 0,
         );
         padding = 4;
       case ReceiptPaperSize.mm80:
         pageFormat = PdfPageFormat(
           80 * PdfPageFormat.mm,
-          _boundedRollHeight,
+          _thermalHeightFor(receipt.lines.length),
           marginAll: 0,
         );
         padding = 6;
@@ -203,7 +216,7 @@ abstract final class PdfReceiptBuilder {
           baseFont,
         ),
 
-            // ---- Balance evolution (credit / partial sales) ----
+      // ---- Balance evolution (credit / partial sales) ----
       if (receipt.hasBalanceChange) ...<pw.Widget>[
         pw.SizedBox(height: 4),
         _divider(),
@@ -228,6 +241,19 @@ abstract final class PdfReceiptBuilder {
           bold: true,
         ),
       ],
+
+      pw.SizedBox(height: 10),
+
+      // ---- Footer ----
+      pw.Center(
+        child: pw.Text(
+          'شكرًا لتعاملكم معنا',
+          style: pw.TextStyle(fontSize: baseFont),
+          textAlign: pw.TextAlign.center,
+        ),
+      ),
+    ];
+  }
 
   // ---------------------------------------------------------------------------
   // Line item
@@ -364,7 +390,8 @@ abstract final class PdfReceiptBuilder {
             value,
             style: pw.TextStyle(
               fontSize: fontSize,
-              fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontWeight:
+                  bold ? pw.FontWeight.bold : pw.FontWeight.normal,
             ),
             textAlign: pw.TextAlign.right,
           ),
