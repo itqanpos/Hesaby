@@ -3,8 +3,6 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
-import 'report_period.dart';
-
 // ============================================================================
 // Stock valuation
 // ============================================================================
@@ -189,18 +187,4 @@ enum DeadStockWindow {
   /// Cutoff instant: `now - days`.
   DateTime get cutoff =>
       DateTime.now().toUtc().subtract(Duration(days: days));
-
-  /// Returns the [ReportPeriod] matching this window, capped at today.
-  ReportPeriod toReportPeriod() {
-    final DateTime now = DateTime.now();
-    final DateTime start =
-        DateTime(now.year, now.month, now.day).subtract(Duration(days: days));
-    return ReportPeriod(
-      type: ReportPeriodType.custom,
-      customRange: DateTimeRange(
-        start: start,
-        end: now,
-      ),
-    );
-  }
 }
