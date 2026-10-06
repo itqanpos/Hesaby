@@ -1,6 +1,7 @@
 // lib/features/pos/presentation/dialogs/pos_barcode_scanner_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 /// Full-screen barcode scanner dialog.
@@ -9,6 +10,13 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 /// value the moment a code is detected. The cashier can dismiss the screen
 /// with the close button or the system back gesture, in which case the
 /// dialog resolves with `null`.
+///
+/// Fallbacks when the camera is unavailable (permission denied, unsupported
+/// browser, no camera):
+/// * **إعادة المحاولة** — calls `controller.start()` again. Useful when
+///   the user has just granted permission or fixed the browser settings.
+/// * **إدخال يدوي** — opens a small text field so the cashier can type the
+///   barcode; the dialog pops with that value.
 ///
 /// The widget does **not** perform any product lookup. It returns the raw
 /// string to its caller, which is responsible for matching it against the
@@ -25,7 +33,8 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
   late final MobileScannerController _controller;
 
   bool _hasEmitted = false;
-  Object? _cameraError;
+  MobileScannerException? _cameraError;
+  bool _isRetrying = false;
 
   @override
   void initState() {
@@ -51,8 +60,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
       return;
     }
 
-    final List<Barcode> barcodes = capture.barcodes;
-    for (final Barcode barcode in barcodes) {
+    for (final Barcode barcode in capture.barcodes) {
       final String? value = barcode.rawValue;
       if (value != null && value.trim().isNotEmpty) {
         _hasEmitted = true;
@@ -63,12 +71,72 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
   }
 
   // ---------------------------------------------------------------------------
+  // Fallbacks
+  // ---------------------------------------------------------------------------
+
+  Future<void> _retry() async {
+    if (_isRetrying) return;
+
+    setState(() {
+      _isRetrying = true;
+      _cameraError = null;
+    });
+
+    try {
+      await _controller.stop();
+    } on Object {
+      // Ignore: the controller may not be running.
+    }
+
+    try {
+      await _controller.start();
+    } on MobileScannerException catch (error) {
+      if (mounted) {
+        setState(() => _cameraError = error);
+      }
+    } on Object {
+      if (mounted) {
+        setState(() {
+          _cameraError = MobileScannerException(
+            errorCode: MobileScannerErrorCode.generic,
+            errorDetails: const MobileScannerErrorDetails(
+              message: 'Unknown camera error',
+            ),
+          );
+        });
+      }
+    } finally {
+      if (mounted) {
+        setState(() => _isRetrying = false);
+      }
+    }
+  }
+
+  Future<void> _manualEntry() async {
+    final String? value = await showModalBottomSheet<String>(
+      context: context,
+      isScrollControlled: true,
+      useSafeArea: true,
+      showDragHandle: true,
+      builder: (BuildContext ctx) => _ManualEntrySheet(
+        title: 'إدخال الباركود يدويًا',
+      ),
+    );
+    if (value == null || value.trim().isEmpty) {
+      return;
+    }
+    if (!mounted) return;
+    Navigator.of(context).pop(value.trim());
+  }
+
+  // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
+    final bool hasError = _cameraError != null;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -81,16 +149,12 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
           IconButton(
             tooltip: 'التبديل للكاميرا الأمامية',
             icon: const Icon(Icons.flip_camera_ios_outlined),
-            onPressed: _cameraError != null
-                ? null
-                : () => _controller.switchCamera(),
+            onPressed: hasError ? null : () => _controller.switchCamera(),
           ),
           IconButton(
             tooltip: 'الفلاش',
             icon: const Icon(Icons.flash_on_outlined),
-            onPressed: _cameraError != null
-                ? null
-                : () => _controller.toggleTorch(),
+            onPressed: hasError ? null : () => _controller.toggleTorch(),
           ),
         ],
       ),
@@ -99,10 +163,28 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
           Positioned.fill(
             child: _buildScannerArea(scheme),
           ),
-          if (_cameraError == null)
+          if (!hasError) ...<Widget>[
             const IgnorePointer(child: _ScanFrameOverlay()),
-          if (_cameraError == null)
             const _BottomHint(),
+            Positioned(
+              left: 0,
+              right: 0,
+              bottom: 88,
+              child: SafeArea(
+                top: false,
+                child: Center(
+                  child: TextButton.icon(
+                    onPressed: _manualEntry,
+                    icon: const Icon(Icons.keyboard, color: Colors.white),
+                    label: const Text(
+                      'إدخال يدوي',
+                      style: TextStyle(color: Colors.white),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ],
         ],
       ),
     );
@@ -110,7 +192,13 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
 
   Widget _buildScannerArea(ColorScheme scheme) {
     if (_cameraError != null) {
-      return _CameraErrorView(error: _cameraError!, scheme: scheme);
+      return _CameraErrorView(
+        error: _cameraError!,
+        scheme: scheme,
+        isRetrying: _isRetrying,
+        onRetry: _retry,
+        onManualEntry: _manualEntry,
+      );
     }
 
     return MobileScanner(
@@ -121,8 +209,23 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
         MobileScannerException error,
         Widget? child,
       ) {
-        _cameraError = error;
-        return _CameraErrorView(error: error, scheme: scheme);
+        // Schedule a state update for the next frame so the AppBar actions
+        // reflect the error state. We cannot call setState synchronously
+        // inside the builder without triggering a reentrant build.
+        if (_cameraError == null) {
+          WidgetsBinding.instance.addPostFrameCallback((_) {
+            if (mounted && _cameraError == null) {
+              setState(() => _cameraError = error);
+            }
+          });
+        }
+        return _CameraErrorView(
+          error: error,
+          scheme: scheme,
+          isRetrying: _isRetrying,
+          onRetry: _retry,
+          onManualEntry: _manualEntry,
+        );
       },
       placeholderBuilder: (
         BuildContext context,
@@ -312,65 +415,131 @@ class _CornerPainter extends CustomPainter {
 // ============================================================================
 
 class _CameraErrorView extends StatelessWidget {
-  const _CameraErrorView({required this.error, required this.scheme});
+  const _CameraErrorView({
+    required this.error,
+    required this.scheme,
+    required this.isRetrying,
+    required this.onRetry,
+    required this.onManualEntry,
+  });
 
   final Object error;
   final ColorScheme scheme;
+  final bool isRetrying;
+  final VoidCallback onRetry;
+  final VoidCallback onManualEntry;
 
   @override
   Widget build(BuildContext context) {
-    final String message = _messageFor(error);
+    final (String title, String hint) = _describe(error);
 
-    return Center(
-      child: Padding(
-        padding: const EdgeInsets.all(24),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            const Icon(
-              Icons.no_photography_outlined,
-              color: Colors.white70,
-              size: 64,
-            ),
-            const SizedBox(height: 16),
-            Text(
-              message,
-              style: const TextStyle(
-                color: Colors.white,
-                fontSize: 16,
-                fontWeight: FontWeight.w600,
-              ),
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 8),
-            const Text(
-              'يمكنك إدخال رقم الباركود يدويًا في حقل البحث.',
-              style: TextStyle(
+    return SafeArea(
+      child: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              const Icon(
+                Icons.no_photography_outlined,
                 color: Colors.white70,
-                fontSize: 13,
+                size: 64,
               ),
-              textAlign: TextAlign.center,
-            ),
-          ],
+              const SizedBox(height: 16),
+              Text(
+                title,
+                style: const TextStyle(
+                  color: Colors.white,
+                  fontSize: 16,
+                  fontWeight: FontWeight.w700,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 8),
+              Text(
+                hint,
+                style: const TextStyle(
+                  color: Colors.white70,
+                  fontSize: 13,
+                  height: 1.6,
+                ),
+                textAlign: TextAlign.center,
+              ),
+              const SizedBox(height: 24),
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                alignment: WrapAlignment.center,
+                children: <Widget>[
+                  FilledButton.icon(
+                    onPressed: isRetrying ? null : onRetry,
+                    icon: isRetrying
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 2,
+                              valueColor:
+                                  AlwaysStoppedAnimation<Color>(Colors.white),
+                            ),
+                          )
+                        : const Icon(Icons.refresh),
+                    label: const Text('إعادة المحاولة'),
+                  ),
+                  OutlinedButton.icon(
+                    onPressed: onManualEntry,
+                    icon: const Icon(Icons.keyboard),
+                    label: const Text('إدخال يدوي'),
+                    style: OutlinedButton.styleFrom(
+                      foregroundColor: Colors.white,
+                      side: const BorderSide(color: Colors.white54),
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          ),
         ),
       ),
     );
   }
 
-  static String _messageFor(Object error) {
+  // ---------------------------------------------------------------------------
+  // Error description
+  // ---------------------------------------------------------------------------
+
+  static (String, String) _describe(Object error) {
     if (error is MobileScannerException) {
       switch (error.errorCode) {
         case MobileScannerErrorCode.permissionDenied:
-          return 'لم يتم منح صلاحية الكاميرا.';
+          return (
+            'لم يتم منح صلاحية الكاميرا',
+            'لتشغيل الكاميرا:\n'
+                '• في Chrome: اضغط أيقونة القفل بجانب العنوان ← الأذونات ← الكاميرا ← السماح.\n'
+                '• في Safari: الإعدادات ← Safari ← الكاميرا ← اسأل/السماح.\n'
+                '• بعد التفعيل، ارجع هنا واضغط "إعادة المحاولة".',
+          );
         case MobileScannerErrorCode.unsupported:
-          return 'المسح بالكاميرا غير مدعوم على هذا الجهاز.';
+          return (
+            'المسح بالكاميرا غير مدعوم',
+            'استخدم قارئ باركود خارجي (HID) أو أدخل الرقم يدويًا.',
+          );
         case MobileScannerErrorCode.controllerUninitialized:
-          return 'تعذّر تشغيل الكاميرا.';
+          return (
+            'تعذّر تشغيل الكاميرا',
+            'حاول مرة أخرى، أو أدخل الرقم يدويًا.',
+          );
         default:
-          return 'تعذّر تشغيل الكاميرا.';
+          return (
+            'تعذّر تشغيل الكاميرا',
+            'حاول مرة أخرى، أو أدخل الرقم يدويًا.',
+          );
       }
     }
-    return 'تعذّر تشغيل الكاميرا.';
+    return (
+      'تعذّر تشغيل الكاميرا',
+      'حاول مرة أخرى، أو أدخل الرقم يدويًا.',
+    );
   }
 }
 
@@ -386,6 +555,106 @@ class _LoadingView extends StatelessWidget {
     return const Center(
       child: CircularProgressIndicator(
         valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Manual entry sheet
+// ============================================================================
+
+class _ManualEntrySheet extends StatefulWidget {
+  const _ManualEntrySheet({required this.title});
+
+  final String title;
+
+  @override
+  State<_ManualEntrySheet> createState() => _ManualEntrySheetState();
+}
+
+class _ManualEntrySheetState extends State<_ManualEntrySheet> {
+  late final TextEditingController _controller;
+  late final FocusNode _focusNode;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _focusNode = FocusNode();
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    _focusNode.dispose();
+    super.dispose();
+  }
+
+  void _submit() {
+    final String value = _controller.text.trim();
+    if (value.isEmpty) return;
+    Navigator.of(context).pop(value);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboardInset),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.keyboard, color: scheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    widget.title,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                ),
+              ],
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _controller,
+              focusNode: _focusNode,
+              autofocus: true,
+              textInputAction: TextInputAction.done,
+              keyboardType: TextInputType.text,
+              inputFormatters: <TextInputFormatter>[
+                FilteringTextInputFormatter.deny(RegExp(r'\s')),
+              ],
+              decoration: const InputDecoration(
+                border: OutlineInputBorder(),
+                labelText: 'رقم الباركود',
+                hintText: 'مثال: 6221031001234',
+                prefixIcon: Icon(Icons.qr_code),
+              ),
+              onSubmitted: (_) => _submit(),
+            ),
+            const SizedBox(height: 12),
+            FilledButton.icon(
+              onPressed: _submit,
+              icon: const Icon(Icons.check),
+              label: const Text('تأكيد'),
+            ),
+          ],
+        ),
       ),
     );
   }
