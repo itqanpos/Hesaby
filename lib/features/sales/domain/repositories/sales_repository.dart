@@ -7,6 +7,7 @@ import '../entities/customer_adjustment.dart';
 import '../entities/customer_payment.dart';
 import '../entities/customer_statement.dart';
 import '../entities/sale_entities.dart';
+import '../entities/sale_return.dart';
 
 // ============================================================================
 // Customer repository
@@ -93,22 +94,11 @@ abstract interface class CustomerRepository {
   // Payments
   // ---------------------------------------------------------------------------
 
-  /// Returns the most recent payments recorded for [customerId].
-  ///
-  /// The list is ordered by `created_at DESC`. When [limit] is null or
-  /// non-positive, a sensible default is applied by the data source.
   Future<List<CustomerPayment>> listPayments(
     String customerId, {
     int? limit,
   });
 
-  /// Records a standalone payment against the customer's balance.
-  ///
-  /// The database trigger `apply_customer_payment` reduces
-  /// `customers.balance` by [amount] immediately after the row is inserted.
-  /// The amount must be strictly positive; the DB enforces this with a
-  /// `CHECK` constraint, and callers are expected to validate it before
-  /// submitting.
   Future<CustomerPayment> recordPayment({
     required String companyId,
     required String customerId,
@@ -122,23 +112,12 @@ abstract interface class CustomerRepository {
   // Adjustments
   // ---------------------------------------------------------------------------
 
-  /// Returns the manual adjustments recorded for [customerId].
-  ///
-  /// When [fromDate] / [toDate] are provided they act as an inclusive
-  /// window on `created_at`. The list is ordered by `created_at DESC`.
   Future<List<CustomerAdjustment>> listAdjustments(
     String customerId, {
     DateTime? fromDate,
     DateTime? toDate,
   });
 
-  /// Records a manual adjustment (positive or negative) to the customer
-  /// balance.
-  ///
-  /// The database trigger `apply_customer_balance_adjustment` applies the
-  /// delta. A negative amount that would drive the balance below zero is
-  /// rejected by the trigger, which raises a `23514` error that the
-  /// repository maps to [CustomerFailureType.insufficientBalance].
   Future<CustomerAdjustment> addAdjustment({
     required String companyId,
     required String customerId,
@@ -151,20 +130,6 @@ abstract interface class CustomerRepository {
   // Statement
   // ---------------------------------------------------------------------------
 
-  /// Builds a full account statement for [customerId].
-  ///
-  /// The statement merges three sources:
-  /// * confirmed sales (and their reversal on cancellation),
-  /// * standalone payments,
-  /// * manual adjustments,
-  ///
-  /// then computes the running balance and derives the opening balance so
-  /// that `closingBalance - openingBalance = totalDebit - totalCredit`.
-  ///
-  /// When [fromDate] / [toDate] are provided they restrict the **visible
-  /// entries**; the opening balance continues to reflect everything that
-  /// happened before [fromDate], so the final `closingBalance` always
-  /// matches the customer's current balance.
   Future<CustomerStatement> buildStatement({
     required String customerId,
     DateTime? fromDate,
@@ -215,18 +180,7 @@ class SaleException extends Equatable implements Exception {
 }
 
 /// Contract for sale operations.
-///
-/// State machine:
-/// A sale is always created in `draft`. Its header and items may only be
-/// modified while it remains in `draft`. [confirmSale] transitions it to
-/// `confirmed` and (via the database trigger) generates the corresponding
-/// `sale_out` stock movements. [cancelSale] transitions it to `cancelled`,
-/// generating reverse `return_in` movements if it was previously confirmed.
 abstract interface class SalesRepository {
-  // ---------------------------------------------------------------------------
-  // Reads
-  // ---------------------------------------------------------------------------
-
   Future<List<Sale>> listSales(
     String companyId, {
     String? branchId,
@@ -237,10 +191,6 @@ abstract interface class SalesRepository {
   Future<Sale> getSale(String saleId);
 
   Future<List<SaleItem>> listSaleItems(String saleId);
-
-  // ---------------------------------------------------------------------------
-  // Writes
-  // ---------------------------------------------------------------------------
 
   Future<Sale> createSale({
     required String companyId,
@@ -272,4 +222,131 @@ abstract interface class SalesRepository {
   Future<Sale> confirmSale(String saleId);
 
   Future<Sale> cancelSale(String saleId);
+}
+
+// ============================================================================
+// Returns repository
+// ============================================================================
+
+/// Categories of failures raised by [ReturnsRepository] operations.
+enum ReturnFailureType {
+  network,
+  unauthorized,
+  notFound,
+
+  /// The parent sale is not in a state that allows returns (must be
+  /// `confirmed`).
+  saleNotConfirmed,
+
+  /// A return was created without any items, or confirmed while empty.
+  emptyReturn,
+
+  /// The requested quantity exceeds the remaining returnable quantity on
+  /// the underlying sale item.
+  excessiveQuantity,
+
+  /// A `credit_note` refund was requested without an attached customer.
+  creditNoteRequiresCustomer,
+
+  /// The return is not in a state that allows the requested operation.
+  invalidStatusTransition,
+
+  /// A confirmed return was modified in a way other than adding notes.
+  immutableConfirmedReturn,
+
+  /// Reference lookup failure: one of the underlying rows is missing.
+  referenceNotFound,
+
+  invalidResponse,
+  unknown,
+}
+
+/// Domain-level exception raised by [ReturnsRepository] operations.
+@immutable
+class ReturnException extends Equatable implements Exception {
+  const ReturnException({
+    required this.type,
+    this.cause,
+    this.stackTrace,
+  });
+
+  final ReturnFailureType type;
+  final Object? cause;
+  final StackTrace? stackTrace;
+
+  @override
+  List<Object?> get props => <Object?>[type];
+
+  @override
+  String toString() => 'ReturnException(type: ${type.name})';
+}
+
+/// Contract for sale-return operations.
+///
+/// State machine:
+/// * A return is created in `draft`. Its header and items may only be
+///   modified while it remains in `draft`.
+/// * [confirmReturn] transitions it to `confirmed` and (via the database
+///   trigger) generates the corresponding `return_in` stock movements and,
+///   when the refund method is `credit_note`, reduces the customer balance.
+/// * [cancelReturn] transitions it to `cancelled`, reversing the stock
+///   movements and restoring the customer balance.
+abstract interface class ReturnsRepository {
+  // ---------------------------------------------------------------------------
+  // Reads
+  // ---------------------------------------------------------------------------
+
+  Future<List<SaleReturn>> listReturns(
+    String companyId, {
+    String? branchId,
+    String? saleId,
+    String? status,
+    int? limit,
+  });
+
+  Future<SaleReturn> getReturn(String returnId);
+
+  Future<List<SaleReturnItem>> listReturnItems(String returnId);
+
+  /// Lists the returns already recorded for a given sale, regardless of
+  /// status. Useful for the "remaining returnable quantity" computation.
+  Future<List<SaleReturn>> listReturnsForSale(String saleId);
+
+  // ---------------------------------------------------------------------------
+  // Writes
+  // ---------------------------------------------------------------------------
+
+  /// Creates a draft return with its items.
+  ///
+  /// The database trigger `assign_sale_return_number` fills the
+  /// `return_number` when it is omitted.
+  Future<SaleReturn> createReturn({
+    required String companyId,
+    required String branchId,
+    required String saleId,
+    String? customerId,
+    required DateTime returnDate,
+    required List<SaleReturnItemDraft> items,
+    String refundMethod,
+    String? notes,
+  });
+
+  /// Replaces the header and items of an existing draft return.
+  Future<SaleReturn> updateDraft({
+    required String returnId,
+    required String companyId,
+    required String branchId,
+    required String saleId,
+    String? customerId,
+    required DateTime returnDate,
+    required List<SaleReturnItemDraft> items,
+    String refundMethod,
+    String? notes,
+  });
+
+  /// Confirms a draft return.
+  Future<SaleReturn> confirmReturn(String returnId);
+
+  /// Cancels a draft or confirmed return.
+  Future<SaleReturn> cancelReturn(String returnId);
 }
