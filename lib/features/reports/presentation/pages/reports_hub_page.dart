@@ -1,14 +1,15 @@
 // lib/features/reports/presentation/pages/reports_hub_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/router.dart';
 import '../../../../shared/layouts/app_shell.dart';
 
 /// Reports hub — a single entry point that groups every report by theme.
 ///
-/// All reports are placeholders for now: tapping any tile shows a
-/// "قريبًا" snack bar. As each report is implemented in a later phase, its
-/// tile's `_handleTap` will navigate to the corresponding route.
+/// Tiles with a `routeName` navigate to the corresponding report page.
+/// Tiles without one are placeholders and show a "قريبًا" snack bar.
 class ReportsHubPage extends StatelessWidget {
   const ReportsHubPage({super.key});
 
@@ -18,8 +19,8 @@ class ReportsHubPage extends StatelessWidget {
       appBar: AppBar(title: const Text('التقارير')),
       body: ListView(
         padding: const EdgeInsets.only(top: 8, bottom: 24),
-        children: const <Widget>[
-          _Section(
+        children: <Widget>[
+          const _Section(
             title: 'المبيعات',
             tiles: <_ReportTile>[
               _ReportTile(
@@ -27,6 +28,7 @@ class ReportsHubPage extends StatelessWidget {
                 color: Color(0xFF0F7B6C),
                 title: 'ملخص المبيعات',
                 subtitle: 'إجماليات، مدفوع، متبقٍ، مرتجعات',
+                routeName: AppRouter.reportSalesSummaryName,
               ),
               _ReportTile(
                 icon: Icons.local_fire_department_outlined,
@@ -42,8 +44,8 @@ class ReportsHubPage extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: 8),
-          _Section(
+          const SizedBox(height: 8),
+          const _Section(
             title: 'المخزون',
             tiles: <_ReportTile>[
               _ReportTile(
@@ -66,8 +68,8 @@ class ReportsHubPage extends StatelessWidget {
               ),
             ],
           ),
-          SizedBox(height: 8),
-          _Section(
+          const SizedBox(height: 8),
+          const _Section(
             title: 'مالي',
             tiles: <_ReportTile>[
               _ReportTile(
@@ -149,6 +151,7 @@ class _ReportTile extends StatelessWidget {
     required this.color,
     required this.title,
     required this.subtitle,
+    this.routeName,
   });
 
   final IconData icon;
@@ -156,18 +159,27 @@ class _ReportTile extends StatelessWidget {
   final String title;
   final String subtitle;
 
+  /// When `null`, the tile is a placeholder and shows "قريبًا".
+  final String? routeName;
+
   void _handleTap(BuildContext context) {
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(content: Text('هذا التقرير قريبًا.')),
-      );
+    final String? route = routeName;
+    if (route == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('هذا التقرير قريبًا.')),
+        );
+      return;
+    }
+    context.pushNamed(route);
   }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final bool isEnabled = routeName != null;
 
     return Material(
       color: scheme.surface,
@@ -219,25 +231,31 @@ class _ReportTile extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.surfaceContainerHighest,
-                    borderRadius: BorderRadius.circular(999),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 8,
-                      vertical: 3,
+                if (!isEnabled)
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(999),
                     ),
-                    child: Text(
-                      'قريبًا',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w700,
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 8,
+                        vertical: 3,
+                      ),
+                      child: Text(
+                        'قريبًا',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          fontWeight: FontWeight.w700,
+                        ),
                       ),
                     ),
+                  )
+                else
+                  Icon(
+                    Icons.chevron_left,
+                    color: scheme.onSurfaceVariant,
                   ),
-                ),
               ],
             ),
           ),
