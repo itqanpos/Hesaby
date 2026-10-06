@@ -1,5 +1,7 @@
 // lib/features/pos/presentation/widgets/pos_search_field.dart
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -16,6 +18,8 @@ import 'pos_results_list.dart';
 /// Responsibilities:
 /// * Keep the local [TextEditingController] in sync with
 ///   `posSearchProvider`.
+/// * **Debounce the notifier update** (see [_debounceDelay]) so a large
+///   catalogue is not filtered on every keystroke.
 /// * Provide a Scan affordance backed by [BarcodeScannerService] when the
 ///   current platform supports a camera.
 /// * Support HID scanners (USB / Bluetooth barcode readers) transparently:
@@ -26,6 +30,16 @@ import 'pos_results_list.dart';
 ///
 /// The field does **not** filter anything. Filtering lives in
 /// `posSearchResultsProvider`.
+///
+/// Debounce design:
+/// * The debounce is scoped to this widget only; the notifier stays
+///   synchronous and unaware of it.
+/// * Both Scan and Enter **cancel the pending timer and commit the query
+///   immediately**, so the quick-add path never reads results computed
+///   against a stale query.
+/// * The controller is synced from the notifier via `ref.listen` (not
+///   `ref.watch`), so that while a debounce is in flight — and the notifier
+///   still holds the previous query — the controller is not reset.
 class PosSearchField extends ConsumerStatefulWidget {
   const PosSearchField({super.key});
 
@@ -36,8 +50,15 @@ class PosSearchField extends ConsumerStatefulWidget {
 class _PosSearchFieldState extends ConsumerState<PosSearchField> {
   static const BarcodeScannerService _scanner = MobileScannerServiceImpl();
 
+  /// How long to wait after the last keystroke before pushing the query
+  /// into the notifier.
+  static const Duration _debounceDelay = Duration(milliseconds: 300);
+
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
+
+  /// Pending debounce timer. `null` when no update is scheduled.
+  Timer? _debounce;
 
   @override
   void initState() {
@@ -49,9 +70,37 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
 
   @override
   void dispose() {
+    _debounce?.cancel();
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Debounce helpers
+  // ---------------------------------------------------------------------------
+
+  /// Schedules a query commit after [_debounceDelay]. Any previously
+  /// scheduled commit is discarded.
+  void _scheduleQuery(String value) {
+    _debounce?.cancel();
+    _debounce = Timer(_debounceDelay, () {
+      _debounce = null;
+      if (!mounted) {
+        return;
+      }
+      ref.read(posSearchProvider.notifier).setQuery(value);
+    });
+  }
+
+  /// Cancels any pending debounce and commits [value] immediately.
+  ///
+  /// Used by the Scan flow and the Enter (HID) flow, where waiting for the
+  /// debounce would compute results against a stale query.
+  void _commitQueryNow(String value) {
+    _debounce?.cancel();
+    _debounce = null;
+    ref.read(posSearchProvider.notifier).setQuery(value);
   }
 
   // ---------------------------------------------------------------------------
@@ -59,10 +108,12 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
   // ---------------------------------------------------------------------------
 
   void _handleQueryChanged(String value) {
-    ref.read(posSearchProvider.notifier).setQuery(value);
+    _scheduleQuery(value);
   }
 
   void _handleClear() {
+    _debounce?.cancel();
+    _debounce = null;
     _controller.clear();
     ref.read(posSearchProvider.notifier).clear();
     _focusNode.requestFocus();
@@ -88,12 +139,11 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
 
     final String value = barcode.trim();
 
-    // Push the value into the search field and the notifier.
     _controller.value = TextEditingValue(
       text: value,
       selection: TextSelection.collapsed(offset: value.length),
     );
-    ref.read(posSearchProvider.notifier).setQuery(value);
+    _commitQueryNow(value);
 
     // Give the results provider a chance to react.
     await Future<void>.delayed(Duration.zero);
@@ -106,9 +156,18 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
 
   /// Called when the user presses Enter in the field.
   ///
-  /// HID scanners send `\n` after the barcode; this callback is what makes
-  /// them indistinguishable from a manual search plus Enter.
-  void _handleSubmitted(String value) {
+  /// HID scanners send `\n` after the barcode; Enter commits the current
+  /// text immediately (skipping the debounce) before attempting a
+  /// quick-add.
+  Future<void> _handleSubmitted(String value) async {
+    _commitQueryNow(value);
+
+    // Give the results provider a chance to react before reading it.
+    await Future<void>.delayed(Duration.zero);
+    if (!mounted) {
+      return;
+    }
+
     _quickAddIfSingleMatch();
   }
 
@@ -132,6 +191,8 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
       return;
     }
 
+    _debounce?.cancel();
+    _debounce = null;
     _controller.clear();
     ref.read(posSearchProvider.notifier).clear();
     _focusNode.requestFocus();
@@ -157,15 +218,25 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
 
   @override
   Widget build(BuildContext context) {
-    // Keep the controller in sync if the notifier is cleared from outside
-    // (for example after a successful sale).
-    final PosSearchState search = ref.watch(posSearchProvider);
-    if (search.query != _controller.text) {
-      _controller.value = TextEditingValue(
-        text: search.query,
-        selection: TextSelection.collapsed(offset: search.query.length),
-      );
-    }
+    // Mirror the notifier's query into the controller whenever it changes
+    // from *outside* this field (e.g. after a successful sale cleared the
+    // search, or after an explicit `.clear()` call). Using `listen`
+    // instead of `watch` means we do not fight the debounce: while the
+    // user is typing, the notifier still holds the previous value, and we
+    // do not want to reset the controller back to it.
+    ref.listen<PosSearchState>(
+      posSearchProvider,
+      (PosSearchState? previous, PosSearchState next) {
+        if (next.query != _controller.text) {
+          _controller.value = TextEditingValue(
+            text: next.query,
+            selection: TextSelection.collapsed(
+              offset: next.query.length,
+            ),
+          );
+        }
+      },
+    );
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
@@ -179,10 +250,19 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
         textInputAction: TextInputAction.search,
         onChanged: _handleQueryChanged,
         onSubmitted: _handleSubmitted,
-        suffixIcon: _SuffixActions(
-          showClear: search.isNotEmpty,
-          onScan: _handleScan,
-          onClear: _handleClear,
+        suffixIcon: ValueListenableBuilder<TextEditingValue>(
+          valueListenable: _controller,
+          builder: (
+            BuildContext context,
+            TextEditingValue value,
+            Widget? _,
+          ) {
+            return _SuffixActions(
+              showClear: value.text.isNotEmpty,
+              onScan: _handleScan,
+              onClear: _handleClear,
+            );
+          },
         ),
       ),
     );
