@@ -5,22 +5,6 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 /// Full-screen barcode scanner dialog.
-///
-/// The dialog shows a live camera preview and pops with the raw barcode
-/// value the moment a code is detected. The cashier can dismiss the screen
-/// with the close button or the system back gesture, in which case the
-/// dialog resolves with `null`.
-///
-/// Fallbacks when the camera is unavailable (permission denied, unsupported
-/// browser, no camera):
-/// * **إعادة المحاولة** — calls `controller.start()` again. Useful when
-///   the user has just granted permission or fixed the browser settings.
-/// * **إدخال يدوي** — opens a small text field so the cashier can type the
-///   barcode; the dialog pops with that value.
-///
-/// The widget does **not** perform any product lookup. It returns the raw
-/// string to its caller, which is responsible for matching it against the
-/// catalogue.
 class PosBarcodeScannerDialog extends StatefulWidget {
   const PosBarcodeScannerDialog({super.key});
 
@@ -98,7 +82,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
       if (mounted) {
         setState(() {
           _cameraError = MobileScannerException(
-            errorCode: MobileScannerErrorCode.unknown,
+            errorCode: MobileScannerErrorCode.genericError,
             errorDetails: const MobileScannerErrorDetails(
               message: 'Unknown camera error',
             ),
@@ -209,9 +193,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
         MobileScannerException error,
         Widget? child,
       ) {
-        // Schedule a state update for the next frame so the AppBar actions
-        // reflect the error state. We cannot call setState synchronously
-        // inside the builder without triggering a reentrant build.
         if (_cameraError == null) {
           WidgetsBinding.instance.addPostFrameCallback((_) {
             if (mounted && _cameraError == null) {
