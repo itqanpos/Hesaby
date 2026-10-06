@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/inventory_reports.dart';
+import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
+import '../widgets/report_print_action.dart';
 
-/// Products that still have stock on hand but have not sold recently.
 class DeadStockPage extends ConsumerStatefulWidget {
   const DeadStockPage({super.key});
 
@@ -26,6 +27,72 @@ class _DeadStockPageState extends ConsumerState<DeadStockPage> {
   );
   static final NumberFormat _qty = NumberFormat.decimalPattern('ar_EG');
   static final DateFormat _date = DateFormat.yMd('ar_EG');
+
+  ReportDocument? _buildDocument(
+    DeadStockWindow window,
+    List<DeadStockItem> items,
+  ) {
+    if (items.isEmpty) return null;
+
+    double totalValue = 0;
+    int neverSold = 0;
+    for (final DeadStockItem it in items) {
+      totalValue += it.stockValue;
+      if (it.neverSold) neverSold++;
+    }
+
+    return ReportDocument(
+      title: 'المنتجات الراكدة',
+      periodLabel: 'لم تُبَع خلال ${window.label}',
+      companyName: '—',
+      generatedAt: DateTime.now(),
+      sections: <ReportSection>[
+        ReportSection(
+          kpis: <ReportKpi>[
+            ReportKpi(
+              label: 'عدد المنتجات',
+              value: '${items.length}',
+            ),
+            ReportKpi(
+              label: 'قيمة المخزون',
+              value: _money.format(totalValue),
+              emphasized: true,
+            ),
+            if (neverSold > 0)
+              ReportKpi(
+                label: 'لم تُبَع أبدًا',
+                value: '$neverSold',
+              ),
+          ],
+        ),
+        ReportSection(
+          title: 'التفاصيل',
+          table: ReportTable(
+            headers: <String>[
+              '#',
+              'المنتج',
+              'الكمية',
+              'قيمة المخزون',
+              'آخر بيع',
+            ],
+            flex: <double>[0.4, 2.2, 0.9, 1.3, 1.5],
+            rows: <List<String>>[
+              for (int i = 0; i < items.length; i++)
+                <String>[
+                  '${i + 1}',
+                  items[i].productName,
+                  _qty.format(items[i].quantityOnHand),
+                  _money.format(items[i].stockValue),
+                  items[i].lastSoldAt == null
+                      ? 'لم تُبَع أبدًا'
+                      : _date.format(items[i].lastSoldAt!.toLocal()),
+                ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -123,7 +190,6 @@ class _WindowSelector extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8),
       child: Material(
@@ -244,7 +310,6 @@ class _SummaryStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest,
@@ -444,7 +509,6 @@ class _EmptyState extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -456,14 +520,6 @@ class _EmptyState extends StatelessWidget {
             Text(
               'لا توجد منتجات راكدة',
               style: theme.textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'كل المنتجات تُبَاع بانتظام.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
               textAlign: TextAlign.center,
             ),
           ],
