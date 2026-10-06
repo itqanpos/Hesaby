@@ -5,10 +5,6 @@ import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
 import '../../domain/repositories/reports_repository.dart';
 
 /// Thin wrapper over the Supabase queries the reports feature needs.
-///
-/// The heavy lifting (aggregation, grouping) happens client-side in
-/// `ReportsRepositoryImpl`; this datasource only fetches narrow slices of
-/// the underlying tables with the correct filters.
 class ReportsRemoteDataSource {
   const ReportsRemoteDataSource(this._client);
 
@@ -16,19 +12,19 @@ class ReportsRemoteDataSource {
 
   bool get isAvailable => _client != null;
 
-  /// Safety cap for report queries. Reports over longer periods fetch this
-  /// many rows at most.
+  /// Safety cap for report queries.
   static const int safetyLimit = 5000;
 
-  /// How many ids to pass to a single `IN (...)` filter. PostgREST has a
-  /// URL length limit, so larger sets are chunked.
+  /// Higher cap used for the "last sold date" query (one row per sale item).
+  static const int saleItemsSafetyLimit = 50000;
+
+  /// How many ids to pass to a single `IN (...)` filter.
   static const int inFilterChunkSize = 150;
 
   // ===========================================================================
   // SALES
   // ===========================================================================
 
-  /// Fetches the fields of every sale in the company over the period.
   Future<List<Map<String, dynamic>>> fetchSales({
     required String companyId,
     required DateTime? fromDate,
@@ -59,7 +55,6 @@ class ReportsRemoteDataSource {
     return rows;
   }
 
-  /// Returns the ids of every confirmed sale in the period.
   Future<List<String>> fetchConfirmedSaleIds({
     required String companyId,
     required DateTime? fromDate,
@@ -88,7 +83,6 @@ class ReportsRemoteDataSource {
         .toList(growable: false);
   }
 
-  /// Fetches the `sale_items` belonging to the given sales.
   Future<List<Map<String, dynamic>>> fetchSaleItems({
     required List<String> saleIds,
   }) async {
@@ -120,7 +114,6 @@ class ReportsRemoteDataSource {
   // RETURNS
   // ===========================================================================
 
-  /// Fetches confirmed returns for the period.
   Future<List<Map<String, dynamic>>> fetchReturns({
     required String companyId,
     required DateTime? fromDate,
@@ -144,6 +137,113 @@ class ReportsRemoteDataSource {
     final List<Map<String, dynamic>> rows =
         await query.limit(safetyLimit);
     return rows;
+  }
+
+  // ===========================================================================
+  // INVENTORY
+  // ===========================================================================
+
+  /// Returns every non-empty `inventory_balances` row for the company.
+  ///
+  /// A "non-empty" row has `quantity_on_hand > 0`. Rows for branches the
+  /// caller cannot see are excluded by RLS.
+  Future<List<Map<String, dynamic>>> fetchInventoryBalances({
+    required String companyId,
+    String? branchId,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    var query = client
+        .from('inventory_balances')
+        .select(
+          'product_id, branch_id, quantity_on_hand, average_cost',
+        )
+        .eq('company_id', companyId)
+        .gt('quantity_on_hand', 0);
+
+    if (branchId != null) {
+      query = query.eq('branch_id', branchId);
+    }
+
+    final List<Map<String, dynamic>> rows =
+        await query.limit(safetyLimit);
+    return rows;
+  }
+
+  /// Returns every active product with a non-null `min_stock` value.
+  ///
+  /// When the schema does not define `min_stock`, the query fails at the
+  /// PostgREST layer and the caller maps the error into a report failure.
+  Future<List<Map<String, dynamic>>> fetchProductsWithMinStock({
+    required String companyId,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('products')
+        .select('id, name, default_unit_id, min_stock')
+        .eq('company_id', companyId)
+        .not('min_stock', 'is', null)
+        .limit(safetyLimit);
+
+    return rows;
+  }
+
+  /// Returns the most recent confirmed sale date for each product in
+  /// [productIds].
+  ///
+  /// The result maps `product_id` → latest `sale_date` (UTC). Products
+  /// that were never sold do not appear in the map. The query is chunked
+  /// to keep each request URL below the PostgREST limit.
+  Future<Map<String, DateTime>> fetchLastSoldDateByProduct({
+    required String companyId,
+    required List<String> productIds,
+  }) async {
+    if (productIds.isEmpty) {
+      return const <String, DateTime>{};
+    }
+
+    final SupabaseClient client = _requireClient();
+    final Map<String, DateTime> result = <String, DateTime>{};
+
+    for (int i = 0; i < productIds.length; i += inFilterChunkSize) {
+      final int end = (i + inFilterChunkSize < productIds.length)
+          ? i + inFilterChunkSize
+          : productIds.length;
+      final List<String> chunk = productIds.sublist(i, end);
+
+      final List<Map<String, dynamic>> rows = await client
+          .from('sale_items')
+          .select('product_id, sales!inner(sale_date, status, company_id)')
+          .eq('sales.company_id', companyId)
+          .eq('sales.status', 'confirmed')
+          .inFilter('product_id', chunk)
+          .limit(saleItemsSafetyLimit);
+
+      for (final Map<String, dynamic> row in rows) {
+        final Object? pidRaw = row['product_id'];
+        final Object? saleRaw = row['sales'];
+        if (pidRaw is! String || saleRaw is! Map) {
+          continue;
+        }
+        final Object? dateRaw =
+            (saleRaw as Map<String, dynamic>)['sale_date'];
+        if (dateRaw is! String) {
+          continue;
+        }
+        final DateTime? parsed = DateTime.tryParse(dateRaw);
+        if (parsed == null) {
+          continue;
+        }
+        final DateTime utc = parsed.toUtc();
+        final DateTime? existing = result[pidRaw];
+        if (existing == null || utc.isAfter(existing)) {
+          result[pidRaw] = utc;
+        }
+      }
+    }
+
+    return result;
   }
 
   // ===========================================================================
