@@ -3,6 +3,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../../../../core/utils/logger.dart';
+import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
@@ -10,13 +11,6 @@ import '../../domain/repositories/reports_repository.dart';
 import '../datasources/reports_remote_datasource.dart';
 
 /// Concrete implementation of [ReportsRepository] backed by Supabase.
-///
-/// Strategy:
-/// * One narrow query per aggregation source (sales, sale_items, returns,
-///   inventory_balances, products).
-/// * Filtering happens in SQL; grouping and derived metrics happen here.
-/// * Only confirmed sales and returns contribute to the sales totals.
-/// * Inventory reports operate on the *current* state (no period).
 class ReportsRepositoryImpl implements ReportsRepository {
   const ReportsRepositoryImpl(this._remoteDataSource);
 
@@ -139,9 +133,7 @@ class ReportsRepositoryImpl implements ReportsRepository {
       final Map<String, _ProductAgg> byProduct = <String, _ProductAgg>{};
       for (final Map<String, dynamic> row in items) {
         final String productId = _asString(row['product_id']);
-        if (productId.isEmpty) {
-          continue;
-        }
+        if (productId.isEmpty) continue;
         final double qty = _asDouble(row['quantity']);
         final double revenue = _asDouble(row['line_total']);
         final String saleId = _asString(row['sale_id']);
@@ -201,14 +193,10 @@ class ReportsRepositoryImpl implements ReportsRepository {
           <String, _CustomerAgg>{};
 
       for (final Map<String, dynamic> row in sales) {
-        if (_asString(row['status']) != 'confirmed') {
-          continue;
-        }
+        if (_asString(row['status']) != 'confirmed') continue;
         final String? customerId =
             row['customer_id'] is String ? row['customer_id'] as String : null;
-        if (customerId == null || customerId.isEmpty) {
-          continue;
-        }
+        if (customerId == null || customerId.isEmpty) continue;
         final double total = _asDouble(row['total']);
         final double paid = _asDouble(row['paid_amount']);
 
@@ -266,9 +254,7 @@ class ReportsRepositoryImpl implements ReportsRepository {
       final Map<String, _CashierAgg> byCashier = <String, _CashierAgg>{};
 
       for (final Map<String, dynamic> row in sales) {
-        if (_asString(row['status']) != 'confirmed') {
-          continue;
-        }
+        if (_asString(row['status']) != 'confirmed') continue;
         final String? createdBy =
             row['created_by'] is String ? row['created_by'] as String : null;
         final String key = createdBy ?? '__unknown__';
@@ -276,9 +262,7 @@ class ReportsRepositoryImpl implements ReportsRepository {
         final double total = _asDouble(row['total']);
         final double paid = _asDouble(row['paid_amount']);
 
-        byCashier
-            .putIfAbsent(key, () => _CashierAgg())
-            .add(total, paid);
+        byCashier.putIfAbsent(key, () => _CashierAgg()).add(total, paid);
       }
 
       final List<CashierSales> all = byCashier.entries.map(
@@ -334,7 +318,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         return StockValuationReport.empty();
       }
 
-      // Aggregate per product across branches.
       final Map<String, _ValuationAgg> byProduct =
           <String, _ValuationAgg>{};
 
@@ -415,7 +398,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
       final List<Map<String, dynamic>> balances =
           (results[1] as List<Map<String, dynamic>>);
 
-      // Sum on-hand quantity per product.
       final Map<String, double> quantityByProduct = <String, double>{};
       for (final Map<String, dynamic> row in balances) {
         final String pid = _asString(row['product_id']);
@@ -447,7 +429,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         );
       }
 
-      // Sort by highest deficit first.
       items.sort((LowStockItem a, LowStockItem b) =>
           b.deficit.compareTo(a.deficit));
 
@@ -486,7 +467,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         return const <DeadStockItem>[];
       }
 
-      // Aggregate per product.
       final Map<String, _ValuationAgg> byProduct =
           <String, _ValuationAgg>{};
       for (final Map<String, dynamic> row in balances) {
@@ -525,7 +505,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         );
       });
 
-      // Sort by highest stock value first (the most capital tied up).
       items.sort((DeadStockItem a, DeadStockItem b) =>
           b.stockValue.compareTo(a.stockValue));
 
@@ -538,6 +517,220 @@ class ReportsRepositoryImpl implements ReportsRepository {
       throw _mapAuth(error, stackTrace, operation: 'getDeadStockItems');
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(error, stackTrace, operation: 'getDeadStockItems');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Profit & Loss
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<ProfitLossSummary> getProfitLoss({
+    required String companyId,
+    required ReportPeriod period,
+  }) async {
+    try {
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchSales(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+        _remoteDataSource.fetchReturns(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+        _remoteDataSource.fetchSaleOutMovements(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+      ]);
+
+      final List<Map<String, dynamic>> sales =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> returns =
+          (results[1] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> movements =
+          (results[2] as List<Map<String, dynamic>>);
+
+      double grossRevenue = 0;
+      for (final Map<String, dynamic> row in sales) {
+        if (_asString(row['status']) == 'confirmed') {
+          grossRevenue += _asDouble(row['total']);
+        }
+      }
+
+      double returnTotal = 0;
+      for (final Map<String, dynamic> row in returns) {
+        returnTotal += _asDouble(row['total']);
+      }
+
+      double cogs = 0;
+      for (final Map<String, dynamic> row in movements) {
+        final double qty = _asDouble(row['quantity']);
+        final double cost = _asDouble(row['unit_cost']);
+        cogs += qty * cost;
+      }
+
+      final double netRevenue = grossRevenue - returnTotal;
+      return ProfitLossSummary(
+        period: period,
+        grossRevenue: grossRevenue,
+        returnTotal: returnTotal,
+        netRevenue: netRevenue < 0 ? 0 : netRevenue,
+        costOfGoodsSold: cogs,
+        grossProfit: netRevenue - cogs,
+        operatingExpenses: 0,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getProfitLoss');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getProfitLoss');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getProfitLoss');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Receivables
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<ReceivablesReport> getReceivables({
+    required String companyId,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> rows =
+          await _remoteDataSource.fetchCustomersWithBalance(
+        companyId: companyId,
+      );
+
+      if (rows.isEmpty) {
+        return ReceivablesReport.empty();
+      }
+
+      double totalBalance = 0;
+      final List<ReceivableItem> items = <ReceivableItem>[];
+      for (final Map<String, dynamic> row in rows) {
+        final String cid = _asString(row['id']);
+        if (cid.isEmpty) continue;
+        final double balance = _asDouble(row['balance']);
+        if (balance <= 0) continue;
+        totalBalance += balance;
+
+        final String? phone = row['phone'] is String
+            ? (row['phone'] as String).trim()
+            : null;
+
+        items.add(
+          ReceivableItem(
+            customerId: cid,
+            customerName: _asString(row['name']).isNotEmpty
+                ? _asString(row['name'])
+                : 'عميل محذوف',
+            balance: balance,
+            phone: (phone == null || phone.isEmpty) ? null : phone,
+          ),
+        );
+      }
+
+      return ReceivablesReport(
+        items: items,
+        totalBalance: totalBalance,
+        customerCount: items.length,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getReceivables');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getReceivables');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getReceivables');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Payables
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<PayablesReport> getPayables({
+    required String companyId,
+    required ReportPeriod period,
+    required Map<String, String> supplierNames,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> rows =
+          await _remoteDataSource.fetchPurchases(
+        companyId: companyId,
+        fromDate: period.fromDate,
+        toDate: period.toDate,
+      );
+
+      if (rows.isEmpty) {
+        return PayablesReport.empty(period);
+      }
+
+      final Map<String, _SupplierAgg> bySupplier =
+          <String, _SupplierAgg>{};
+
+      for (final Map<String, dynamic> row in rows) {
+        final String? sid = row['supplier_id'] is String
+            ? row['supplier_id'] as String
+            : null;
+        if (sid == null || sid.isEmpty) continue;
+
+        bySupplier
+            .putIfAbsent(sid, () => _SupplierAgg())
+            .add(
+              _asDouble(row['total']),
+              _asDouble(row['paid_amount']),
+            );
+      }
+
+      final List<PayableItem> items = bySupplier.entries.map(
+        (MapEntry<String, _SupplierAgg> e) {
+          return PayableItem(
+            supplierId: e.key,
+            supplierName: supplierNames[e.key] ?? 'مورد محذوف',
+            invoiceCount: e.value.count,
+            totalPurchases: e.value.purchases,
+            totalPaid: e.value.paid,
+            totalDue: e.value.purchases - e.value.paid,
+          );
+        },
+      ).toList();
+
+      items.sort((PayableItem a, PayableItem b) =>
+          b.totalDue.compareTo(a.totalDue));
+
+      double totalPurchases = 0;
+      double totalPaid = 0;
+      for (final PayableItem it in items) {
+        totalPurchases += it.totalPurchases;
+        totalPaid += it.totalPaid;
+      }
+
+      return PayablesReport(
+        period: period,
+        items: items,
+        totalPurchases: totalPurchases,
+        totalPaid: totalPaid,
+        totalDue: totalPurchases - totalPaid,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getPayables');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getPayables');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getPayables');
     }
   }
 
@@ -609,8 +802,6 @@ class _CashierAgg {
   }
 }
 
-/// Accumulator used by both stock valuation and dead stock: tracks total
-/// quantity and total cost value per product across all matching balances.
 class _ValuationAgg {
   double quantity = 0;
   double costValue = 0;
@@ -618,6 +809,18 @@ class _ValuationAgg {
   void add(double qty, double value) {
     quantity += qty;
     costValue += value;
+  }
+}
+
+class _SupplierAgg {
+  int count = 0;
+  double purchases = 0;
+  double paid = 0;
+
+  void add(double total, double paidAmount) {
+    count++;
+    purchases += total;
+    paid += paidAmount;
   }
 }
 
