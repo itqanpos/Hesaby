@@ -4,10 +4,6 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
 /// A printable representation of any report.
-///
-/// This is deliberately a *generic* value object: every report page maps
-/// its own data into a [ReportDocument] just before printing, so the PDF
-/// renderer stays agnostic of the underlying domain types.
 @immutable
 class ReportDocument extends Equatable {
   const ReportDocument({
@@ -29,6 +25,24 @@ class ReportDocument extends Equatable {
   final String? branchName;
   final DateTime generatedAt;
   final List<ReportSection> sections;
+
+  ReportDocument copyWith({
+    String? title,
+    String? periodLabel,
+    String? companyName,
+    String? branchName,
+    DateTime? generatedAt,
+    List<ReportSection>? sections,
+  }) {
+    return ReportDocument(
+      title: title ?? this.title,
+      periodLabel: periodLabel ?? this.periodLabel,
+      companyName: companyName ?? this.companyName,
+      branchName: branchName ?? this.branchName,
+      generatedAt: generatedAt ?? this.generatedAt,
+      sections: sections ?? this.sections,
+    );
+  }
 
   @override
   List<Object?> get props => <Object?>[
@@ -89,7 +103,7 @@ class ReportLine extends Equatable {
 
   final String label;
   final String value;
-  final bool emphasized ;
+  final bool emphasized;
 
   @override
   List<Object?> get props => <Object?>[label, value, emphasized];
