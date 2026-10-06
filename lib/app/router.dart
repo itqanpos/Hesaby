@@ -17,6 +17,7 @@ import '../features/purchases/presentation/pages/purchase_detail_page.dart';
 import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
 import '../features/sales/presentation/pages/customers_page.dart';
+import '../features/sales/presentation/pages/sale_detail_page.dart';
 import '../features/sales/presentation/pages/sale_form_page.dart';
 import '../features/sales/presentation/pages/sales_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
@@ -75,6 +76,9 @@ abstract final class AppRouter {
 
   static const String saleNewPath = '/sales/new';
   static const String saleNewName = 'sale-new';
+
+  static const String saleDetailPath = '/sales/:id';
+  static const String saleDetailName = 'sale-detail';
 
   static const String saleEditPath = '/sales/:id/edit';
   static const String saleEditName = 'sale-edit';
@@ -230,15 +234,28 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
                 const SaleFormPage(),
           ),
           GoRoute(
-            path: ':id/edit',
-            name: AppRouter.saleEditName,
+            path: ':id',
+            name: AppRouter.saleDetailName,
             builder: (BuildContext context, GoRouterState state) {
               final String? id = state.pathParameters['id'];
-              return SaleFormPage(
-                key: ValueKey<String>('sale-edit-${id ?? ''}'),
-                saleId: id,
+              return SaleDetailPage(
+                key: ValueKey<String>('sale-detail-${id ?? ''}'),
+                saleId: id ?? '',
               );
             },
+            routes: <RouteBase>[
+              GoRoute(
+                path: 'edit',
+                name: AppRouter.saleEditName,
+                builder: (BuildContext context, GoRouterState state) {
+                  final String? id = state.pathParameters['id'];
+                  return SaleFormPage(
+                    key: ValueKey<String>('sale-edit-${id ?? ''}'),
+                    saleId: id,
+                  );
+                },
+              ),
+            ],
           ),
         ],
       ),
