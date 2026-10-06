@@ -64,10 +64,10 @@ Map<String, String> _buildUnitNamesByProduct(Ref ref) {
 
   final Map<String, String> result = <String, String>{};
   for (final Product p in products) {
-    final String? unitId = p.defaultUnitId;
-    if (unitId == null) continue;
-    final String? name = unitNameById[unitId];
-    if (name != null) {
+    final String? maybeUnitId = p.defaultUnitId;
+    if (maybeUnitId == null) continue;
+    final String name = unitNameById[maybeUnitId] ?? '';
+    if (name.isNotEmpty) {
       result[p.id] = name;
     }
   }
