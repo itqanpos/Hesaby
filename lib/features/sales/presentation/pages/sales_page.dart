@@ -16,25 +16,17 @@ import '../../../companies/presentation/providers/company_context_provider.dart'
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
+import '../dialogs/sales_filter_sheet.dart';
 import '../providers/sales_providers.dart';
 import '../widgets/sales_kpi_row.dart';
 
-/// Date presets exposed as chips above the sales list.
-enum _SalesDateFilter {
-  all,
-  today,
-  thisWeek,
-  thisMonth,
-  thisYear,
-  custom,
-}
-
 /// Sales list page.
 ///
-/// Displays the sales invoices of the currently selected company, with
-/// client-side filters on date, status, payment status and a free-text
-/// search across invoice number and customer name. Tapping a card pushes
-/// the dedicated `SaleDetailPage` route.
+/// Layout, top to bottom:
+/// * KPI overview cards (always visible, not affected by filters).
+/// * Search field + filter button (with an active-filter badge).
+/// * Compact chip row showing only the active filters (when any).
+/// * The filtered list of sales.
 class SalesPage extends ConsumerStatefulWidget {
   const SalesPage({super.key});
 
@@ -45,15 +37,7 @@ class SalesPage extends ConsumerStatefulWidget {
 class _SalesPageState extends ConsumerState<SalesPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
-
-  /// `null` means "all statuses".
-  String? _statusFilter;
-
-  /// `null` means "all payment states".
-  String? _paymentFilter;
-
-  _SalesDateFilter _dateFilter = _SalesDateFilter.all;
-  DateTimeRange? _customDateRange;
+  SalesFilter _filter = const SalesFilter();
 
   @override
   void dispose() {
@@ -61,123 +45,39 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     super.dispose();
   }
 
-  // ---------------------------------------------------------------------------
-  // Filter state helpers
-  // ---------------------------------------------------------------------------
+  bool get _hasActiveFilters =>
+      _filter.isNotEmpty || _searchQuery.trim().isNotEmpty;
 
-  bool get _hasActiveFilters {
-    return _searchQuery.trim().isNotEmpty ||
-        _statusFilter != null ||
-        _paymentFilter != null ||
-        _dateFilter != _SalesDateFilter.all;
-  }
-
-  DateTime? _computeFromDate() {
-    final DateTime now = DateTime.now();
-    switch (_dateFilter) {
-      case _SalesDateFilter.all:
-        return null;
-      case _SalesDateFilter.today:
-        return DateTime(now.year, now.month, now.day);
-      case _SalesDateFilter.thisWeek:
-        // ISO 8601: Monday is the first day of the week (`weekday == 1`).
-        return DateTime(now.year, now.month, now.day)
-            .subtract(Duration(days: now.weekday - 1));
-      case _SalesDateFilter.thisMonth:
-        return DateTime(now.year, now.month, 1);
-      case _SalesDateFilter.thisYear:
-        return DateTime(now.year, 1, 1);
-      case _SalesDateFilter.custom:
-        final DateTime? start = _customDateRange?.start;
-        if (start == null) {
-          return null;
-        }
-        return DateTime(start.year, start.month, start.day);
-    }
-  }
-
-  DateTime? _computeToDate() {
-    final DateTime now = DateTime.now();
-    switch (_dateFilter) {
-      case _SalesDateFilter.all:
-        return null;
-      case _SalesDateFilter.today:
-        return DateTime(now.year, now.month, now.day, 23, 59, 59, 999);
-      case _SalesDateFilter.thisWeek:
-      case _SalesDateFilter.thisMonth:
-      case _SalesDateFilter.thisYear:
-        return now;
-      case _SalesDateFilter.custom:
-        final DateTime? end = _customDateRange?.end;
-        if (end == null) {
-          return null;
-        }
-        return DateTime(end.year, end.month, end.day, 23, 59, 59, 999);
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Filter actions
-  // ---------------------------------------------------------------------------
-
-  Future<void> _selectDateFilter(_SalesDateFilter next) async {
-    if (next != _SalesDateFilter.custom) {
-      setState(() {
-        _dateFilter = next;
-        _customDateRange = null;
-      });
-      return;
-    }
-
-    final DateTime now = DateTime.now();
-    final DateTimeRange? picked = await showDateRangePicker(
+  Future<void> _openFilterSheet() async {
+    final SalesFilter? result = await showSalesFilterSheet(
       context: context,
-      firstDate: DateTime(now.year - 5),
-      lastDate: now,
-      initialDateRange: _customDateRange,
-      helpText: 'اختر الفترة',
-      saveText: 'تطبيق',
+      current: _filter,
     );
-
-    if (picked == null || !mounted) {
+    if (result == null || !mounted) {
       return;
     }
-    setState(() {
-      _dateFilter = _SalesDateFilter.custom;
-      _customDateRange = picked;
-    });
+    setState(() => _filter = result);
   }
 
   void _clearAllFilters() {
     _searchController.clear();
     setState(() {
       _searchQuery = '';
-      _statusFilter = null;
-      _paymentFilter = null;
-      _dateFilter = _SalesDateFilter.all;
-      _customDateRange = null;
+      _filter = const SalesFilter();
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Filtering
-  // ---------------------------------------------------------------------------
-
-  bool _matchesFilters(Sale sale, Map<String, String> customerNames) {
-    // 1) Status
-    if (_statusFilter != null && sale.status != _statusFilter) {
+  bool _matches(Sale sale, Map<String, String> customerNames) {
+    if (_filter.status != null && sale.status != _filter.status) {
+      return false;
+    }
+    if (_filter.payment != null && sale.paymentStatus != _filter.payment) {
       return false;
     }
 
-    // 2) Payment status
-    if (_paymentFilter != null && sale.paymentStatus != _paymentFilter) {
-      return false;
-    }
-
-    // 3) Date window (inclusive)
     final DateTime localDate = sale.saleDate.toLocal();
-    final DateTime? fromDate = _computeFromDate();
-    final DateTime? toDate = _computeToDate();
+    final DateTime? fromDate = _filter.fromDate;
+    final DateTime? toDate = _filter.toDate;
     if (fromDate != null && localDate.isBefore(fromDate)) {
       return false;
     }
@@ -185,7 +85,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       return false;
     }
 
-    // 4) Free-text search: invoice number OR customer name
     final String trimmed = _searchQuery.trim().toLowerCase();
     if (trimmed.isEmpty) {
       return true;
@@ -206,10 +105,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 
     return false;
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -267,92 +162,63 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           final List<Sale> allSales = salesAsync.value ?? const <Sale>[];
           final List<Customer> customers =
               customersAsync.value ?? const <Customer>[];
-
           final Map<String, String> customerNames = <String, String>{
-            for (final Customer customer in customers)
-              customer.id: customer.name,
+            for (final Customer c in customers) c.id: c.name,
           };
 
           final List<Sale> filtered = allSales
-              .where((Sale s) => _matchesFilters(s, customerNames))
+              .where((Sale s) => _matches(s, customerNames))
               .toList(growable: false);
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- KPI overview (unaffected by filters) ----
+              // ---- KPI overview ----
               Padding(
-                padding: const EdgeInsets.only(top: 8, bottom: 4),
+                padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: SalesKpiRow(sales: allSales),
               ),
 
-              // ---- Search field ----
-              Padding(
-                padding: const EdgeInsets.only(top: 8, bottom: 8),
-                child: AppTextField(
-                  controller: _searchController,
-                  hint: 'ابحث برقم الفاتورة أو اسم العميل',
-                  prefixIcon: Icons.search,
-                  suffixIcon: _searchQuery.isEmpty
-                      ? null
-                      : IconButton(
-                          tooltip: 'مسح البحث',
-                          icon: const Icon(Icons.close),
-                          onPressed: () {
-                            _searchController.clear();
-                            setState(() => _searchQuery = '');
-                          },
-                        ),
-                  onChanged: (String value) {
-                    setState(() => _searchQuery = value);
-                  },
-                ),
-              ),
-
-              // ---- Date filter chips ----
+              // ---- Search + Filter button ----
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
-                child: _DateFilterChips(
-                  selected: _dateFilter,
-                  customRange: _customDateRange,
-                  onChanged: _selectDateFilter,
+                child: Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: AppTextField(
+                        controller: _searchController,
+                        hint: 'ابحث برقم الفاتورة أو اسم العميل',
+                        prefixIcon: Icons.search,
+                        suffixIcon: _searchQuery.isEmpty
+                            ? null
+                            : IconButton(
+                                tooltip: 'مسح البحث',
+                                icon: const Icon(Icons.close),
+                                onPressed: () {
+                                  _searchController.clear();
+                                  setState(() => _searchQuery = '');
+                                },
+                              ),
+                        onChanged: (String v) =>
+                            setState(() => _searchQuery = v),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    _FilterButton(
+                      activeCount: _filter.activeCount,
+                      onPressed: _openFilterSheet,
+                    ),
+                  ],
                 ),
               ),
 
-              // ---- Status filter chips ----
-              Padding(
-                padding: const EdgeInsets.only(bottom: 6),
-                child: _StatusFilterChips(
-                  selected: _statusFilter,
-                  onChanged: (String? status) {
-                    setState(() => _statusFilter = status);
-                  },
-                ),
-              ),
-
-              // ---- Payment filter chips ----
-              Padding(
-                padding: const EdgeInsets.only(bottom: 8),
-                child: _PaymentFilterChips(
-                  selected: _paymentFilter,
-                  onChanged: (String? payment) {
-                    setState(() => _paymentFilter = payment);
-                  },
-                ),
-              ),
-
-              // ---- Clear all filters ----
-              if (_hasActiveFilters)
+              // ---- Active filter chips (compact) ----
+              if (_filter.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
-                  child: Align(
-                    alignment: AlignmentDirectional.centerStart,
-                    child: ActionChip(
-                      avatar: const Icon(Icons.filter_alt_off_outlined,
-                          size: 16),
-                      label: const Text('مسح الفلاتر'),
-                      onPressed: _clearAllFilters,
-                    ),
+                  child: _ActiveFilterChips(
+                    filter: _filter,
+                    onClearAll: _clearAllFilters,
                   ),
                 ),
 
@@ -393,14 +259,12 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                             itemBuilder:
                                 (BuildContext context, int index) {
                               final Sale sale = filtered[index];
-                              final String customerName =
-                                  _resolveCardCustomerName(
-                                customerNames,
-                                sale.customerId,
-                              );
                               return _SaleCard(
                                 sale: sale,
-                                customerName: customerName,
+                                customerName: _resolveCardCustomerName(
+                                  customerNames,
+                                  sale.customerId,
+                                ),
                                 onTap: () => _openDetail(context, sale),
                               );
                             },
@@ -413,10 +277,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
-
   Future<void> _openDetail(BuildContext context, Sale sale) async {
     await context.pushNamed(
       AppRouter.saleDetailName,
@@ -424,8 +284,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     );
   }
 
-  /// Resolves the customer name for a card, handling the cash-sale case
-  /// where `customerId` is null.
   static String _resolveCardCustomerName(
     Map<String, String> customerNames,
     String? customerId,
@@ -438,141 +296,174 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 }
 
 // -----------------------------------------------------------------------------
-// Date filter chips
+// Filter button
 // -----------------------------------------------------------------------------
 
-class _DateFilterChips extends StatelessWidget {
-  const _DateFilterChips({
-    required this.selected,
-    required this.customRange,
-    required this.onChanged,
-  });
+class _FilterButton extends StatelessWidget {
+  const _FilterButton({required this.activeCount, required this.onPressed});
 
-  final _SalesDateFilter selected;
-  final DateTimeRange? customRange;
-  final Future<void> Function(_SalesDateFilter) onChanged;
+  final int activeCount;
+  final VoidCallback onPressed;
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: <Widget>[
-          _chip(context, 'الكل', _SalesDateFilter.all),
-          const SizedBox(width: 8),
-          _chip(context, 'اليوم', _SalesDateFilter.today),
-          const SizedBox(width: 8),
-          _chip(context, 'هذا الأسبوع', _SalesDateFilter.thisWeek),
-          const SizedBox(width: 8),
-          _chip(context, 'هذا الشهر', _SalesDateFilter.thisMonth),
-          const SizedBox(width: 8),
-          _chip(context, 'هذا العام', _SalesDateFilter.thisYear),
-          const SizedBox(width: 8),
-          _chip(context, _customLabel(), _SalesDateFilter.custom),
-        ],
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool isActive = activeCount > 0;
+
+    return Material(
+      color: isActive ? scheme.primary : scheme.surface,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: onPressed,
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isActive ? scheme.primary : scheme.outlineVariant,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                Icons.tune,
+                size: 20,
+                color: isActive ? scheme.onPrimary : scheme.onSurface,
+              ),
+              if (isActive) ...<Widget>[
+                const SizedBox(width: 4),
+                Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 1,
+                  ),
+                  decoration: BoxDecoration(
+                    color: scheme.onPrimary,
+                    borderRadius: BorderRadius.circular(999),
+                  ),
+                  child: Text(
+                    '$activeCount',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
       ),
     );
   }
+}
 
-  Widget _chip(
-    BuildContext context,
-    String label,
-    _SalesDateFilter value,
-  ) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected == value,
-      onSelected: (_) => onChanged(value),
-    );
-  }
+// -----------------------------------------------------------------------------
+// Active filter chips (compact summary)
+// -----------------------------------------------------------------------------
 
-  String _customLabel() {
-    if (selected == _SalesDateFilter.custom && customRange != null) {
-      final DateFormat fmt = DateFormat('yy/MM/dd');
-      return '${fmt.format(customRange!.start)} → '
-          '${fmt.format(customRange!.end)}';
+class _ActiveFilterChips extends StatelessWidget {
+  const _ActiveFilterChips({
+    required this.filter,
+    required this.onClearAll,
+  });
+
+  final SalesFilter filter;
+  final VoidCallback onClearAll;
+
+  @override
+  Widget build(BuildContext context) {
+    final List<Widget> chips = <Widget>[];
+
+    if (filter.dateFilter != SalesDateFilter.all) {
+      chips.add(_chip(context, _dateLabel()));
     }
-    return 'نطاق مخصص';
-  }
-}
+    if (filter.status != null) {
+      chips.add(_chip(context, _statusLabel(filter.status!)));
+    }
+    if (filter.payment != null) {
+      chips.add(_chip(context, _paymentLabel(filter.payment!)));
+    }
 
-// -----------------------------------------------------------------------------
-// Status filter chips
-// -----------------------------------------------------------------------------
+    if (chips.isEmpty) {
+      return const SizedBox.shrink();
+    }
 
-class _StatusFilterChips extends StatelessWidget {
-  const _StatusFilterChips({
-    required this.selected,
-    required this.onChanged,
-  });
-
-  final String? selected;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
     return SingleChildScrollView(
       scrollDirection: Axis.horizontal,
       child: Row(
         children: <Widget>[
-          _chip(context, 'كل الحالات', null),
-          const SizedBox(width: 8),
-          _chip(context, 'مسودة', SaleStatus.draft),
-          const SizedBox(width: 8),
-          _chip(context, 'مؤكدة', SaleStatus.confirmed),
-          const SizedBox(width: 8),
-          _chip(context, 'ملغاة', SaleStatus.cancelled),
+          for (int i = 0; i < chips.length; i++) ...<Widget>[
+            chips[i],
+            if (i < chips.length - 1) const SizedBox(width: 6),
+          ],
+          const SizedBox(width: 6),
+          ActionChip(
+            avatar: const Icon(Icons.filter_alt_off_outlined, size: 16),
+            label: const Text('مسح'),
+            onPressed: onClearAll,
+          ),
         ],
       ),
     );
   }
 
-  Widget _chip(BuildContext context, String label, String? value) {
-    return ChoiceChip(
+  Widget _chip(BuildContext context, String label) {
+    return Chip(
       label: Text(label),
-      selected: selected == value,
-      onSelected: (_) => onChanged(value),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Payment filter chips
-// -----------------------------------------------------------------------------
-
-class _PaymentFilterChips extends StatelessWidget {
-  const _PaymentFilterChips({
-    required this.selected,
-    required this.onChanged,
-  });
-
-  final String? selected;
-  final ValueChanged<String?> onChanged;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: <Widget>[
-          _chip(context, 'كل المدفوعات', null),
-          const SizedBox(width: 8),
-          _chip(context, 'غير مدفوع', PaymentStatus.unpaid),
-          const SizedBox(width: 8),
-          _chip(context, 'مدفوع جزئيًا', PaymentStatus.partial),
-          const SizedBox(width: 8),
-          _chip(context, 'مدفوع', PaymentStatus.paid),
-        ],
-      ),
+      visualDensity: VisualDensity.compact,
     );
   }
 
-  Widget _chip(BuildContext context, String label, String? value) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected == value,
-      onSelected: (_) => onChanged(value),
-    );
+  String _dateLabel() {
+    switch (filter.dateFilter) {
+      case SalesDateFilter.all:
+        return 'الكل';
+      case SalesDateFilter.today:
+        return 'اليوم';
+      case SalesDateFilter.thisWeek:
+        return 'هذا الأسبوع';
+      case SalesDateFilter.thisMonth:
+        return 'هذا الشهر';
+      case SalesDateFilter.thisYear:
+        return 'هذا العام';
+      case SalesDateFilter.custom:
+        if (filter.customRange != null) {
+          final DateFormat fmt = DateFormat('yy/MM/dd');
+          return '${fmt.format(filter.customRange!.start)} → '
+              '${fmt.format(filter.customRange!.end)}';
+        }
+        return 'نطاق مخصص';
+    }
+  }
+
+  String _statusLabel(String status) {
+    switch (status) {
+      case SaleStatus.draft:
+        return 'مسودة';
+      case SaleStatus.confirmed:
+        return 'مؤكدة';
+      case SaleStatus.cancelled:
+        return 'ملغاة';
+      default:
+        return status;
+    }
+  }
+
+  String _paymentLabel(String payment) {
+    switch (payment) {
+      case PaymentStatus.unpaid:
+        return 'غير مدفوع';
+      case PaymentStatus.partial:
+        return 'مدفوع جزئيًا';
+      case PaymentStatus.paid:
+        return 'مدفوع';
+      default:
+        return payment;
+    }
   }
 }
 
