@@ -17,6 +17,7 @@ import '../features/purchases/presentation/pages/purchase_detail_page.dart';
 import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
 import '../features/sales/presentation/pages/customers_page.dart';
+import '../features/sales/presentation/pages/returns_page.dart';
 import '../features/sales/presentation/pages/sale_detail_page.dart';
 import '../features/sales/presentation/pages/sale_form_page.dart';
 import '../features/sales/presentation/pages/sales_page.dart';
@@ -82,6 +83,9 @@ abstract final class AppRouter {
 
   static const String saleEditPath = '/sales/:id/edit';
   static const String saleEditName = 'sale-edit';
+
+  static const String returnsPath = '/returns';
+  static const String returnsName = 'returns';
 
   // ---- Phase 6 (POS Foundation) ----
   static const String posPath = '/pos';
@@ -258,6 +262,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
             ],
           ),
         ],
+      ),
+      GoRoute(
+        path: AppRouter.returnsPath,
+        name: AppRouter.returnsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const ReturnsPage(),
       ),
       // ---- Phase 6: POS Foundation ----
       GoRoute(
