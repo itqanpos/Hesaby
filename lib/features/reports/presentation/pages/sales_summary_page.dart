@@ -6,6 +6,7 @@ import 'package:intl/intl.dart';
 
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
+import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
 
@@ -37,7 +38,9 @@ class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
     ref.read(reportPagePeriodProvider.notifier).setPeriod(newPeriod);
     // Force refresh of the summary with the new period.
     final ReportPeriod p = ref.read(reportPagePeriodProvider);
-    await ref.read(salesSummaryProvider(p).future).catchError((_) => SalesSummary.empty(p));
+    await ref
+        .read(salesSummaryProvider(p).future)
+        .catchError((_) => SalesSummary.empty(p));
   }
 
   @override
@@ -111,15 +114,12 @@ class _SummaryBody extends StatelessWidget {
         _HeroCard(
           title: 'صافي المبيعات',
           value: money.format(summary.netSales),
-          subtitle:
-              'من ${summary.confirmedCount} فاتورة مؤكدة',
-          money: money,
+          subtitle: 'من ${summary.confirmedCount} فاتورة مؤكدة',
         ),
         const SizedBox(height: 12),
         _StatsGrid(
           summary: summary,
           money: money,
-          percent: percent,
         ),
         const SizedBox(height: 16),
         _SectionCard(
@@ -201,13 +201,11 @@ class _HeroCard extends StatelessWidget {
     required this.title,
     required this.value,
     required this.subtitle,
-    required this.money,
   });
 
   final String title;
   final String value;
   final String subtitle;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -278,12 +276,10 @@ class _StatsGrid extends StatelessWidget {
   const _StatsGrid({
     required this.summary,
     required this.money,
-    required this.percent,
   });
 
   final SalesSummary summary;
   final NumberFormat money;
-  final NumberFormat percent;
 
   @override
   Widget build(BuildContext context) {
