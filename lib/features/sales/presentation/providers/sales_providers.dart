@@ -14,6 +14,7 @@ import '../../domain/entities/customer_adjustment.dart';
 import '../../domain/entities/customer_payment.dart';
 import '../../domain/entities/customer_statement.dart';
 import '../../domain/entities/sale_entities.dart';
+import '../../domain/entities/sale_return.dart';
 import '../../domain/repositories/sales_repository.dart';
 
 // ============================================================================
@@ -44,15 +45,23 @@ final Provider<SalesRepository> salesRepositoryProvider =
   return SalesRepositoryImpl(SalesRemoteDataSource(client));
 });
 
+/// The application's returns repository.
+final Provider<ReturnsRepository> returnsRepositoryProvider =
+    Provider<ReturnsRepository>((ref) {
+  SupabaseClient? client;
+  try {
+    client = Supabase.instance.client;
+  } on Object {
+    client = null;
+  }
+  return ReturnsRepositoryImpl(SalesRemoteDataSource(client));
+});
+
 // ============================================================================
 // Customers
 // ============================================================================
 
 /// Provides the list of customers for the currently selected company.
-///
-/// The notifier reloads automatically whenever [companyContextProvider]
-/// reports a different `currentCompany.id`. When no company is selected, it
-/// resolves to an empty list.
 class CustomersNotifier extends AsyncNotifier<List<Customer>> {
   @override
   Future<List<Customer>> build() async {
@@ -136,11 +145,6 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
   }
 
   /// Records a standalone payment against [customerId].
-  ///
-  /// The database trigger `apply_customer_payment` reduces the customer
-  /// balance; the in-memory [customersProvider] is invalidated so the new
-  /// balance is re-fetched before the caller continues. The customer's
-  /// payment history and cached statements are also invalidated.
   Future<CustomerPayment> recordPayment({
     required String customerId,
     required double amount,
@@ -168,9 +172,6 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
 
   /// Records a manual adjustment (positive or negative) against
   /// [customerId].
-  ///
-  /// The database trigger `apply_customer_balance_adjustment` applies the
-  /// delta and rejects any value that would drive the balance below zero.
   Future<CustomerAdjustment> addAdjustment({
     required String customerId,
     required double amount,
@@ -205,12 +206,6 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
     return companyId;
   }
 
-  /// Invalidates every cached customer statement.
-  ///
-  /// Riverpod 2.x does not support predicate-based invalidation on a
-  /// family, so we invalidate the family as a whole. The set of cached
-  /// statements is small (one per open customer/period), and re-fetching
-  /// them is cheap — correctness beats micro-optimisation here.
   void _invalidateStatements() {
     ref.invalidate(customerStatementProvider);
   }
@@ -232,11 +227,6 @@ final AsyncNotifierProvider<CustomersNotifier, List<Customer>>
 // Customer payments (per customer)
 // ============================================================================
 
-/// Provides the payment history of a single customer, keyed by `customerId`.
-///
-/// This is a read-only derived view over `customer_payments`. It is
-/// invalidated explicitly by [CustomersNotifier.recordPayment] after a
-/// successful insert.
 class CustomerPaymentsNotifier
     extends FamilyAsyncNotifier<List<CustomerPayment>, String> {
   @override
@@ -253,10 +243,6 @@ class CustomerPaymentsNotifier
   }
 }
 
-/// Provides the payment history of a single customer, keyed by `customerId`.
-///
-/// No explicit type annotation is used: `AsyncNotifierProvider.family` is a
-/// factory constructor, not a type.
 final customerPaymentsProvider = AsyncNotifierProvider.family<
     CustomerPaymentsNotifier, List<CustomerPayment>, String>(
   CustomerPaymentsNotifier.new,
@@ -267,11 +253,6 @@ final customerPaymentsProvider = AsyncNotifierProvider.family<
 // ============================================================================
 
 /// Arguments that identify a single customer statement query.
-///
-/// [fromDate] and [toDate] are inclusive bounds. Both are optional: `null`
-/// on either side means "open-ended". Dates are normalised to UTC on
-/// construction so that two visually identical requests share the same
-/// cache key.
 @immutable
 class CustomerStatementArgs extends Equatable {
   const CustomerStatementArgs({
@@ -293,11 +274,6 @@ class CustomerStatementArgs extends Equatable {
       'fromDate: $fromDate, toDate: $toDate)';
 }
 
-/// Builds and caches the full account statement for a single customer.
-///
-/// The statement is invalidated by [CustomersNotifier] after any operation
-/// that can affect the customer's balance (payment, adjustment, sale
-/// confirmation, sale cancellation).
 class CustomerStatementNotifier
     extends FamilyAsyncNotifier<CustomerStatement, CustomerStatementArgs> {
   @override
@@ -322,10 +298,6 @@ class CustomerStatementNotifier
   }
 }
 
-/// Provides the statement of a single customer over an optional period.
-///
-/// No explicit type annotation is used: `AsyncNotifierProvider.family` is a
-/// factory constructor, not a type.
 final customerStatementProvider = AsyncNotifierProvider.family<
     CustomerStatementNotifier, CustomerStatement, CustomerStatementArgs>(
   CustomerStatementNotifier.new,
@@ -336,14 +308,6 @@ final customerStatementProvider = AsyncNotifierProvider.family<
 // ============================================================================
 
 /// Provides the list of sales for the currently selected company.
-///
-/// Note on naming: [AsyncNotifier] already declares `update`. Business
-/// operations are therefore named `createSale`, `updateDraft`,
-/// `confirmSale` and `cancelSale`.
-///
-/// A sale may be associated with a registered customer (`customerId` not
-/// null) or with no customer at all — a cash sale. The POS uses the latter
-/// by default.
 class SalesNotifier extends AsyncNotifier<List<Sale>> {
   @override
   Future<List<Sale>> build() async {
@@ -386,8 +350,6 @@ class SalesNotifier extends AsyncNotifier<List<Sale>> {
           notes: notes,
         );
 
-    // The new sale has just been created; no items provider exists yet for
-    // its id, so no per-id invalidation is needed here.
     await _reload();
     return created;
   }
@@ -430,6 +392,7 @@ class SalesNotifier extends AsyncNotifier<List<Sale>> {
         await ref.read(salesRepositoryProvider).confirmSale(saleId);
 
     ref.invalidate(saleItemsProvider(saleId));
+    _invalidateSaleReturns(saleId);
     await _reload();
     return confirmed;
   }
@@ -439,6 +402,7 @@ class SalesNotifier extends AsyncNotifier<List<Sale>> {
         await ref.read(salesRepositoryProvider).cancelSale(saleId);
 
     ref.invalidate(saleItemsProvider(saleId));
+    _invalidateSaleReturns(saleId);
     await _reload();
     return cancelled;
   }
@@ -455,6 +419,13 @@ class SalesNotifier extends AsyncNotifier<List<Sale>> {
     return companyId;
   }
 
+  /// Invalidates the returns list attached to [saleId] so that the
+  /// remaining returnable quantity shown in any open return dialog is
+  /// refreshed after a sale confirmation or cancellation.
+  void _invalidateSaleReturns(String saleId) {
+    ref.invalidate(saleReturnsProvider(saleId));
+  }
+
   Future<void> _reload() async {
     ref.invalidateSelf();
     await future;
@@ -469,11 +440,6 @@ final AsyncNotifierProvider<SalesNotifier, List<Sale>> salesProvider =
 // Sale items (per sale)
 // ============================================================================
 
-/// Provides the line items of a single sale, keyed by `saleId`.
-///
-/// This is a read-only derived view over `sale_items`. It is invalidated
-/// explicitly by [SalesNotifier] after any mutation that touches the sale's
-/// lines (`updateDraft`, `confirmSale`, `cancelSale`).
 class SaleItemsNotifier
     extends FamilyAsyncNotifier<List<SaleItem>, String> {
   @override
@@ -490,10 +456,206 @@ class SaleItemsNotifier
   }
 }
 
-/// Provides the line items of a single sale, keyed by `saleId`.
-///
-/// No explicit type annotation is used: `AsyncNotifierProvider.family` is a
-/// factory constructor, not a type. Dart infers the correct
-/// `AsyncNotifierProviderFamily<...>` from the value expression.
 final saleItemsProvider = AsyncNotifierProvider.family<
     SaleItemsNotifier, List<SaleItem>, String>(SaleItemsNotifier.new);
+
+// ============================================================================
+// Returns (per company)
+// ============================================================================
+
+/// Provides the list of sale returns for the currently selected company.
+///
+/// The notifier reloads automatically whenever [companyContextProvider]
+/// reports a different `currentCompany.id`. When no company is selected it
+/// resolves to an empty list.
+class ReturnsNotifier extends AsyncNotifier<List<SaleReturn>> {
+  @override
+  Future<List<SaleReturn>> build() async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState state) => state.currentCompany?.id,
+      ),
+    );
+
+    if (companyId == null) {
+      return const <SaleReturn>[];
+    }
+
+    return ref.read(returnsRepositoryProvider).listReturns(companyId);
+  }
+
+  /// Creates a draft return and invalidates any provider derived from it.
+  Future<SaleReturn> createReturn({
+    required String branchId,
+    required String saleId,
+    String? customerId,
+    required DateTime returnDate,
+    required List<SaleReturnItemDraft> items,
+    String refundMethod = 'credit_note',
+    String? notes,
+  }) async {
+    final String companyId = _requireCurrentCompanyId();
+
+    final SaleReturn created =
+        await ref.read(returnsRepositoryProvider).createReturn(
+              companyId: companyId,
+              branchId: branchId,
+              saleId: saleId,
+              customerId: customerId,
+              returnDate: returnDate,
+              items: items,
+              refundMethod: refundMethod,
+              notes: notes,
+            );
+
+    ref.invalidate(saleReturnsProvider(saleId));
+    await _reload();
+    return created;
+  }
+
+  /// Replaces the header and items of a draft return.
+  Future<SaleReturn> updateDraft({
+    required String returnId,
+    required String branchId,
+    required String saleId,
+    String? customerId,
+    required DateTime returnDate,
+    required List<SaleReturnItemDraft> items,
+    String refundMethod = 'credit_note',
+    String? notes,
+  }) async {
+    final String companyId = _requireCurrentCompanyId();
+
+    final SaleReturn updated =
+        await ref.read(returnsRepositoryProvider).updateDraft(
+              returnId: returnId,
+              companyId: companyId,
+              branchId: branchId,
+              saleId: saleId,
+              customerId: customerId,
+              returnDate: returnDate,
+              items: items,
+              refundMethod: refundMethod,
+              notes: notes,
+            );
+
+    ref.invalidate(returnItemsProvider(returnId));
+    ref.invalidate(saleReturnsProvider(saleId));
+    await _reload();
+    return updated;
+  }
+
+  /// Confirms a draft return.
+  ///
+  /// The database trigger creates the `return_in` stock movements and,
+  /// when the refund method is `credit_note`, reduces the customer
+  /// balance. Both the customer list and any open statement are
+  /// invalidated afterwards so the UI reflects the new balance.
+  Future<SaleReturn> confirmReturn({
+    required String returnId,
+    required String saleId,
+  }) async {
+    final SaleReturn confirmed =
+        await ref.read(returnsRepositoryProvider).confirmReturn(returnId);
+
+    ref.invalidate(returnItemsProvider(returnId));
+    ref.invalidate(saleReturnsProvider(saleId));
+    ref.invalidate(customerStatementProvider);
+    ref.invalidate(customersProvider);
+    await _reload();
+    return confirmed;
+  }
+
+  /// Cancels a draft or confirmed return.
+  Future<SaleReturn> cancelReturn({
+    required String returnId,
+    required String saleId,
+  }) async {
+    final SaleReturn cancelled =
+        await ref.read(returnsRepositoryProvider).cancelReturn(returnId);
+
+    ref.invalidate(returnItemsProvider(returnId));
+    ref.invalidate(saleReturnsProvider(saleId));
+    ref.invalidate(customerStatementProvider);
+    ref.invalidate(customersProvider);
+    await _reload();
+    return cancelled;
+  }
+
+  String _requireCurrentCompanyId() {
+    final CompanyContextState context = ref.read(companyContextProvider);
+    final String? companyId = context.currentCompany?.id;
+    if (companyId == null) {
+      throw const ReturnException(
+        type: ReturnFailureType.unauthorized,
+        cause: 'No company is currently selected.',
+      );
+    }
+    return companyId;
+  }
+
+  Future<void> _reload() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+/// Provides the current company's sale returns.
+final AsyncNotifierProvider<ReturnsNotifier, List<SaleReturn>>
+    returnsProvider =
+    AsyncNotifierProvider<ReturnsNotifier, List<SaleReturn>>(
+  ReturnsNotifier.new,
+);
+
+// ============================================================================
+// Return items (per return)
+// ============================================================================
+
+class ReturnItemsNotifier
+    extends FamilyAsyncNotifier<List<SaleReturnItem>, String> {
+  @override
+  Future<List<SaleReturnItem>> build(String returnId) async {
+    if (returnId.isEmpty) {
+      return const <SaleReturnItem>[];
+    }
+    return ref.read(returnsRepositoryProvider).listReturnItems(returnId);
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final returnItemsProvider = AsyncNotifierProvider.family<
+    ReturnItemsNotifier, List<SaleReturnItem>, String>(
+  ReturnItemsNotifier.new,
+);
+
+// ============================================================================
+// Returns for a specific sale (per sale)
+// ============================================================================
+
+/// Lists every return (draft, confirmed, or cancelled) recorded against a
+/// specific sale. Used by the return creation dialog to compute the
+/// remaining returnable quantity per sale item.
+class SaleReturnsNotifier
+    extends FamilyAsyncNotifier<List<SaleReturn>, String> {
+  @override
+  Future<List<SaleReturn>> build(String saleId) async {
+    if (saleId.isEmpty) {
+      return const <SaleReturn>[];
+    }
+    return ref.read(returnsRepositoryProvider).listReturnsForSale(saleId);
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final saleReturnsProvider = AsyncNotifierProvider.family<
+    SaleReturnsNotifier, List<SaleReturn>, String>(
+  SaleReturnsNotifier.new,
+);
