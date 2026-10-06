@@ -5,12 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/inventory_reports.dart';
+import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
+import '../widgets/report_print_action.dart';
 
-/// Products whose on-hand stock is at or below their configured minimum.
 class LowStockPage extends ConsumerStatefulWidget {
   const LowStockPage({super.key});
 
@@ -20,6 +21,59 @@ class LowStockPage extends ConsumerStatefulWidget {
 
 class _LowStockPageState extends ConsumerState<LowStockPage> {
   static final NumberFormat _qty = NumberFormat.decimalPattern('ar_EG');
+
+  ReportDocument? _buildDocument(List<LowStockItem> items) {
+    if (items.isEmpty) return null;
+
+    final int outOfStock =
+        items.where((LowStockItem i) => i.isOutOfStock).length;
+
+    return ReportDocument(
+      title: 'المخزون المنخفض',
+      companyName: '—',
+      generatedAt: DateTime.now(),
+      sections: <ReportSection>[
+        ReportSection(
+          kpis: <ReportKpi>[
+            ReportKpi(
+              label: 'إجمالي المنتجات',
+              value: '${items.length}',
+              emphasized: true,
+            ),
+            ReportKpi(
+              label: 'نفدت تمامًا',
+              value: '$outOfStock',
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'التفاصيل',
+          table: ReportTable(
+            headers: <String>[
+              '#',
+              'المنتج',
+              'الرصيد',
+              'الحد الأدنى',
+              'النقص',
+            ],
+            flex: <double>[0.4, 2.4, 1.0, 1.0, 1.0],
+            rows: <List<String>>[
+              for (int i = 0; i < items.length; i++)
+                <String>[
+                  '${i + 1}',
+                  items[i].productName,
+                  _qty.format(items[i].quantityOnHand),
+                  _qty.format(items[i].minStock),
+                  items[i].isOutOfStock
+                      ? 'نفد'
+                      : _qty.format(items[i].deficit),
+                ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -34,6 +88,13 @@ class _LowStockPageState extends ConsumerState<LowStockPage> {
       errorMessage:
           itemsAsync.hasError ? _errorMessage(itemsAsync.error!) : null,
       onRetry: () => ref.invalidate(lowStockProvider),
+      trailing: ReportPrintAction(
+        documentBuilder: () {
+          final List<LowStockItem>? list = itemsAsync.valueOrNull;
+          if (list == null) return null;
+          return _buildDocument(list);
+        },
+      ),
       body: itemsAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
@@ -68,10 +129,7 @@ class _Body extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: <Widget>[
-        _SummaryStrip(
-          total: items.length,
-          outOfStock: outOfStock,
-        ),
+        _SummaryStrip(total: items.length, outOfStock: outOfStock),
         const SizedBox(height: 16),
         for (int i = 0; i < items.length; i++) ...<Widget>[
           _LowStockRow(item: items[i], qty: qty),
@@ -92,7 +150,6 @@ class _SummaryStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest,
@@ -103,13 +160,7 @@ class _SummaryStrip extends StatelessWidget {
         child: Row(
           children: <Widget>[
             Expanded(
-              child: _cell(
-                theme,
-                scheme,
-                'إجمالي المنتجات',
-                '$total',
-                null,
-              ),
+              child: _cell(theme, scheme, 'إجمالي المنتجات', '$total', null),
             ),
             Container(width: 1, height: 32, color: scheme.outlineVariant),
             const SizedBox(width: 14),
@@ -245,30 +296,17 @@ class _AllGoodState extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
         child: Column(
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Icon(
-              Icons.check_circle_outline,
-              size: 48,
-              color: scheme.primary,
-            ),
+            Icon(Icons.check_circle_outline, size: 48, color: scheme.primary),
             const SizedBox(height: 12),
             Text(
               'كل المنتجات فوق حد الطلب',
               style: theme.textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'لا توجد منتجات تحتاج إعادة طلب حاليًا.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
               textAlign: TextAlign.center,
             ),
           ],
