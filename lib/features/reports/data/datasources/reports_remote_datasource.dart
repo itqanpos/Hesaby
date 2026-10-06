@@ -1,274 +1,919 @@
-// lib/features/reports/data/datasources/reports_remote_datasource.dart
+// lib/features/reports/data/repositories/reports_repository_impl.dart
 
-import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
+import '../../../../core/utils/logger.dart';
+import '../../domain/entities/financial_reports.dart';
+import '../../domain/entities/inventory_reports.dart';
+import '../../domain/entities/report_period.dart';
+import '../../domain/entities/sales_reports.dart';
 import '../../domain/repositories/reports_repository.dart';
+import '../datasources/reports_remote_datasource.dart';
 
-/// Thin wrapper over the Supabase queries the reports feature needs.
-class ReportsRemoteDataSource {
-  const ReportsRemoteDataSource(this._client);
+/// Concrete implementation of [ReportsRepository] backed by Supabase.
+class ReportsRepositoryImpl implements ReportsRepository {
+  const ReportsRepositoryImpl(this._remoteDataSource);
 
-  final SupabaseClient? _client;
+  final ReportsRemoteDataSource _remoteDataSource;
 
-  bool get isAvailable => _client != null;
+  // ---------------------------------------------------------------------------
+  // Sales summary
+  // ---------------------------------------------------------------------------
 
-  /// Safety cap for report queries.
-  static const int safetyLimit = 5000;
-
-  /// Higher cap used for the "last sold date" query (one row per sale item).
-  static const int saleItemsSafetyLimit = 50000;
-
-  /// How many ids to pass to a single `IN (...)` filter.
-  static const int inFilterChunkSize = 150;
-
-  // ===========================================================================
-  // SALES
-  // ===========================================================================
-
-  Future<List<Map<String, dynamic>>> fetchSales({
+  @override
+  Future<SalesSummary> getSalesSummary({
     required String companyId,
-    required DateTime? fromDate,
-    required DateTime? toDate,
-    int? limit,
+    required ReportPeriod period,
   }) async {
-    final SupabaseClient client = _requireClient();
+    try {
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchSales(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+        _remoteDataSource.fetchReturns(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+      ]);
 
-    var query = client
-        .from('sales')
-        .select(
-          'id, status, total, paid_amount, discount, tax_amount, '
-          'customer_id, created_by, sale_date',
-        )
-        .eq('company_id', companyId);
+      final List<Map<String, dynamic>> sales =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> returns =
+          (results[1] as List<Map<String, dynamic>>);
 
-    if (fromDate != null) {
-      query = query.gte('sale_date', _formatTimestamp(fromDate));
-    }
-    if (toDate != null) {
-      query = query.lte('sale_date', _formatTimestamp(toDate));
-    }
+      int confirmedCount = 0;
+      int draftCount = 0;
+      int cancelledCount = 0;
+      double totalSales = 0;
+      double totalPaid = 0;
+      double totalDue = 0;
+      double totalDiscount = 0;
+      double totalTax = 0;
 
-    final int effectiveLimit =
-        (limit == null || limit <= 0) ? safetyLimit : limit;
-
-    final List<Map<String, dynamic>> rows = await query.limit(effectiveLimit);
-    return rows;
-  }
-
-  Future<List<String>> fetchConfirmedSaleIds({
-    required String companyId,
-    required DateTime? fromDate,
-    required DateTime? toDate,
-  }) async {
-    final SupabaseClient client = _requireClient();
-
-    var query = client
-        .from('sales')
-        .select('id')
-        .eq('company_id', companyId)
-        .eq('status', 'confirmed');
-
-    if (fromDate != null) {
-      query = query.gte('sale_date', _formatTimestamp(fromDate));
-    }
-    if (toDate != null) {
-      query = query.lte('sale_date', _formatTimestamp(toDate));
-    }
-
-    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
-
-    return rows
-        .map((Map<String, dynamic> r) => r['id'])
-        .whereType<String>()
-        .toList(growable: false);
-  }
-
-  Future<List<Map<String, dynamic>>> fetchSaleItems({
-    required List<String> saleIds,
-  }) async {
-    if (saleIds.isEmpty) {
-      return const <Map<String, dynamic>>[];
-    }
-
-    final SupabaseClient client = _requireClient();
-    final List<Map<String, dynamic>> allRows = <Map<String, dynamic>>[];
-
-    for (int i = 0; i < saleIds.length; i += inFilterChunkSize) {
-      final int end = (i + inFilterChunkSize < saleIds.length)
-          ? i + inFilterChunkSize
-          : saleIds.length;
-      final List<String> chunk = saleIds.sublist(i, end);
-
-      final List<Map<String, dynamic>> rows = await client
-          .from('sale_items')
-          .select('product_id, quantity, unit_price, line_total, sale_id')
-          .inFilter('sale_id', chunk);
-
-      allRows.addAll(rows);
-    }
-
-    return allRows;
-  }
-
-  // ===========================================================================
-  // RETURNS
-  // ===========================================================================
-
-  Future<List<Map<String, dynamic>>> fetchReturns({
-    required String companyId,
-    required DateTime? fromDate,
-    required DateTime? toDate,
-  }) async {
-    final SupabaseClient client = _requireClient();
-
-    var query = client
-        .from('sale_returns')
-        .select('id, total, status, return_date')
-        .eq('company_id', companyId)
-        .eq('status', 'confirmed');
-
-    if (fromDate != null) {
-      query = query.gte('return_date', _formatDateOnly(fromDate));
-    }
-    if (toDate != null) {
-      query = query.lte('return_date', _formatDateOnly(toDate));
-    }
-
-    final List<Map<String, dynamic>> rows =
-        await query.limit(safetyLimit);
-    return rows;
-  }
-
-  // ===========================================================================
-  // INVENTORY
-  // ===========================================================================
-
-  /// Returns every non-empty `inventory_balances` row for the company.
-  ///
-  /// A "non-empty" row has `quantity_on_hand > 0`. Rows for branches the
-  /// caller cannot see are excluded by RLS.
-  Future<List<Map<String, dynamic>>> fetchInventoryBalances({
-    required String companyId,
-    String? branchId,
-  }) async {
-    final SupabaseClient client = _requireClient();
-
-    var query = client
-        .from('inventory_balances')
-        .select(
-          'product_id, branch_id, quantity_on_hand, average_cost',
-        )
-        .eq('company_id', companyId)
-        .gt('quantity_on_hand', 0);
-
-    if (branchId != null) {
-      query = query.eq('branch_id', branchId);
-    }
-
-    final List<Map<String, dynamic>> rows =
-        await query.limit(safetyLimit);
-    return rows;
-  }
-
-  /// Returns every active product with a non-null `min_stock` value.
-  ///
-  /// When the schema does not define `min_stock`, the query fails at the
-  /// PostgREST layer and the caller maps the error into a report failure.
-  Future<List<Map<String, dynamic>>> fetchProductsWithMinStock({
-    required String companyId,
-  }) async {
-    final SupabaseClient client = _requireClient();
-
-    final List<Map<String, dynamic>> rows = await client
-        .from('products')
-        .select('id, name, default_unit_id, min_stock')
-        .eq('company_id', companyId)
-        .not('min_stock', 'is', null)
-        .limit(safetyLimit);
-
-    return rows;
-  }
-
-  /// Returns the most recent confirmed sale date for each product in
-  /// [productIds].
-  ///
-  /// The result maps `product_id` → latest `sale_date` (UTC). Products
-  /// that were never sold do not appear in the map. The query is chunked
-  /// to keep each request URL below the PostgREST limit.
-  Future<Map<String, DateTime>> fetchLastSoldDateByProduct({
-    required String companyId,
-    required List<String> productIds,
-  }) async {
-    if (productIds.isEmpty) {
-      return const <String, DateTime>{};
-    }
-
-    final SupabaseClient client = _requireClient();
-    final Map<String, DateTime> result = <String, DateTime>{};
-
-    for (int i = 0; i < productIds.length; i += inFilterChunkSize) {
-      final int end = (i + inFilterChunkSize < productIds.length)
-          ? i + inFilterChunkSize
-          : productIds.length;
-      final List<String> chunk = productIds.sublist(i, end);
-
-      final List<Map<String, dynamic>> rows = await client
-          .from('sale_items')
-          .select('product_id, sales!inner(sale_date, status, company_id)')
-          .eq('sales.company_id', companyId)
-          .eq('sales.status', 'confirmed')
-          .inFilter('product_id', chunk)
-          .limit(saleItemsSafetyLimit);
-
-      for (final Map<String, dynamic> row in rows) {
-        final Object? pidRaw = row['product_id'];
-        final Object? saleRaw = row['sales'];
-        if (pidRaw is! String || saleRaw is! Map) {
-          continue;
-        }
-        final Object? dateRaw =
-            (saleRaw as Map<String, dynamic>)['sale_date'];
-        if (dateRaw is! String) {
-          continue;
-        }
-        final DateTime? parsed = DateTime.tryParse(dateRaw);
-        if (parsed == null) {
-          continue;
-        }
-        final DateTime utc = parsed.toUtc();
-        final DateTime? existing = result[pidRaw];
-        if (existing == null || utc.isAfter(existing)) {
-          result[pidRaw] = utc;
+      for (final Map<String, dynamic> row in sales) {
+        final String status = _asString(row['status']);
+        switch (status) {
+          case 'confirmed':
+            confirmedCount++;
+            final double total = _asDouble(row['total']);
+            final double paid = _asDouble(row['paid_amount']);
+            totalSales += total;
+            totalPaid += paid;
+            final double due = total - paid;
+            if (due > 0) totalDue += due;
+            totalDiscount += _asDouble(row['discount']);
+            totalTax += _asDouble(row['tax_amount']);
+          case 'draft':
+            draftCount++;
+          case 'cancelled':
+            cancelledCount++;
         }
       }
-    }
 
-    return result;
-  }
+      int returnCount = 0;
+      double returnTotal = 0;
+      for (final Map<String, dynamic> row in returns) {
+        returnCount++;
+        returnTotal += _asDouble(row['total']);
+      }
 
-  // ===========================================================================
-  // Internal helpers
-  // ===========================================================================
-
-  SupabaseClient _requireClient() {
-    final SupabaseClient? client = _client;
-    if (client == null) {
-      throw const ReportException(
-        type: ReportFailureType.unknown,
-        cause: 'Supabase client is not initialised.',
+      return SalesSummary(
+        period: period,
+        confirmedCount: confirmedCount,
+        draftCount: draftCount,
+        cancelledCount: cancelledCount,
+        totalSales: totalSales,
+        totalPaid: totalPaid,
+        totalDue: totalDue,
+        totalDiscount: totalDiscount,
+        totalTax: totalTax,
+        returnCount: returnCount,
+        returnTotal: returnTotal,
       );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getSalesSummary');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getSalesSummary');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getSalesSummary');
     }
-    return client;
   }
 
-  static String _formatTimestamp(DateTime value) =>
-      value.toUtc().toIso8601String();
+  // ---------------------------------------------------------------------------
+  // Top products
+  // ---------------------------------------------------------------------------
 
-  static String _formatDateOnly(DateTime value) {
-    final DateTime local = value.toLocal();
-    final String y = local.year.toString().padLeft(4, '0');
-    final String m = local.month.toString().padLeft(2, '0');
-    final String d = local.day.toString().padLeft(2, '0');
-    return '$y-$m-$d';
+  @override
+  Future<List<TopProduct>> getTopProducts({
+    required String companyId,
+    required ReportPeriod period,
+    int limit = 20,
+    required Map<String, String> productNames,
+  }) async {
+    try {
+      final List<String> saleIds =
+          await _remoteDataSource.fetchConfirmedSaleIds(
+        companyId: companyId,
+        fromDate: period.fromDate,
+        toDate: period.toDate,
+      );
+
+      if (saleIds.isEmpty) {
+        return const <TopProduct>[];
+      }
+
+      final List<Map<String, dynamic>> items =
+          await _remoteDataSource.fetchSaleItems(saleIds: saleIds);
+
+      final Map<String, _ProductAgg> byProduct = <String, _ProductAgg>{};
+      for (final Map<String, dynamic> row in items) {
+        final String productId = _asString(row['product_id']);
+        if (productId.isEmpty) continue;
+        final double qty = _asDouble(row['quantity']);
+        final double revenue = _asDouble(row['line_total']);
+        final String saleId = _asString(row['sale_id']);
+
+        byProduct
+            .putIfAbsent(productId, () => _ProductAgg())
+            .add(qty, revenue, saleId);
+      }
+
+      final List<TopProduct> all = byProduct.entries.map(
+        (MapEntry<String, _ProductAgg> e) {
+          return TopProduct(
+            productId: e.key,
+            productName: productNames[e.key] ?? 'منتج محذوف',
+            totalQuantity: e.value.quantity,
+            totalRevenue: e.value.revenue,
+            invoiceCount: e.value.saleIds.length,
+          );
+        },
+      ).toList();
+
+      all.sort((TopProduct a, TopProduct b) =>
+          b.totalRevenue.compareTo(a.totalRevenue));
+
+      return all.take(limit).toList(growable: false);
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getTopProducts');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getTopProducts');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getTopProducts');
+    }
   }
+
+  // ---------------------------------------------------------------------------
+  // Top customers
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<List<TopCustomer>> getTopCustomers({
+    required String companyId,
+    required ReportPeriod period,
+    int limit = 20,
+    required Map<String, String> customerNames,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> sales =
+          await _remoteDataSource.fetchSales(
+        companyId: companyId,
+        fromDate: period.fromDate,
+        toDate: period.toDate,
+      );
+
+      final Map<String, _CustomerAgg> byCustomer =
+          <String, _CustomerAgg>{};
+
+      for (final Map<String, dynamic> row in sales) {
+        if (_asString(row['status']) != 'confirmed') continue;
+        final String? customerId =
+            row['customer_id'] is String ? row['customer_id'] as String : null;
+        if (customerId == null || customerId.isEmpty) continue;
+        final double total = _asDouble(row['total']);
+        final double paid = _asDouble(row['paid_amount']);
+
+        byCustomer
+            .putIfAbsent(customerId, () => _CustomerAgg())
+            .add(total, paid);
+      }
+
+      final List<TopCustomer> all = byCustomer.entries.map(
+        (MapEntry<String, _CustomerAgg> e) {
+          return TopCustomer(
+            customerId: e.key,
+            customerName: customerNames[e.key] ?? 'عميل محذوف',
+            invoiceCount: e.value.count,
+            totalSpent: e.value.spent,
+            totalPaid: e.value.paid,
+            totalDue: e.value.spent - e.value.paid,
+          );
+        },
+      ).toList();
+
+      all.sort((TopCustomer a, TopCustomer b) =>
+          b.totalSpent.compareTo(a.totalSpent));
+
+      return all.take(limit).toList(growable: false);
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getTopCustomers');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getTopCustomers');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getTopCustomers');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Sales by cashier
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<List<CashierSales>> getSalesByCashier({
+    required String companyId,
+    required ReportPeriod period,
+    required Map<String, String> cashierNames,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> sales =
+          await _remoteDataSource.fetchSales(
+        companyId: companyId,
+        fromDate: period.fromDate,
+        toDate: period.toDate,
+      );
+
+      final Map<String, _CashierAgg> byCashier = <String, _CashierAgg>{};
+
+      for (final Map<String, dynamic> row in sales) {
+        if (_asString(row['status']) != 'confirmed') continue;
+        final String? createdBy =
+            row['created_by'] is String ? row['created_by'] as String : null;
+        final String key = createdBy ?? '__unknown__';
+
+        final double total = _asDouble(row['total']);
+        final double paid = _asDouble(row['paid_amount']);
+
+        byCashier.putIfAbsent(key, () => _CashierAgg()).add(total, paid);
+      }
+
+      final List<CashierSales> all = byCashier.entries.map(
+        (MapEntry<String, _CashierAgg> e) {
+          final String name = e.key == '__unknown__'
+              ? 'غير معروف'
+              : (cashierNames[e.key] ?? _shortId(e.key));
+          return CashierSales(
+            cashierId: e.key,
+            cashierName: name,
+            invoiceCount: e.value.count,
+            totalSales: e.value.sales,
+            totalPaid: e.value.paid,
+            totalDue: e.value.sales - e.value.paid,
+          );
+        },
+      ).toList();
+
+      all.sort((CashierSales a, CashierSales b) =>
+          b.totalSales.compareTo(a.totalSales));
+
+      return all;
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getSalesByCashier');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getSalesByCashier');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getSalesByCashier');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Stock valuation
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<StockValuationReport> getStockValuation({
+    required String companyId,
+    String? branchId,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> rows =
+          await _remoteDataSource.fetchInventoryBalances(
+        companyId: companyId,
+        branchId: branchId,
+      );
+
+      if (rows.isEmpty) {
+        return StockValuationReport.empty();
+      }
+
+      final Map<String, _ValuationAgg> byProduct =
+          <String, _ValuationAgg>{};
+
+      for (final Map<String, dynamic> row in rows) {
+        final String productId = _asString(row['product_id']);
+        if (productId.isEmpty) continue;
+        final double qty = _asDouble(row['quantity_on_hand']);
+        final double cost = _asDouble(row['average_cost']);
+        byProduct
+            .putIfAbsent(productId, () => _ValuationAgg())
+            .add(qty, cost * qty);
+      }
+
+      final List<StockValuationItem> items = byProduct.entries.map(
+        (MapEntry<String, _ValuationAgg> e) {
+          final _ValuationAgg agg = e.value;
+          final double weightedCost =
+              agg.quantity > 0 ? agg.costValue / agg.quantity : 0;
+          return StockValuationItem(
+            productId: e.key,
+            productName: productNames[e.key] ?? 'منتج محذوف',
+            quantityOnHand: agg.quantity,
+            averageCost: weightedCost,
+            totalValue: agg.costValue,
+            unitName: unitNames[e.key],
+          );
+        },
+      ).toList();
+
+      items.sort((StockValuationItem a, StockValuationItem b) =>
+          b.totalValue.compareTo(a.totalValue));
+
+      double totalValue = 0;
+      double totalQuantity = 0;
+      for (final StockValuationItem it in items) {
+        totalValue += it.totalValue;
+        totalQuantity += it.quantityOnHand;
+      }
+
+      return StockValuationReport(
+        items: items,
+        totalValue: totalValue,
+        totalQuantity: totalQuantity,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getStockValuation');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getStockValuation');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getStockValuation');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Low stock
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<List<LowStockItem>> getLowStockItems({
+    required String companyId,
+    String? branchId,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+  }) async {
+    try {
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchProductsWithMinStock(companyId: companyId),
+        _remoteDataSource.fetchInventoryBalances(
+          companyId: companyId,
+          branchId: branchId,
+        ),
+      ]);
+
+      final List<Map<String, dynamic>> products =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> balances =
+          (results[1] as List<Map<String, dynamic>>);
+
+      final Map<String, double> quantityByProduct = <String, double>{};
+      for (final Map<String, dynamic> row in balances) {
+        final String pid = _asString(row['product_id']);
+        if (pid.isEmpty) continue;
+        quantityByProduct[pid] =
+            (quantityByProduct[pid] ?? 0) + _asDouble(row['quantity_on_hand']);
+      }
+
+      final List<LowStockItem> items = <LowStockItem>[];
+      for (final Map<String, dynamic> p in products) {
+        final String pid = _asString(p['id']);
+        if (pid.isEmpty) continue;
+        final double minStock = _asDouble(p['min_stock']);
+        if (minStock <= 0) continue;
+
+        final double onHand = quantityByProduct[pid] ?? 0;
+        if (onHand > minStock) continue;
+
+        final String rawName = _asString(p['name']);
+        items.add(
+          LowStockItem(
+            productId: pid,
+            productName: productNames[pid] ??
+                (rawName.isNotEmpty ? rawName : 'منتج محذوف'),
+            quantityOnHand: onHand,
+            minStock: minStock,
+            unitName: unitNames[pid],
+          ),
+        );
+      }
+
+      items.sort((LowStockItem a, LowStockItem b) =>
+          b.deficit.compareTo(a.deficit));
+
+      return items;
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getLowStockItems');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getLowStockItems');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getLowStockItems');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dead stock
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<List<DeadStockItem>> getDeadStockItems({
+    required String companyId,
+    String? branchId,
+    required DeadStockWindow window,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> balances =
+          await _remoteDataSource.fetchInventoryBalances(
+        companyId: companyId,
+        branchId: branchId,
+      );
+
+      if (balances.isEmpty) {
+        return const <DeadStockItem>[];
+      }
+
+      final Map<String, _ValuationAgg> byProduct =
+          <String, _ValuationAgg>{};
+      for (final Map<String, dynamic> row in balances) {
+        final String pid = _asString(row['product_id']);
+        if (pid.isEmpty) continue;
+        final double qty = _asDouble(row['quantity_on_hand']);
+        final double cost = _asDouble(row['average_cost']);
+        byProduct
+            .putIfAbsent(pid, () => _ValuationAgg())
+            .add(qty, cost * qty);
+      }
+
+      final Map<String, DateTime> lastSold =
+          await _remoteDataSource.fetchLastSoldDateByProduct(
+        companyId: companyId,
+        productIds: byProduct.keys.toList(growable: false),
+      );
+
+      final DateTime cutoff = window.cutoff;
+
+      final List<DeadStockItem> items = <DeadStockItem>[];
+      byProduct.forEach((String pid, _ValuationAgg agg) {
+        final DateTime? last = lastSold[pid];
+        final bool dead = last == null || last.isBefore(cutoff);
+        if (!dead) return;
+
+        items.add(
+          DeadStockItem(
+            productId: pid,
+            productName: productNames[pid] ?? 'منتج محذوف',
+            quantityOnHand: agg.quantity,
+            stockValue: agg.costValue,
+            lastSoldAt: last,
+            unitName: unitNames[pid],
+          ),
+        );
+      });
+
+      items.sort((DeadStockItem a, DeadStockItem b) =>
+          b.stockValue.compareTo(a.stockValue));
+
+      return items;
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getDeadStockItems');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getDeadStockItems');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getDeadStockItems');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Profit & Loss
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<ProfitLossSummary> getProfitLoss({
+    required String companyId,
+    required ReportPeriod period,
+  }) async {
+    try {
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchSales(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+        _remoteDataSource.fetchReturns(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+        _remoteDataSource.fetchSaleOutMovements(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+      ]);
+
+      final List<Map<String, dynamic>> sales =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> returns =
+          (results[1] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> movements =
+          (results[2] as List<Map<String, dynamic>>);
+
+      double grossRevenue = 0;
+      for (final Map<String, dynamic> row in sales) {
+        if (_asString(row['status']) == 'confirmed') {
+          grossRevenue += _asDouble(row['total']);
+        }
+      }
+
+      double returnTotal = 0;
+      for (final Map<String, dynamic> row in returns) {
+        returnTotal += _asDouble(row['total']);
+      }
+
+      double cogs = 0;
+      for (final Map<String, dynamic> row in movements) {
+        final double qty = _asDouble(row['quantity']);
+        final double cost = _asDouble(row['unit_cost']);
+        cogs += qty * cost;
+      }
+
+      final double netRevenue = grossRevenue - returnTotal;
+      return ProfitLossSummary(
+        period: period,
+        grossRevenue: grossRevenue,
+        returnTotal: returnTotal,
+        netRevenue: netRevenue < 0 ? 0 : netRevenue,
+        costOfGoodsSold: cogs,
+        grossProfit: netRevenue - cogs,
+        operatingExpenses: 0,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getProfitLoss');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getProfitLoss');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getProfitLoss');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Receivables
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<ReceivablesReport> getReceivables({
+    required String companyId,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> rows =
+          await _remoteDataSource.fetchCustomersWithBalance(
+        companyId: companyId,
+      );
+
+      if (rows.isEmpty) {
+        return ReceivablesReport.empty();
+      }
+
+      double totalBalance = 0;
+      final List<ReceivableItem> items = <ReceivableItem>[];
+      for (final Map<String, dynamic> row in rows) {
+        final String cid = _asString(row['id']);
+        if (cid.isEmpty) continue;
+        final double balance = _asDouble(row['balance']);
+        if (balance <= 0) continue;
+        totalBalance += balance;
+
+        final String? phone = row['phone'] is String
+            ? (row['phone'] as String).trim()
+            : null;
+
+        items.add(
+          ReceivableItem(
+            customerId: cid,
+            customerName: _asString(row['name']).isNotEmpty
+                ? _asString(row['name'])
+                : 'عميل محذوف',
+            balance: balance,
+            phone: (phone == null || phone.isEmpty) ? null : phone,
+          ),
+        );
+      }
+
+      return ReceivablesReport(
+        items: items,
+        totalBalance: totalBalance,
+        customerCount: items.length,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getReceivables');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getReceivables');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getReceivables');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Payables
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<PayablesReport> getPayables({
+    required String companyId,
+    required ReportPeriod period,
+    required Map<String, String> supplierNames,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> rows =
+          await _remoteDataSource.fetchPurchases(
+        companyId: companyId,
+        fromDate: period.fromDate,
+        toDate: period.toDate,
+      );
+
+      if (rows.isEmpty) {
+        return PayablesReport.empty(period);
+      }
+
+      final Map<String, _SupplierAgg> bySupplier =
+          <String, _SupplierAgg>{};
+
+      for (final Map<String, dynamic> row in rows) {
+        final String? sid = row['supplier_id'] is String
+            ? row['supplier_id'] as String
+            : null;
+        if (sid == null || sid.isEmpty) continue;
+
+        bySupplier
+            .putIfAbsent(sid, () => _SupplierAgg())
+            .add(
+              _asDouble(row['total']),
+              _asDouble(row['paid_amount']),
+            );
+      }
+
+      final List<PayableItem> items = bySupplier.entries.map(
+        (MapEntry<String, _SupplierAgg> e) {
+          return PayableItem(
+            supplierId: e.key,
+            supplierName: supplierNames[e.key] ?? 'مورد محذوف',
+            invoiceCount: e.value.count,
+            totalPurchases: e.value.purchases,
+            totalPaid: e.value.paid,
+            totalDue: e.value.purchases - e.value.paid,
+          );
+        },
+      ).toList();
+
+      items.sort((PayableItem a, PayableItem b) =>
+          b.totalDue.compareTo(a.totalDue));
+
+      double totalPurchases = 0;
+      double totalPaid = 0;
+      for (final PayableItem it in items) {
+        totalPurchases += it.totalPurchases;
+        totalPaid += it.totalPaid;
+      }
+
+      return PayablesReport(
+        period: period,
+        items: items,
+        totalPurchases: totalPurchases,
+        totalPaid: totalPaid,
+        totalDue: totalPurchases - totalPaid,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getPayables');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getPayables');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getPayables');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
+  static String _asString(Object? value) {
+    if (value is String) return value;
+    return value?.toString() ?? '';
+  }
+
+  static double _asDouble(Object? value) {
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      final double? parsed = double.tryParse(value);
+      if (parsed != null) return parsed;
+    }
+    return 0;
+  }
+
+  static String _shortId(String id) {
+    if (id.length <= 6) return id;
+    return 'كاشير ${id.substring(id.length - 6)}';
+  }
+}
+
+// ============================================================================
+// Internal aggregation helpers
+// ============================================================================
+
+class _ProductAgg {
+  double quantity = 0;
+  double revenue = 0;
+  final Set<String> saleIds = <String>{};
+
+  void add(double qty, double rev, String saleId) {
+    quantity += qty;
+    revenue += rev;
+    if (saleId.isNotEmpty) {
+      saleIds.add(saleId);
+    }
+  }
+}
+
+class _CustomerAgg {
+  int count = 0;
+  double spent = 0;
+  double paid = 0;
+
+  void add(double total, double paidAmount) {
+    count++;
+    spent += total;
+    paid += paidAmount;
+  }
+}
+
+class _CashierAgg {
+  int count = 0;
+  double sales = 0;
+  double paid = 0;
+
+  void add(double total, double paidAmount) {
+    count++;
+    sales += total;
+    paid += paidAmount;
+  }
+}
+
+class _ValuationAgg {
+  double quantity = 0;
+  double costValue = 0;
+
+  void add(double qty, double value) {
+    quantity += qty;
+    costValue += value;
+  }
+}
+
+class _SupplierAgg {
+  int count = 0;
+  double purchases = 0;
+  double paid = 0;
+
+  void add(double total, double paidAmount) {
+    count++;
+    purchases += total;
+    paid += paidAmount;
+  }
+}
+
+// ============================================================================
+// Error mapping
+// ============================================================================
+
+ReportException _mapPostgrest(
+  supabase.PostgrestException error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  final ReportFailureType type = _classifyPostgrest(error);
+  AppLogger.warning(
+    'Report PostgREST error during "$operation" mapped to ${type.name} '
+    '(code: ${error.code ?? 'n/a'}).',
+  );
+  return ReportException(
+    type: type,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReportException _mapAuth(
+  supabase.AuthException error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  AppLogger.warning(
+    'Report auth error during "$operation" mapped to unauthorized '
+    '(code: ${error.code ?? 'n/a'}).',
+  );
+  return ReportException(
+    type: ReportFailureType.unauthorized,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReportException _mapUnknown(
+  Object error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  final ReportFailureType type = _looksLikeNetwork(error)
+      ? ReportFailureType.network
+      : ReportFailureType.unknown;
+  AppLogger.error(
+    'Unhandled report error during "$operation" '
+    '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
+    error,
+    stackTrace,
+  );
+  return ReportException(
+    type: type,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReportFailureType _classifyPostgrest(supabase.PostgrestException error) {
+  final String code = (error.code ?? '').toUpperCase();
+  final String message = error.message.toLowerCase();
+
+  if (code == 'PGRST116') {
+    return ReportFailureType.notFound;
+  }
+  if (code.startsWith('42501') || code.startsWith('28')) {
+    return ReportFailureType.unauthorized;
+  }
+  if (code.startsWith('42')) {
+    return ReportFailureType.invalidResponse;
+  }
+  if (message.contains('permission denied') ||
+      message.contains('row level security') ||
+      message.contains('jwt')) {
+    return ReportFailureType.unauthorized;
+  }
+  if (_looksLikeNetwork(message)) {
+    return ReportFailureType.network;
+  }
+  return ReportFailureType.unknown;
+}
+
+bool _looksLikeNetwork(Object error) {
+  final String s = error.toString().toLowerCase();
+  return s.contains('socket') ||
+      s.contains('network') ||
+      s.contains('connection') ||
+      s.contains('timeout') ||
+      s.contains('timed out') ||
+      s.contains('unreachable') ||
+      s.contains('failed host lookup') ||
+      s.contains('clientexception');
 }
