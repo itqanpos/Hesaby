@@ -16,8 +16,11 @@ import '../features/products/presentation/pages/units_page.dart';
 import '../features/purchases/presentation/pages/purchase_detail_page.dart';
 import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
+import '../features/reports/presentation/pages/dead_stock_page.dart';
+import '../features/reports/presentation/pages/low_stock_page.dart';
 import '../features/reports/presentation/pages/reports_hub_page.dart';
 import '../features/reports/presentation/pages/sales_summary_page.dart';
+import '../features/reports/presentation/pages/stock_valuation_page.dart';
 import '../features/reports/presentation/pages/top_customers_page.dart';
 import '../features/reports/presentation/pages/top_products_page.dart';
 import '../features/sales/presentation/pages/customers_page.dart';
@@ -103,6 +106,15 @@ abstract final class AppRouter {
 
   static const String reportTopCustomersPath = '/reports/top-customers';
   static const String reportTopCustomersName = 'report-top-customers';
+
+  static const String reportStockValuationPath = '/reports/stock-valuation';
+  static const String reportStockValuationName = 'report-stock-valuation';
+
+  static const String reportLowStockPath = '/reports/low-stock';
+  static const String reportLowStockName = 'report-low-stock';
+
+  static const String reportDeadStockPath = '/reports/dead-stock';
+  static const String reportDeadStockName = 'report-dead-stock';
 
   // ---- Phase 6 (POS Foundation) ----
   static const String posPath = '/pos';
@@ -310,6 +322,24 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.reportTopCustomersName,
         builder: (BuildContext context, GoRouterState state) =>
             const TopCustomersPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportStockValuationPath,
+        name: AppRouter.reportStockValuationName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const StockValuationPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportLowStockPath,
+        name: AppRouter.reportLowStockName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const LowStockPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportDeadStockPath,
+        name: AppRouter.reportDeadStockName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const DeadStockPage(),
       ),
       // ---- Phase 6: POS Foundation ----
       GoRoute(
