@@ -4,18 +4,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
 import '../../domain/repositories/reports_repository.dart';
 import '../providers/reports_providers.dart';
 import '../widgets/report_page_scaffold.dart';
+import '../widgets/report_print_action.dart';
 
-/// Top products report page.
-///
-/// Shows the best-selling products (by revenue) for the selected company
-/// over the selected period. Each row carries the product name, the
-/// aggregated quantity, revenue, and the number of invoices that included
-/// it.
 class TopProductsPage extends ConsumerStatefulWidget {
   const TopProductsPage({super.key});
 
@@ -39,6 +35,57 @@ class _TopProductsPageState extends ConsumerState<TopProductsPage> {
         .catchError((_) => const <TopProduct>[]);
   }
 
+  ReportDocument? _buildDocument(
+    ReportPeriod period,
+    List<TopProduct> products,
+  ) {
+    if (products.isEmpty) return null;
+
+    double totalRevenue = 0;
+    for (final TopProduct p in products) {
+      totalRevenue += p.totalRevenue;
+    }
+
+    return ReportDocument(
+      title: 'المنتجات الأكثر مبيعًا',
+      periodLabel: period.label,
+      companyName: '—',
+      generatedAt: DateTime.now(),
+      sections: <ReportSection>[
+        ReportSection(
+          kpis: <ReportKpi>[
+            ReportKpi(
+              label: 'عدد المنتجات',
+              value: '${products.length}',
+            ),
+            ReportKpi(
+              label: 'إجمالي الإيرادات',
+              value: _money.format(totalRevenue),
+              emphasized: true,
+            ),
+          ],
+        ),
+        ReportSection(
+          title: 'التفاصيل',
+          table: ReportTable(
+            headers: <String>['#', 'المنتج', 'الكمية', 'الفواتير', 'الإيراد'],
+            flex: <double>[0.4, 2.6, 0.9, 0.9, 1.4],
+            rows: <List<String>>[
+              for (int i = 0; i < products.length; i++)
+                <String>[
+                  '${i + 1}',
+                  products[i].productName,
+                  _qty.format(products[i].totalQuantity),
+                  '${products[i].invoiceCount}',
+                  _money.format(products[i].totalRevenue),
+                ],
+            ],
+          ),
+        ),
+      ],
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final ReportPeriod period = ref.watch(reportPagePeriodProvider);
@@ -54,6 +101,13 @@ class _TopProductsPageState extends ConsumerState<TopProductsPage> {
           ? _errorMessage(productsAsync.error!)
           : null,
       onRetry: () => ref.invalidate(topProductsProvider(period)),
+      trailing: ReportPrintAction(
+        documentBuilder: () {
+          final List<TopProduct>? list = productsAsync.valueOrNull;
+          if (list == null) return null;
+          return _buildDocument(period, list);
+        },
+      ),
       body: productsAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
@@ -69,26 +123,11 @@ class _TopProductsPageState extends ConsumerState<TopProductsPage> {
 
   static String _errorMessage(Object error) {
     if (error is ReportException) {
-      switch (error.type) {
-        case ReportFailureType.network:
-          return 'تعذّر الاتصال بالخادم.';
-        case ReportFailureType.unauthorized:
-          return 'انتهت صلاحية الجلسة.';
-        case ReportFailureType.notFound:
-          return 'البيانات المطلوبة غير متوفرة.';
-        case ReportFailureType.invalidResponse:
-          return 'تعذّر قراءة البيانات.';
-        case ReportFailureType.unknown:
-          return 'تعذّر تحميل التقرير.';
-      }
+      return 'تعذّر تحميل التقرير.';
     }
     return 'تعذّر تحميل التقرير.';
   }
 }
-
-// ============================================================================
-// Body
-// ============================================================================
 
 class _Body extends StatelessWidget {
   const _Body({
@@ -139,20 +178,14 @@ class _Body extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Period header
-// ============================================================================
-
 class _PeriodHeader extends StatelessWidget {
   const _PeriodHeader({required this.period});
-
   final ReportPeriod period;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Row(
@@ -173,10 +206,6 @@ class _PeriodHeader extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Summary strip
-// ============================================================================
-
 class _SummaryStrip extends StatelessWidget {
   const _SummaryStrip({
     required this.count,
@@ -192,7 +221,6 @@ class _SummaryStrip extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return DecoratedBox(
       decoration: BoxDecoration(
         color: scheme.surfaceContainerHighest,
@@ -224,11 +252,7 @@ class _SummaryStrip extends StatelessWidget {
                 ],
               ),
             ),
-            Container(
-              width: 1,
-              height: 32,
-              color: scheme.outlineVariant,
-            ),
+            Container(width: 1, height: 32, color: scheme.outlineVariant),
             const SizedBox(width: 14),
             Expanded(
               child: Column(
@@ -260,10 +284,6 @@ class _SummaryStrip extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Product row
-// ============================================================================
-
 class _ProductRow extends StatelessWidget {
   const _ProductRow({
     required this.rank,
@@ -281,7 +301,6 @@ class _ProductRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     final Color rankColor = _rankColor(rank, scheme);
 
     return DecoratedBox(
@@ -293,9 +312,7 @@ class _ProductRow extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
-          crossAxisAlignment: CrossAxisAlignment.center,
           children: <Widget>[
-            // ---- Rank badge ----
             Container(
               width: 36,
               height: 36,
@@ -313,8 +330,6 @@ class _ProductRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 12),
-
-            // ---- Product info ----
             Expanded(
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
@@ -341,8 +356,6 @@ class _ProductRow extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-
-            // ---- Revenue ----
             Text(
               money.format(product.totalRevenue),
               style: theme.textTheme.titleSmall?.copyWith(
@@ -359,31 +372,25 @@ class _ProductRow extends StatelessWidget {
   static Color _rankColor(int rank, ColorScheme scheme) {
     switch (rank) {
       case 1:
-        return const Color(0xFFFFB300); // Amber (gold)
+        return const Color(0xFFFFB300);
       case 2:
-        return const Color(0xFF9E9E9E); // Silver
+        return const Color(0xFF9E9E9E);
       case 3:
-        return const Color(0xFF8D6E63); // Bronze
+        return const Color(0xFF8D6E63);
       default:
         return scheme.primary;
     }
   }
 }
 
-// ============================================================================
-// Empty state
-// ============================================================================
-
 class _EmptyState extends StatelessWidget {
   const _EmptyState({required this.period});
-
   final ReportPeriod period;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Center(
       child: Padding(
         padding: const EdgeInsets.all(32),
@@ -399,14 +406,6 @@ class _EmptyState extends StatelessWidget {
             Text(
               'لا توجد مبيعات في هذه الفترة',
               style: theme.textTheme.titleMedium,
-              textAlign: TextAlign.center,
-            ),
-            const SizedBox(height: 6),
-            Text(
-              'جرّب تغيير الفترة من الأعلى.',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
               textAlign: TextAlign.center,
             ),
           ],
