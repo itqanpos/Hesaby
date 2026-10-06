@@ -420,8 +420,9 @@ ReportException _mapUnknown(
   StackTrace stackTrace, {
   required String operation,
 }) {
-  final ReportFailureType type =
-      _looksLikeNetwork(error) ? ReportFailureType.network : ReportFailureType.unknown;
+  final ReportFailureType type = _looksLikeNetwork(error)
+      ? ReportFailureType.network
+      : ReportFailureType.unknown;
   AppLogger.error(
     'Unhandled report error during "$operation" '
     '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
@@ -438,7 +439,6 @@ ReportException _mapUnknown(
 ReportFailureType _classifyPostgrest(supabase.PostgrestException error) {
   final String code = (error.code ?? '').toUpperCase();
   final String message = error.message.toLowerCase();
-  final String full = error.toString().toLowerCase();
 
   if (code == 'PGRST116') {
     return ReportFailureType.notFound;
