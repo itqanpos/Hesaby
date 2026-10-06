@@ -18,6 +18,9 @@ import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
 import '../features/reports/presentation/pages/dead_stock_page.dart';
 import '../features/reports/presentation/pages/low_stock_page.dart';
+import '../features/reports/presentation/pages/payables_page.dart';
+import '../features/reports/presentation/pages/profit_loss_page.dart';
+import '../features/reports/presentation/pages/receivables_page.dart';
 import '../features/reports/presentation/pages/reports_hub_page.dart';
 import '../features/reports/presentation/pages/sales_summary_page.dart';
 import '../features/reports/presentation/pages/stock_valuation_page.dart';
@@ -115,6 +118,15 @@ abstract final class AppRouter {
 
   static const String reportDeadStockPath = '/reports/dead-stock';
   static const String reportDeadStockName = 'report-dead-stock';
+
+  static const String reportProfitLossPath = '/reports/profit-loss';
+  static const String reportProfitLossName = 'report-profit-loss';
+
+  static const String reportReceivablesPath = '/reports/receivables';
+  static const String reportReceivablesName = 'report-receivables';
+
+  static const String reportPayablesPath = '/reports/payables';
+  static const String reportPayablesName = 'report-payables';
 
   // ---- Phase 6 (POS Foundation) ----
   static const String posPath = '/pos';
@@ -340,6 +352,24 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.reportDeadStockName,
         builder: (BuildContext context, GoRouterState state) =>
             const DeadStockPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportProfitLossPath,
+        name: AppRouter.reportProfitLossName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const ProfitLossPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportReceivablesPath,
+        name: AppRouter.reportReceivablesName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const ReceivablesPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportPayablesPath,
+        name: AppRouter.reportPayablesName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const PayablesPage(),
       ),
       // ---- Phase 6: POS Foundation ----
       GoRoute(
