@@ -3,6 +3,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../../../../core/utils/logger.dart';
+import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
 import '../../domain/repositories/reports_repository.dart';
@@ -11,9 +12,11 @@ import '../datasources/reports_remote_datasource.dart';
 /// Concrete implementation of [ReportsRepository] backed by Supabase.
 ///
 /// Strategy:
-/// * One narrow query per aggregation source (sales, sale_items, returns).
+/// * One narrow query per aggregation source (sales, sale_items, returns,
+///   inventory_balances, products).
 /// * Filtering happens in SQL; grouping and derived metrics happen here.
-/// * Only confirmed sales and returns contribute to the totals.
+/// * Only confirmed sales and returns contribute to the sales totals.
+/// * Inventory reports operate on the *current* state (no period).
 class ReportsRepositoryImpl implements ReportsRepository {
   const ReportsRepositoryImpl(this._remoteDataSource);
 
@@ -133,7 +136,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
       final List<Map<String, dynamic>> items =
           await _remoteDataSource.fetchSaleItems(saleIds: saleIds);
 
-      // Aggregate by product id.
       final Map<String, _ProductAgg> byProduct = <String, _ProductAgg>{};
       for (final Map<String, dynamic> row in items) {
         final String productId = _asString(row['product_id']);
@@ -311,6 +313,235 @@ class ReportsRepositoryImpl implements ReportsRepository {
   }
 
   // ---------------------------------------------------------------------------
+  // Stock valuation
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<StockValuationReport> getStockValuation({
+    required String companyId,
+    String? branchId,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> rows =
+          await _remoteDataSource.fetchInventoryBalances(
+        companyId: companyId,
+        branchId: branchId,
+      );
+
+      if (rows.isEmpty) {
+        return StockValuationReport.empty();
+      }
+
+      // Aggregate per product across branches.
+      final Map<String, _ValuationAgg> byProduct =
+          <String, _ValuationAgg>{};
+
+      for (final Map<String, dynamic> row in rows) {
+        final String productId = _asString(row['product_id']);
+        if (productId.isEmpty) continue;
+        final double qty = _asDouble(row['quantity_on_hand']);
+        final double cost = _asDouble(row['average_cost']);
+        byProduct
+            .putIfAbsent(productId, () => _ValuationAgg())
+            .add(qty, cost * qty);
+      }
+
+      final List<StockValuationItem> items = byProduct.entries.map(
+        (MapEntry<String, _ValuationAgg> e) {
+          final _ValuationAgg agg = e.value;
+          final double weightedCost =
+              agg.quantity > 0 ? agg.costValue / agg.quantity : 0;
+          return StockValuationItem(
+            productId: e.key,
+            productName: productNames[e.key] ?? 'منتج محذوف',
+            quantityOnHand: agg.quantity,
+            averageCost: weightedCost,
+            totalValue: agg.costValue,
+            unitName: unitNames[e.key],
+          );
+        },
+      ).toList();
+
+      items.sort((StockValuationItem a, StockValuationItem b) =>
+          b.totalValue.compareTo(a.totalValue));
+
+      double totalValue = 0;
+      double totalQuantity = 0;
+      for (final StockValuationItem it in items) {
+        totalValue += it.totalValue;
+        totalQuantity += it.quantityOnHand;
+      }
+
+      return StockValuationReport(
+        items: items,
+        totalValue: totalValue,
+        totalQuantity: totalQuantity,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getStockValuation');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getStockValuation');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getStockValuation');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Low stock
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<List<LowStockItem>> getLowStockItems({
+    required String companyId,
+    String? branchId,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+  }) async {
+    try {
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchProductsWithMinStock(companyId: companyId),
+        _remoteDataSource.fetchInventoryBalances(
+          companyId: companyId,
+          branchId: branchId,
+        ),
+      ]);
+
+      final List<Map<String, dynamic>> products =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> balances =
+          (results[1] as List<Map<String, dynamic>>);
+
+      // Sum on-hand quantity per product.
+      final Map<String, double> quantityByProduct = <String, double>{};
+      for (final Map<String, dynamic> row in balances) {
+        final String pid = _asString(row['product_id']);
+        if (pid.isEmpty) continue;
+        quantityByProduct[pid] =
+            (quantityByProduct[pid] ?? 0) + _asDouble(row['quantity_on_hand']);
+      }
+
+      final List<LowStockItem> items = <LowStockItem>[];
+      for (final Map<String, dynamic> p in products) {
+        final String pid = _asString(p['id']);
+        if (pid.isEmpty) continue;
+        final double minStock = _asDouble(p['min_stock']);
+        if (minStock <= 0) continue;
+
+        final double onHand = quantityByProduct[pid] ?? 0;
+        if (onHand > minStock) continue;
+
+        final String rawName = _asString(p['name']);
+        items.add(
+          LowStockItem(
+            productId: pid,
+            productName: productNames[pid] ??
+                (rawName.isNotEmpty ? rawName : 'منتج محذوف'),
+            quantityOnHand: onHand,
+            minStock: minStock,
+            unitName: unitNames[pid],
+          ),
+        );
+      }
+
+      // Sort by highest deficit first.
+      items.sort((LowStockItem a, LowStockItem b) =>
+          b.deficit.compareTo(a.deficit));
+
+      return items;
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getLowStockItems');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getLowStockItems');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getLowStockItems');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dead stock
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<List<DeadStockItem>> getDeadStockItems({
+    required String companyId,
+    String? branchId,
+    required DeadStockWindow window,
+    required Map<String, String> productNames,
+    required Map<String, String> unitNames,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> balances =
+          await _remoteDataSource.fetchInventoryBalances(
+        companyId: companyId,
+        branchId: branchId,
+      );
+
+      if (balances.isEmpty) {
+        return const <DeadStockItem>[];
+      }
+
+      // Aggregate per product.
+      final Map<String, _ValuationAgg> byProduct =
+          <String, _ValuationAgg>{};
+      for (final Map<String, dynamic> row in balances) {
+        final String pid = _asString(row['product_id']);
+        if (pid.isEmpty) continue;
+        final double qty = _asDouble(row['quantity_on_hand']);
+        final double cost = _asDouble(row['average_cost']);
+        byProduct
+            .putIfAbsent(pid, () => _ValuationAgg())
+            .add(qty, cost * qty);
+      }
+
+      final Map<String, DateTime> lastSold =
+          await _remoteDataSource.fetchLastSoldDateByProduct(
+        companyId: companyId,
+        productIds: byProduct.keys.toList(growable: false),
+      );
+
+      final DateTime cutoff = window.cutoff;
+
+      final List<DeadStockItem> items = <DeadStockItem>[];
+      byProduct.forEach((String pid, _ValuationAgg agg) {
+        final DateTime? last = lastSold[pid];
+        final bool dead = last == null || last.isBefore(cutoff);
+        if (!dead) return;
+
+        items.add(
+          DeadStockItem(
+            productId: pid,
+            productName: productNames[pid] ?? 'منتج محذوف',
+            quantityOnHand: agg.quantity,
+            stockValue: agg.costValue,
+            lastSoldAt: last,
+            unitName: unitNames[pid],
+          ),
+        );
+      });
+
+      // Sort by highest stock value first (the most capital tied up).
+      items.sort((DeadStockItem a, DeadStockItem b) =>
+          b.stockValue.compareTo(a.stockValue));
+
+      return items;
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getDeadStockItems');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getDeadStockItems');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getDeadStockItems');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
 
@@ -375,6 +606,18 @@ class _CashierAgg {
     count++;
     sales += total;
     paid += paidAmount;
+  }
+}
+
+/// Accumulator used by both stock valuation and dead stock: tracks total
+/// quantity and total cost value per product across all matching balances.
+class _ValuationAgg {
+  double quantity = 0;
+  double costValue = 0;
+
+  void add(double qty, double value) {
+    quantity += qty;
+    costValue += value;
   }
 }
 
