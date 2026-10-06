@@ -3,35 +3,35 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../data/services/pdf_report_builder.dart';
 import '../../domain/entities/report_document.dart';
 
 /// A button that opens a print / share dialog for a [ReportDocument].
 ///
-/// The document is built **lazily** on tap, via [documentBuilder], so it
-/// always reflects the current state of the report (period, loaded data,
-/// etc.).
-class ReportPrintAction extends StatelessWidget {
-  const ReportPrintAction({
-    super.key,
-    required this.documentBuilder,
-  });
+/// Company and branch names are injected from the current company context
+/// just before printing, so individual report pages do not need to read
+/// the context themselves.
+class ReportPrintAction extends ConsumerWidget {
+  const ReportPrintAction({super.key, required this.documentBuilder});
 
   /// Called every time the user taps the button. Returning `null` disables
   /// the action silently — use it when the report has no printable data.
   final ReportDocument? Function() documentBuilder;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return IconButton(
       tooltip: 'طباعة / مشاركة',
       icon: const Icon(Icons.ios_share),
       onPressed: () {
-        final ReportDocument? doc = documentBuilder();
-        if (doc == null) {
+        final ReportDocument? raw = documentBuilder();
+        if (raw == null) {
           ScaffoldMessenger.of(context)
             ..hideCurrentSnackBar()
             ..showSnackBar(
@@ -41,21 +41,23 @@ class ReportPrintAction extends StatelessWidget {
             );
           return;
         }
-        _showPrintDialog(context, doc);
-      },
-    );
-  }
 
-  Future<void> _showPrintDialog(
-    BuildContext context,
-    ReportDocument document,
-  ) async {
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: true,
-      builder: (BuildContext dialogContext) => _PrintDialog(
-        document: document,
-      ),
+        // Inject the current company / branch names, falling back to
+        // whatever the report page provided if the context is empty.
+        final CompanyContextState ctx =
+            ref.read(companyContextProvider);
+        final ReportDocument doc = raw.copyWith(
+          companyName: ctx.currentCompany?.name ?? raw.companyName,
+          branchName: ctx.currentBranch?.name ?? raw.branchName,
+        );
+
+        showDialog<void>(
+          context: context,
+          barrierDismissible: true,
+          builder: (BuildContext dialogContext) =>
+              _PrintDialog(document: doc),
+        );
+      },
     );
   }
 }
@@ -158,16 +160,8 @@ class _PrintDialogState extends State<_PrintDialog> {
           _infoRow(theme, 'الشركة', doc.companyName),
           if (doc.branchName != null)
             _infoRow(theme, 'الفرع', doc.branchName!),
-          _infoRow(
-            theme,
-            'الفترة',
-            doc.periodLabel ?? 'الكل',
-          ),
-          _infoRow(
-            theme,
-            'عدد الأقسام',
-            doc.sections.length.toString(),
-          ),
+          _infoRow(theme, 'الفترة', doc.periodLabel ?? 'الكل'),
+          _infoRow(theme, 'عدد الأقسام', doc.sections.length.toString()),
         ],
       ),
       actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
