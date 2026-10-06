@@ -7,11 +7,14 @@ import 'package:supabase_flutter/supabase_flutter.dart'
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
+import '../../../products/presentation/providers/unit_providers.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
 import '../../data/datasources/reports_remote_datasource.dart';
 import '../../data/repositories/reports_repository_impl.dart';
+import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
 import '../../domain/repositories/reports_repository.dart';
@@ -33,14 +36,43 @@ final Provider<ReportsRepository> reportsRepositoryProvider =
 });
 
 // ============================================================================
-// Helpers
+// Shared map builders
 // ============================================================================
 
-/// Reads the currently selected company id, throwing when none is selected.
-///
-/// Reports are only meaningful with a company; the page-level providers
-/// translate this exception into an error state.
+/// Builds `{productId: productName}` from the current catalogue.
+Map<String, String> _buildProductNames(Ref ref) {
+  final List<Product> products =
+      ref.watch(productsProvider).value ?? const <Product>[];
+  return <String, String>{
+    for (final Product p in products) p.id: p.name,
+  };
+}
 
+/// Builds `{productId: defaultUnitName}` from the current catalogue.
+///
+/// A product's display unit is its `defaultUnitId`; when that unit is
+/// missing from the units list, the entry is omitted.
+Map<String, String> _buildUnitNamesByProduct(Ref ref) {
+  final List<Product> products =
+      ref.watch(productsProvider).value ?? const <Product>[];
+  final List<Unit> units =
+      ref.watch(unitsProvider).value ?? const <Unit>[];
+
+  final Map<String, String> unitNameById = <String, String>{
+    for (final Unit u in units) u.id: u.name,
+  };
+
+  final Map<String, String> result = <String, String>{};
+  for (final Product p in products) {
+    final String? unitId = p.defaultUnitId;
+    if (unitId == null) continue;
+    final String? name = unitNameById[unitId];
+    if (name != null) {
+      result[p.id] = name;
+    }
+  }
+  return result;
+}
 
 // ============================================================================
 // Sales summary
@@ -58,8 +90,6 @@ class SalesSummaryNotifier
     );
 
     if (companyId == null) {
-      // Return an empty summary rather than throwing: the UI can render a
-      // meaningful zero-state when no company is selected.
       return SalesSummary.empty(period);
     }
 
@@ -84,7 +114,6 @@ final salesSummaryProvider = AsyncNotifierProvider.family<
 // Top products
 // ============================================================================
 
-/// Top products by revenue for the currently selected company over [period].
 class TopProductsNotifier
     extends FamilyAsyncNotifier<List<TopProduct>, ReportPeriod> {
   @override
@@ -98,14 +127,7 @@ class TopProductsNotifier
       return const <TopProduct>[];
     }
 
-    // Load the products catalogue once; use it both as a lookup table for
-    // display names and (indirectly) to keep the aggregation stable while
-    // the network fetch is in flight.
-    final List<Product> products =
-        ref.watch(productsProvider).value ?? const <Product>[];
-    final Map<String, String> productNames = <String, String>{
-      for (final Product p in products) p.id: p.name,
-    };
+    final Map<String, String> productNames = _buildProductNames(ref);
 
     return ref.read(reportsRepositoryProvider).getTopProducts(
           companyId: companyId,
@@ -129,8 +151,6 @@ final topProductsProvider = AsyncNotifierProvider.family<
 // Top customers
 // ============================================================================
 
-/// Top customers by spending for the currently selected company over
-/// [period].
 class TopCustomersNotifier
     extends FamilyAsyncNotifier<List<TopCustomer>, ReportPeriod> {
   @override
@@ -172,11 +192,6 @@ final topCustomersProvider = AsyncNotifierProvider.family<
 // Sales by cashier
 // ============================================================================
 
-/// Sales grouped by cashier for the currently selected company over
-/// [period].
-///
-/// Cashier names are not yet available from a dedicated table, so an empty
-/// map is passed: the repository falls back to a short id suffix.
 class SalesByCashierNotifier
     extends FamilyAsyncNotifier<List<CashierSales>, ReportPeriod> {
   @override
@@ -209,6 +224,145 @@ final salesByCashierProvider = AsyncNotifierProvider.family<
 );
 
 // ============================================================================
+// Stock valuation
+// ============================================================================
+
+/// Current stock valuation for the selected company (and current branch,
+/// when one is selected).
+///
+/// This is a *state* report, not a time-window report: no [ReportPeriod] is
+/// involved.
+class StockValuationNotifier extends AsyncNotifier<StockValuationReport> {
+  @override
+  Future<StockValuationReport> build() async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return StockValuationReport.empty();
+    }
+    final String? branchId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+
+    final Map<String, String> productNames = _buildProductNames(ref);
+    final Map<String, String> unitNames = _buildUnitNamesByProduct(ref);
+
+    return ref.read(reportsRepositoryProvider).getStockValuation(
+          companyId: companyId,
+          branchId: branchId,
+          productNames: productNames,
+          unitNames: unitNames,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final stockValuationProvider =
+    AsyncNotifierProvider<StockValuationNotifier, StockValuationReport>(
+  StockValuationNotifier.new,
+);
+
+// ============================================================================
+// Low stock
+// ============================================================================
+
+/// Current list of products whose on-hand stock is at or below their
+/// configured minimum.
+class LowStockNotifier extends AsyncNotifier<List<LowStockItem>> {
+  @override
+  Future<List<LowStockItem>> build() async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return const <LowStockItem>[];
+    }
+    final String? branchId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+
+    final Map<String, String> productNames = _buildProductNames(ref);
+    final Map<String, String> unitNames = _buildUnitNamesByProduct(ref);
+
+    return ref.read(reportsRepositoryProvider).getLowStockItems(
+          companyId: companyId,
+          branchId: branchId,
+          productNames: productNames,
+          unitNames: unitNames,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final lowStockProvider =
+    AsyncNotifierProvider<LowStockNotifier, List<LowStockItem>>(
+  LowStockNotifier.new,
+);
+
+// ============================================================================
+// Dead stock
+// ============================================================================
+
+/// Products with stock on hand that have not sold within [DeadStockWindow].
+class DeadStockNotifier
+    extends FamilyAsyncNotifier<List<DeadStockItem>, DeadStockWindow> {
+  @override
+  Future<List<DeadStockItem>> build(DeadStockWindow window) async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return const <DeadStockItem>[];
+    }
+    final String? branchId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+
+    final Map<String, String> productNames = _buildProductNames(ref);
+    final Map<String, String> unitNames = _buildUnitNamesByProduct(ref);
+
+    return ref.read(reportsRepositoryProvider).getDeadStockItems(
+          companyId: companyId,
+          branchId: branchId,
+          window: window,
+          productNames: productNames,
+          unitNames: unitNames,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final deadStockProvider = AsyncNotifierProvider.family<
+    DeadStockNotifier, List<DeadStockItem>, DeadStockWindow>(
+  DeadStockNotifier.new,
+);
+
+// ============================================================================
 // Currently selected period (per page)
 // ============================================================================
 
@@ -231,4 +385,23 @@ class ReportPagePeriodNotifier extends Notifier<ReportPeriod> {
 final reportPagePeriodProvider = NotifierProvider<
     ReportPagePeriodNotifier, ReportPeriod>(
   ReportPagePeriodNotifier.new,
+);
+
+// ============================================================================
+// Currently selected dead-stock window (per page)
+// ============================================================================
+
+/// Notifier holding the dead-stock lookback window on the report page.
+class DeadStockWindowNotifier extends Notifier<DeadStockWindow> {
+  @override
+  DeadStockWindow build() => DeadStockWindow.days90;
+
+  void setWindow(DeadStockWindow window) {
+    state = window;
+  }
+}
+
+final deadStockWindowProvider = NotifierProvider<
+    DeadStockWindowNotifier, DeadStockWindow>(
+  DeadStockWindowNotifier.new,
 );
