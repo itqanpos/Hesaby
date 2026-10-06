@@ -5,7 +5,6 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
-import '../../../../core/utils/logger.dart';
 import '../../domain/entities/receipt.dart';
 import 'pdf_receipt_builder.dart';
 
@@ -65,10 +64,13 @@ abstract interface class ReceiptPrinter {
 /// * It is stateless: each method builds a fresh PDF from the given
 ///   receipt, so reprinting an older sale is safe at any time.
 ///
-/// TEMPORARY DIAGNOSTIC: failures are now logged via [AppLogger] so the
-/// underlying exception surfaces in the browser / device console. This
-/// will be reverted to a silent `return false` once the current 80 mm
-/// printing issue is resolved.
+/// Failure handling:
+///   `printing` throws for many benign reasons (user cancelled the
+///   dialog, no printer installed, browser blocked the print window).
+///   All such exceptions are swallowed and reported to the caller as
+///   `false`; surfacing them as errors would interrupt the cashier's
+///   flow for no benefit. The logger is deliberately not used here to
+///   avoid writing receipt metadata into device logs.
 class ReceiptPrinterImpl implements ReceiptPrinter {
   const ReceiptPrinterImpl();
 
@@ -92,13 +94,7 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
       );
 
       return true;
-    } on Object catch (error, stackTrace) {
-      // TEMPORARY diagnostic logging. Remove once the issue is fixed.
-      AppLogger.error(
-        'Print failed (size: ${size.name})',
-        error,
-        stackTrace,
-      );
+    } on Object {
       return false;
     }
   }
@@ -130,13 +126,7 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
       );
 
       return true;
-    } on Object catch (error, stackTrace) {
-      // TEMPORARY diagnostic logging. Remove once the issue is fixed.
-      AppLogger.error(
-        'Share failed (size: ${size.name})',
-        error,
-        stackTrace,
-      );
+    } on Object {
       return false;
     }
   }
