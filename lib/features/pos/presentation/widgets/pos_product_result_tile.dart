@@ -9,50 +9,243 @@ import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../inventory/domain/entities/inventory_balance.dart';
 import '../../../inventory/presentation/providers/inventory_providers.dart';
 import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/product_unit.dart';
+import '../../../products/domain/entities/unit.dart';
+import '../../../products/presentation/providers/product_providers.dart';
+import '../../../products/presentation/providers/unit_providers.dart';
+import '../state/pos_providers.dart';
 
-/// A single search-result row in the POS.
+/// A single search-result tile in the POS.
 ///
-/// Layout (right-to-left in RTL):
+/// Layout:
 /// * Product name (title), with an optional SKU / barcode subtitle.
-/// * Stock badge (only when known): "متاح: 15", "آخر 3", or "غير متوفر".
-/// * Selling price in the company currency.
-/// * Default unit name.
-/// * A large `[+]` button that adds one default-unit line at the
-///   catalogue price.
+/// * One row per available unit:
+///   `unit name | price | stock badge | [+]`
 ///
-/// Tapping anywhere else on the row opens the unit picker
-/// (`pos_unit_selector_sheet`). Tapping the `[+]` button is the
-/// fast-path for cashiers: one tap, one default-unit line at the default
-/// price.
+/// Tapping any unit row (or its `[+]` button) adds **one** line with
+/// quantity 1 and the unit's own price to the cart. Quantity and price
+/// can then be refined inside the cart itself.
 ///
-/// No product images are used anywhere in this widget.
+/// No product images are used anywhere in this widget. No bottom sheet
+/// is opened from here.
 class PosProductResultTile extends ConsumerWidget {
   const PosProductResultTile({
     super.key,
     required this.product,
-    required this.unitName,
-    required this.onTap,
-    required this.onQuickAdd,
+    required this.onAdded,
   });
 
   /// The product to render.
   final Product product;
 
-  /// Display name of the product's default unit (already resolved by the
-  /// caller). Pass `null` when the unit could not be resolved.
-  final String? unitName;
-
-  /// Called when the cashier taps the row (excluding the `[+]` button).
-  final VoidCallback onTap;
-
-  /// Called when the cashier taps the `[+]` button.
-  ///
-  /// The callback is responsible for adding the line to the cart using the
-  /// product's default unit and price. It should not open any dialog.
-  final VoidCallback onQuickAdd;
+  /// Called after a unit was successfully added to the cart.
+  final VoidCallback onAdded;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    // ---- Stock in base units, for the current branch ----
+    final String? branchId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+    double? baseStock;
+    if (branchId != null) {
+      final AsyncValue<List<InventoryBalance>> balancesAsync =
+          ref.watch(inventoryBalancesProvider(branchId));
+      baseStock = balancesAsync.maybeWhen(
+        data: (List<InventoryBalance> balances) {
+          for (final InventoryBalance b in balances) {
+            if (b.productId == product.id) {
+              return b.quantityOnHand;
+            }
+          }
+          return 0.0;
+        },
+        orElse: () => null,
+      );
+    }
+
+    // ---- Unit names ----
+    final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
+    final Map<String, String> unitNames = unitsAsync.maybeWhen(
+      data: (List<Unit> units) => <String, String>{
+        for (final Unit u in units) u.id: u.name,
+      },
+      orElse: () => const <String, String>{},
+    );
+
+    // ---- Extra (non-base) units ----
+    final AsyncValue<List<ProductUnit>> extrasAsync =
+        ref.watch(productUnitsProvider(product.id));
+    final List<ProductUnit> extras =
+        extrasAsync.valueOrNull ?? const <ProductUnit>[];
+
+    // ---- Build the choice list: base unit first, then extras ----
+    final List<_UnitChoice> choices = <_UnitChoice>[
+      _UnitChoice(
+        unitId: product.defaultUnitId,
+        unitName: unitNames[product.defaultUnitId] ?? 'الوحدة',
+        conversionFactor: 1,
+        unitPrice: product.sellingPrice,
+        minSellingPrice: product.minSellingPrice,
+        maxSellingPrice: product.maxSellingPrice,
+        availableStock: baseStock,
+      ),
+      for (final ProductUnit extra in extras)
+        _UnitChoice(
+          unitId: extra.unitId,
+          unitName: unitNames[extra.unitId] ?? 'وحدة',
+          conversionFactor: extra.conversionFactor,
+          unitPrice: extra.sellingPrice ??
+              product.sellingPrice * extra.conversionFactor,
+          minSellingPrice: extra.minSellingPrice ??
+              (product.minSellingPrice != null
+                  ? product.minSellingPrice! * extra.conversionFactor
+                  : null),
+          maxSellingPrice: extra.maxSellingPrice ??
+              (product.maxSellingPrice != null
+                  ? product.maxSellingPrice! * extra.conversionFactor
+                  : null),
+          availableStock: baseStock != null
+              ? baseStock / extra.conversionFactor
+              : null,
+        ),
+    ];
+
+    return Material(
+      color: scheme.surface,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(12, 10, 12, 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            // ---- Header ----
+            Text(
+              product.name,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+            if (_hasSubtitle(product)) ...<Widget>[
+              const SizedBox(height: 2),
+              Text(
+                _subtitle(product),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+            const SizedBox(height: 6),
+            // ---- Unit rows ----
+            for (final _UnitChoice c in choices)
+              Padding(
+                padding: const EdgeInsets.only(bottom: 4),
+                child: _UnitRow(
+                  choice: c,
+                  onAdd: () => _handleAdd(ref, c),
+                ),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Handlers
+  // ---------------------------------------------------------------------------
+
+  void _handleAdd(WidgetRef ref, _UnitChoice choice) {
+    final bool added = ref.read(posCartProvider.notifier).addLine(
+          productId: product.id,
+          productName: product.name,
+          unitId: choice.unitId,
+          unitName: choice.unitName,
+          conversionFactor: choice.conversionFactor,
+          quantity: 1,
+          unitPrice: choice.unitPrice,
+          minSellingPrice: choice.minSellingPrice,
+          maxSellingPrice: choice.maxSellingPrice,
+          availableStock: choice.availableStock,
+        );
+    if (added) {
+      onAdded();
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  static bool _hasSubtitle(Product product) {
+    final String? sku = product.sku;
+    final String? barcode = product.barcode;
+    return (sku != null && sku.trim().isNotEmpty) ||
+        (barcode != null && barcode.trim().isNotEmpty);
+  }
+
+  static String _subtitle(Product product) {
+    final List<String> parts = <String>[];
+    if (product.sku != null && product.sku!.trim().isNotEmpty) {
+      parts.add('SKU: ${product.sku}');
+    }
+    if (product.barcode != null && product.barcode!.trim().isNotEmpty) {
+      parts.add(product.barcode!);
+    }
+    return parts.join('  •  ');
+  }
+}
+
+// ============================================================================
+// Unit choice (view model)
+// ============================================================================
+
+class _UnitChoice {
+  const _UnitChoice({
+    required this.unitId,
+    required this.unitName,
+    required this.conversionFactor,
+    required this.unitPrice,
+    required this.minSellingPrice,
+    required this.maxSellingPrice,
+    required this.availableStock,
+  });
+
+  final String unitId;
+  final String unitName;
+  final double conversionFactor;
+  final double unitPrice;
+  final double? minSellingPrice;
+  final double? maxSellingPrice;
+  final double? availableStock;
+
+  bool get isOutOfStock =>
+      availableStock != null && availableStock! <= 0;
+  bool get isLowStock =>
+      availableStock != null && availableStock! > 0 && availableStock! <= 3;
+}
+
+// ============================================================================
+// Unit row
+// ============================================================================
+
+class _UnitRow extends StatelessWidget {
+  const _UnitRow({required this.choice, required this.onAdd});
+
+  final _UnitChoice choice;
+  final VoidCallback onAdd;
+
+  @override
+  Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final NumberFormat money = NumberFormat.currency(
@@ -62,228 +255,87 @@ class PosProductResultTile extends ConsumerWidget {
     );
     final NumberFormat number = NumberFormat.decimalPattern('en_US');
 
-    // Read the current stock for the selected branch. When unavailable
-    // (no branch, no balance row), `available` stays null and the badge
-    // is hidden.
-    final String? branchId = ref.watch(
-      companyContextProvider.select(
-        (CompanyContextState state) => state.currentBranch?.id,
-      ),
-    );
-
-    double? available;
-    if (branchId != null) {
-      final AsyncValue<List<InventoryBalance>> balancesAsync = ref.watch(
-        inventoryBalancesProvider(branchId),
-      );
-      available = balancesAsync.maybeWhen(
-        data: (List<InventoryBalance> balances) {
-          for (final InventoryBalance balance in balances) {
-            if (balance.productId == product.id) {
-              return balance.quantityOnHand;
-            }
-          }
-          return 0.0;
-        },
-        orElse: () => null,
-      );
-    }
-
-    final bool outOfStock = available != null && available <= 0;
-    final bool lowStock =
-        available != null && available > 0 && available <= 3;
-    final String? sku = product.sku;
-    final String? barcode = product.barcode;
+    final bool out = choice.isOutOfStock;
+    final Color stockColor = out
+        ? scheme.error
+        : (choice.isLowStock ? scheme.tertiary : scheme.onSurfaceVariant);
 
     return Material(
-      color: scheme.surface,
+      color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+      borderRadius: BorderRadius.circular(10),
       child: InkWell(
-        onTap: onTap,
+        borderRadius: BorderRadius.circular(10),
+        onTap: out ? null : onAdd,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
           child: Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              // -----------------------------------------------------------------
-              // Main info
-              // -----------------------------------------------------------------
+              // Unit name
               Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      product.name,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (sku != null || barcode != null) ...<Widget>[
-                      const SizedBox(height: 2),
-                      Text(
-                        _subtitle(sku: sku, barcode: barcode),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    const SizedBox(height: 4),
-                    Row(
-                      children: <Widget>[
-                        if (unitName != null) ...<Widget>[
-                          Text(
-                            unitName!,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
-                        if (available != null)
-                          _StockBadge(
-                            available: available,
-                            outOfStock: outOfStock,
-                            lowStock: lowStock,
-                            number: number,
-                            theme: theme,
-                            scheme: scheme,
-                          ),
-                      ],
-                    ),
-                  ],
+                flex: 3,
+                child: Text(
+                  choice.unitName,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-
-              // -----------------------------------------------------------------
               // Price
-              // -----------------------------------------------------------------
-              const SizedBox(width: 10),
-              Text(
-                money.format(product.sellingPrice),
-                style: theme.textTheme.titleMedium?.copyWith(
-                  color: scheme.primary,
-                  fontWeight: FontWeight.w800,
+              Expanded(
+                flex: 3,
+                child: Text(
+                  money.format(choice.unitPrice),
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w700,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
-
-              // -----------------------------------------------------------------
-              // Quick add
-              // -----------------------------------------------------------------
-              const SizedBox(width: 6),
-              _QuickAddButton(
-                enabled: !outOfStock,
-                onPressed: onQuickAdd,
+              // Stock
+              Expanded(
+                flex: 3,
+                child: Text(
+                  choice.availableStock == null
+                      ? '—'
+                      : 'متاح ${number.format(choice.availableStock)}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: stockColor,
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              const SizedBox(width: 4),
+              // [+] button
+              SizedBox(
+                width: 36,
+                height: 36,
+                child: Material(
+                  color: out
+                      ? scheme.surfaceContainerHighest
+                      : scheme.primaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(10),
+                    onTap: out ? null : onAdd,
+                    child: Icon(
+                      Icons.add,
+                      size: 18,
+                      color: out
+                          ? scheme.onSurfaceVariant
+                          : scheme.onPrimaryContainer,
+                    ),
+                  ),
+                ),
               ),
             ],
-          ),
-        ),
-      ),
-    );
-  }
-
-  /// Builds the small subtitle combining SKU and barcode when present.
-  ///
-  /// Returns an empty string when neither is available; callers should
-  /// guard the call with a null check on at least one of the two.
-  static String _subtitle({
-    required String? sku,
-    required String? barcode,
-  }) {
-    final List<String> parts = <String>[];
-    final String? skuValue = sku;
-    if (skuValue != null && skuValue.trim().isNotEmpty) {
-      parts.add('SKU: $skuValue');
-    }
-    final String? barcodeValue = barcode;
-    if (barcodeValue != null && barcodeValue.trim().isNotEmpty) {
-      parts.add(barcodeValue);
-    }
-    return parts.join('  •  ');
-  }
-}
-
-// ============================================================================
-// Stock badge
-// ============================================================================
-
-class _StockBadge extends StatelessWidget {
-  const _StockBadge({
-    required this.available,
-    required this.outOfStock,
-    required this.lowStock,
-    required this.number,
-    required this.theme,
-    required this.scheme,
-  });
-
-  final double available;
-  final bool outOfStock;
-  final bool lowStock;
-  final NumberFormat number;
-  final ThemeData theme;
-  final ColorScheme scheme;
-
-  @override
-  Widget build(BuildContext context) {
-    final (String label, Color color) = switch (true) {
-      _ when outOfStock => ('غير متوفر', scheme.error),
-      _ when lowStock =>
-        ('آخر ${number.format(available)}', scheme.tertiary),
-      _ => ('متاح: ${number.format(available)}', scheme.onSurfaceVariant),
-    };
-
-    return Row(
-      mainAxisSize: MainAxisSize.min,
-      children: <Widget>[
-        Icon(Icons.inventory_2_outlined, size: 12, color: color),
-        const SizedBox(width: 3),
-        Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: color,
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ============================================================================
-// Quick add button
-// ============================================================================
-
-class _QuickAddButton extends StatelessWidget {
-  const _QuickAddButton({required this.enabled, required this.onPressed});
-
-  final bool enabled;
-  final VoidCallback onPressed;
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-
-    return SizedBox(
-      width: 44,
-      height: 44,
-      child: Material(
-        color: enabled
-            ? scheme.primaryContainer
-            : scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(12),
-          onTap: enabled ? onPressed : null,
-          child: Icon(
-            Icons.add,
-            color: enabled
-                ? scheme.onPrimaryContainer
-                : scheme.onSurfaceVariant,
-            size: 22,
           ),
         ),
       ),
