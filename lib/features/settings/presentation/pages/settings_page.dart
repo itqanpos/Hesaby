@@ -29,6 +29,12 @@ class SettingsPage extends ConsumerWidget {
           const _SectionHeader(title: 'الشركة'),
           _SettingsTile(
             icon: Icons.business_outlined,
+            title: 'بيانات الشركة',
+            subtitle: 'الاسم، الهاتف، العنوان، العملة، المنطقة الزمنية',
+            onTap: () => context.pushNamed(AppRouter.companyProfileName),
+          ),
+          _SettingsTile(
+            icon: Icons.tune_outlined,
             title: 'إعدادات الشركة',
             subtitle: 'الضريبة والخصم وقواعد البيع وتذييل الإيصال',
             onTap: () => context.pushNamed(AppRouter.companySettingsName),
