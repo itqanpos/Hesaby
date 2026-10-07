@@ -14,9 +14,6 @@ import 'app_preferences.dart';
 ///
 /// Reads its initial value from storage; each write is persisted
 /// optimistically (state first, then disk).
-///
-/// Uses a `bool _isDisposed` flag rather than `ref.mounted` because the
-/// latter does not exist in Riverpod 2.x.
 class ThemeModeNotifier extends AsyncNotifier<ThemeMode> {
   bool _isDisposed = false;
 
@@ -105,7 +102,9 @@ class LocaleNotifier extends AsyncNotifier<Locale?> {
           value: AppPreferences.localeName(locale),
         );
       }
-    } catch (error, stackTrace) {
+    } catch (error) {
+      // The stack trace is not used here; the state restore is the only
+      // side-effect we care about.
       if (!_isDisposed) {
         state = AsyncData<Locale?>(previous);
       }
