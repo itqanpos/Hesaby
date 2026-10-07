@@ -1,0 +1,157 @@
+# ============================================================================
+# HESABI — Build Android APK
+# ----------------------------------------------------------------------------
+# Builds a signed-with-debug-key Android APK entirely in CI, without
+# requiring an `android/` folder in the repository. The workflow:
+#
+#   1. Runs `flutter create --platforms=android` to generate `android/`.
+#   2. Sets the app display name to "حسابي" in AndroidManifest.xml.
+#   3. Enables Android in the icon and splash configs, then regenerates both
+#      from `assets/images/logo.png`.
+#   4. Patches release signing to reuse the debug keystore (safe for
+#      internal distribution; replace with a production keystore before
+#      publishing to Google Play).
+#   5. Builds a release APK with Supabase credentials injected via
+#      --dart-define.
+#   6. Publishes the APK to a rolling GitHub Release tagged `apk-latest`,
+#      so the download URL stays stable:
+#         https://github.com/<owner>/<repo>/releases/tag/apk-latest
+#
+# This project is Flutter/Dart only. Do NOT add Node.js, npm, or their caches.
+# ============================================================================
+
+name: Build Android APK
+
+on:
+  # Manual trigger only, to avoid burning CI minutes on every commit.
+  # Trigger from the Actions tab: "Build Android APK" → "Run workflow".
+  workflow_dispatch:
+    inputs:
+      build_type:
+        description: "Build type"
+        required: true
+        default: "release"
+        type: choice
+        options:
+          - release
+          - debug
+
+# Required by softprops/action-gh-release to create/update the release.
+permissions:
+  contents: write
+
+concurrency:
+  group: flutter-apk-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-apk:
+    name: Build APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Display Flutter version
+        run: flutter --version
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Generate android/ folder
+        run: |
+          flutter create \
+            --platforms=android \
+            --org com.itqanpos \
+            --project-name hesabi \
+            --description "Hesabi - Multi-Tenant SaaS for POS, Inventory, Sales & Accounting" \
+            .
+
+      - name: Remove default widget test
+        run: rm -f test/widget_test.dart
+
+      - name: Set Arabic app label
+        run: |
+          sed -i 's/android:label="hesabi"/android:label="حسابي"/' \
+            android/app/src/main/AndroidManifest.xml
+
+      - name: Enable Android in flutter_launcher_icons.yaml
+        run: |
+          sed -i 's/^  android: false/  android: true/' flutter_launcher_icons.yaml
+
+      - name: Generate launcher icons
+        run: dart run flutter_launcher_icons
+
+      - name: Enable Android in flutter_native_splash.yaml
+        run: |
+          sed -i 's/^  android: false/  android: true/' flutter_native_splash.yaml
+
+      - name: Generate native splash
+        run: dart run flutter_native_splash:create
+
+      - name: Patch release signing to reuse debug keystore
+        run: |
+          # Flutter's default template already uses the debug keystore for
+          # release builds. These substitutions are defensive: they cover
+          # both the Groovy DSL (build.gradle) and the Kotlin DSL
+          # (build.gradle.kts) if the template ever changes.
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            if [ -f "$f" ]; then
+              sed -i 's/signingConfig signingConfigs\.release/signingConfig signingConfigs.debug/g' "$f" || true
+              sed -i 's/signingConfig = signingConfigs\.getByName("release")/signingConfig = signingConfigs.getByName("debug")/g' "$f" || true
+            fi
+          done
+
+      - name: Build APK
+        env:
+          BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          flutter build apk --$BUILD_TYPE \
+            --dart-define=APP_ENV=production \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Collect APK
+        env:
+          BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+        run: |
+          mkdir -p build/apk
+          cp "build/app/outputs/flutter-apk/app-$BUILD_TYPE.apk" \
+             "build/apk/hesabi-${BUILD_TYPE}-build${{ github.run_number }}.apk"
+          ls -lh build/apk/
+
+      - name: Upload APK as run artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: hesabi-apk-build${{ github.run_number }}
+          path: build/apk/*.apk
+          retention-days: 30
+          if-no-files-found: error
+
+      - name: Publish to "apk-latest" release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: apk-latest
+          name: "Hesabi APK — Latest"
+          body: |
+            **Build #${{ github.run_number }}**
+            - Commit: `${{ github.sha }}`
+            - Build type: `${{ github.event.inputs.build_type || 'release' }}`
+            - Built from: `${{ github.ref_name }}`
+
+            حمّل ملف APK من قسم Assets أدناه، ثم افتحه على جهاز Android
+            لتثبيت Hesabi.
+          files: build/apk/*.apk
+          make_latest: true
+          draft: false
+          prerelease: true
