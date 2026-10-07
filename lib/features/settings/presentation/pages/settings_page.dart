@@ -2,7 +2,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/router.dart';
 import '../../../../core/preferences/app_preferences_providers.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
@@ -23,6 +25,17 @@ class SettingsPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.only(top: 8, bottom: 24),
         children: <Widget>[
+          // ---- الشركة ----
+          const _SectionHeader(title: 'الشركة'),
+          _SettingsTile(
+            icon: Icons.business_outlined,
+            title: 'إعدادات الشركة',
+            subtitle: 'الضريبة والخصم وقواعد البيع وتذييل الإيصال',
+            onTap: () => context.pushNamed(AppRouter.companySettingsName),
+          ),
+
+          const SizedBox(height: 8),
+
           // ---- المظهر ----
           const _SectionHeader(title: 'المظهر'),
           _SettingsTile(
