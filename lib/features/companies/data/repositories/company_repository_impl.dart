@@ -26,6 +26,10 @@ class CompanyRepositoryImpl implements CompanyRepository {
 
   final CompanyRemoteDataSource _remoteDataSource;
 
+  // ---------------------------------------------------------------------------
+  // Companies
+  // ---------------------------------------------------------------------------
+
   @override
   Future<List<Company>> getMyCompanies() async {
     try {
@@ -46,6 +50,46 @@ class CompanyRepositoryImpl implements CompanyRepository {
       throw _mapUnknown(error, stackTrace, operation: 'getMyCompanies');
     }
   }
+
+  @override
+  Future<Company> updateCompany({
+    required String companyId,
+    required String name,
+    required String currency,
+    required String timezone,
+    String? legalName,
+    String? phone,
+    String? email,
+    String? address,
+  }) async {
+    try {
+      final CompanyModel model = await _remoteDataSource.updateCompany(
+        companyId: companyId,
+        name: name,
+        currency: currency,
+        timezone: timezone,
+        legalName: legalName,
+        phone: phone,
+        email: email,
+        address: address,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(error, stackTrace, operation: 'updateCompany');
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'updateCompany');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'updateCompany');
+    } on CompanyException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'updateCompany');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Branches — reads
+  // ---------------------------------------------------------------------------
 
   @override
   Future<List<Branch>> getCompanyBranches(String companyId) async {
@@ -85,38 +129,143 @@ class CompanyRepositoryImpl implements CompanyRepository {
   }
 
   @override
-  Future<Company> updateCompany({
-    required String companyId,
-    required String name,
-    required String currency,
-    required String timezone,
-    String? legalName,
-    String? phone,
-    String? email,
-    String? address,
-  }) async {
+  Future<List<Branch>> getAllCompanyBranches(String companyId) async {
     try {
-      final CompanyModel model = await _remoteDataSource.updateCompany(
-        companyId: companyId,
-        name: name,
-        currency: currency,
-        timezone: timezone,
-        legalName: legalName,
-        phone: phone,
-        email: email,
-        address: address,
-      );
-      return model.toEntity();
+      final List<BranchModel> models =
+          await _remoteDataSource.fetchAllCompanyBranches(companyId);
+      return models
+          .map((BranchModel model) => model.toEntity())
+          .toList(growable: false);
     } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(error, stackTrace, operation: 'updateCompany');
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'getAllCompanyBranches',
+      );
     } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'updateCompany');
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'getAllCompanyBranches',
+      );
     } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'updateCompany');
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'getAllCompanyBranches',
+      );
     } on CompanyException {
       rethrow;
     } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'updateCompany');
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'getAllCompanyBranches',
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Branches — mutations
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<Branch> createBranch({
+    required String companyId,
+    required String name,
+    String? code,
+    String? address,
+    String? phone,
+  }) async {
+    try {
+      final BranchModel model = await _remoteDataSource.insertBranch(
+        companyId: companyId,
+        name: name,
+        code: code,
+        address: address,
+        phone: phone,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(error, stackTrace, operation: 'createBranch');
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'createBranch');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'createBranch');
+    } on CompanyException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'createBranch');
+    }
+  }
+
+  @override
+  Future<Branch> updateBranch({
+    required String branchId,
+    required String name,
+    String? code,
+    String? address,
+    String? phone,
+  }) async {
+    try {
+      final BranchModel model = await _remoteDataSource.updateBranch(
+        branchId: branchId,
+        name: name,
+        code: code,
+        address: address,
+        phone: phone,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(error, stackTrace, operation: 'updateBranch');
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'updateBranch');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'updateBranch');
+    } on CompanyException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'updateBranch');
+    }
+  }
+
+  @override
+  Future<Branch> setBranchActive({
+    required String branchId,
+    required bool isActive,
+  }) async {
+    try {
+      final BranchModel model = await _remoteDataSource.updateBranchActive(
+        branchId: branchId,
+        isActive: isActive,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'setBranchActive',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'setBranchActive',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'setBranchActive',
+      );
+    } on CompanyException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'setBranchActive',
+      );
     }
   }
 
@@ -208,7 +357,8 @@ class CompanyRepositoryImpl implements CompanyRepository {
     final String message = error.message.toLowerCase();
 
     // PostgreSQL SQLSTATE prefixes: 42xxx (syntax/undefined), 23xxx
-    // (integrity), 42501 (insufficient privilege), etc.
+    // (integrity: unique, check, foreign key), 42501 (insufficient
+    // privilege), etc.
     if (code.startsWith('42501')) {
       return CompanyFailureType.unauthorized;
     }
@@ -216,6 +366,9 @@ class CompanyRepositoryImpl implements CompanyRepository {
       return CompanyFailureType.unauthorized;
     }
     if (code.startsWith('23')) {
+      // Unique / check violation — surfaced to the UI as a generic
+      // "invalid input" so the form can prompt the user to review the
+      // values (typically a duplicate branch name or code).
       return CompanyFailureType.invalidResponse;
     }
     if (code.startsWith('42')) {
