@@ -6,40 +6,38 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../shared/widgets/app_button.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../dialogs/pos_payment_dialog.dart';
 import '../state/pos_providers.dart';
 
 /// Compact bottom panel used by the POS **mobile** layout.
 ///
 /// Replaces the taller combination of `PosTotalsBar` + `PosPayButton` that
-/// is still used on tablet and desktop. The goal here is to keep the whole
-/// panel under ~170 dp on a typical phone, so the cart list above stays
-/// readable even while the soft keyboard is open.
+/// is still used on tablet and desktop.
 ///
-/// Layout, top to bottom:
-/// ```
-/// ┌──────────────────────────────────────────────┐
-/// │  🛍  الأصناف: 3            الخصم [___] ج.م   │
-/// │  ──────────────────────────────────────────  │
-/// │  الصافي                        1,250.00 ج.م  │
-/// │  ┌────────────────────────────────────────┐  │
-/// │  │           ✓  دفع                       │  │
-/// │  └────────────────────────────────────────┘  │
-/// └──────────────────────────────────────────────┘
-/// ```
-///
-/// The panel is purely presentational: it reads `posTotalsProvider` and
-/// delegates every mutation back to `posCartProvider`. The pay button
-/// opens `showPosPaymentDialog` directly — no `PosPayButton` is reused,
-/// because that widget also renders the running total, which would
-/// duplicate the "الصافي" row above.
+/// Business rules applied here:
+/// * **Default tax** — when the cart has no explicit `taxAmount`, the
+///   panel applies `defaultTaxRate` from company settings to
+///   `(subtotal − discount)`.
+/// * **Max discount** — the discount field rejects any value above
+///   `maxDiscountPercent` from company settings, clamping it to the
+///   allowed ceiling.
 class PosBottomPanel extends ConsumerWidget {
   const PosBottomPanel({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    final PosTotals totals = ref.watch(posTotalsProvider);
+    final PosCart cart = ref.watch(posCartProvider);
+    final double defaultTaxRate = ref.watch(defaultTaxRateProvider);
+    final double maxDiscountPercent = ref.watch(maxDiscountPercentProvider);
+
+    final double afterDiscount = cart.subtotal - cart.discount;
+    final double effectiveTax = cart.taxAmount > 0
+        ? cart.taxAmount
+        : afterDiscount * defaultTaxRate / 100;
+    final double effectiveTotal = afterDiscount + effectiveTax;
+    final double maxDiscountValue = cart.subtotal * maxDiscountPercent / 100;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -56,11 +54,15 @@ class PosBottomPanel extends ConsumerWidget {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              _TopRow(totals: totals),
+              _TopRow(
+                lineCount: cart.lines.length,
+                discount: cart.discount,
+                maxDiscountValue: maxDiscountValue,
+              ),
               const SizedBox(height: 6),
-              _TotalRow(total: totals.total),
+              _TotalRow(total: effectiveTotal),
               const SizedBox(height: 8),
-              _PayButton(isEmpty: totals.isEmpty),
+              _PayButton(isEmpty: cart.isEmpty),
             ],
           ),
         ),
@@ -74,9 +76,15 @@ class PosBottomPanel extends ConsumerWidget {
 // ============================================================================
 
 class _TopRow extends ConsumerWidget {
-  const _TopRow({required this.totals});
+  const _TopRow({
+    required this.lineCount,
+    required this.discount,
+    required this.maxDiscountValue,
+  });
 
-  final PosTotals totals;
+  final int lineCount;
+  final double discount;
+  final double maxDiscountValue;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -92,7 +100,7 @@ class _TopRow extends ConsumerWidget {
         ),
         const SizedBox(width: 4),
         Text(
-          'الأصناف: ${totals.lineCount}',
+          'الأصناف: $lineCount',
           style: theme.textTheme.bodySmall?.copyWith(
             color: scheme.onSurfaceVariant,
             fontWeight: FontWeight.w600,
@@ -107,7 +115,8 @@ class _TopRow extends ConsumerWidget {
         ),
         const SizedBox(width: 6),
         _DiscountField(
-          discount: totals.discount,
+          discount: discount,
+          maxAllowed: maxDiscountValue,
           onChanged: (double value) =>
               ref.read(posCartProvider.notifier).setDiscount(value),
         ),
@@ -166,7 +175,7 @@ class _TotalRow extends StatelessWidget {
 }
 
 // ============================================================================
-// Pay button — opens the payment dialog
+// Pay button
 // ============================================================================
 
 class _PayButton extends StatelessWidget {
@@ -181,30 +190,28 @@ class _PayButton extends StatelessWidget {
       icon: Icons.check_circle_outline,
       expanded: true,
       size: AppButtonSize.large,
-      onPressed: isEmpty
-          ? null
-          : () => showPosPaymentDialog(context: context),
+      onPressed:
+          isEmpty ? null : () => showPosPaymentDialog(context: context),
     );
   }
 }
 
 // ============================================================================
-// Discount field — inline editable, no external dependencies
+// Discount field — inline editable, clamped to the allowed maximum
 // ============================================================================
 
-/// Compact editable discount field.
-///
-/// Mirrors the behaviour of the private `_DiscountRow` in
-/// `pos_totals_bar.dart` but at a smaller footprint, and without the
-/// "ج.م" suffix inside the field itself (the suffix is rendered by the
-/// parent row). Kept private here to avoid coupling the two files.
 class _DiscountField extends StatefulWidget {
   const _DiscountField({
     required this.discount,
+    required this.maxAllowed,
     required this.onChanged,
   });
 
   final double discount;
+
+  /// Highest value the field will accept. Values above it are clamped.
+  final double maxAllowed;
+
   final ValueChanged<double> onChanged;
 
   @override
@@ -243,7 +250,14 @@ class _DiscountFieldState extends State<_DiscountField> {
 
   void _onTextChanged() {
     final double parsed = double.tryParse(_controller.text.trim()) ?? 0;
-    widget.onChanged(parsed);
+
+    // Clamp to the allowed maximum. The clamp is silent from the field's
+    // perspective; the caller receives the clamped value.
+    final double accepted = parsed > widget.maxAllowed
+        ? widget.maxAllowed
+        : (parsed < 0 ? 0 : parsed);
+
+    widget.onChanged(accepted);
   }
 
   static String _formatDiscount(double value) {
