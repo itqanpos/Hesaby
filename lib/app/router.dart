@@ -6,6 +6,8 @@ import 'package:go_router/go_router.dart';
 
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
+import '../features/companies/presentation/pages/branch_form_page.dart';
+import '../features/companies/presentation/pages/branches_page.dart';
 import '../features/companies/presentation/pages/company_profile_page.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
@@ -108,6 +110,15 @@ abstract final class AppRouter {
 
   static const String companyProfilePath = '/settings/company-profile';
   static const String companyProfileName = 'company-profile';
+
+  static const String branchesPath = '/settings/branches';
+  static const String branchesName = 'branches';
+
+  static const String branchNewPath = '/settings/branches/new';
+  static const String branchNewName = 'branch-new';
+
+  static const String branchEditPath = '/settings/branches/:id/edit';
+  static const String branchEditName = 'branch-edit';
 
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
@@ -326,6 +337,31 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
             name: AppRouter.companyProfileName,
             builder: (BuildContext context, GoRouterState state) =>
                 const CompanyProfilePage(),
+          ),
+          GoRoute(
+            path: 'branches',
+            name: AppRouter.branchesName,
+            builder: (BuildContext context, GoRouterState state) =>
+                const BranchesPage(),
+            routes: <RouteBase>[
+              GoRoute(
+                path: 'new',
+                name: AppRouter.branchNewName,
+                builder: (BuildContext context, GoRouterState state) =>
+                    const BranchFormPage(),
+              ),
+              GoRoute(
+                path: ':id/edit',
+                name: AppRouter.branchEditName,
+                builder: (BuildContext context, GoRouterState state) {
+                  final String? id = state.pathParameters['id'];
+                  return BranchFormPage(
+                    key: ValueKey<String>('branch-edit-${id ?? ''}'),
+                    branchId: id,
+                  );
+                },
+              ),
+            ],
           ),
         ],
       ),
