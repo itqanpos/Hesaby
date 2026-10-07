@@ -31,6 +31,7 @@ import '../features/sales/presentation/pages/returns_page.dart';
 import '../features/sales/presentation/pages/sale_detail_page.dart';
 import '../features/sales/presentation/pages/sale_form_page.dart';
 import '../features/sales/presentation/pages/sales_page.dart';
+import '../features/settings/presentation/pages/company_settings_page.dart';
 import '../features/settings/presentation/pages/settings_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
@@ -100,6 +101,9 @@ abstract final class AppRouter {
 
   static const String settingsPath = '/settings';
   static const String settingsName = 'settings';
+
+  static const String companySettingsPath = '/settings/company';
+  static const String companySettingsName = 'company-settings';
 
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
@@ -306,6 +310,14 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.settingsName,
         builder: (BuildContext context, GoRouterState state) =>
             const SettingsPage(),
+        routes: <RouteBase>[
+          GoRoute(
+            path: 'company',
+            name: AppRouter.companySettingsName,
+            builder: (BuildContext context, GoRouterState state) =>
+                const CompanySettingsPage(),
+          ),
+        ],
       ),
       // ---- Phase 9: Reports ----
       GoRoute(
