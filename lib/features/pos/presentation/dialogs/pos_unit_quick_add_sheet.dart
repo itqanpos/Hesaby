@@ -1,384 +1,358 @@
 // lib/features/pos/presentation/dialogs/pos_unit_quick_add_sheet.dart
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
-import '../../../../shared/widgets/app_button.dart';
 import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/product_unit.dart';
+import '../../../products/domain/entities/unit.dart';
+import '../../../products/presentation/providers/product_providers.dart';
+import '../../../products/presentation/providers/unit_providers.dart';
 import '../state/pos_providers.dart';
 
-/// Opens a compact bottom sheet that lets the cashier confirm the quantity
-/// and unit price before adding a single unit of [product] to the cart.
-///
-/// The sheet is intentionally small: its content fits in a single viewport
-/// even with the soft keyboard open. It uses `viewInsets` to push the
-/// "Add" button above the keyboard, so nothing is obscured while typing.
-///
-/// Returns `true` when a line was added, `null`/`false` otherwise.
 Future<bool?> showPosUnitQuickAddSheet({
   required BuildContext context,
   required Product product,
-  required String unitId,
-  required String unitName,
-  required double conversionFactor,
-  required double defaultPrice,
-  double? minSellingPrice,
-  double? maxSellingPrice,
-  double? availableStock,
 }) {
   return showModalBottomSheet<bool>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
-    builder: (BuildContext ctx) => _PosUnitQuickAddSheet(
-      product: product,
-      unitId: unitId,
-      unitName: unitName,
-      conversionFactor: conversionFactor,
-      defaultPrice: defaultPrice,
-      minSellingPrice: minSellingPrice,
-      maxSellingPrice: maxSellingPrice,
-      availableStock: availableStock,
-    ),
+    backgroundColor: Theme.of(context).colorScheme.surface,
+    builder: (BuildContext ctx) => _PosUnitQuickAddSheet(product: product),
   );
 }
 
-class _PosUnitQuickAddSheet extends ConsumerStatefulWidget {
-  const _PosUnitQuickAddSheet({
+class _PosUnitQuickAddSheet extends ConsumerWidget {
+  const _PosUnitQuickAddSheet({required this.product});
+
+  final Product product;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
+    final AsyncValue<List<ProductUnit>> extrasAsync =
+        ref.watch(productUnitsProvider(product.id));
+
+    final bool isLoading =
+        unitsAsync.isLoading || extrasAsync.isLoading;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                IconButton(
+                  onPressed: () => Navigator.of(context).pop(),
+                  icon: const Icon(Icons.close),
+                  tooltip: 'إغلاق',
+                ),
+                const Spacer(),
+                Text(
+                  'اختر وحدة البيع',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ],
+            ),
+            Padding(
+              padding: const EdgeInsetsDirectional.only(end: 48),
+              child: Align(
+                alignment: AlignmentDirectional.centerEnd,
+                child: Text(
+                  'المنتج: ${product.name}',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.end,
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+            ),
+            const SizedBox(height: 12),
+
+            if (isLoading)
+              const Padding(
+                padding: EdgeInsets.symmetric(vertical: 48),
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else
+              _UnitsList(
+                product: product,
+                units: unitsAsync.valueOrNull ?? const <Unit>[],
+                extras: extrasAsync.valueOrNull ?? const <ProductUnit>[],
+                onAdded: () => Navigator.of(context).pop(true),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _UnitsList extends ConsumerWidget {
+  const _UnitsList({
     required this.product,
-    required this.unitId,
-    required this.unitName,
-    required this.conversionFactor,
-    required this.defaultPrice,
-    required this.minSellingPrice,
-    required this.maxSellingPrice,
-    required this.availableStock,
+    required this.units,
+    required this.extras,
+    required this.onAdded,
   });
 
   final Product product;
-  final String unitId;
-  final String unitName;
-  final double conversionFactor;
-  final double defaultPrice;
-  final double? minSellingPrice;
-  final double? maxSellingPrice;
-  final double? availableStock;
+  final List<Unit> units;
+  final List<ProductUnit> extras;
+  final VoidCallback onAdded;
 
   @override
-  ConsumerState<_PosUnitQuickAddSheet> createState() =>
-      _PosUnitQuickAddSheetState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    final Map<String, String> unitNames = <String, String>{
+      for (final Unit u in units) u.id: u.name,
+    };
+
+    final String baseUnitName =
+        unitNames[product.defaultUnitId] ?? 'وحدة';
+
+    final List<_UnitChoice> choices = <_UnitChoice>[
+      _UnitChoice(
+        unitId: product.defaultUnitId,
+        unitName: baseUnitName,
+        isBase: true,
+        conversionFactor: 1,
+        unitPrice: product.sellingPrice,
+        minSellingPrice: product.minSellingPrice,
+        maxSellingPrice: product.maxSellingPrice,
+        conversionNote: _baseUnitNote(),
+        priceLabel: 'لللوحدة',
+      ),
+      for (final ProductUnit extra in extras)
+        _UnitChoice(
+          unitId: extra.unitId,
+          unitName: unitNames[extra.unitId] ?? 'وحدة',
+          isBase: false,
+          conversionFactor: extra.conversionFactor,
+          unitPrice: extra.sellingPrice ??
+              product.sellingPrice * extra.conversionFactor,
+          minSellingPrice: extra.minSellingPrice ??
+              (product.minSellingPrice != null
+                  ? product.minSellingPrice! * extra.conversionFactor
+                  : null),
+          maxSellingPrice: extra.maxSellingPrice ??
+              (product.maxSellingPrice != null
+                  ? product.maxSellingPrice! * extra.conversionFactor
+                  : null),
+          conversionNote: _extraUnitNote(
+            extra.conversionFactor,
+            baseUnitName,
+          ),
+          priceLabel: 'للـ${unitNames[extra.unitId] ?? 'وحدة'}',
+        ),
+    ];
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        for (int i = 0; i < choices.length; i++) ...<Widget>[
+          _UnitCard(
+            choice: choices[i],
+            isFirst: i == 0,
+            onTap: () => _addUnit(ref, choices[i]),
+          ),
+          if (i < choices.length - 1) const SizedBox(height: 8),
+        ],
+      ],
+    );
+  }
+
+  String _baseUnitNote() {
+    final String? description = product.description;
+    if (description != null && description.trim().isNotEmpty) {
+      return 'العبوة الواحدة ${description.trim()}';
+    }
+    return 'الوحدة الأساسية';
+  }
+
+  static String _extraUnitNote(double factor, String baseUnitName) {
+    final String factorLabel = factor == factor.roundToDouble()
+        ? factor.toInt().toString()
+        : factor.toStringAsFixed(2);
+    return 'عدد $factorLabel $baseUnitName';
+  }
+
+  void _addUnit(WidgetRef ref, _UnitChoice choice) {
+    final bool added = ref.read(posCartProvider.notifier).addLine(
+          productId: product.id,
+          productName: product.name,
+          unitId: choice.unitId,
+          unitName: choice.unitName,
+          conversionFactor: choice.conversionFactor,
+          quantity: 1,
+          unitPrice: choice.unitPrice,
+          minSellingPrice: choice.minSellingPrice,
+          maxSellingPrice: choice.maxSellingPrice,
+        );
+    if (added) {
+      onAdded();
+    }
+  }
 }
 
-class _PosUnitQuickAddSheetState
-    extends ConsumerState<_PosUnitQuickAddSheet> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
+class _UnitChoice {
+  const _UnitChoice({
+    required this.unitId,
+    required this.unitName,
+    required this.isBase,
+    required this.conversionFactor,
+    required this.unitPrice,
+    required this.minSellingPrice,
+    required this.maxSellingPrice,
+    required this.conversionNote,
+    required this.priceLabel,
+  });
 
-  late final TextEditingController _quantityController;
-  late final TextEditingController _priceController;
+  final String unitId;
+  final String unitName;
+  final bool isBase;
+  final double conversionFactor;
+  final double unitPrice;
+  final double? minSellingPrice;
+  final double? maxSellingPrice;
+  final String conversionNote;
+  final String priceLabel;
+}
 
-  @override
-  void initState() {
-    super.initState();
-    _quantityController = TextEditingController(text: '1');
-    _priceController = TextEditingController(
-      text: _formatNumber(widget.defaultPrice),
-    );
-    _quantityController.addListener(_rebuild);
-    _priceController.addListener(_rebuild);
-  }
+class _UnitCard extends StatelessWidget {
+  const _UnitCard({
+    required this.choice,
+    required this.isFirst,
+    required this.onTap,
+  });
 
-  @override
-  void dispose() {
-    _quantityController.removeListener(_rebuild);
-    _priceController.removeListener(_rebuild);
-    _quantityController.dispose();
-    _priceController.dispose();
-    super.dispose();
-  }
-
-  void _rebuild() {
-    if (mounted) setState(() {});
-  }
-
-  static String _formatNumber(double value) {
-    if (value == value.roundToDouble()) {
-      return value.toInt().toString();
-    }
-    return value.toStringAsFixed(2);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Derived
-  // ---------------------------------------------------------------------------
-
-  double get _quantity =>
-      double.tryParse(_quantityController.text.trim()) ?? 0;
-
-  double get _unitPrice =>
-      double.tryParse(_priceController.text.trim()) ?? 0;
-
-  double get _lineTotal => _quantity * _unitPrice;
-
-  bool get _exceedsStock =>
-      widget.availableStock != null && _quantity > widget.availableStock!;
-
-  bool get _priceBelowMin =>
-      widget.minSellingPrice != null &&
-      _unitPrice < widget.minSellingPrice!;
-
-  bool get _priceAboveMax =>
-      widget.maxSellingPrice != null &&
-      _unitPrice > widget.maxSellingPrice!;
-
-  bool get _canSubmit =>
-      _quantity > 0 &&
-      !_exceedsStock &&
-      !_priceBelowMin &&
-      !_priceAboveMax;
-
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
-
-  void _increment() {
-    final double next = _quantity + 1;
-    if (widget.availableStock != null && next > widget.availableStock!) {
-      return;
-    }
-    _quantityController.text = _formatNumber(next);
-  }
-
-  void _decrement() {
-    final double next = _quantity > 1 ? _quantity - 1 : 1;
-    _quantityController.text = _formatNumber(next);
-  }
-
-  void _submit() {
-    if (!_canSubmit) return;
-
-    final bool added = ref.read(posCartProvider.notifier).addLine(
-          productId: widget.product.id,
-          productName: widget.product.name,
-          unitId: widget.unitId,
-          unitName: widget.unitName,
-          conversionFactor: widget.conversionFactor,
-          quantity: _quantity,
-          unitPrice: _unitPrice,
-          minSellingPrice: widget.minSellingPrice,
-          maxSellingPrice: widget.maxSellingPrice,
-          availableStock: widget.availableStock,
-        );
-
-    Navigator.of(context).pop(added);
-  }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
+  final _UnitChoice choice;
+  final bool isFirst;
+  final VoidCallback onTap;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+    final NumberFormat money = NumberFormat.currency(
+      locale: 'en_US',
+      symbol: 'ج.م ',
+      decimalDigits: 2,
+    );
 
-    return Padding(
-      // Push the sheet content above the soft keyboard.
-      padding: EdgeInsets.only(bottom: keyboardInset),
-      child: SingleChildScrollView(
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+    final Color cardColor = isFirst
+        ? scheme.primaryContainer.withValues(alpha: 0.35)
+        : scheme.surface;
+    final Color borderColor = isFirst
+        ? scheme.primary
+        : scheme.outlineVariant;
+    final double borderWidth = isFirst ? 1.5 : 1;
+    final Color radioColor =
+        isFirst ? scheme.primary : scheme.outlineVariant;
+
+    return Material(
+      color: cardColor,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: borderColor,
+              width: borderWidth,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(
+            horizontal: 14,
+            vertical: 14,
+          ),
+          child: Row(
             children: <Widget>[
-              // ---- Header ----
-              Row(
-                children: <Widget>[
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: <Widget>[
-                        Text(
-                          widget.product.name,
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        const SizedBox(height: 2),
-                        Text(
-                          'الوحدة: ${widget.unitName}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 4),
-
-              // ---- Quantity ----
-              Text('الكمية', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 6),
-              Row(
-                children: <Widget>[
-                  IconButton.filledTonal(
-                    onPressed: _decrement,
-                    icon: const Icon(Icons.remove),
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: TextField(
-                      controller: _quantityController,
-                      textAlign: TextAlign.center,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(
-                        decimal: true,
-                      ),
-                      inputFormatters: <TextInputFormatter>[
-                        FilteringTextInputFormatter.allow(
-                          RegExp(r'[0-9.]'),
-                        ),
-                      ],
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w700,
-                      ),
-                      decoration: const InputDecoration(
-                        border: OutlineInputBorder(),
-                        isDense: true,
-                        contentPadding: EdgeInsets.symmetric(
-                          vertical: 14,
-                          horizontal: 12,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  IconButton.filledTonal(
-                    onPressed: _increment,
-                    icon: const Icon(Icons.add),
-                  ),
-                ],
-              ),
-              if (widget.availableStock != null) ...<Widget>[
-                const SizedBox(height: 4),
-                Text(
-                  'المتاح: ${_formatNumber(widget.availableStock!)} '
-                  '${widget.unitName}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: _exceedsStock
-                        ? scheme.error
-                        : scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-
-              const SizedBox(height: 12),
-
-              // ---- Price ----
-              Text('سعر الوحدة', style: theme.textTheme.labelLarge),
-              const SizedBox(height: 6),
-              TextField(
-                controller: _priceController,
-                textAlign: TextAlign.center,
-                keyboardType: const TextInputType.numberWithOptions(
-                  decimal: true,
-                ),
-                inputFormatters: <TextInputFormatter>[
-                  FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
-                ],
-                style: theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                ),
-                decoration: InputDecoration(
-                  border: const OutlineInputBorder(),
-                  isDense: true,
-                  contentPadding: const EdgeInsets.symmetric(
-                    vertical: 14,
-                    horizontal: 12,
-                  ),
-                  suffixText: 'ج.م',
-                  errorText: (_priceBelowMin || _priceAboveMax)
-                      ? 'السعر خارج النطاق المسموح.'
-                      : null,
-                ),
-              ),
-              if (widget.minSellingPrice != null ||
-                  widget.maxSellingPrice != null) ...<Widget>[
-                const SizedBox(height: 4),
-                Text(
-                  'النطاق: '
-                  '${widget.minSellingPrice == null ? '—' : _money.format(widget.minSellingPrice)}'
-                  ' – '
-                  '${widget.maxSellingPrice == null ? '—' : _money.format(widget.maxSellingPrice)}',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: (_priceBelowMin || _priceAboveMax)
-                        ? scheme.error
-                        : scheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
-
-              const SizedBox(height: 16),
-
-              // ---- Total ----
-              DecoratedBox(
+              Container(
+                width: 22,
+                height: 22,
                 decoration: BoxDecoration(
-                  color: scheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(12),
+                  shape: BoxShape.circle,
+                  border: Border.all(
+                    color: radioColor,
+                    width: 2,
+                  ),
                 ),
-                child: Padding(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 14,
-                    vertical: 10,
-                  ),
-                  child: Row(
-                    children: <Widget>[
-                      Text(
-                        'الإجمالي',
-                        style: theme.textTheme.titleMedium?.copyWith(
-                          color: scheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w700,
+                child: isFirst
+                    ? Center(
+                        child: Container(
+                          width: 10,
+                          height: 10,
+                          decoration: BoxDecoration(
+                            shape: BoxShape.circle,
+                            color: scheme.primary,
+                          ),
                         ),
+                      )
+                    : null,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Text(
+                      choice.unitName,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w800,
                       ),
-                      const Spacer(),
-                      Text(
-                        _money.format(_lineTotal),
-                        style: theme.textTheme.headlineSmall?.copyWith(
-                          color: scheme.onPrimaryContainer,
-                          fontWeight: FontWeight.w900,
-                        ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      choice.conversionNote,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
                       ),
-                    ],
-                  ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
                 ),
               ),
-
-              const SizedBox(height: 12),
-
-              // ---- Submit ----
-              AppButton(
-                label: 'إضافة إلى السلة',
-                icon: Icons.add_shopping_cart,
-                expanded: true,
-                size: AppButtonSize.large,
-                onPressed: _canSubmit ? _submit : null,
+              const SizedBox(width: 12),
+              Column(
+                crossAxisAlignment: CrossAxisAlignment.end,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    money.format(choice.unitPrice),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      color: isFirst ? scheme.primary : scheme.onSurface,
+                      fontWeight: FontWeight.w800,
+                    ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    choice.priceLabel,
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
