@@ -9,13 +9,6 @@ import '../datasources/auth_remote_datasource.dart';
 import '../models/auth_session_model.dart';
 
 /// Concrete implementation of [AuthRepository] backed by Supabase Auth.
-///
-/// Responsibilities:
-/// * Call the remote data source.
-/// * Translate Supabase session models into pure [AuthSession] entities.
-/// * Translate Supabase and low-level errors into safe [AuthException]s
-///   carrying an [AuthFailureType]. Raw backend messages never leave this
-///   layer, and no credential or token is ever logged.
 class AuthRepositoryImpl implements AuthRepository {
   const AuthRepositoryImpl(this._remoteDataSource);
 
@@ -62,6 +55,23 @@ class AuthRepositoryImpl implements AuthRepository {
       rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknownException(error, stackTrace, operation: 'logout');
+    }
+  }
+
+  @override
+  Future<void> changePassword({required String newPassword}) async {
+    try {
+      await _remoteDataSource.updatePassword(newPassword: newPassword);
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapSupabaseAuthException(error, stackTrace);
+    } on AuthException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknownException(
+        error,
+        stackTrace,
+        operation: 'changePassword',
+      );
     }
   }
 
@@ -116,11 +126,6 @@ class AuthRepositoryImpl implements AuthRepository {
     final String code = (rawCode ?? '').toLowerCase();
     final String message = error.message.toLowerCase();
 
-    // `statusCode` is delivered by supabase_flutter as a `String?`, since it
-    // originates from an HTTP response header. It is parsed to an `int?` so
-    // that the classification below can use numeric comparisons. A
-    // non-numeric value (unexpected) safely falls back to `null` and skips
-    // the numeric branches.
     final String? rawStatus = error.statusCode;
     final int? status = rawStatus == null ? null : int.tryParse(rawStatus);
 
@@ -137,6 +142,8 @@ class AuthRepositoryImpl implements AuthRepository {
       case 'over_email_send_rate_limit':
       case 'too_many_requests':
         return AuthFailureType.tooManyRequests;
+      case 'weak_password':
+        return AuthFailureType.weakPassword;
       case 'request_failed':
       case 'network_error':
         return AuthFailureType.network;
@@ -153,6 +160,14 @@ class AuthRepositoryImpl implements AuthRepository {
     }
     if (status == 404) {
       return AuthFailureType.userNotFound;
+    }
+    if (status == 422) {
+      // Supabase uses 422 for validation failures, most commonly a weak
+      // password during an updateUser call.
+      if (message.contains('password')) {
+        return AuthFailureType.weakPassword;
+      }
+      return AuthFailureType.unknown;
     }
     if (status == 429) {
       return AuthFailureType.tooManyRequests;
