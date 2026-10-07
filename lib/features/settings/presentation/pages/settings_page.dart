@@ -232,7 +232,7 @@ class SettingsPage extends ConsumerWidget {
 
     if (confirmed != true || !context.mounted) return;
 
-    await ref.read(authProvider.notifier).signOut();
+    await ref.read(authProvider.notifier).logout();
   }
 }
 
