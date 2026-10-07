@@ -17,6 +17,8 @@ import '../models/company_model.dart';
 ///   user has an active membership.
 /// * `select * from branches where company_id = X` only returns branches
 ///   of companies the current user may access.
+/// * `update companies set ... where id = X` only succeeds when the current
+///   user holds the `owner` or `admin` role in the company.
 ///
 /// The data source therefore never accepts a `userId` and never trusts a
 /// client-supplied identity. The active identity is always `auth.uid()`,
@@ -62,6 +64,52 @@ class CompanyRemoteDataSource {
         .order('name', ascending: true);
 
     return rows.map(BranchModel.fromMap).toList(growable: false);
+  }
+
+  /// Updates the profile of [companyId] and returns the updated row.
+  ///
+  /// Uses `maybeSingle()` so that an RLS-blocked update — which affects
+  /// zero rows and then returns an empty result — is surfaced as
+  /// [CompanyFailureType.unauthorized] instead of a raw PostgREST error.
+  /// The company id is always supplied by the authenticated context, so a
+  /// zero-row result can only mean the role check failed.
+  Future<CompanyModel> updateCompany({
+    required String companyId,
+    required String name,
+    required String currency,
+    required String timezone,
+    String? legalName,
+    String? phone,
+    String? email,
+    String? address,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'name': name,
+      'currency': currency,
+      'timezone': timezone,
+      'legal_name': legalName,
+      'phone': phone,
+      'email': email,
+      'address': address,
+    };
+
+    final Map<String, dynamic>? row = await client
+        .from('companies')
+        .update(payload)
+        .eq('id', companyId)
+        .select()
+        .maybeSingle();
+
+    if (row == null) {
+      throw const CompanyException(
+        type: CompanyFailureType.unauthorized,
+        cause: 'Update affected no rows (RLS role check likely failed).',
+      );
+    }
+
+    return CompanyModel.fromMap(row);
   }
 
   /// Returns the active Supabase client, or throws [CompanyException] when
