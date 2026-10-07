@@ -179,6 +179,8 @@ String _failureMessage(AuthFailureType type) => switch (type) {
       AuthFailureType.userNotFound => 'لا يوجد حساب مرتبط بهذا البريد الإلكتروني.',
       AuthFailureType.tooManyRequests =>
         'تمت محاولات كثيرة. يرجى المحاولة بعد قليل.',
+      AuthFailureType.weakPassword =>
+        'كلمة المرور ضعيفة. يرجى استخدام كلمة مرور أقوى.',
       AuthFailureType.network =>
         'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
       AuthFailureType.unknown => 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.',
