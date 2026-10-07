@@ -45,6 +45,7 @@ class ReturnReceipt extends Equatable {
     this.customerName,
     this.notes,
     this.cashierName,
+    this.footer,
   });
 
   final String returnId;
@@ -64,6 +65,14 @@ class ReturnReceipt extends Equatable {
   final String? notes;
   final String? cashierName;
 
+  /// Optional footer text printed at the bottom of the return receipt.
+  ///
+  /// When `null` or empty, the PDF builder falls back to a built-in
+  /// default (`'شكرًا لتعاملكم معنا'`). The value is normally sourced from
+  /// `company_settings.receipt_footer`, mirroring the behaviour of the POS
+  /// receipt.
+  final String? footer;
+
   int get lineCount => lines.length;
   bool get hasCustomer =>
       customerName != null && customerName!.trim().isNotEmpty;
@@ -72,6 +81,9 @@ class ReturnReceipt extends Equatable {
   bool get hasNotes => notes != null && notes!.trim().isNotEmpty;
   bool get hasCashier =>
       cashierName != null && cashierName!.trim().isNotEmpty;
+
+  /// Whether the receipt carries a custom footer.
+  bool get hasFooter => footer != null && footer!.trim().isNotEmpty;
 
   @override
   List<Object?> get props => <Object?>[
@@ -87,5 +99,6 @@ class ReturnReceipt extends Equatable {
         customerName,
         notes,
         cashierName,
+        footer,
       ];
 }
