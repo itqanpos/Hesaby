@@ -144,7 +144,6 @@ abstract final class PdfReceiptBuilder {
     final double baseFont = isThermal ? 8 : 10;
     final double headerFont = isThermal ? 11 : 16;
     final double titleFont = isThermal ? 9 : 12;
-    final double smallFont = isThermal ? 7 : 9;
     final double grandFont = isThermal ? 10 : 13;
     final double tableFont = isThermal ? 7.5 : 9;
 
@@ -323,11 +322,11 @@ abstract final class PdfReceiptBuilder {
       defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
       columnWidths: isThermal
           ? const <int, pw.TableColumnWidth>{
-              0: pw.FixedColumnWidth(16),   // م
-              1: pw.FlexColumnWidth(3.0),   // الصنف
-              2: pw.FlexColumnWidth(1.4),   // الكمية
-              3: pw.FlexColumnWidth(1.2),   // السعر
-              4: pw.FlexColumnWidth(1.5),   // الإجمالي
+              0: pw.FixedColumnWidth(16),
+              1: pw.FlexColumnWidth(3.0),
+              2: pw.FlexColumnWidth(1.4),
+              3: pw.FlexColumnWidth(1.2),
+              4: pw.FlexColumnWidth(1.5),
             }
           : const <int, pw.TableColumnWidth>{
               0: pw.FixedColumnWidth(28),
