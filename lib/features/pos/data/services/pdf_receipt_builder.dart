@@ -17,13 +17,14 @@ enum ReceiptPaperSize {
 
 /// Builds a PDF document from a [Receipt].
 ///
-/// Design follows the classic small-business invoice layout:
-/// * Centred company name + branch.
-/// * Bordered "فاتورة مبيعات" title.
-/// * Dashed divider, then a labelled info block.
-/// * A bordered 5-column table: م | الصنف | الكمية | السعر | الإجمالي.
-/// * Subtotal row inside the table.
-/// * Bottom summary with each value inside a small bordered box.
+/// Layout:
+/// * Company + branch centred at the top.
+/// * Bordered "فاتورة مبيعات" title, then a dashed divider.
+/// * Labelled info block (label on the right, value on the left edge).
+/// * 5-column table, **RTL order**: م on the far right, then الصنف,
+///   الكمية, السعر, الإجمالي on the far left.
+/// * Bottom summary: `إجمالي الفاتورة` and `المدفوع` shown in boxes,
+///   while `الرصيد السابق` / `الرصيد الحالي` are plain lines (no box).
 ///
 /// Fonts are cached across calls (see [_regularFont]).
 abstract final class PdfReceiptBuilder {
@@ -41,7 +42,7 @@ abstract final class PdfReceiptBuilder {
       _boldFontFuture ??= PdfGoogleFonts.cairoBold();
 
   // ---------------------------------------------------------------------------
-  // Arabic day names, indexed by [DateTime.weekday] (1 = Monday).
+  // Arabic day names (1 = Monday ... 7 = Sunday).
   // ---------------------------------------------------------------------------
 
   static const List<String> _arabicDays = <String>[
@@ -214,7 +215,7 @@ abstract final class PdfReceiptBuilder {
 
       pw.SizedBox(height: 6),
 
-      // ---- Info block ----
+      // ---- Info block (label on right, value at far left) ----
       _infoRow('رقم الفاتورة', receipt.invoiceNumber ?? '—', baseFont,
           boldValue: true),
       _infoRow('التاريخ', _formatDayAndDate(receipt.dateTime), baseFont),
@@ -225,7 +226,7 @@ abstract final class PdfReceiptBuilder {
 
       pw.SizedBox(height: 6),
 
-      // ---- Items table ----
+      // ---- Items table (RTL: م on the right, الإجمالي on the left) ----
       _buildItemsTable(
         receipt: receipt,
         isThermal: isThermal,
@@ -235,7 +236,7 @@ abstract final class PdfReceiptBuilder {
 
       pw.SizedBox(height: 8),
 
-      // ---- Bottom summary with boxed values ----
+      // ---- Bottom summary ----
       _buildBottomSummary(
         receipt: receipt,
         labelFont: baseFont,
@@ -260,7 +261,7 @@ abstract final class PdfReceiptBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Info row: `label:` on the right, value on the left
+  // Info row: `label:` on the right, value on the far left
   // ---------------------------------------------------------------------------
 
   static pw.Widget _infoRow(
@@ -293,6 +294,8 @@ abstract final class PdfReceiptBuilder {
                     ? pw.FontWeight.bold
                     : pw.FontWeight.normal,
               ),
+              // RTL: end = left side, i.e. as far from the label as possible.
+              textAlign: pw.TextAlign.left,
               softWrap: true,
             ),
           ),
@@ -302,7 +305,7 @@ abstract final class PdfReceiptBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Items table
+  // Items table — columns in RTL order
   // ---------------------------------------------------------------------------
 
   static pw.Widget _buildItemsTable({
@@ -314,45 +317,53 @@ abstract final class PdfReceiptBuilder {
     const double padH = 3;
     const double padV = 3;
 
+    // Note on column order:
+    //   In the `pdf` package, the order of `children` inside a `TableRow`
+    //   defines the visual column order from LEFT to RIGHT, regardless of
+    //   `TextDirection`. To produce an Arabic table (first column on the
+    //   right), we therefore list the cells in reverse logical order:
+    //   الإجمالي / السعر / الكمية / الصنف / م.
+    final Map<int, pw.TableColumnWidth> columnWidths = isThermal
+        ? const <int, pw.TableColumnWidth>{
+            0: pw.FlexColumnWidth(1.5),   // الإجمالي
+            1: pw.FlexColumnWidth(1.2),   // السعر
+            2: pw.FlexColumnWidth(1.4),   // الكمية
+            3: pw.FlexColumnWidth(3.0),   // الصنف
+            4: pw.FixedColumnWidth(16),   // م
+          }
+        : const <int, pw.TableColumnWidth>{
+            0: pw.FlexColumnWidth(1.5),   // الإجمالي
+            1: pw.FlexColumnWidth(1.2),   // السعر
+            2: pw.FlexColumnWidth(1.3),   // الكمية
+            3: pw.FlexColumnWidth(3.0),   // الصنف
+            4: pw.FixedColumnWidth(28),   // م
+          };
+
     return pw.Table(
       border: pw.TableBorder.all(
         color: PdfColors.grey800,
         width: 0.5,
       ),
       defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
-      columnWidths: isThermal
-          ? const <int, pw.TableColumnWidth>{
-              0: pw.FixedColumnWidth(16),
-              1: pw.FlexColumnWidth(3.0),
-              2: pw.FlexColumnWidth(1.4),
-              3: pw.FlexColumnWidth(1.2),
-              4: pw.FlexColumnWidth(1.5),
-            }
-          : const <int, pw.TableColumnWidth>{
-              0: pw.FixedColumnWidth(28),
-              1: pw.FlexColumnWidth(3.0),
-              2: pw.FlexColumnWidth(1.3),
-              3: pw.FlexColumnWidth(1.2),
-              4: pw.FlexColumnWidth(1.5),
-            },
+      columnWidths: columnWidths,
       children: <pw.TableRow>[
         // ---- Header row ----
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey200),
           children: <pw.Widget>[
-            _cell('م',
-                fontSize: headerFont, bold: true, center: true,
-                padH: padH, padV: padV),
-            _cell('الصنف',
-                fontSize: headerFont, bold: true,
-                padH: padH, padV: padV),
-            _cell('الكمية',
+            _cell('الإجمالي',
                 fontSize: headerFont, bold: true, center: true,
                 padH: padH, padV: padV),
             _cell('السعر',
                 fontSize: headerFont, bold: true, center: true,
                 padH: padH, padV: padV),
-            _cell('الإجمالي',
+            _cell('الكمية',
+                fontSize: headerFont, bold: true, center: true,
+                padH: padH, padV: padV),
+            _cell('الصنف',
+                fontSize: headerFont, bold: true,
+                padH: padH, padV: padV),
+            _cell('م',
                 fontSize: headerFont, bold: true, center: true,
                 padH: padH, padV: padV),
           ],
@@ -362,19 +373,9 @@ abstract final class PdfReceiptBuilder {
         for (int i = 0; i < receipt.lines.length; i++)
           pw.TableRow(
             children: <pw.Widget>[
-              _cell('${i + 1}',
-                  fontSize: baseFont, center: true,
-                  padH: padH, padV: padV),
               _cell(
-                receipt.lines[i].productName,
-                fontSize: baseFont,
-                padH: padH,
-                padV: padV,
-              ),
-              _cell(
-                '${_formatQuantity(receipt.lines[i].quantity)} '
-                '${receipt.lines[i].unitName}',
-                fontSize: baseFont, center: true,
+                _formatNumber(receipt.lines[i].lineTotal),
+                fontSize: baseFont, bold: true, center: true,
                 padH: padH, padV: padV,
               ),
               _cell(
@@ -383,10 +384,20 @@ abstract final class PdfReceiptBuilder {
                 padH: padH, padV: padV,
               ),
               _cell(
-                _formatNumber(receipt.lines[i].lineTotal),
-                fontSize: baseFont, bold: true, center: true,
+                '${_formatQuantity(receipt.lines[i].quantity)} '
+                '${receipt.lines[i].unitName}',
+                fontSize: baseFont, center: true,
                 padH: padH, padV: padV,
               ),
+              _cell(
+                receipt.lines[i].productName,
+                fontSize: baseFont,
+                padH: padH,
+                padV: padV,
+              ),
+              _cell('${i + 1}',
+                  fontSize: baseFont, center: true,
+                  padH: padH, padV: padV),
             ],
           ),
 
@@ -394,20 +405,20 @@ abstract final class PdfReceiptBuilder {
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey100),
           children: <pw.Widget>[
+            _cell(_formatNumber(receipt.subtotal),
+                fontSize: baseFont, bold: true, center: true,
+                padH: padH, padV: padV),
             _cell('',
                 fontSize: baseFont,
-                padH: padH, padV: padV),
-            _cell('المجموع الفرعي',
-                fontSize: baseFont, bold: true,
                 padH: padH, padV: padV),
             _cell('${receipt.lines.length}',
                 fontSize: baseFont, center: true,
                 padH: padH, padV: padV),
+            _cell('المجموع الفرعي',
+                fontSize: baseFont, bold: true,
+                padH: padH, padV: padV),
             _cell('',
                 fontSize: baseFont,
-                padH: padH, padV: padV),
-            _cell(_formatNumber(receipt.subtotal),
-                fontSize: baseFont, bold: true, center: true,
                 padH: padH, padV: padV),
           ],
         ),
@@ -442,7 +453,7 @@ abstract final class PdfReceiptBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Bottom summary (boxed values)
+  // Bottom summary
   // ---------------------------------------------------------------------------
 
   static pw.Widget _buildBottomSummary({
@@ -453,13 +464,19 @@ abstract final class PdfReceiptBuilder {
   }) {
     final double remaining = receipt.total - receipt.paidAmount;
     final double amountRemaining = remaining > 0 ? remaining : 0;
-    final double? previousBalance = receipt.previousBalance;
-    final double? newBalance = receipt.newBalance;
+
+    // ---- Balance computation ----
+    // Previous balance is whatever the customer owed before this invoice.
+    // When the receipt does not carry a snapshot (cash sale or no customer),
+    // both values fall back to 0 / the invoice's own unpaid amount.
+    final double previousBalance = receipt.previousBalance ?? 0;
+    final double currentBalance = receipt.newBalance ??
+        (previousBalance + amountRemaining);
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
-        // ---- إجمالي الفاتورة ----
+        // ---- إجمالي الفاتورة (boxed) ----
         _boxedRow(
           label: 'إجمالي الفاتورة',
           value: _formatNumber(receipt.total),
@@ -470,27 +487,16 @@ abstract final class PdfReceiptBuilder {
 
         pw.SizedBox(height: 4),
 
-        // ---- طريقة الدفع ----
+        // ---- طريقة الدفع (plain, no box) ----
         _plainRow(
           label: 'طريقة الدفع',
           value: _paymentMethodLabel(receipt),
           labelFont: labelFont,
         ),
 
-        // ---- صافي الرصيد السابق ----
-        if (previousBalance != null) ...<pw.Widget>[
-          pw.SizedBox(height: 4),
-          _boxedRow(
-            label: 'صافي الرصيد السابق',
-            value: _formatNumber(previousBalance),
-            labelFont: labelFont,
-            valueFont: valueFont,
-          ),
-        ],
-
         pw.SizedBox(height: 4),
 
-        // ---- إجمالي المدفوع ----
+        // ---- المدفوع (boxed) ----
         _boxedRow(
           label: 'المدفوع',
           value: _formatNumber(receipt.paidAmount),
@@ -498,7 +504,7 @@ abstract final class PdfReceiptBuilder {
           valueFont: valueFont,
         ),
 
-        // ---- المتبقي (only when not fully paid) ----
+        // ---- المتبقي على العميل (boxed) ----
         if (amountRemaining > 0) ...<pw.Widget>[
           pw.SizedBox(height: 4),
           _boxedRow(
@@ -509,20 +515,28 @@ abstract final class PdfReceiptBuilder {
           ),
         ],
 
-        // ---- صافي الرصيد بعد الفاتورة ----
-        if (newBalance != null) ...<pw.Widget>[
-          pw.SizedBox(height: 4),
-          _boxedRow(
-            label: 'صافي الرصيد بعد الفاتورة',
-            value: _formatNumber(newBalance),
-            labelFont: labelFont,
-            valueFont: valueFont,
-          ),
-        ],
+        pw.SizedBox(height: 6),
+
+        // ---- الرصيد السابق (plain) ----
+        _plainRow(
+          label: 'الرصيد السابق',
+          value: _formatNumber(previousBalance),
+          labelFont: labelFont,
+        ),
+
+        pw.SizedBox(height: 2),
+
+        // ---- الرصيد الحالي (plain) ----
+        _plainRow(
+          label: 'الرصيد الحالي',
+          value: _formatNumber(currentBalance),
+          labelFont: labelFont,
+        ),
       ],
     );
   }
 
+  /// Row with a small bordered box around the value.
   static pw.Widget _boxedRow({
     required String label,
     required String value,
@@ -574,6 +588,7 @@ abstract final class PdfReceiptBuilder {
     );
   }
 
+  /// Row without any border around the value.
   static pw.Widget _plainRow({
     required String label,
     required String value,
@@ -635,7 +650,7 @@ abstract final class PdfReceiptBuilder {
     return buf.toString();
   }
 
-  /// Returns `"الأحد 2026/10/05 02:55 م"`.
+  /// Returns `"الأحد  2026/10/05  02:55 م"`.
   static String _formatDayAndDate(DateTime value) {
     final DateTime local = value.toLocal();
     final int wd = local.weekday;
