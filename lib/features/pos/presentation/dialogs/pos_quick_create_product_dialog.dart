@@ -145,8 +145,6 @@ class _UnitsList extends ConsumerWidget {
         unitPrice: product.sellingPrice,
         minSellingPrice: product.minSellingPrice,
         maxSellingPrice: product.maxSellingPrice,
-        // For the base unit, the conversion note is the product description
-        // when available, or a generic "العبوة الواحدة" text otherwise.
         conversionNote: _baseUnitNote(),
         priceLabel: 'لللوحدة',
       ),
@@ -276,9 +274,6 @@ class _UnitCard extends StatelessWidget {
       decimalDigits: 2,
     );
 
-    // The first card is styled as "selected" (radio filled, light accent
-    // tint). This matches the reference design and gives the cashier an
-    // obvious default target for a single tap.
     final Color cardColor = isFirst
         ? scheme.primaryContainer.withValues(alpha: 0.35)
         : scheme.surface;
@@ -309,7 +304,7 @@ class _UnitCard extends StatelessWidget {
           ),
           child: Row(
             children: <Widget>[
-              // ---- Radio indicator (leftmost in LTR, rightmost in RTL) ----
+              // ---- Radio indicator ----
               Container(
                 width: 22,
                 height: 22,
