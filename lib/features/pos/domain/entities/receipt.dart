@@ -37,6 +37,7 @@ class Receipt extends Equatable {
     this.cashierName,
     this.previousBalance,
     this.newBalance,
+    this.footer,
   });
 
   /// Stable identifier of the underlying sale (UUID).
@@ -87,6 +88,13 @@ class Receipt extends Equatable {
   /// Customer balance after this sale, or `null` for cash sales.
   final double? newBalance;
 
+  /// Optional footer text printed at the bottom of the receipt.
+  ///
+  /// When `null` or empty, the PDF builder falls back to a built-in
+  /// default (`'شكرًا لتعاملكم معنا'`). The value is normally sourced from
+  /// `company_settings.receipt_footer`.
+  final String? footer;
+
   // ---------------------------------------------------------------------------
   // Convenience
   // ---------------------------------------------------------------------------
@@ -100,6 +108,9 @@ class Receipt extends Equatable {
 
   /// Whether change was given back to the customer.
   bool get hasChange => change > 0;
+
+  /// Whether the receipt carries a custom footer.
+  bool get hasFooter => footer != null && footer!.trim().isNotEmpty;
 
   /// Number of distinct lines.
   int get lineCount => lines.length;
@@ -122,6 +133,7 @@ class Receipt extends Equatable {
         cashierName,
         previousBalance,
         newBalance,
+        footer,
       ];
 
   @override
@@ -131,10 +143,6 @@ class Receipt extends Equatable {
 }
 
 /// Immutable, self-contained representation of a single receipt line.
-///
-/// Unlike `PosCartLine`, this type is deliberately minimal: it holds only
-/// the fields that must appear on the printed receipt. It carries no
-/// identifiers, no stock information, and no price bounds.
 @immutable
 class ReceiptLine extends Equatable {
   const ReceiptLine({
@@ -145,19 +153,10 @@ class ReceiptLine extends Equatable {
     required this.lineTotal,
   });
 
-  /// Display name of the product.
   final String productName;
-
-  /// Display name of the chosen unit (piece, carton, kilogram, ...).
   final String unitName;
-
-  /// Quantity in [unitName]. Always strictly positive.
   final double quantity;
-
-  /// Unit price applied to this line.
   final double unitPrice;
-
-  /// Line total = quantity * unitPrice.
   final double lineTotal;
 
   @override
