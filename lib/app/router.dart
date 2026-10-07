@@ -35,6 +35,7 @@ import '../features/sales/presentation/pages/sale_detail_page.dart';
 import '../features/sales/presentation/pages/sale_form_page.dart';
 import '../features/sales/presentation/pages/sales_page.dart';
 import '../features/settings/presentation/pages/company_settings_page.dart';
+import '../features/settings/presentation/pages/profile_page.dart';
 import '../features/settings/presentation/pages/settings_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
@@ -42,8 +43,6 @@ import '../shared/widgets/app_error.dart';
 import '../shared/widgets/app_loader.dart';
 
 /// Route paths and names used across the application.
-///
-/// Kept as a namespace of constants so no route is ever hard-coded twice.
 abstract final class AppRouter {
   static const String homePath = '/';
   static const String homeName = 'home';
@@ -120,6 +119,9 @@ abstract final class AppRouter {
   static const String branchEditPath = '/settings/branches/:id/edit';
   static const String branchEditName = 'branch-edit';
 
+  static const String profilePath = '/settings/profile';
+  static const String profileName = 'profile';
+
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
   static const String reportsName = 'reports';
@@ -151,7 +153,6 @@ abstract final class AppRouter {
   static const String reportPayablesPath = '/reports/payables';
   static const String reportPayablesName = 'report-payables';
 
-  // ---- Phase 6 (POS Foundation) ----
   static const String posPath = '/pos';
   static const String posName = 'pos';
 }
@@ -172,7 +173,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         return location == AppRouter.loginPath ? null : AppRouter.loginPath;
       }
 
-      // Authenticated: the login and loading screens are no longer reachable.
       if (location == AppRouter.loginPath ||
           location == AppRouter.loadingPath) {
         return AppRouter.homePath;
@@ -363,6 +363,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
               ),
             ],
           ),
+          GoRoute(
+            path: 'profile',
+            name: AppRouter.profileName,
+            builder: (BuildContext context, GoRouterState state) =>
+                const ProfilePage(),
+          ),
         ],
       ),
       // ---- Phase 9: Reports ----
@@ -426,7 +432,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const PayablesPage(),
       ),
-      // ---- Phase 6: POS Foundation ----
       GoRoute(
         path: AppRouter.posPath,
         name: AppRouter.posName,
