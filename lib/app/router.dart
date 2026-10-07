@@ -31,6 +31,7 @@ import '../features/sales/presentation/pages/returns_page.dart';
 import '../features/sales/presentation/pages/sale_detail_page.dart';
 import '../features/sales/presentation/pages/sale_form_page.dart';
 import '../features/sales/presentation/pages/sales_page.dart';
+import '../features/settings/presentation/pages/settings_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
@@ -97,6 +98,9 @@ abstract final class AppRouter {
   static const String returnsPath = '/returns';
   static const String returnsName = 'returns';
 
+  static const String settingsPath = '/settings';
+  static const String settingsName = 'settings';
+
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
   static const String reportsName = 'reports';
@@ -134,19 +138,6 @@ abstract final class AppRouter {
 }
 
 /// Provides the application router.
-///
-/// The router observes [authProvider] and applies authentication-based
-/// redirection:
-///
-/// * `AuthStatus.unknown`      → `/loading` (waiting for session restoration)
-/// * `AuthStatus.unauthenticated` → `/login`  (all other routes are
-///   unreachable)
-/// * `AuthStatus.authenticated`  → every route except `/login` and
-///   `/loading` is reachable.
-///
-/// The redirect callback is intentionally synchronous: `go_router` requires
-/// a deterministic decision on every navigation. The current authentication
-/// state is read synchronously via `ref.read`.
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
   final GoRouter router = GoRouter(
     initialLocation: AppRouter.homePath,
@@ -310,6 +301,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const ReturnsPage(),
       ),
+      GoRoute(
+        path: AppRouter.settingsPath,
+        name: AppRouter.settingsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const SettingsPage(),
+      ),
       // ---- Phase 9: Reports ----
       GoRoute(
         path: AppRouter.reportsPath,
@@ -392,7 +389,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
     },
   );
 
-  // Re-evaluate the redirect whenever the authentication status changes.
   ref.listen<AuthState>(authProvider, (AuthState? previous, AuthState next) {
     if (previous?.status != next.status) {
       router.refresh();
