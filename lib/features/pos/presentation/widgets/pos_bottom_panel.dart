@@ -7,21 +7,17 @@ import 'package:intl/intl.dart';
 
 import '../../../../shared/widgets/app_button.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
+import '../../domain/entities/pos_cart.dart';
 import '../dialogs/pos_payment_dialog.dart';
 import '../state/pos_providers.dart';
 
 /// Compact bottom panel used by the POS **mobile** layout.
 ///
-/// Replaces the taller combination of `PosTotalsBar` + `PosPayButton` that
-/// is still used on tablet and desktop.
-///
 /// Business rules applied here:
 /// * **Default tax** — when the cart has no explicit `taxAmount`, the
-///   panel applies `defaultTaxRate` from company settings to
-///   `(subtotal − discount)`.
+///   panel applies `defaultTaxRate` from company settings.
 /// * **Max discount** — the discount field rejects any value above
-///   `maxDiscountPercent` from company settings, clamping it to the
-///   allowed ceiling.
+///   `maxDiscountPercent` from company settings.
 class PosBottomPanel extends ConsumerWidget {
   const PosBottomPanel({super.key});
 
@@ -70,10 +66,6 @@ class PosBottomPanel extends ConsumerWidget {
     );
   }
 }
-
-// ============================================================================
-// Top row — item count + editable discount
-// ============================================================================
 
 class _TopRow extends ConsumerWidget {
   const _TopRow({
@@ -132,10 +124,6 @@ class _TopRow extends ConsumerWidget {
   }
 }
 
-// ============================================================================
-// Total row — the emphasized "الصافي"
-// ============================================================================
-
 class _TotalRow extends StatelessWidget {
   const _TotalRow({required this.total});
 
@@ -174,10 +162,6 @@ class _TotalRow extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Pay button
-// ============================================================================
-
 class _PayButton extends StatelessWidget {
   const _PayButton({required this.isEmpty});
 
@@ -196,10 +180,6 @@ class _PayButton extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Discount field — inline editable, clamped to the allowed maximum
-// ============================================================================
-
 class _DiscountField extends StatefulWidget {
   const _DiscountField({
     required this.discount,
@@ -208,10 +188,7 @@ class _DiscountField extends StatefulWidget {
   });
 
   final double discount;
-
-  /// Highest value the field will accept. Values above it are clamped.
   final double maxAllowed;
-
   final ValueChanged<double> onChanged;
 
   @override
@@ -250,13 +227,9 @@ class _DiscountFieldState extends State<_DiscountField> {
 
   void _onTextChanged() {
     final double parsed = double.tryParse(_controller.text.trim()) ?? 0;
-
-    // Clamp to the allowed maximum. The clamp is silent from the field's
-    // perspective; the caller receives the clamped value.
     final double accepted = parsed > widget.maxAllowed
         ? widget.maxAllowed
         : (parsed < 0 ? 0 : parsed);
-
     widget.onChanged(accepted);
   }
 
