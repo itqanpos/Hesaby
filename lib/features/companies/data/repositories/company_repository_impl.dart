@@ -84,6 +84,42 @@ class CompanyRepositoryImpl implements CompanyRepository {
     }
   }
 
+  @override
+  Future<Company> updateCompany({
+    required String companyId,
+    required String name,
+    required String currency,
+    required String timezone,
+    String? legalName,
+    String? phone,
+    String? email,
+    String? address,
+  }) async {
+    try {
+      final CompanyModel model = await _remoteDataSource.updateCompany(
+        companyId: companyId,
+        name: name,
+        currency: currency,
+        timezone: timezone,
+        legalName: legalName,
+        phone: phone,
+        email: email,
+        address: address,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(error, stackTrace, operation: 'updateCompany');
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'updateCompany');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'updateCompany');
+    } on CompanyException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'updateCompany');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Error mapping
   // ---------------------------------------------------------------------------
