@@ -6,19 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/preferences/app_preferences_providers.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
 
 /// Application settings page.
-///
-/// Sections (top to bottom):
-/// * **المظهر**    — theme mode (light / dark / system).
-/// * **اللغة**     — app language (Arabic / English / system).
-/// * **الطابعة**   — printer settings (placeholder until Phase D).
-/// * **الحساب**    — current account + logout.
-/// * **حول**       — version + developer.
-///
-/// Preferences are stored locally via `SharedPreferences` (see
-/// `AppPreferences`). Business defaults per company (tax, receipt footer)
-/// live in the `company_settings` table and are edited elsewhere.
 class SettingsPage extends ConsumerWidget {
   const SettingsPage({super.key});
 
@@ -161,7 +151,6 @@ class SettingsPage extends ConsumerWidget {
     WidgetRef ref,
     Locale? current,
   ) async {
-    // `null` = system default; `ar` / `en` = explicit choice.
     final _LocaleChoice? picked =
         await showModalBottomSheet<_LocaleChoice>(
       context: context,
@@ -243,9 +232,6 @@ class SettingsPage extends ConsumerWidget {
 
     if (confirmed != true || !context.mounted) return;
 
-    // NOTE: if your AuthNotifier exposes the sign-out method under a
-    // different name (`signOut`, `logout`, `signOutUser`), update the line
-    // below accordingly.
     await ref.read(authProvider.notifier).signOut();
   }
 }
@@ -426,7 +412,6 @@ class _SettingsTile extends StatelessWidget {
 // Picker sheet
 // ============================================================================
 
-/// Locale choice presented in the picker: system / Arabic / English.
 enum _LocaleChoice { system, ar, en }
 
 class _PickerOption<T> {
