@@ -100,19 +100,14 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   double get _inputAmount =>
       double.tryParse(_amountController.text.trim()) ?? 0;
 
-  /// Default tax rate from company settings. `0` while loading.
   double get _defaultTaxRate => ref.read(defaultTaxRateProvider);
 
-  /// Effective tax amount. When the cart already carries a manual tax
-  /// amount (> 0), it wins; otherwise the default rate is applied to the
-  /// post-discount subtotal.
   double get _effectiveTax {
     if (_cart.taxAmount > 0) return _cart.taxAmount;
     final double base = _cart.subtotal - _cart.discount;
     return base * _defaultTaxRate / 100;
   }
 
-  /// Effective total including the effective tax.
   double get _effectiveTotal =>
       _cart.subtotal - _cart.discount + _effectiveTax;
 
@@ -324,6 +319,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       customerName: _cart.customerName,
       previousBalance: hasBalanceChange ? _cart.customerBalance : null,
       newBalance: hasBalanceChange ? newBalance : null,
+      footer: ref.read(receiptFooterProvider),
     );
   }
 
@@ -544,7 +540,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 }
 
 // ============================================================================
-// Sub-widgets
+// Sub-widgets (as before)
 // ============================================================================
 
 class _CustomerRow extends StatelessWidget {
