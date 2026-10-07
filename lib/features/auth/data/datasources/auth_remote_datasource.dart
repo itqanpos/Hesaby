@@ -1,34 +1,25 @@
 // lib/features/auth/data/datasources/auth_remote_datasource.dart
 
 import 'package:supabase_flutter/supabase_flutter.dart'
-    show AuthResponse, AuthState, Session, SupabaseClient;
+    show
+        AuthResponse,
+        AuthState,
+        Session,
+        SupabaseClient,
+        UserAttributes,
+        UserResponse;
 
 import '../../domain/repositories/auth_repository.dart';
 import '../models/auth_session_model.dart';
 
 /// Thin wrapper around Supabase Auth.
-///
-/// This is the only place within the auth feature that talks to the
-/// Supabase Auth API directly. Everything above this class deals with
-/// [AuthSessionModel] and never sees Supabase types.
-///
-/// The data source accepts a nullable [SupabaseClient]. In Phase 0 the
-/// Supabase client is only initialised when credentials are provided at
-/// build time; when it is absent, the data source fails predictably with
-/// an [AuthException] rather than throwing a low-level state error.
 class AuthRemoteDataSource {
   const AuthRemoteDataSource(this._client);
 
-  /// Active Supabase client, or `null` when Supabase was not initialised.
   final SupabaseClient? _client;
 
-  /// Whether this data source can perform remote authentication calls.
   bool get isAvailable => _client != null;
 
-  /// Returns the session currently held by Supabase, if any.
-  ///
-  /// This is a synchronous read of the in-memory session; it does not
-  /// perform a network call.
   AuthSessionModel? get currentSession {
     final SupabaseClient? client = _client;
     if (client == null) {
@@ -41,10 +32,6 @@ class AuthRemoteDataSource {
     return AuthSessionModel.fromSupabaseSession(session);
   }
 
-  /// Emits the session whenever Supabase Auth reports a state change.
-  ///
-  /// Emits `null` when the user is signed out. When Supabase is not
-  /// available, emits a closed stream containing no events.
   Stream<AuthSessionModel?> authStateChanges() {
     final SupabaseClient? client = _client;
     if (client == null) {
@@ -59,11 +46,6 @@ class AuthRemoteDataSource {
     });
   }
 
-  /// Signs in with email and password.
-  ///
-  /// Throws [AuthException] when Supabase is unavailable, or rethrows the
-  /// underlying [AuthException] raised by Supabase so that the repository
-  /// can translate it into a safe [AuthFailureType].
   Future<AuthSessionModel> signInWithPassword({
     required String email,
     required String password,
@@ -92,9 +74,6 @@ class AuthRemoteDataSource {
     return AuthSessionModel.fromSupabaseSession(session);
   }
 
-  /// Signs the current user out.
-  ///
-  /// Throws [AuthException] when Supabase is unavailable.
   Future<void> signOut() async {
     final SupabaseClient? client = _client;
     if (client == null) {
@@ -106,8 +85,35 @@ class AuthRemoteDataSource {
     await client.auth.signOut();
   }
 
+  /// Updates the password of the currently authenticated user.
+  ///
+  /// Supabase requires an active session; the current password is not
+  /// re-checked because the session already proves possession.
+  Future<void> updatePassword({required String newPassword}) async {
+    final SupabaseClient? client = _client;
+    if (client == null) {
+      throw const AuthException(
+        type: AuthFailureType.unknown,
+        cause: _supabaseUnavailableMessage,
+      );
+    }
+
+    final UserResponse response = await client.auth.updateUser(
+      UserAttributes(password: newPassword),
+    );
+
+    if (response.user == null) {
+      throw const AuthException(
+        type: AuthFailureType.unknown,
+        cause: _emptyUserMessage,
+      );
+    }
+  }
+
   static const String _supabaseUnavailableMessage =
       'Supabase client is not initialised.';
   static const String _emptySessionMessage =
       'Supabase returned no session after a successful sign-in.';
+  static const String _emptyUserMessage =
+      'Supabase returned no user after a successful password update.';
 }
