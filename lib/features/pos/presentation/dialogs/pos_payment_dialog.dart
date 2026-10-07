@@ -11,6 +11,7 @@ import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/domain/repositories/sales_repository.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/entities/receipt.dart';
@@ -66,7 +67,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     super.initState();
     _cart = ref.read(posCartProvider);
     _amountController = TextEditingController(
-      text: _formatAmount(_cart.total),
+      text: _formatAmount(_effectiveTotal),
     );
     _amountController.addListener(_onAmountChanged);
   }
@@ -99,6 +100,22 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   double get _inputAmount =>
       double.tryParse(_amountController.text.trim()) ?? 0;
 
+  /// Default tax rate from company settings. `0` while loading.
+  double get _defaultTaxRate => ref.read(defaultTaxRateProvider);
+
+  /// Effective tax amount. When the cart already carries a manual tax
+  /// amount (> 0), it wins; otherwise the default rate is applied to the
+  /// post-discount subtotal.
+  double get _effectiveTax {
+    if (_cart.taxAmount > 0) return _cart.taxAmount;
+    final double base = _cart.subtotal - _cart.discount;
+    return base * _defaultTaxRate / 100;
+  }
+
+  /// Effective total including the effective tax.
+  double get _effectiveTotal =>
+      _cart.subtotal - _cart.discount + _effectiveTax;
+
   double _appliedToSale() {
     if (_method == PosPaymentMethod.credit) {
       return 0;
@@ -106,13 +123,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     if (_inputAmount <= 0) {
       return 0;
     }
-    final double total = _cart.total;
+    final double total = _effectiveTotal;
     return _inputAmount >= total ? total : _inputAmount;
   }
 
-  /// Portion of the payment that goes to reducing the customer's
-  /// outstanding balance (only when a customer is attached and the
-  /// payment exceeds the invoice total).
   double _appliedToBalance() {
     if (_method == PosPaymentMethod.credit) {
       return 0;
@@ -120,7 +134,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     if (!_cart.hasCustomer) {
       return 0;
     }
-    final double excess = _inputAmount - _cart.total;
+    final double excess = _inputAmount - _effectiveTotal;
     if (excess <= 0) {
       return 0;
     }
@@ -132,7 +146,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     if (_method != PosPaymentMethod.cash) {
       return 0;
     }
-    final double excess = _inputAmount - _cart.total;
+    final double excess = _inputAmount - _effectiveTotal;
     if (excess <= 0) {
       return 0;
     }
@@ -140,12 +154,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return remaining > 0 ? remaining : 0;
   }
 
-  double _addedToBalance() => _cart.total - _appliedToSale();
+  double _addedToBalance() => _effectiveTotal - _appliedToSale();
 
-  /// Resulting customer balance after applying this payment.
-  ///
-  /// `+addedToBalance` covers the unpaid part of the invoice;
-  /// `-appliedToBalance` accounts for the overpayment that clears debt.
   double _resultingBalance() =>
       _cart.customerBalance + _addedToBalance() - _appliedToBalance();
 
@@ -164,10 +174,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       return null;
     }
     if (_method == PosPaymentMethod.card) {
-      if (_inputAmount < _cart.total) {
+      if (_inputAmount < _effectiveTotal) {
         return 'الدفع بالبطاقة يجب أن يغطي كامل قيمة الفاتورة.';
       }
-      final double maxAllowed = _cart.total +
+      final double maxAllowed = _effectiveTotal +
           (_cart.hasCustomer ? _cart.customerBalance : 0);
       if (_inputAmount > maxAllowed) {
         return 'المبلغ يتجاوز قيمة الفاتورة + الرصيد المستحق.';
@@ -224,15 +234,12 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
             ),
         ],
         discount: _cart.discount,
-        taxAmount: _cart.taxAmount,
+        taxAmount: _effectiveTax,
         paidAmount: appliedToSale,
       );
 
       final Sale confirmed = await notifier.confirmSale(sale.id);
 
-      // If the customer overpaid, apply the excess to their outstanding
-      // balance. This reduces the debt in a single, server-visible
-      // customer_payments row, keeping the statement consistent.
       if (appliedToBalance > 0 && _cart.customerId != null) {
         await ref.read(customersProvider.notifier).recordPayment(
               customerId: _cart.customerId!,
@@ -247,8 +254,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         return;
       }
 
-      // Build the receipt snapshot *before* clearing the cart, so the
-      // printed document matches exactly what the cashier just rang up.
       final Receipt receipt = _buildReceipt(
         sale: confirmed,
         contextState: contextState,
@@ -286,8 +291,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     }
   }
 
-  /// Builds a pure [Receipt] from the confirmed sale and the current
-  /// company / branch context.
   Receipt _buildReceipt({
     required Sale sale,
     required CompanyContextState contextState,
@@ -314,8 +317,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       ],
       subtotal: _cart.subtotal,
       discount: _cart.discount,
-      taxAmount: _cart.taxAmount,
-      total: _cart.total,
+      taxAmount: _effectiveTax,
+      total: _effectiveTotal,
       paidAmount: _appliedToSale(),
       change: _changeToCustomer(),
       customerName: _cart.customerName,
@@ -331,10 +334,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (method == PosPaymentMethod.credit) {
         _amountController.text = '0';
       } else if (method == PosPaymentMethod.card) {
-        _amountController.text = _formatAmount(_cart.total);
+        _amountController.text = _formatAmount(_effectiveTotal);
       } else if (_amountController.text.trim() == '0' ||
           _amountController.text.trim().isEmpty) {
-        _amountController.text = _formatAmount(_cart.total);
+        _amountController.text = _formatAmount(_effectiveTotal);
       }
     });
   }
@@ -411,11 +414,11 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   if (_cart.hasCustomer && _cart.customerBalance > 0) ...<Widget>[
                     _BalanceDetails(
                       previousBalance: _cart.customerBalance,
-                      currentInvoice: _cart.total,
-                      totalOwed: _cart.settlementTotal,
+                      currentInvoice: _effectiveTotal,
+                      totalOwed: _cart.customerBalance + _effectiveTotal,
                     ),
                   ] else ...<Widget>[
-                    _TotalBanner(total: _cart.total),
+                    _TotalBanner(total: _effectiveTotal),
                   ],
 
                   const SizedBox(height: 16),
@@ -959,7 +962,6 @@ class _PosReceiptDialog extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                // ---- Header ----
                 Row(
                   children: <Widget>[
                     Icon(Icons.check_circle,
@@ -993,7 +995,6 @@ class _PosReceiptDialog extends StatelessWidget {
                 const Divider(height: 1),
                 const SizedBox(height: 12),
 
-                // ---- Lines ----
                 for (final ReceiptLine line in receipt.lines)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 4),
@@ -1023,7 +1024,6 @@ class _PosReceiptDialog extends StatelessWidget {
                 const Divider(height: 1),
                 const SizedBox(height: 8),
 
-                // ---- Totals ----
                 _row(theme, 'المجموع الفرعي',
                     _money.format(receipt.subtotal)),
                 if (receipt.discount > 0)
@@ -1059,7 +1059,6 @@ class _PosReceiptDialog extends StatelessWidget {
 
                 const SizedBox(height: 16),
 
-                // ---- Actions ----
                 Row(
                   children: <Widget>[
                     Expanded(
