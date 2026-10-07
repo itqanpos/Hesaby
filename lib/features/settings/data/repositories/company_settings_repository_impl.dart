@@ -87,7 +87,7 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
 
       // Nothing to update — return the current row unchanged.
       if (payload.isEmpty) {
-        return getSettings(companyId);
+        return await getSettings(companyId);
       }
 
       final Map<String, dynamic> row = await client
