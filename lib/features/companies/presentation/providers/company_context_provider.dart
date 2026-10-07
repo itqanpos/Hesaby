@@ -176,6 +176,64 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
   /// Reloads the entire context from the backend.
   Future<void> refresh() => _loadFromScratch();
 
+  /// Updates the profile of the currently selected company.
+  ///
+  /// On success the notifier updates the in-memory list and the current
+  /// company in place, so every widget that reads
+  /// `companyContextProvider.currentCompany` sees the new values without
+  /// waiting for a network round-trip on the whole context.
+  ///
+  /// Throws [CompanyException] when no company is selected or when the
+  /// backend rejects the update (typically [CompanyFailureType.unauthorized]
+  /// when the caller is not an owner/admin).
+  Future<Company> updateCurrentCompany({
+    required String name,
+    required String currency,
+    required String timezone,
+    String? legalName,
+    String? phone,
+    String? email,
+    String? address,
+  }) async {
+    final Company? current = state.currentCompany;
+    if (current == null) {
+      throw const CompanyException(
+        type: CompanyFailureType.unknown,
+        cause: 'No company is currently selected.',
+      );
+    }
+
+    final Company updated =
+        await ref.read(companyRepositoryProvider).updateCompany(
+              companyId: current.id,
+              name: name,
+              currency: currency,
+              timezone: timezone,
+              legalName: legalName,
+              phone: phone,
+              email: email,
+              address: address,
+            );
+
+    if (_isDisposed) {
+      return updated;
+    }
+
+    final List<Company> updatedCompanies = state.companies
+        .map(
+          (Company candidate) =>
+              candidate.id == updated.id ? updated : candidate,
+        )
+        .toList(growable: false);
+
+    state = state.copyWith(
+      companies: updatedCompanies,
+      currentCompany: updated,
+    );
+
+    return updated;
+  }
+
   // ---------------------------------------------------------------------------
   // Internal flows
   // ---------------------------------------------------------------------------
