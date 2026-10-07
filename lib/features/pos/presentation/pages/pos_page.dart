@@ -25,15 +25,18 @@ import 'pos_tablet_layout.dart';
 /// * **F9**  — open the payment dialog (no-op on an empty cart).
 /// * **Esc** — clear the search query.
 ///
-/// The shortcuts are wired via `CallbackShortcuts` at the page level, so
-/// they fire regardless of which descendant currently holds focus — the
-/// search field itself, a layout button, or the page's own autofocus node.
+/// The page is rendered with `resizeToAvoidBottomInset: false` so that the
+/// bottom pay panel stays pinned at the bottom of the screen and is simply
+/// covered by the on-screen keyboard. This matches how POS apps behave:
+/// the cashier types into the search field while the pay panel stays out
+/// of the way.
 class PosPage extends ConsumerWidget {
   const PosPage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     return AppShell(
+      resizeToAvoidBottomInset: false,
       appBar: const PosHeader(),
       body: CallbackShortcuts(
         bindings: <ShortcutActivator, VoidCallback>{
