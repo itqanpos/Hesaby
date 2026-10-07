@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
+import '../features/companies/presentation/pages/company_profile_page.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
 import '../features/inventory/presentation/pages/stock_movements_page.dart';
@@ -104,6 +105,9 @@ abstract final class AppRouter {
 
   static const String companySettingsPath = '/settings/company';
   static const String companySettingsName = 'company-settings';
+
+  static const String companyProfilePath = '/settings/company-profile';
+  static const String companyProfileName = 'company-profile';
 
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
@@ -316,6 +320,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
             name: AppRouter.companySettingsName,
             builder: (BuildContext context, GoRouterState state) =>
                 const CompanySettingsPage(),
+          ),
+          GoRoute(
+            path: 'company-profile',
+            name: AppRouter.companyProfileName,
+            builder: (BuildContext context, GoRouterState state) =>
+                const CompanyProfilePage(),
           ),
         ],
       ),
