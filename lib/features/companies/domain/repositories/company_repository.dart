@@ -63,14 +63,18 @@ class CompanyException extends Equatable implements Exception {
   String toString() => 'CompanyException(type: ${type.name})';
 }
 
-/// Contract for retrieving companies and branches accessible to the
-/// currently authenticated user.
+/// Contract for retrieving and updating companies and branches accessible
+/// to the currently authenticated user.
 ///
 /// All access decisions are ultimately enforced by Row Level Security in the
 /// database. This repository never accepts a `userId`: the identity is taken
 /// from the authenticated session (`auth.uid()`) by the data layer, so a
 /// malicious client cannot query on behalf of another user by supplying a
 /// forged identifier.
+///
+/// Update operations are restricted by RLS to `owner` and `admin` roles of
+/// the target company. Attempts by other roles or by non-members fail with
+/// [CompanyFailureType.unauthorized].
 abstract interface class CompanyRepository {
   /// Returns every company the current user has an active membership in.
   ///
@@ -84,4 +88,24 @@ abstract interface class CompanyRepository {
   /// the current user has no membership in the company (RLS filters rows).
   /// Throws [CompanyException] when the request fails.
   Future<List<Branch>> getCompanyBranches(String companyId);
+
+  /// Updates the profile of [companyId] and returns the updated row.
+  ///
+  /// [name], [currency] and [timezone] are mandatory: the database columns
+  /// are `not null`. The remaining fields are optional and are written as
+  /// `null` when not provided, so an empty string sent by the UI clears the
+  /// underlying column.
+  ///
+  /// Throws [CompanyException] when the request fails or when the current
+  /// user lacks the required role.
+  Future<Company> updateCompany({
+    required String companyId,
+    required String name,
+    required String currency,
+    required String timezone,
+    String? legalName,
+    String? phone,
+    String? email,
+    String? address,
+  });
 }
