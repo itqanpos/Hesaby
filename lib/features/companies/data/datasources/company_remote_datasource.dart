@@ -17,8 +17,9 @@ import '../models/company_model.dart';
 ///   user has an active membership.
 /// * `select * from branches where company_id = X` only returns branches
 ///   of companies the current user may access.
-/// * `update companies set ... where id = X` only succeeds when the current
-///   user holds the `owner` or `admin` role in the company.
+/// * `insert / update / delete` on `companies` and `branches` only succeed
+///   when the current user holds the `owner` or `admin` role in the target
+///   company.
 ///
 /// The data source therefore never accepts a `userId` and never trusts a
 /// client-supplied identity. The active identity is always `auth.uid()`,
@@ -31,6 +32,10 @@ class CompanyRemoteDataSource {
 
   /// Whether this data source can perform remote queries.
   bool get isAvailable => _client != null;
+
+  // ---------------------------------------------------------------------------
+  // Companies
+  // ---------------------------------------------------------------------------
 
   /// Returns every active company the current user may access.
   ///
@@ -46,24 +51,6 @@ class CompanyRemoteDataSource {
         .order('name', ascending: true);
 
     return rows.map(CompanyModel.fromMap).toList(growable: false);
-  }
-
-  /// Returns every active branch of [companyId] the current user may access.
-  ///
-  /// When the current user has no membership in [companyId], RLS returns
-  /// an empty list rather than raising an error. This is intentional: it
-  /// avoids leaking the existence of companies the user cannot access.
-  Future<List<BranchModel>> fetchCompanyBranches(String companyId) async {
-    final SupabaseClient client = _requireClient();
-
-    final List<Map<String, dynamic>> rows = await client
-        .from('branches')
-        .select()
-        .eq('company_id', companyId)
-        .eq('is_active', true)
-        .order('name', ascending: true);
-
-    return rows.map(BranchModel.fromMap).toList(growable: false);
   }
 
   /// Updates the profile of [companyId] and returns the updated row.
@@ -111,6 +98,138 @@ class CompanyRemoteDataSource {
 
     return CompanyModel.fromMap(row);
   }
+
+  // ---------------------------------------------------------------------------
+  // Branches — reads
+  // ---------------------------------------------------------------------------
+
+  /// Returns every active branch of [companyId] the current user may access.
+  ///
+  /// When the current user has no membership in [companyId], RLS returns
+  /// an empty list rather than raising an error. This is intentional: it
+  /// avoids leaking the existence of companies the user cannot access.
+  Future<List<BranchModel>> fetchCompanyBranches(String companyId) async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('branches')
+        .select()
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .order('name', ascending: true);
+
+    return rows.map(BranchModel.fromMap).toList(growable: false);
+  }
+
+  /// Returns every branch (active and inactive) of [companyId].
+  ///
+  /// Active branches are listed first so that management UIs naturally
+  /// surface actionable rows before deactivated ones.
+  Future<List<BranchModel>> fetchAllCompanyBranches(String companyId) async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('branches')
+        .select()
+        .eq('company_id', companyId)
+        .order('is_active', ascending: false)
+        .order('name', ascending: true);
+
+    return rows.map(BranchModel.fromMap).toList(growable: false);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Branches — mutations
+  // ---------------------------------------------------------------------------
+
+  /// Inserts a new branch and returns the created row.
+  Future<BranchModel> insertBranch({
+    required String companyId,
+    required String name,
+    String? code,
+    String? address,
+    String? phone,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'company_id': companyId,
+      'name': name,
+      'code': code,
+      'address': address,
+      'phone': phone,
+    };
+
+    final Map<String, dynamic> row = await client
+        .from('branches')
+        .insert(payload)
+        .select()
+        .single();
+
+    return BranchModel.fromMap(row);
+  }
+
+  /// Updates an existing branch and returns the updated row.
+  Future<BranchModel> updateBranch({
+    required String branchId,
+    required String name,
+    String? code,
+    String? address,
+    String? phone,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'name': name,
+      'code': code,
+      'address': address,
+      'phone': phone,
+    };
+
+    final Map<String, dynamic>? row = await client
+        .from('branches')
+        .update(payload)
+        .eq('id', branchId)
+        .select()
+        .maybeSingle();
+
+    if (row == null) {
+      throw const CompanyException(
+        type: CompanyFailureType.unauthorized,
+        cause: 'Update affected no rows (RLS role check likely failed).',
+      );
+    }
+
+    return BranchModel.fromMap(row);
+  }
+
+  /// Toggles `is_active` on a branch and returns the updated row.
+  Future<BranchModel> updateBranchActive({
+    required String branchId,
+    required bool isActive,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic>? row = await client
+        .from('branches')
+        .update(<String, dynamic>{'is_active': isActive})
+        .eq('id', branchId)
+        .select()
+        .maybeSingle();
+
+    if (row == null) {
+      throw const CompanyException(
+        type: CompanyFailureType.unauthorized,
+        cause: 'Update affected no rows (RLS role check likely failed).',
+      );
+    }
+
+    return BranchModel.fromMap(row);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Client
+  // ---------------------------------------------------------------------------
 
   /// Returns the active Supabase client, or throws [CompanyException] when
   /// Supabase was not initialised.
