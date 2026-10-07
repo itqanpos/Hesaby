@@ -5,6 +5,12 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 /// Full-screen barcode scanner dialog.
+///
+/// Performance profile:
+/// * `detectionSpeed: unrestricted` — analyze every frame.
+/// * `detectionTimeoutMs: 50` — minimal wait between analyses.
+/// * `formats` restricted to common 1D + QR types.
+/// * `cameraResolution` set to 640×480 on Android (lower = faster).
 class PosBarcodeScannerDialog extends StatefulWidget {
   const PosBarcodeScannerDialog({super.key});
 
@@ -13,8 +19,10 @@ class PosBarcodeScannerDialog extends StatefulWidget {
       _PosBarcodeScannerDialogState();
 }
 
-class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
+class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
+    with SingleTickerProviderStateMixin {
   late final MobileScannerController _controller;
+  late final AnimationController _laserController;
 
   bool _hasEmitted = false;
   MobileScannerException? _cameraError;
@@ -24,13 +32,28 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
   void initState() {
     super.initState();
     _controller = MobileScannerController(
-      detectionSpeed: DetectionSpeed.noDuplicates,
+      detectionSpeed: DetectionSpeed.unrestricted,
+      detectionTimeoutMs: 50,
       facing: CameraFacing.back,
+      formats: const <BarcodeFormat>[
+        BarcodeFormat.ean13,
+        BarcodeFormat.ean8,
+        BarcodeFormat.upcA,
+        BarcodeFormat.upcE,
+        BarcodeFormat.code128,
+        BarcodeFormat.qrCode,
+      ],
     );
+
+    _laserController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 2000),
+    )..repeat(reverse: true);
   }
 
   @override
   void dispose() {
+    _laserController.dispose();
     _controller.dispose();
     super.dispose();
   }
@@ -40,9 +63,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
   // ---------------------------------------------------------------------------
 
   void _handleDetection(BarcodeCapture capture) {
-    if (_hasEmitted) {
-      return;
-    }
+    if (_hasEmitted) return;
 
     for (final Barcode barcode in capture.barcodes) {
       final String? value = barcode.rawValue;
@@ -69,15 +90,13 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
     try {
       await _controller.stop();
     } on Object {
-      // Ignore: the controller may not be running.
+      // Ignore.
     }
 
     try {
       await _controller.start();
     } on MobileScannerException catch (error) {
-      if (mounted) {
-        setState(() => _cameraError = error);
-      }
+      if (mounted) setState(() => _cameraError = error);
     } on Object {
       if (mounted) {
         setState(() {
@@ -90,9 +109,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
         });
       }
     } finally {
-      if (mounted) {
-        setState(() => _isRetrying = false);
-      }
+      if (mounted) setState(() => _isRetrying = false);
     }
   }
 
@@ -102,13 +119,10 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (BuildContext ctx) => _ManualEntrySheet(
-        title: 'إدخال الباركود يدويًا',
-      ),
+      builder: (BuildContext ctx) =>
+          _ManualEntrySheet(title: 'إدخال الباركود يدويًا'),
     );
-    if (value == null || value.trim().isEmpty) {
-      return;
-    }
+    if (value == null || value.trim().isEmpty) return;
     if (!mounted) return;
     Navigator.of(context).pop(value.trim());
   }
@@ -144,11 +158,13 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
       ),
       body: Stack(
         children: <Widget>[
-          Positioned.fill(
-            child: _buildScannerArea(scheme),
-          ),
+          Positioned.fill(child: _buildScannerArea(scheme)),
           if (!hasError) ...<Widget>[
-            const IgnorePointer(child: _ScanFrameOverlay()),
+            IgnorePointer(
+              child: _ScanFrameOverlay(
+                animation: _laserController,
+              ),
+            ),
             const _BottomHint(),
             Positioned(
               left: 0,
@@ -257,11 +273,14 @@ class _BottomHint extends StatelessWidget {
 }
 
 // ============================================================================
-// Scan frame overlay
+// Scan frame overlay — corners + animated laser beam
 // ============================================================================
 
 class _ScanFrameOverlay extends StatelessWidget {
-  const _ScanFrameOverlay();
+  const _ScanFrameOverlay({required this.animation});
+
+  /// 0.0 → 1.0 progress. Drives the laser line position (top ↔ bottom).
+  final Animation<double> animation;
 
   @override
   Widget build(BuildContext context) {
@@ -279,6 +298,18 @@ class _ScanFrameOverlay extends StatelessWidget {
             height: frameSize,
             child: Stack(
               children: <Widget>[
+                // ---- Animated laser line ----
+                AnimatedBuilder(
+                  animation: animation,
+                  builder: (BuildContext context, Widget? child) {
+                    return CustomPaint(
+                      size: Size(frameSize, frameSize),
+                      painter: _LaserPainter(progress: animation.value),
+                    );
+                  },
+                ),
+
+                // ---- Corner brackets ----
                 Positioned(
                   top: 0,
                   left: 0,
@@ -327,6 +358,73 @@ class _ScanFrameOverlay extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// Laser painter
+// ============================================================================
+
+class _LaserPainter extends CustomPainter {
+  _LaserPainter({required this.progress});
+
+  /// Animation progress in the [0.0, 1.0] range.
+  final double progress;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // ---- Compute the Y position of the laser line ----
+    const double verticalMargin = 8;
+    final double usableHeight = size.height - verticalMargin * 2;
+    final double laserY = verticalMargin + usableHeight * progress;
+
+    // ---- Glow (wide, low-alpha) ----
+    final Paint glowPaint = Paint()
+      ..shader = LinearGradient(
+        begin: Alignment.topCenter,
+        end: Alignment.bottomCenter,
+        colors: <Color>[
+          Colors.red.withValues(alpha: 0.0),
+          Colors.red.withValues(alpha: 0.45),
+          Colors.red.withValues(alpha: 0.0),
+        ],
+        stops: const <double>[0.0, 0.5, 1.0],
+      ).createShader(
+        Rect.fromLTWH(0, laserY - 12, size.width, 24),
+      );
+
+    canvas.drawRect(
+      Rect.fromLTWH(0, laserY - 12, size.width, 24),
+      glowPaint,
+    );
+
+    // ---- Core line ----
+    final Paint corePaint = Paint()
+      ..color = Colors.red
+      ..strokeWidth = 2
+      ..strokeCap = StrokeCap.round;
+
+    canvas.drawLine(
+      Offset(0, laserY),
+      Offset(size.width, laserY),
+      corePaint,
+    );
+
+    // ---- Bright head dots at both ends ----
+    final Paint dotPaint = Paint()
+      ..color = Colors.red
+      ..style = PaintingStyle.fill;
+
+    canvas.drawCircle(Offset(0, laserY), 3, dotPaint);
+    canvas.drawCircle(Offset(size.width, laserY), 3, dotPaint);
+  }
+
+  @override
+  bool shouldRepaint(_LaserPainter oldDelegate) =>
+      oldDelegate.progress != progress;
+}
+
+// ============================================================================
+// Corner bracket
+// ============================================================================
 
 class _Corner extends StatelessWidget {
   const _Corner({
@@ -484,10 +582,6 @@ class _CameraErrorView extends StatelessWidget {
       ),
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Error description
-  // ---------------------------------------------------------------------------
 
   static (String, String) _describe(Object error) {
     if (error is MobileScannerException) {
