@@ -10,7 +10,12 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 /// * `detectionSpeed: unrestricted` — analyze every frame.
 /// * `detectionTimeoutMs: 50` — minimal wait between analyses.
 /// * `formats` restricted to common 1D + QR types.
-/// * `cameraResolution` set to 640×480 on Android (lower = faster).
+///
+/// Feedback on success:
+/// * A short system alert sound (`SystemSound.play`).
+/// * A haptic "heavy impact" vibration.
+/// Both are wrapped in try/catch; failures are silently ignored so that a
+/// device without sound or haptics does not break the scan.
 class PosBarcodeScannerDialog extends StatefulWidget {
   const PosBarcodeScannerDialog({super.key});
 
@@ -59,16 +64,45 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   }
 
   // ---------------------------------------------------------------------------
+  // Feedback
+  // ---------------------------------------------------------------------------
+
+  /// Emits the short success feedback (sound + vibration).
+  ///
+  /// Every call is isolated so that one failure does not prevent the other,
+  /// and so that a platform that does not support one of them (e.g. `SystemSound`
+  /// on web) does not break the scan flow.
+  Future<void> _emitSuccessFeedback() async {
+    try {
+      await HapticFeedback.heavyImpact();
+    } on Object {
+      // Ignore: the platform has no haptic engine.
+    }
+    try {
+      await SystemSound.play(SystemSoundType.alert);
+    } on Object {
+      // Ignore: the platform has no system sound (typically web).
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Detection
   // ---------------------------------------------------------------------------
 
-  void _handleDetection(BarcodeCapture capture) {
+  Future<void> _handleDetection(BarcodeCapture capture) async {
     if (_hasEmitted) return;
 
     for (final Barcode barcode in capture.barcodes) {
       final String? value = barcode.rawValue;
       if (value != null && value.trim().isNotEmpty) {
         _hasEmitted = true;
+
+        // Give the feedback a chance to play before we tear down the
+        // camera and pop the route. `await` is safe: the dialog will still
+        // be mounted.
+        await _emitSuccessFeedback();
+
+        if (!mounted) return;
         Navigator.of(context).pop(value.trim());
         return;
       }
@@ -279,7 +313,6 @@ class _BottomHint extends StatelessWidget {
 class _ScanFrameOverlay extends StatelessWidget {
   const _ScanFrameOverlay({required this.animation});
 
-  /// 0.0 → 1.0 progress. Drives the laser line position (top ↔ bottom).
   final Animation<double> animation;
 
   @override
@@ -298,7 +331,6 @@ class _ScanFrameOverlay extends StatelessWidget {
             height: frameSize,
             child: Stack(
               children: <Widget>[
-                // ---- Animated laser line ----
                 AnimatedBuilder(
                   animation: animation,
                   builder: (BuildContext context, Widget? child) {
@@ -308,8 +340,6 @@ class _ScanFrameOverlay extends StatelessWidget {
                     );
                   },
                 ),
-
-                // ---- Corner brackets ----
                 Positioned(
                   top: 0,
                   left: 0,
@@ -366,17 +396,14 @@ class _ScanFrameOverlay extends StatelessWidget {
 class _LaserPainter extends CustomPainter {
   _LaserPainter({required this.progress});
 
-  /// Animation progress in the [0.0, 1.0] range.
   final double progress;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // ---- Compute the Y position of the laser line ----
     const double verticalMargin = 8;
     final double usableHeight = size.height - verticalMargin * 2;
     final double laserY = verticalMargin + usableHeight * progress;
 
-    // ---- Glow (wide, low-alpha) ----
     final Paint glowPaint = Paint()
       ..shader = LinearGradient(
         begin: Alignment.topCenter,
@@ -396,7 +423,6 @@ class _LaserPainter extends CustomPainter {
       glowPaint,
     );
 
-    // ---- Core line ----
     final Paint corePaint = Paint()
       ..color = Colors.red
       ..strokeWidth = 2
@@ -408,7 +434,6 @@ class _LaserPainter extends CustomPainter {
       corePaint,
     );
 
-    // ---- Bright head dots at both ends ----
     final Paint dotPaint = Paint()
       ..color = Colors.red
       ..style = PaintingStyle.fill;
