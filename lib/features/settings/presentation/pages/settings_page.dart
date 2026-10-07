@@ -25,6 +25,17 @@ class SettingsPage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.only(top: 8, bottom: 24),
         children: <Widget>[
+          // ---- الحساب ----
+          const _SectionHeader(title: 'الحساب'),
+          _SettingsTile(
+            icon: Icons.person_outline,
+            title: 'الملف الشخصي',
+            subtitle: 'الاسم، الهاتف، كلمة المرور',
+            onTap: () => context.pushNamed(AppRouter.profileName),
+          ),
+
+          const SizedBox(height: 8),
+
           // ---- الشركة ----
           const _SectionHeader(title: 'الشركة'),
           _SettingsTile(
@@ -83,8 +94,8 @@ class SettingsPage extends ConsumerWidget {
 
           const SizedBox(height: 8),
 
-          // ---- الحساب ----
-          const _SectionHeader(title: 'الحساب'),
+          // ---- الحساب (تسجيل الخروج) ----
+          const _SectionHeader(title: 'الجلسة'),
           _SettingsTile(
             icon: Icons.logout,
             title: 'تسجيل الخروج',
