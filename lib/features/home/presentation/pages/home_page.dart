@@ -42,6 +42,11 @@ class HomePage extends ConsumerWidget {
       appBar: AppBar(
         title: Text(l10n.appName),
         actions: <Widget>[
+          IconButton(
+            tooltip: 'الإعدادات',
+            icon: const Icon(Icons.settings_outlined),
+            onPressed: () => context.pushNamed(AppRouter.settingsName),
+          ),
           _EnvironmentPill(config: config),
           const SizedBox(width: 12),
         ],
@@ -113,7 +118,6 @@ class HomePage extends ConsumerWidget {
 
                 const SizedBox(height: 32),
 
-                // ---- Infrastructure (small, footer) ----
                 _InfrastructureFooter(config: config),
                 const SizedBox(height: 16),
               ],
@@ -367,7 +371,7 @@ class _QuickActionsRow extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// Catalog & inventory (4 tiles, 2x2 on mobile via Wrap)
+// Catalog & inventory (5 tiles)
 // -----------------------------------------------------------------------------
 
 class _CatalogGrid extends StatelessWidget {
