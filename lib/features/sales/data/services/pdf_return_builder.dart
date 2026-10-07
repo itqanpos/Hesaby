@@ -11,13 +11,16 @@ import '../../domain/entities/return_receipt.dart';
 
 /// Builds a PDF document from a [ReturnReceipt].
 ///
-/// Mirrors `PdfReceiptBuilder` in structure and font handling so that the
-/// two documents look consistent when printed side by side. Thermal page
-/// sizes use a finite, content-derived height (see `PdfReceiptBuilder`
-/// for the reasoning).
+/// Mirrors `PdfReceiptBuilder` in structure, font handling, and footer
+/// resolution so that the two documents look consistent when printed side
+/// by side. Thermal page sizes use a finite, content-derived height (see
+/// `PdfReceiptBuilder` for the reasoning).
 abstract final class PdfReturnBuilder {
   static const double _thermalFixedMm = 120;
   static const double _thermalPerLineMm = 12;
+
+  /// Fallback footer when the receipt carries no custom one.
+  static const String _defaultFooter = 'شكرًا لتعاملكم معنا';
 
   static double _thermalHeightFor(int lineCount) {
     final double estimatedMm =
@@ -208,15 +211,31 @@ abstract final class PdfReturnBuilder {
 
       pw.SizedBox(height: 10),
 
-      // ---- Footer ----
+      // ---- Footer (custom, with fallback) ----
       pw.Center(
         child: pw.Text(
-          'شكرًا لتعاملكم معنا',
-          style: pw.TextStyle(fontSize: baseFont),
+          _footerText(receipt),
+          style: pw.TextStyle(
+            fontSize: baseFont,
+            color: PdfColors.grey700,
+          ),
           textAlign: pw.TextAlign.center,
         ),
       ),
     ];
+  }
+
+  /// Resolves the footer text of a return receipt.
+  ///
+  /// Falls back to a built-in default when the receipt carries no custom
+  /// footer (for example older returns printed before
+  /// `company_settings.receipt_footer` was introduced).
+  static String _footerText(ReturnReceipt receipt) {
+    final String? custom = receipt.footer;
+    if (custom != null && custom.trim().isNotEmpty) {
+      return custom.trim();
+    }
+    return _defaultFooter;
   }
 
   // ---------------------------------------------------------------------------
