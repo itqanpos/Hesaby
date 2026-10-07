@@ -1,4 +1,5 @@
 // lib/shared/layouts/app_shell.dart
+
 import 'package:flutter/material.dart';
 
 import '../../core/responsive/responsive_helper.dart';
@@ -7,6 +8,15 @@ import '../../core/responsive/responsive_helper.dart';
 ///
 /// It applies safe-area handling, responsive horizontal padding and the
 /// project's maximum content width.
+///
+/// [resizeToAvoidBottomInset] is forwarded to the underlying [Scaffold]:
+/// * `true` (default) — the body shrinks when the soft keyboard appears,
+///   pushing any bottom-anchored widget above the keyboard. This is the
+///   right choice for most form pages.
+/// * `false` — the body keeps its full height, and the keyboard simply
+///   overlays whatever is at the bottom. Used by the POS page, where the
+///   cashier expects the pay panel to stay put and be covered by the
+///   keyboard.
 class AppShell extends StatelessWidget {
   const AppShell({
     super.key,
@@ -17,6 +27,7 @@ class AppShell extends StatelessWidget {
     this.backgroundColor,
     this.applyHorizontalPadding = true,
     this.constrainContentWidth = true,
+    this.resizeToAvoidBottomInset = true,
   });
 
   final Widget body;
@@ -26,6 +37,9 @@ class AppShell extends StatelessWidget {
   final Color? backgroundColor;
   final bool applyHorizontalPadding;
   final bool constrainContentWidth;
+
+  /// Forwarded to [Scaffold.resizeToAvoidBottomInset].
+  final bool resizeToAvoidBottomInset;
 
   @override
   Widget build(BuildContext context) {
@@ -39,6 +53,7 @@ class AppShell extends StatelessWidget {
       appBar: appBar,
       bottomNavigationBar: bottomNavigationBar,
       floatingActionButton: floatingActionButton,
+      resizeToAvoidBottomInset: resizeToAvoidBottomInset,
       body: SafeArea(
         child: Center(
           child: ConstrainedBox(
