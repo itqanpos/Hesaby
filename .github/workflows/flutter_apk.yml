@@ -6,14 +6,16 @@
 #
 #   1. Runs `flutter create --platforms=android` to generate `android/`.
 #   2. Sets the app display name to "حسابي" in AndroidManifest.xml.
-#   3. Enables Android in the icon and splash configs, then regenerates both
+#   3. Adds the Android permissions required by mobile_scanner and printing
+#      (camera, bluetooth for future thermal printing, storage for PDF save).
+#   4. Enables Android in the icon and splash configs, then regenerates both
 #      from `assets/images/logo.png`.
-#   4. Patches release signing to reuse the debug keystore (safe for
+#   5. Patches release signing to reuse the debug keystore (safe for
 #      internal distribution; replace with a production keystore before
 #      publishing to Google Play).
-#   5. Builds a release APK with Supabase credentials injected via
+#   6. Builds a release APK with Supabase credentials injected via
 #      --dart-define.
-#   6. Publishes the APK to a rolling GitHub Release tagged `apk-latest`,
+#   7. Publishes the APK to a rolling GitHub Release tagged `apk-latest`,
 #      so the download URL stays stable:
 #         https://github.com/<owner>/<repo>/releases/tag/apk-latest
 #
@@ -23,8 +25,6 @@
 name: Build Android APK
 
 on:
-  # Manual trigger only, to avoid burning CI minutes on every commit.
-  # Trigger from the Actions tab: "Build Android APK" → "Run workflow".
   workflow_dispatch:
     inputs:
       build_type:
@@ -36,7 +36,6 @@ on:
           - release
           - debug
 
-# Required by softprops/action-gh-release to create/update the release.
 permissions:
   contents: write
 
@@ -83,6 +82,29 @@ jobs:
           sed -i 's/android:label="hesabi"/android:label="حسابي"/' \
             android/app/src/main/AndroidManifest.xml
 
+      - name: Add Android permissions
+        run: |
+          MANIFEST=android/app/src/main/AndroidManifest.xml
+          if ! grep -q 'android.permission.CAMERA' "$MANIFEST"; then
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
+          fi
+          if ! grep -q 'android.permission.BLUETOOTH_SCAN' "$MANIFEST"; then
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.BLUETOOTH_SCAN" android:usesPermissionFlags="neverForLocation" />' "$MANIFEST"
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />' "$MANIFEST"
+          fi
+          if ! grep -q 'android.permission.BLUETOOTH_ADMIN' "$MANIFEST"; then
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.BLUETOOTH" android:maxSdkVersion="30" />' "$MANIFEST"
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN" android:maxSdkVersion="30" />' "$MANIFEST"
+          fi
+          if ! grep -q 'android.permission.WRITE_EXTERNAL_STORAGE' "$MANIFEST"; then
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" android:maxSdkVersion="28" />' "$MANIFEST"
+          fi
+          if ! grep -q 'android.hardware.camera' "$MANIFEST"; then
+            sed -i '/<application/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' "$MANIFEST"
+          fi
+          echo "--- AndroidManifest.xml (permissions section) ---"
+          grep 'uses-permission\|uses-feature' "$MANIFEST"
+
       - name: Enable Android in flutter_launcher_icons.yaml
         run: |
           sed -i 's/^  android: false/  android: true/' flutter_launcher_icons.yaml
@@ -99,10 +121,6 @@ jobs:
 
       - name: Patch release signing to reuse debug keystore
         run: |
-          # Flutter's default template already uses the debug keystore for
-          # release builds. These substitutions are defensive: they cover
-          # both the Groovy DSL (build.gradle) and the Kotlin DSL
-          # (build.gradle.kts) if the template ever changes.
           for f in android/app/build.gradle android/app/build.gradle.kts; do
             if [ -f "$f" ]; then
               sed -i 's/signingConfig signingConfigs\.release/signingConfig signingConfigs.debug/g' "$f" || true
