@@ -37,6 +37,27 @@ final Provider<CompanyRepository> companyRepositoryProvider =
       (ref) => CompanyRepositoryImpl(ref.watch(companyRemoteDataSourceProvider)),
     );
 
+/// Provides every branch (active and inactive) of the currently selected
+/// company. Used by the branches management page so that deactivated
+/// branches remain visible and can be reactivated.
+///
+/// The provider is invalidated by [CompanyContextNotifier] after any branch
+/// mutation so that listeners refetch automatically.
+final FutureProvider<List<Branch>> companyAllBranchesProvider =
+    FutureProvider<List<Branch>>((ref) async {
+  final String? companyId = ref.watch(
+    companyContextProvider.select(
+      (CompanyContextState s) => s.currentCompany?.id,
+    ),
+  );
+  if (companyId == null) {
+    return const <Branch>[];
+  }
+  return ref
+      .read(companyRepositoryProvider)
+      .getAllCompanyBranches(companyId);
+});
+
 /// Owns the company/branch selection context.
 ///
 /// Responsibilities:
@@ -54,21 +75,11 @@ final Provider<CompanyRepository> companyRepositoryProvider =
 ///
 /// Lifecycle safety (Riverpod 2.x):
 /// Riverpod 3.x exposes `ref.mounted`, but this project targets Riverpod 2.x.
-/// Disposal is tracked with a private flag updated by [Ref.onDispose]. The
-/// flag is flipped *inside* a single callback that also cancels the
-/// notifier's internal state transitions, so behaviour does not depend on
-/// Riverpod's callback ordering. Every write to [state] that can happen
-/// after an `await` is guarded by this flag, matching the semantics that
-/// `ref.mounted` would provide.
+/// Disposal is tracked with a private flag updated by [Ref.onDispose].
 ///
 /// Build safety:
 /// [build] must not write to `state` before returning. The initial load is
-/// therefore scheduled on the next microtask with [scheduleMicrotask],
-/// which runs *after* Riverpod has stored the value returned by [build].
-/// Running the load inline would trigger
-/// `StateError: Tried to read the state of an uninitialized provider`,
-/// because `_loadFromScratch` reads `state` at its very first statement
-/// (before any `await`).
+/// therefore scheduled on the next microtask with [scheduleMicrotask].
 class CompanyContextNotifier extends Notifier<CompanyContextState> {
   bool _isDisposed = false;
 
@@ -104,7 +115,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
   }
 
   // ---------------------------------------------------------------------------
-  // Public API
+  // Public API — selection
   // ---------------------------------------------------------------------------
 
   /// Explicitly selects [company].
@@ -176,6 +187,29 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
   /// Reloads the entire context from the backend.
   Future<void> refresh() => _loadFromScratch();
 
+  /// Reloads only the active branches of the current company.
+  ///
+  /// Cheaper than [refresh] and used after a branch mutation so that the
+  /// Home branch selector reflects the change without a full reload.
+  Future<void> refreshBranches() async {
+    final Company? current = state.currentCompany;
+    if (current == null) {
+      return;
+    }
+    if (_isDisposed) {
+      return;
+    }
+    state = state.copyWith(
+      isLoadingBranches: true,
+      clearBranchesFailure: true,
+    );
+    await _loadBranchesFor(current);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public API — companies
+  // ---------------------------------------------------------------------------
+
   /// Updates the profile of the currently selected company.
   ///
   /// On success the notifier updates the in-memory list and the current
@@ -230,6 +264,118 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       companies: updatedCompanies,
       currentCompany: updated,
     );
+
+    return updated;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Public API — branches
+  // ---------------------------------------------------------------------------
+
+  /// Creates a new branch inside the currently selected company and returns
+  /// the created entity.
+  ///
+  /// Throws [CompanyException] when no company is selected or when the
+  /// backend rejects the request (typically [CompanyFailureType.unauthorized]
+  /// for non-admin callers, [CompanyFailureType.invalidResponse] for a
+  /// duplicate name or code).
+  Future<Branch> createBranch({
+    required String name,
+    String? code,
+    String? address,
+    String? phone,
+  }) async {
+    final Company? current = state.currentCompany;
+    if (current == null) {
+      throw const CompanyException(
+        type: CompanyFailureType.unknown,
+        cause: 'No company is currently selected.',
+      );
+    }
+
+    final Branch created = await ref
+        .read(companyRepositoryProvider)
+        .createBranch(
+          companyId: current.id,
+          name: name,
+          code: code,
+          address: address,
+          phone: phone,
+        );
+
+    if (_isDisposed) {
+      return created;
+    }
+
+    ref.invalidate(companyAllBranchesProvider);
+    await refreshBranches();
+
+    return created;
+  }
+
+  /// Updates an existing branch and returns the updated entity.
+  Future<Branch> updateBranch({
+    required String branchId,
+    required String name,
+    String? code,
+    String? address,
+    String? phone,
+  }) async {
+    final Branch updated = await ref
+        .read(companyRepositoryProvider)
+        .updateBranch(
+          branchId: branchId,
+          name: name,
+          code: code,
+          address: address,
+          phone: phone,
+        );
+
+    if (_isDisposed) {
+      return updated;
+    }
+
+    // Keep the currently selected branch in sync if it was the edited one.
+    final Branch? current = state.currentBranch;
+    if (current != null && current.id == updated.id) {
+      state = state.copyWith(currentBranch: updated);
+    }
+
+    ref.invalidate(companyAllBranchesProvider);
+    await refreshBranches();
+
+    return updated;
+  }
+
+  /// Activates or deactivates a branch and returns the updated entity.
+  ///
+  /// When the branch is deactivated and was the currently selected branch,
+  /// the selection is cleared. The caller is responsible for ensuring at
+  /// least one active branch remains (see the branches page validation).
+  Future<Branch> setBranchActive({
+    required String branchId,
+    required bool isActive,
+  }) async {
+    final Branch updated = await ref
+        .read(companyRepositoryProvider)
+        .setBranchActive(
+          branchId: branchId,
+          isActive: isActive,
+        );
+
+    if (_isDisposed) {
+      return updated;
+    }
+
+    if (!isActive) {
+      final Branch? current = state.currentBranch;
+      if (current != null && current.id == updated.id) {
+        state = state.copyWith(clearCurrentBranch: true);
+      }
+    }
+
+    ref.invalidate(companyAllBranchesProvider);
+    await refreshBranches();
 
     return updated;
   }
@@ -435,14 +581,6 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
   // Selection resolution
   // ---------------------------------------------------------------------------
 
-  /// Chooses the company that should become current, given the authorized
-  /// list and the persisted identifier.
-  ///
-  /// * A single company is always auto-selected.
-  /// * A persisted identifier is honoured only when it matches an entry in
-  ///   the authorized list.
-  /// * Otherwise `null` is returned and the caller waits for an explicit
-  ///   selection.
   static Company? _resolveCompanySelection({
     required List<Company> companies,
     required String? savedCompanyId,
@@ -461,11 +599,6 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
     return null;
   }
 
-  /// Chooses the branch that should become current, given the authorized
-  /// list and the persisted identifier.
-  ///
-  /// Symmetric to [_resolveCompanySelection], and used only after a company
-  /// has been selected.
   static Branch? _resolveBranchSelection({
     required List<Branch> branches,
     required String? savedBranchId,
