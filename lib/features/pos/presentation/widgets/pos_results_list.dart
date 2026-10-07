@@ -22,6 +22,9 @@ import 'pos_product_result_tile.dart';
 /// Each tile shows the product name and its **default-unit** price and
 /// stock. Tapping a tile opens `showPosUnitQuickAddSheet`, where the
 /// cashier picks the unit to add to the cart.
+///
+/// After a successful add, the search query is cleared automatically so the
+/// cashier is immediately ready to look up the next product.
 class PosResultsList extends ConsumerWidget {
   const PosResultsList({super.key});
 
@@ -72,7 +75,7 @@ class PosResultsList extends ConsumerWidget {
             return PosProductResultTile(
               product: product,
               unitName: unitName,
-              onTap: () => _openUnitSheet(context, product),
+              onTap: () => _openUnitSheet(context, ref, product),
             );
           },
         );
@@ -80,8 +83,23 @@ class PosResultsList extends ConsumerWidget {
     );
   }
 
-  Future<void> _openUnitSheet(BuildContext context, Product product) async {
-    await showPosUnitQuickAddSheet(context: context, product: product);
+  Future<void> _openUnitSheet(
+    BuildContext context,
+    WidgetRef ref,
+    Product product,
+  ) async {
+    final bool? added = await showPosUnitQuickAddSheet(
+      context: context,
+      product: product,
+    );
+
+    if (added != true) {
+      return;
+    }
+
+    // Clear the search query so the results area empties and the cart
+    // regains the full middle area — ready for the next scan.
+    ref.read(posSearchProvider.notifier).clear();
   }
 }
 
