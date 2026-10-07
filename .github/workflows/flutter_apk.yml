@@ -1,23 +1,8 @@
 # ============================================================================
 # HESABI — Build Android APK
-# ----------------------------------------------------------------------------
+# ============================================================================
 # Builds a signed-with-debug-key Android APK entirely in CI, without
-# requiring an `android/` folder in the repository. The workflow:
-#
-#   1. Runs `flutter create --platforms=android` to generate `android/`.
-#   2. Sets the app display name to "حسابي" in AndroidManifest.xml.
-#   3. Adds the Android permissions required by mobile_scanner and printing
-#      (camera, bluetooth for future thermal printing, storage for PDF save).
-#   4. Enables Android in the icon and splash configs, then regenerates both
-#      from `assets/images/logo.png`.
-#   5. Patches release signing to reuse the debug keystore (safe for
-#      internal distribution; replace with a production keystore before
-#      publishing to Google Play).
-#   6. Builds a release APK with Supabase credentials injected via
-#      --dart-define.
-#   7. Publishes the APK to a rolling GitHub Release tagged `apk-latest`,
-#      so the download URL stays stable:
-#         https://github.com/<owner>/<repo>/releases/tag/apk-latest
+# requiring an `android/` folder in the repository.
 #
 # This project is Flutter/Dart only. Do NOT add Node.js, npm, or their caches.
 # ============================================================================
@@ -105,16 +90,63 @@ jobs:
           echo "--- AndroidManifest.xml (permissions section) ---"
           grep 'uses-permission\|uses-feature' "$MANIFEST"
 
-      - name: Enable Android in flutter_launcher_icons.yaml
+      - name: Prepare flutter_launcher_icons.yaml for Android
         run: |
-          sed -i 's/^  android: false/  android: true/' flutter_launcher_icons.yaml
+          python3 - <<'PY'
+          import re, pathlib
+
+          p = pathlib.Path('flutter_launcher_icons.yaml')
+          text = p.read_text()
+
+          # 1) Ensure a top-level `image_path` exists (required by the
+          #    android target; the current config only declares it under
+          #    `web:`).
+          header_block = text.split('web:', 1)[0]
+          if 'image_path:' not in header_block:
+              text = text.replace(
+                  'flutter_launcher_icons:\n',
+                  'flutter_launcher_icons:\n  image_path: "assets/images/logo.png"\n',
+                  1,
+              )
+
+          # 2) Flip android to true.
+          text = re.sub(r'^  android: false', '  android: true', text, flags=re.M)
+
+          p.write_text(text)
+          print('--- flutter_launcher_icons.yaml (after patch) ---')
+          print(text)
+          PY
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
-      - name: Enable Android in flutter_native_splash.yaml
+      - name: Prepare flutter_native_splash.yaml for Android
         run: |
-          sed -i 's/^  android: false/  android: true/' flutter_native_splash.yaml
+          python3 - <<'PY'
+          import re, pathlib
+
+          p = pathlib.Path('flutter_native_splash.yaml')
+          text = p.read_text()
+
+          # Flip android to true.
+          text = re.sub(r'^  android: false', '  android: true', text, flags=re.M)
+
+          # Add an android_12 block if it does not exist, so Android 12+
+          # shows a proper splash. Uses the same logo image.
+          if 'android_12:' not in text:
+              text += (
+                  '\n  android_12:\n'
+                  '    image: assets/images/logo.png\n'
+                  '    color: "#FFFFFF"\n'
+                  '    color_dark: "#121212"\n'
+                  '    icon_background_color: "#FFFFFF"\n'
+                  '    icon_background_color_dark: "#121212"\n'
+              )
+
+          p.write_text(text)
+          print('--- flutter_native_splash.yaml (after patch) ---')
+          print(text)
+          PY
 
       - name: Generate native splash
         run: dart run flutter_native_splash:create
