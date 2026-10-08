@@ -33,7 +33,7 @@ class ProductRepositoryImpl implements ProductRepository {
   final ProductRemoteDataSource _remoteDataSource;
 
   // ---------------------------------------------------------------------------
-  // Products
+  // Products — legacy (unpaged)
   // ---------------------------------------------------------------------------
 
   @override
@@ -82,6 +82,94 @@ class ProductRepositoryImpl implements ProductRepository {
       throw _mapUnknown(error, stackTrace, operation: 'getProduct');
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Products — paginated / filtered / sorted
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<ProductsPageResult> listProductsPaged({
+    required String companyId,
+    required int offset,
+    required int limit,
+    String? categoryId,
+    bool? isActive,
+    String? searchQuery,
+    ProductSortField sortField = ProductSortField.name,
+    bool sortAscending = true,
+  }) async {
+    try {
+      final List<ProductModel> models =
+          await _remoteDataSource.listProductsPaged(
+        companyId: companyId,
+        offset: offset,
+        limit: limit,
+        categoryId: categoryId,
+        isActive: isActive,
+        searchQuery: searchQuery,
+        sortColumn: sortField.column,
+        sortAscending: sortAscending,
+      );
+
+      final List<Product> items = models
+          .map((ProductModel model) => model.toEntity())
+          .toList(growable: false);
+
+      return ProductsPageResult(
+        items: items,
+        offset: offset,
+        limit: limit,
+        hasMore: items.length == limit,
+      );
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'listProductsPaged',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'listProductsPaged',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'listProductsPaged');
+    } on ProductException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'listProductsPaged');
+    }
+  }
+
+  @override
+  Future<ProductCounts> countProducts(String companyId) async {
+    try {
+      final List<int> results = await Future.wait<int>(<Future<int>>[
+        _remoteDataSource.countProducts(companyId),
+        _remoteDataSource.countProducts(companyId, isActive: true),
+        _remoteDataSource.countProducts(companyId, isActive: false),
+      ]);
+
+      return ProductCounts(
+        total: results[0],
+        active: results[1],
+        inactive: results[2],
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'countProducts');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'countProducts');
+    } on ProductException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'countProducts');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Products — mutations
+  // ---------------------------------------------------------------------------
 
   @override
   Future<Product> createProduct({
