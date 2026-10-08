@@ -12,6 +12,7 @@ import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
 import '../state/purchase_focus_providers.dart';
 import '../state/purchase_providers.dart';
+import '../state/purchase_search_notifier.dart';
 
 /// Search field for the purchase form.
 ///
