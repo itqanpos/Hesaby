@@ -64,7 +64,7 @@ class SavedPrinterNotifier extends AsyncNotifier<SavedPrinter?> {
         key: PosPreferences.savedPrinterKey,
         value: jsonEncode(printer.toJson()),
       );
-    } catch (error, stackTrace) {
+    } on Object {
       if (!_isDisposed) {
         state = AsyncData<SavedPrinter?>(previous);
       }
@@ -83,7 +83,7 @@ class SavedPrinterNotifier extends AsyncNotifier<SavedPrinter?> {
       final PreferencesStorage storage =
           await ref.read(preferencesStorageProvider.future);
       await storage.remove(key: PosPreferences.savedPrinterKey);
-    } catch (error, stackTrace) {
+    } on Object {
       if (!_isDisposed) {
         state = AsyncData<SavedPrinter?>(previous);
       }
