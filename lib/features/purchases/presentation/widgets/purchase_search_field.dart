@@ -8,11 +8,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../pos/domain/services/barcode_scanner_service.dart';
 import '../../../pos/presentation/services/mobile_scanner_service.dart';
 import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
+import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
 import '../state/purchase_focus_providers.dart';
 import '../state/purchase_providers.dart';
-import '../state/purchase_search_notifier.dart';
 
 /// Search field for the purchase form.
 ///
@@ -20,7 +21,8 @@ import '../state/purchase_search_notifier.dart';
 /// * Debounced query (300ms).
 /// * Barcode scan affordance.
 /// * Clear button.
-/// * Quick-add on Enter when exactly one match exists.
+/// * Quick-add on Enter when exactly one match exists — uses the largest
+///   available unit of the product (carton over piece).
 class PurchaseSearchField extends ConsumerStatefulWidget {
   const PurchaseSearchField({super.key});
 
@@ -106,17 +108,17 @@ class _PurchaseSearchFieldState
 
     await Future<void>.delayed(Duration.zero);
     if (!mounted) return;
-    _quickAddIfSingleMatch();
+    await _quickAddIfSingleMatch();
   }
 
   Future<void> _handleSubmitted(String value) async {
     _commitQueryNow(value);
     await Future<void>.delayed(Duration.zero);
     if (!mounted) return;
-    _quickAddIfSingleMatch();
+    await _quickAddIfSingleMatch();
   }
 
-  void _quickAddIfSingleMatch() {
+  Future<void> _quickAddIfSingleMatch() async {
     final AsyncValue<List<Product>> results =
         ref.read(purchaseSearchResultsProvider);
     final List<Product>? products = results.valueOrNull;
@@ -124,38 +126,77 @@ class _PurchaseSearchFieldState
 
     final Product product = products.first;
 
-    // Find its default unit; skip if unavailable.
-    final AsyncValue<List<Unit>> unitsAsync = ref.read(unitsProvider);
-    final List<Unit> units = unitsAsync.valueOrNull ?? const <Unit>[];
-    Unit? defaultUnit;
-    for (final Unit u in units) {
-      if (u.id == product.defaultUnitId) {
-        defaultUnit = u;
-        break;
+    try {
+      final List<Unit> allUnits =
+          ref.read(unitsProvider).valueOrNull ?? const <Unit>[];
+
+      // Prefer the largest available unit (carton over piece).
+      final List<ProductUnit> productUnits =
+          await ref.read(productUnitsProvider(product.id).future);
+
+      ProductUnit? largest;
+      for (final ProductUnit pu in productUnits) {
+        if (largest == null ||
+            pu.conversionFactor > largest.conversionFactor) {
+          largest = pu;
+        }
       }
-    }
-    if (defaultUnit == null) {
+
+      Unit? pickedUnit;
+      double pickedFactor = 1;
+
+      if (largest != null) {
+        for (final Unit u in allUnits) {
+          if (u.id == largest.unitId) {
+            pickedUnit = u;
+            pickedFactor = largest.conversionFactor;
+            break;
+          }
+        }
+      }
+
+      if (pickedUnit == null) {
+        for (final Unit u in allUnits) {
+          if (u.id == product.defaultUnitId) {
+            pickedUnit = u;
+            break;
+          }
+        }
+      }
+
+      if (pickedUnit == null) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('وحدة المنتج غير متاحة.')),
+          );
+        return;
+      }
+
+      final double pickedCost = product.costPrice * pickedFactor;
+
+      ref.read(purchaseCartProvider.notifier).addProduct(
+            product: product,
+            unit: pickedUnit,
+            quantity: 1,
+            unitCost: pickedCost,
+            conversionFactor: pickedFactor,
+          );
+
+      _debounce?.cancel();
+      _debounce = null;
+      _controller.clear();
+      ref.read(purchaseSearchProvider.notifier).clear();
+      _focusNode.requestFocus();
+    } on Object {
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('وحدة المنتج غير متاحة.'),
-          ),
+          const SnackBar(content: Text('تعذّر إضافة المنتج.')),
         );
-      return;
     }
-
-    ref.read(purchaseCartProvider.notifier).addProduct(
-          product: product,
-          unit: defaultUnit,
-        );
-
-    _debounce?.cancel();
-    _debounce = null;
-    _controller.clear();
-    ref.read(purchaseSearchProvider.notifier).clear();
-    _focusNode.requestFocus();
   }
 
   @override
