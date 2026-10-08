@@ -1,5 +1,3 @@
-# pubspec.yaml
-
 name: hesabi
 description: "Hesabi - Multi-tenant SaaS for POS, Inventory, Sales and Accounting"
 publish_to: "none"
@@ -45,6 +43,24 @@ dependencies:
   mobile_scanner: ^5.2.3
   printing: ^5.13.4
   pdf: ^3.11.1
+
+  # POS — Phase D additions (thermal printer via Bluetooth / USB / Network)
+  #
+  # `flutter_pos_printer_platform_image_3` is a maintained fork of the
+  # original `flutter_pos_printer_platform` package. It exposes a single
+  # `PrinterManager` that supports Bluetooth Classic (SPP), BLE, USB, and
+  # network printers. This lets the app work with any thermal printer the
+  # user owns, without requiring them to know the exact protocol.
+  #
+  # `esc_pos_utils_plus` builds ESC/POS tickets, including raster images
+  # so Arabic text prints correctly on printers that lack an Arabic code
+  # page (which is most low-cost thermal printers sold in the region).
+  #
+  # `image` is needed to convert the rendered receipt into a bitmap before
+  # it is encoded as an ESC/POS raster command.
+  flutter_pos_printer_platform_image_3: ^1.2.0
+  esc_pos_utils_plus: ^2.0.4
+  image: ^4.2.0
 
 dev_dependencies:
   flutter_test:
