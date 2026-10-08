@@ -11,22 +11,27 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../../suppliers/domain/entities/supplier.dart';
 import '../../../suppliers/presentation/providers/supplier_providers.dart';
 import '../../domain/entities/purchase.dart';
 import '../../domain/entities/purchase_item.dart';
+import '../../domain/entities/purchase_receipt.dart';
 import '../../domain/entities/supplier_payment.dart';
 import '../../domain/repositories/purchase_repository.dart';
+import '../dialogs/purchase_print_dialog.dart';
 import '../dialogs/supplier_payment_dialog.dart';
 import '../providers/purchase_providers.dart';
 import '../providers/supplier_payment_providers.dart';
 
 /// Read-only view of a single purchase order, with actions to edit,
-/// confirm, cancel, and record payments.
+/// confirm, cancel, record payments, and print the receipt.
 class PurchaseDetailPage extends ConsumerStatefulWidget {
   const PurchaseDetailPage({super.key});
 
@@ -84,6 +89,13 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
       appBar: AppBar(
         title: const Text('تفاصيل الفاتورة'),
         actions: <Widget>[
+          IconButton(
+            tooltip: 'طباعة',
+            onPressed: anyLoading || _isActing
+                ? null
+                : () => _print(context),
+            icon: const Icon(Icons.print_outlined),
+          ),
           IconButton(
             tooltip: 'تحديث',
             onPressed: anyLoading || _isActing
@@ -217,6 +229,87 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
     );
   }
 
+  Future<void> _print(BuildContext context) async {
+    // Re-read every dependency at the moment of printing so any mutation
+    // performed since the page opened is reflected in the output.
+    final GoRouterState state = GoRouterState.of(context);
+    final String? id = state.pathParameters['id'];
+    if (id == null || id.isEmpty) {
+      return;
+    }
+
+    final Purchase? purchase = _findPurchase(
+      ref.read(purchasesProvider).value ?? const <Purchase>[],
+      id,
+    );
+    if (purchase == null) {
+      return;
+    }
+
+    final Supplier? supplier = _findSupplier(
+      ref.read(suppliersProvider).value ?? const <Supplier>[],
+      purchase.supplierId,
+    );
+
+    final List<PurchaseItem> items =
+        ref.read(purchaseItemsProvider(id)).value ??
+            const <PurchaseItem>[];
+    final List<Product> products =
+        ref.read(productsProvider).value ?? const <Product>[];
+    final List<Unit> units =
+        ref.read(unitsProvider).value ?? const <Unit>[];
+
+    final Map<String, String> productNames = <String, String>{
+      for (final Product p in products) p.id: p.name,
+    };
+    final Map<String, String> unitNames = <String, String>{
+      for (final Unit u in units) u.id: u.name,
+    };
+
+    final CompanyContextState contextState =
+        ref.read(companyContextProvider);
+    final String companyName =
+        contextState.currentCompany?.name ?? '—';
+    final String branchName =
+        contextState.currentBranch?.name ?? '—';
+    final String footer = ref.read(receiptFooterProvider);
+
+    final PurchaseReceipt receipt = PurchaseReceipt(
+      purchaseId: purchase.id,
+      invoiceNumber: purchase.invoiceNumber,
+      purchaseDate: purchase.purchaseDate,
+      companyName: companyName,
+      branchName: branchName,
+      supplierName: supplier?.name ?? 'مورد محذوف',
+      supplierPhone: supplier?.phone,
+      supplierEmail: supplier?.email,
+      supplierAddress: supplier?.address,
+      lines: <PurchaseReceiptLine>[
+        for (final PurchaseItem item in items)
+          PurchaseReceiptLine(
+            productName:
+                productNames[item.productId] ?? 'منتج محذوف',
+            unitName: unitNames[item.unitId] ?? 'وحدة',
+            quantity: item.quantity,
+            unitCost: item.unitCost,
+            lineTotal: item.lineTotal,
+          ),
+      ],
+      subtotal: purchase.subtotal,
+      discount: purchase.discount,
+      taxAmount: purchase.taxAmount,
+      total: purchase.total,
+      status: purchase.status,
+      notes: purchase.notes,
+      footer: footer,
+    );
+
+    if (!context.mounted) {
+      return;
+    }
+    await showPurchasePrintDialog(context: context, receipt: receipt);
+  }
+
   Future<void> _recordPayment(
     BuildContext context, {
     required Purchase purchase,
@@ -259,28 +352,38 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
       ),
     );
 
-    if (confirmed != true || !context.mounted) return;
+    if (confirmed != true || !context.mounted) {
+      return;
+    }
 
     setState(() => _isActing = true);
     try {
       await ref
           .read(purchasesProvider.notifier)
           .confirmPurchase(purchase.id);
-      if (!context.mounted) return;
+      if (!context.mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تأكيد الفاتورة')),
       );
     } on PurchaseException catch (error) {
-      if (!context.mounted) return;
+      if (!context.mounted) {
+        return;
+      }
       _showError(context, error);
     } on Object {
-      if (!context.mounted) return;
+      if (!context.mounted) {
+        return;
+      }
       _showError(
         context,
         const PurchaseException(type: PurchaseFailureType.unknown),
       );
     } finally {
-      if (mounted) setState(() => _isActing = false);
+      if (mounted) {
+        setState(() => _isActing = false);
+      }
     }
   }
 
@@ -312,34 +415,62 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
       ),
     );
 
-    if (confirmed != true || !context.mounted) return;
+    if (confirmed != true || !context.mounted) {
+      return;
+    }
 
     setState(() => _isActing = true);
     try {
       await ref
           .read(purchasesProvider.notifier)
           .cancelPurchase(purchase.id);
-      if (!context.mounted) return;
+      if (!context.mounted) {
+        return;
+      }
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم إلغاء الفاتورة')),
       );
     } on PurchaseException catch (error) {
-      if (!context.mounted) return;
+      if (!context.mounted) {
+        return;
+      }
       _showError(context, error);
     } on Object {
-      if (!context.mounted) return;
+      if (!context.mounted) {
+        return;
+      }
       _showError(
         context,
         const PurchaseException(type: PurchaseFailureType.unknown),
       );
     } finally {
-      if (mounted) setState(() => _isActing = false);
+      if (mounted) {
+        setState(() => _isActing = false);
+      }
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Lookup helpers
+  // ---------------------------------------------------------------------------
+
   static Purchase? _findPurchase(List<Purchase> purchases, String id) {
     for (final Purchase purchase in purchases) {
-      if (purchase.id == id) return purchase;
+      if (purchase.id == id) {
+        return purchase;
+      }
+    }
+    return null;
+  }
+
+  static Supplier? _findSupplier(
+    List<Supplier> suppliers,
+    String supplierId,
+  ) {
+    for (final Supplier supplier in suppliers) {
+      if (supplier.id == supplierId) {
+        return supplier;
+      }
     }
     return null;
   }
@@ -349,7 +480,9 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
     String supplierId,
   ) {
     for (final Supplier supplier in suppliers) {
-      if (supplier.id == supplierId) return supplier.name;
+      if (supplier.id == supplierId) {
+        return supplier.name;
+      }
     }
     return 'مورد محذوف';
   }
@@ -360,7 +493,10 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
 // -----------------------------------------------------------------------------
 
 class _HeaderCard extends StatelessWidget {
-  const _HeaderCard({required this.purchase, required this.supplierName});
+  const _HeaderCard({
+    required this.purchase,
+    required this.supplierName,
+  });
 
   final Purchase purchase;
   final String supplierName;
@@ -372,8 +508,11 @@ class _HeaderCard extends StatelessWidget {
     final DateFormat dateFormat = DateFormat.yMd('ar_EG');
     final DateFormat dateTimeFormat = DateFormat.yMd('ar_EG').add_Hm();
 
-    final (Color badgeBg, Color badgeFg) =
-        _statusColors(scheme, purchase.status);
+    final (Color badgeBg, Color badgeFg) = _statusColors(
+      scheme,
+      purchase.status,
+    );
+
     final String? invoice = purchase.invoiceNumber;
 
     return DecoratedBox(
@@ -390,8 +529,10 @@ class _HeaderCard extends StatelessWidget {
             Row(
               children: <Widget>[
                 Expanded(
-                  child: Text('بيانات الفاتورة',
-                      style: theme.textTheme.titleMedium),
+                  child: Text(
+                    'بيانات الفاتورة',
+                    style: theme.textTheme.titleMedium,
+                  ),
                 ),
                 DecoratedBox(
                   decoration: BoxDecoration(
@@ -400,66 +541,89 @@ class _HeaderCard extends StatelessWidget {
                   ),
                   child: Padding(
                     padding: const EdgeInsets.symmetric(
-                        horizontal: 10, vertical: 4),
+                      horizontal: 10,
+                      vertical: 4,
+                    ),
                     child: Text(
                       _statusLabel(purchase.status),
-                      style: theme.textTheme.labelMedium
-                          ?.copyWith(color: badgeFg),
+                      style: theme.textTheme.labelMedium?.copyWith(
+                        color: badgeFg,
+                      ),
                     ),
                   ),
                 ),
               ],
             ),
             const SizedBox(height: 12),
-            _row(theme,
-                label: 'رقم الفاتورة',
-                value: (invoice != null && invoice.isNotEmpty)
-                    ? invoice
-                    : '—'),
+            _row(
+              theme,
+              label: 'رقم الفاتورة',
+              value: (invoice != null && invoice.isNotEmpty)
+                  ? invoice
+                  : '—',
+            ),
             _row(theme, label: 'المورد', value: supplierName),
-            _row(theme,
-                label: 'تاريخ الفاتورة',
-                value: dateFormat.format(purchase.purchaseDate.toLocal())),
+            _row(
+              theme,
+              label: 'تاريخ الفاتورة',
+              value: dateFormat.format(purchase.purchaseDate.toLocal()),
+            ),
             if (purchase.wasConfirmed && purchase.confirmedAt != null)
-              _row(theme,
-                  label: 'تم التأكيد في',
-                  value: dateTimeFormat
-                      .format(purchase.confirmedAt!.toLocal())),
+              _row(
+                theme,
+                label: 'تم التأكيد في',
+                value: dateTimeFormat.format(
+                  purchase.confirmedAt!.toLocal(),
+                ),
+              ),
             if (purchase.wasCancelled && purchase.cancelledAt != null)
-              _row(theme,
-                  label: 'تم الإلغاء في',
-                  value: dateTimeFormat
-                      .format(purchase.cancelledAt!.toLocal())),
+              _row(
+                theme,
+                label: 'تم الإلغاء في',
+                value: dateTimeFormat.format(
+                  purchase.cancelledAt!.toLocal(),
+                ),
+              ),
             if (purchase.hasNotes)
-              _row(theme,
-                  label: 'ملاحظات',
-                  value: purchase.notes!,
-                  multiline: true),
+              _row(
+                theme,
+                label: 'ملاحظات',
+                value: purchase.notes!,
+                multiline: true,
+              ),
           ],
         ),
       ),
     );
   }
 
-  Widget _row(ThemeData theme,
-      {required String label,
-      required String value,
-      bool multiline = false}) {
+  Widget _row(
+    ThemeData theme, {
+    required String label,
+    required String value,
+    bool multiline = false,
+  }) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
-        crossAxisAlignment: multiline
-            ? CrossAxisAlignment.start
-            : CrossAxisAlignment.center,
+        crossAxisAlignment:
+            multiline ? CrossAxisAlignment.start : CrossAxisAlignment.center,
         children: <Widget>[
           SizedBox(
             width: 120,
-            child: Text('$label:',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: theme.colorScheme.onSurfaceVariant,
-                )),
+            child: Text(
+              '$label:',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
           ),
-          Expanded(child: Text(value, style: theme.textTheme.bodyMedium)),
+          Expanded(
+            child: Text(
+              value,
+              style: theme.textTheme.bodyMedium,
+            ),
+          ),
         ],
       ),
     );
@@ -484,6 +648,7 @@ class _ItemsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+
     return DecoratedBox(
       decoration: BoxDecoration(
         color: theme.colorScheme.surface,
@@ -498,17 +663,20 @@ class _ItemsCard extends StatelessWidget {
             Text('بنود الفاتورة', style: theme.textTheme.titleMedium),
             const SizedBox(height: 12),
             if (items.isEmpty)
-              Text('لا توجد بنود في هذه الفاتورة.',
-                  style: theme.textTheme.bodySmall)
+              Text(
+                'لا توجد بنود في هذه الفاتورة.',
+                style: theme.textTheme.bodySmall,
+              )
             else
               for (int i = 0; i < items.length; i++)
                 Padding(
                   padding: EdgeInsets.only(
-                      bottom: i == items.length - 1 ? 0 : 8),
+                    bottom: i == items.length - 1 ? 0 : 8,
+                  ),
                   child: _ItemRow(
                     item: items[i],
-                    productName:
-                        productNames[items[i].productId] ?? 'منتج محذوف',
+                    productName: productNames[items[i].productId] ??
+                        'منتج محذوف',
                     unitName: unitNames[items[i].unitId] ?? 'وحدة',
                   ),
                 ),
@@ -546,23 +714,28 @@ class _ItemRow extends StatelessWidget {
         borderRadius: BorderRadius.circular(12),
       ),
       child: Padding(
-        padding:
-            const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
           children: <Widget>[
-            Text(productName,
-                style: theme.textTheme.titleSmall,
-                overflow: TextOverflow.ellipsis),
+            Text(
+              productName,
+              style: theme.textTheme.titleSmall,
+              overflow: TextOverflow.ellipsis,
+            ),
             const SizedBox(height: 4),
             Row(
               children: <Widget>[
-                Text('${numberFormat.format(item.quantity)} $unitName',
-                    style: theme.textTheme.bodySmall),
+                Text(
+                  '${numberFormat.format(item.quantity)} $unitName',
+                  style: theme.textTheme.bodySmall,
+                ),
                 const SizedBox(width: 12),
-                Text('× ${moneyFormat.format(item.unitCost)}',
-                    style: theme.textTheme.bodySmall),
+                Text(
+                  '× ${moneyFormat.format(item.unitCost)}',
+                  style: theme.textTheme.bodySmall,
+                ),
                 const Spacer(),
                 Text(
                   moneyFormat.format(item.lineTotal),
@@ -577,8 +750,9 @@ class _ItemRow extends StatelessWidget {
               const SizedBox(height: 4),
               Text(
                 item.notes!,
-                style: theme.textTheme.bodySmall
-                    ?.copyWith(fontStyle: FontStyle.italic),
+                style: theme.textTheme.bodySmall?.copyWith(
+                  fontStyle: FontStyle.italic,
+                ),
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
               ),
@@ -621,23 +795,42 @@ class _TotalsCard extends StatelessWidget {
           children: <Widget>[
             Text('الإجماليات', style: theme.textTheme.titleMedium),
             const SizedBox(height: 12),
-            _line(theme, 'المجموع الفرعي',
-                moneyFormat.format(purchase.subtotal)),
+            _line(
+              theme,
+              'المجموع الفرعي',
+              moneyFormat.format(purchase.subtotal),
+            ),
             const SizedBox(height: 4),
-            _line(theme, 'الخصم', moneyFormat.format(purchase.discount)),
+            _line(
+              theme,
+              'الخصم',
+              moneyFormat.format(purchase.discount),
+            ),
             const SizedBox(height: 4),
-            _line(theme, 'الضريبة', moneyFormat.format(purchase.taxAmount)),
+            _line(
+              theme,
+              'الضريبة',
+              moneyFormat.format(purchase.taxAmount),
+            ),
             const Divider(height: 20),
-            _line(theme, 'الإجمالي', moneyFormat.format(purchase.total),
-                emphasized: true),
+            _line(
+              theme,
+              'الإجمالي',
+              moneyFormat.format(purchase.total),
+              emphasized: true,
+            ),
           ],
         ),
       ),
     );
   }
 
-  Widget _line(ThemeData theme, String label, String value,
-      {bool emphasized = false}) {
+  Widget _line(
+    ThemeData theme,
+    String label,
+    String value, {
+    bool emphasized = false,
+  }) {
     return Row(
       children: <Widget>[
         Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
@@ -699,7 +892,6 @@ class _PaymentsCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            // ---- Header ----
             Row(
               children: <Widget>[
                 Expanded(
@@ -721,13 +913,10 @@ class _PaymentsCard extends StatelessWidget {
 
             const SizedBox(height: 12),
 
-            // ---- Summary ----
             _summaryRow(
               theme,
               label: 'إجمالي الفاتورة',
-              value: moneyFormat.format(payments.isEmpty
-                  ? remaining + totalPaid
-                  : totalPaid + remaining),
+              value: moneyFormat.format(totalPaid + remaining),
             ),
             const SizedBox(height: 4),
             _summaryRow(
@@ -756,11 +945,16 @@ class _PaymentsCard extends StatelessWidget {
                 ),
                 child: Padding(
                   padding: const EdgeInsets.symmetric(
-                      horizontal: 12, vertical: 8),
+                    horizontal: 12,
+                    vertical: 8,
+                  ),
                   child: Row(
                     children: <Widget>[
-                      const Icon(Icons.check_circle,
-                          color: Color(0xFF0F7B6C), size: 18),
+                      const Icon(
+                        Icons.check_circle,
+                        color: Color(0xFF0F7B6C),
+                        size: 18,
+                      ),
                       const SizedBox(width: 8),
                       Expanded(
                         child: Text(
@@ -779,7 +973,6 @@ class _PaymentsCard extends StatelessWidget {
 
             const Divider(height: 24),
 
-            // ---- Payments list ----
             if (payments.isEmpty)
               Text(
                 'لا توجد دفعات مسجلة على هذه الفاتورة بعد.',
@@ -791,7 +984,8 @@ class _PaymentsCard extends StatelessWidget {
               for (int i = 0; i < payments.length; i++)
                 Padding(
                   padding: EdgeInsets.only(
-                      bottom: i == payments.length - 1 ? 0 : 6),
+                    bottom: i == payments.length - 1 ? 0 : 6,
+                  ),
                   child: _PaymentRow(payment: payments[i]),
                 ),
           ],
@@ -935,41 +1129,54 @@ class _ActionsSection extends StatelessWidget {
     final List<Widget> buttons = <Widget>[];
 
     if (purchase.canEdit) {
-      buttons.add(Expanded(
-        child: AppButton(
-          label: 'تعديل',
-          icon: Icons.edit_outlined,
-          variant: AppButtonVariant.secondary,
-          onPressed: isBusy ? null : onEdit,
+      buttons.add(
+        Expanded(
+          child: AppButton(
+            label: 'تعديل',
+            icon: Icons.edit_outlined,
+            variant: AppButtonVariant.secondary,
+            onPressed: isBusy ? null : onEdit,
+          ),
         ),
-      ));
+      );
     }
 
     if (purchase.isDraft) {
-      if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 12));
-      buttons.add(Expanded(
-        child: AppButton(
-          label: 'تأكيد',
-          icon: Icons.check_circle_outline,
-          isLoading: isBusy,
-          onPressed: isBusy ? null : onConfirm,
+      if (buttons.isNotEmpty) {
+        buttons.add(const SizedBox(width: 12));
+      }
+      buttons.add(
+        Expanded(
+          child: AppButton(
+            label: 'تأكيد',
+            icon: Icons.check_circle_outline,
+            isLoading: isBusy,
+            onPressed: isBusy ? null : onConfirm,
+          ),
         ),
-      ));
+      );
     }
 
     if (purchase.canTransition) {
-      if (buttons.isNotEmpty) buttons.add(const SizedBox(width: 12));
-      buttons.add(Expanded(
-        child: AppButton(
-          label: 'إلغاء الفاتورة',
-          icon: Icons.cancel_outlined,
-          variant: AppButtonVariant.danger,
-          onPressed: isBusy ? null : onCancel,
+      if (buttons.isNotEmpty) {
+        buttons.add(const SizedBox(width: 12));
+      }
+      buttons.add(
+        Expanded(
+          child: AppButton(
+            label: 'إلغاء الفاتورة',
+            icon: Icons.cancel_outlined,
+            variant: AppButtonVariant.danger,
+            onPressed: isBusy ? null : onCancel,
+          ),
         ),
-      ));
+      );
     }
 
-    if (buttons.isEmpty) return const SizedBox.shrink();
+    if (buttons.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
     return Row(children: buttons);
   }
 }
