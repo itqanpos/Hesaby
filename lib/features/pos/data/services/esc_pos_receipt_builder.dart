@@ -376,6 +376,9 @@ class _Painter {
 
   void _balanceBlock(Receipt r) {
     _kvRow('الرصيد السابق', _money(r.previousBalance ?? 0));
+    if (r.hasBalancePayment) {
+      _kvRow('مدفوع على الرصيد السابق', _money(r.paidOnBalance));
+    }
     _kvRow('الرصيد الحالي', _money(r.newBalance ?? 0),
         emphasized: true);
   }
