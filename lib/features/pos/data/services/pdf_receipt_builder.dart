@@ -535,6 +535,12 @@ abstract final class PdfReceiptBuilder {
           _money(receipt.previousBalance ?? 0),
           s,
         ),
+        if (receipt.hasBalancePayment)
+          _kvRow(
+            'مدفوع على الرصيد السابق',
+            _money(receipt.paidOnBalance),
+            s,
+          ),
         _kvRow(
           'الرصيد الحالي',
           _money(receipt.newBalance ?? 0),
