@@ -67,6 +67,23 @@ jobs:
           sed -i 's/android:label="hesabi"/android:label="حسابي"/' \
             android/app/src/main/AndroidManifest.xml
 
+      - name: Set minSdkVersion to 23
+        run: |
+          # `flutter_pos_printer_platform_image_3` requires Android API 23
+          # (Marshmallow) because it uses the newer Bluetooth permission
+          # model and BluetoothLeScanner APIs. Flutter's default template
+          # uses `flutter.minSdkVersion` (currently 21), so we override it
+          # here. This runs after `flutter create` has generated the file.
+          for f in android/app/build.gradle android/app/build.gradle.kts; do
+            if [ -f "$f" ]; then
+              sed -i 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 23/' "$f" || true
+              sed -i 's/minSdk = flutter\.minSdkVersion/minSdk = 23/' "$f" || true
+              sed -i 's/minSdkVersion 21/minSdkVersion 23/' "$f" || true
+              echo "--- $f (sdk section) ---"
+              grep -n 'minSdk\|targetSdk\|compileSdk' "$f" || true
+            fi
+          done
+
       - name: Add Android permissions
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
@@ -98,9 +115,6 @@ jobs:
           p = pathlib.Path('flutter_launcher_icons.yaml')
           text = p.read_text()
 
-          # 1) Ensure a top-level `image_path` exists (required by the
-          #    android target; the current config only declares it under
-          #    `web:`).
           header_block = text.split('web:', 1)[0]
           if 'image_path:' not in header_block:
               text = text.replace(
@@ -109,7 +123,6 @@ jobs:
                   1,
               )
 
-          # 2) Flip android to true.
           text = re.sub(r'^  android: false', '  android: true', text, flags=re.M)
 
           p.write_text(text)
@@ -128,11 +141,8 @@ jobs:
           p = pathlib.Path('flutter_native_splash.yaml')
           text = p.read_text()
 
-          # Flip android to true.
           text = re.sub(r'^  android: false', '  android: true', text, flags=re.M)
 
-          # Add an android_12 block if it does not exist, so Android 12+
-          # shows a proper splash. Uses the same logo image.
           if 'android_12:' not in text:
               text += (
                   '\n  android_12:\n'
