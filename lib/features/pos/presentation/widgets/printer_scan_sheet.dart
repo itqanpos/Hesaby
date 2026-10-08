@@ -6,6 +6,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/logger.dart';
+import '../../data/services/printer_service.dart';
 import '../../domain/entities/printer_device.dart';
 import '../providers/printer_providers.dart';
 
@@ -48,7 +49,6 @@ class _PrinterScanSheetState extends ConsumerState<_PrinterScanSheet> {
   @override
   void initState() {
     super.initState();
-    // Kick off a scan automatically so the user does not need an extra tap.
     WidgetsBinding.instance.addPostFrameCallback((_) => _startScan());
   }
 
