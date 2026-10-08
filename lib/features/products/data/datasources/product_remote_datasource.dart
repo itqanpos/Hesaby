@@ -1,178 +1,189 @@
-// lib/features/products/data/repositories/product_repository_impl.dart
+// lib/features/products/data/datasources/product_remote_datasource.dart
 
-import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
+import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
 
-import '../../../../core/utils/logger.dart';
-import '../../domain/entities/product.dart';
-import '../../domain/entities/product_unit.dart';
 import '../../domain/repositories/product_repository.dart';
-import '../datasources/product_remote_datasource.dart';
 import '../models/product_model.dart';
 import '../models/product_unit_model.dart';
 
-/// Concrete implementation of [ProductRepository] backed by Supabase.
+/// Thin wrapper around the Supabase queries for `products` and
+/// `product_units`.
 ///
-/// Responsibilities:
-/// * Call the remote data source.
-/// * Translate [ProductModel] / [ProductUnitModel] rows into pure
-///   [Product] / [ProductUnit] entities.
-/// * Translate Supabase / PostgREST errors into safe [ProductException]s
-///   carrying a [ProductFailureType]. Raw backend messages never leave this
-///   layer, and no credential or token is ever logged.
+/// This is the only file within the products feature that talks to Supabase
+/// directly for products and their unit conversions. Everything above this
+/// class deals with [ProductModel] / [ProductUnitModel] and never sees
+/// Supabase types.
 ///
-/// Typed error disambiguation:
-/// Both partial unique indexes on `products` (`sku`, `barcode`) and both
-/// composite foreign keys that guard cross-tenant references report generic
-/// PostgreSQL codes (`23505`, `23503`). The specific failure type is
-/// therefore resolved by inspecting the constraint name present in the
-/// error text. Constraint names are declared in the Phase 4 migrations and
-/// are stable, so this mapping is deterministic.
-class ProductRepositoryImpl implements ProductRepository {
-  const ProductRepositoryImpl(this._remoteDataSource);
+/// Tenant isolation is enforced by Row Level Security and by composite
+/// foreign keys:
+/// * `products` rows are visible / writable only for companies where the
+///   current user has an active membership (RLS).
+/// * `products.category_id` / `products.default_unit_id` can only reference
+///   a category / unit of the same company (composite FKs).
+/// * `product_units` rows are similarly scoped by RLS and by composite FKs
+///   on both the product and the unit.
+///
+/// The data source never accepts a `userId` and never trusts a
+/// client-supplied identity. The active identity is always `auth.uid()`,
+/// evaluated inside the database.
+class ProductRemoteDataSource {
+  const ProductRemoteDataSource(this._client);
 
-  final ProductRemoteDataSource _remoteDataSource;
+  /// Active Supabase client, or `null` when Supabase was not initialised.
+  final SupabaseClient? _client;
+
+  /// Whether this data source can perform remote queries.
+  bool get isAvailable => _client != null;
 
   // ---------------------------------------------------------------------------
   // Products — legacy (unpaged)
   // ---------------------------------------------------------------------------
 
-  @override
-  Future<List<Product>> listProducts(
+  /// Returns products of [companyId] visible to the current user.
+  ///
+  /// Inactive products are omitted unless [includeInactive] is `true`. When
+  /// [categoryId] is provided, only products of that category are returned.
+  /// Results are ordered by name.
+  ///
+  /// Kept for consumers that genuinely need every product in memory (POS
+  /// scanner fallback, sale form lookup). New UI should prefer
+  /// [listProductsPaged].
+  Future<List<ProductModel>> listProducts(
     String companyId, {
-    bool includeInactive = false,
+    required bool includeInactive,
     String? categoryId,
   }) async {
-    try {
-      final List<ProductModel> models = await _remoteDataSource.listProducts(
-        companyId,
-        includeInactive: includeInactive,
-        categoryId: categoryId,
-      );
-      return models
-          .map((ProductModel model) => model.toEntity())
-          .toList(growable: false);
-    } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(error, stackTrace, operation: 'listProducts');
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'listProducts');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'listProducts');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'listProducts');
+    final SupabaseClient client = _requireClient();
+
+    // `var` infers `PostgrestFilterBuilder<PostgrestList>`. Reassignment is
+    // used because filters must be applied conditionally; Dart preserves the
+    // concrete type across reassignments of the same builder.
+    var query = client.from('products').select().eq('company_id', companyId);
+
+    if (!includeInactive) {
+      query = query.eq('is_active', true);
     }
+    if (categoryId != null) {
+      query = query.eq('category_id', categoryId);
+    }
+
+    final List<Map<String, dynamic>> rows =
+        await query.order('name', ascending: true);
+
+    return rows.map(ProductModel.fromMap).toList(growable: false);
   }
 
-  @override
-  Future<Product> getProduct(String productId) async {
-    try {
-      final ProductModel model =
-          await _remoteDataSource.getProduct(productId);
-      return model.toEntity();
-    } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(error, stackTrace, operation: 'getProduct');
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'getProduct');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'getProduct');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'getProduct');
-    }
+  /// Returns the product with [productId], or throws if inaccessible.
+  Future<ProductModel> getProduct(String productId) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> row = await client
+        .from('products')
+        .select()
+        .eq('id', productId)
+        .single();
+
+    return ProductModel.fromMap(row);
   }
 
   // ---------------------------------------------------------------------------
   // Products — paginated / filtered / sorted
   // ---------------------------------------------------------------------------
 
-  @override
-  Future<ProductsPageResult> listProductsPaged({
+  /// Fetches one page of products with optional filter, search and sort.
+  ///
+  /// - [categoryId] filters by category.
+  /// - [isActive] filters by active flag; `null` means "both".
+  /// - [searchQuery] matches name / SKU / barcode (case-insensitive
+  ///   substring), with PostgREST special characters neutralised.
+  /// - [sortColumn] and [sortAscending] control the ORDER BY clause.
+  ///
+  /// A tie-breaker on `id` is always appended so the pagination window
+  /// stays stable across requests.
+  Future<List<ProductModel>> listProductsPaged({
     required String companyId,
     required int offset,
     required int limit,
     String? categoryId,
     bool? isActive,
     String? searchQuery,
-    ProductSortField sortField = ProductSortField.name,
-    bool sortAscending = true,
+    required String sortColumn,
+    required bool sortAscending,
   }) async {
-    try {
-      final List<ProductModel> models =
-          await _remoteDataSource.listProductsPaged(
-        companyId: companyId,
-        offset: offset,
-        limit: limit,
-        categoryId: categoryId,
-        isActive: isActive,
-        searchQuery: searchQuery,
-        sortColumn: sortField.column,
-        sortAscending: sortAscending,
-      );
+    final SupabaseClient client = _requireClient();
 
-      final List<Product> items = models
-          .map((ProductModel model) => model.toEntity())
-          .toList(growable: false);
+    var query = client.from('products').select().eq('company_id', companyId);
 
-      return ProductsPageResult(
-        items: items,
-        offset: offset,
-        limit: limit,
-        hasMore: items.length == limit,
-      );
-    } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(
-        error,
-        stackTrace,
-        operation: 'listProductsPaged',
-      );
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(
-        error,
-        stackTrace,
-        operation: 'listProductsPaged',
-      );
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'listProductsPaged');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'listProductsPaged');
+    if (isActive != null) {
+      query = query.eq('is_active', isActive);
     }
+    if (categoryId != null) {
+      query = query.eq('category_id', categoryId);
+    }
+
+    final String? rawSearch = searchQuery?.trim();
+    if (rawSearch != null && rawSearch.isNotEmpty) {
+      final String term = _sanitizeSearchTerm(rawSearch);
+      if (term.isNotEmpty) {
+        query = query.or(
+          'name.ilike.%$term%,sku.ilike.%$term%,barcode.ilike.%$term%',
+        );
+      }
+    }
+
+    query = query.order(sortColumn, ascending: sortAscending);
+    query = query.order('id', ascending: true);
+
+    final List<Map<String, dynamic>> rows =
+        await query.range(offset, offset + limit - 1);
+
+    return rows.map(ProductModel.fromMap).toList(growable: false);
   }
 
-  @override
-  Future<ProductCounts> countProducts(String companyId) async {
-    try {
-      final List<int> results = await Future.wait<int>(<Future<int>>[
-        _remoteDataSource.countProducts(companyId),
-        _remoteDataSource.countProducts(companyId, isActive: true),
-        _remoteDataSource.countProducts(companyId, isActive: false),
-      ]);
+  /// Counts products of [companyId], optionally filtered by active flag.
+  ///
+  /// Implemented by fetching only the `id` column and counting rows in
+  /// Dart. This avoids a dependency on the PostgREST count header, which
+  /// is not exposed uniformly by the Supabase Dart client across versions.
+  /// The payload for 1,000–10,000 rows stays small (36–360 KB).
+  Future<int> countProducts(
+    String companyId, {
+    bool? isActive,
+  }) async {
+    final SupabaseClient client = _requireClient();
 
-      return ProductCounts(
-        total: results[0],
-        active: results[1],
-        inactive: results[2],
-      );
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'countProducts');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'countProducts');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'countProducts');
+    var query =
+        client.from('products').select('id').eq('company_id', companyId);
+
+    if (isActive != null) {
+      query = query.eq('is_active', isActive);
     }
+
+    final List<Map<String, dynamic>> rows = await query;
+
+    return rows.length;
+  }
+
+  /// Neutralises PostgREST-special characters in a user-supplied search
+  /// term before it is embedded in an `.or(...)` filter.
+  ///
+  /// PostgREST treats commas as filter separators and `%` / `_` as LIKE
+  /// wildcards. Rather than attempt to escape them (the escaping rules
+  /// differ between PostgREST versions), they are replaced with a single
+  /// space and the result is trimmed. Users can still search for any
+  /// ordinary word, number or hyphenated code.
+  static String _sanitizeSearchTerm(String input) {
+    final String cleaned =
+        input.replaceAll(RegExp(r'[%,_\\]'), ' ').trim();
+    return cleaned;
   }
 
   // ---------------------------------------------------------------------------
   // Products — mutations
   // ---------------------------------------------------------------------------
 
-  @override
-  Future<Product> createProduct({
+  /// Inserts a new product and returns the created row.
+  Future<ProductModel> createProduct({
     required String companyId,
     required String name,
     required String defaultUnitId,
@@ -185,36 +196,39 @@ class ProductRepositoryImpl implements ProductRepository {
     double? minSellingPrice,
     double? taxRate,
   }) async {
-    try {
-      final ProductModel model = await _remoteDataSource.createProduct(
-        companyId: companyId,
-        name: name,
-        defaultUnitId: defaultUnitId,
-        costPrice: costPrice,
-        sellingPrice: sellingPrice,
-        categoryId: categoryId,
-        sku: sku,
-        barcode: barcode,
-        description: description,
-        minSellingPrice: minSellingPrice,
-        taxRate: taxRate,
-      );
-      return model.toEntity();
-    } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(error, stackTrace, operation: 'createProduct');
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'createProduct');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'createProduct');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'createProduct');
-    }
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'company_id': companyId,
+      'name': name.trim(),
+      'default_unit_id': defaultUnitId,
+      'cost_price': costPrice,
+      'selling_price': sellingPrice,
+      if (categoryId != null) 'category_id': categoryId,
+      if (sku != null && sku.trim().isNotEmpty) 'sku': sku.trim(),
+      if (barcode != null && barcode.trim().isNotEmpty)
+        'barcode': barcode.trim(),
+      if (description != null && description.trim().isNotEmpty)
+        'description': description.trim(),
+      if (minSellingPrice != null) 'min_selling_price': minSellingPrice,
+      if (taxRate != null) 'tax_rate': taxRate,
+    };
+
+    final Map<String, dynamic> row = await client
+        .from('products')
+        .insert(payload)
+        .select()
+        .single();
+
+    return ProductModel.fromMap(row);
   }
 
-  @override
-  Future<Product> updateProduct({
+  /// Updates an existing product and returns the updated row.
+  ///
+  /// Only non-null fields are sent, except for the six nullable columns that
+  /// carry an explicit `clear*` flag to disambiguate "leave as is" from
+  /// "set to null".
+  Future<ProductModel> updateProduct({
     required String productId,
     String? name,
     String? defaultUnitId,
@@ -234,346 +248,148 @@ class ProductRepositoryImpl implements ProductRepository {
     bool clearTaxRate = false,
     bool? isActive,
   }) async {
-    try {
-      final ProductModel model = await _remoteDataSource.updateProduct(
-        productId: productId,
-        name: name,
-        defaultUnitId: defaultUnitId,
-        categoryId: categoryId,
-        clearCategory: clearCategory,
-        sku: sku,
-        clearSku: clearSku,
-        barcode: barcode,
-        clearBarcode: clearBarcode,
-        description: description,
-        clearDescription: clearDescription,
-        costPrice: costPrice,
-        sellingPrice: sellingPrice,
-        minSellingPrice: minSellingPrice,
-        clearMinSellingPrice: clearMinSellingPrice,
-        taxRate: taxRate,
-        clearTaxRate: clearTaxRate,
-        isActive: isActive,
-      );
-      return model.toEntity();
-    } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(error, stackTrace, operation: 'updateProduct');
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'updateProduct');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'updateProduct');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'updateProduct');
-    }
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      if (name != null) 'name': name.trim(),
+      if (defaultUnitId != null) 'default_unit_id': defaultUnitId,
+      if (clearCategory) 'category_id': null,
+      if (!clearCategory && categoryId != null) 'category_id': categoryId,
+      if (clearSku) 'sku': null,
+      if (!clearSku && sku != null) 'sku': sku.trim(),
+      if (clearBarcode) 'barcode': null,
+      if (!clearBarcode && barcode != null) 'barcode': barcode.trim(),
+      if (clearDescription) 'description': null,
+      if (!clearDescription && description != null)
+        'description': description.trim(),
+      if (costPrice != null) 'cost_price': costPrice,
+      if (sellingPrice != null) 'selling_price': sellingPrice,
+      if (clearMinSellingPrice) 'min_selling_price': null,
+      if (!clearMinSellingPrice && minSellingPrice != null)
+        'min_selling_price': minSellingPrice,
+      if (clearTaxRate) 'tax_rate': null,
+      if (!clearTaxRate && taxRate != null) 'tax_rate': taxRate,
+      if (isActive != null) 'is_active': isActive,
+    };
+
+    final Map<String, dynamic> row = await client
+        .from('products')
+        .update(payload)
+        .eq('id', productId)
+        .select()
+        .single();
+
+    return ProductModel.fromMap(row);
   }
 
-  @override
+  /// Deletes the product with [productId].
   Future<void> deleteProduct(String productId) async {
-    try {
-      await _remoteDataSource.deleteProduct(productId);
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'deleteProduct');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'deleteProduct');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'deleteProduct');
-    }
+    final SupabaseClient client = _requireClient();
+
+    await client.from('products').delete().eq('id', productId);
   }
 
   // ---------------------------------------------------------------------------
   // Product units (non-base conversions)
   // ---------------------------------------------------------------------------
 
-  @override
-  Future<List<ProductUnit>> listProductUnits(String productId) async {
-    try {
-      final List<ProductUnitModel> models =
-          await _remoteDataSource.listProductUnits(productId);
-      return models
-          .map((ProductUnitModel model) => model.toEntity())
-          .toList(growable: false);
-    } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(
-        error,
-        stackTrace,
-        operation: 'listProductUnits',
-      );
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'listProductUnits');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'listProductUnits');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'listProductUnits');
-    }
+  /// Returns every non-base unit conversion of [productId], oldest first.
+  Future<List<ProductUnitModel>> listProductUnits(String productId) async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('product_units')
+        .select()
+        .eq('product_id', productId)
+        .order('created_at', ascending: true);
+
+    return rows.map(ProductUnitModel.fromMap).toList(growable: false);
   }
 
-  @override
-  Future<ProductUnit> addProductUnit({
+  /// Inserts a new non-base unit conversion for [productId].
+  ///
+  /// `company_id` is required by the database but is not part of the Domain
+  /// interface. It is derived here by reading the product's `company_id`
+  /// first. This keeps the repository interface free of a value that is
+  /// always implied by the product, and it preserves tenant integrity: the
+  /// subsequent composite FKs on `product_units` guarantee that the unit
+  /// belongs to the same company as the product.
+  Future<ProductUnitModel> addProductUnit({
     required String productId,
     required String unitId,
     required double conversionFactor,
   }) async {
-    try {
-      final ProductUnitModel model = await _remoteDataSource.addProductUnit(
-        productId: productId,
-        unitId: unitId,
-        conversionFactor: conversionFactor,
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> productRow = await client
+        .from('products')
+        .select('company_id')
+        .eq('id', productId)
+        .single();
+
+    final Object? rawCompanyId = productRow['company_id'];
+    if (rawCompanyId is! String || rawCompanyId.isEmpty) {
+      throw const ProductException(
+        type: ProductFailureType.invalidResponse,
+        cause: 'Product row is missing a valid company_id.',
       );
-      return model.toEntity();
-    } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(error, stackTrace, operation: 'addProductUnit');
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'addProductUnit');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'addProductUnit');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'addProductUnit');
     }
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'company_id': rawCompanyId,
+      'product_id': productId,
+      'unit_id': unitId,
+      'conversion_factor': conversionFactor,
+    };
+
+    final Map<String, dynamic> row = await client
+        .from('product_units')
+        .insert(payload)
+        .select()
+        .single();
+
+    return ProductUnitModel.fromMap(row);
   }
 
-  @override
-  Future<ProductUnit> updateProductUnit({
+  /// Updates the conversion factor of an existing product-unit row.
+  Future<ProductUnitModel> updateProductUnit({
     required String productUnitId,
     required double conversionFactor,
   }) async {
-    try {
-      final ProductUnitModel model =
-          await _remoteDataSource.updateProductUnit(
-        productUnitId: productUnitId,
-        conversionFactor: conversionFactor,
-      );
-      return model.toEntity();
-    } on FormatException catch (error, stackTrace) {
-      throw _mapInvalidResponse(
-        error,
-        stackTrace,
-        operation: 'updateProductUnit',
-      );
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'updateProductUnit');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'updateProductUnit');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'updateProductUnit');
-    }
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> row = await client
+        .from('product_units')
+        .update(<String, dynamic>{'conversion_factor': conversionFactor})
+        .eq('id', productUnitId)
+        .select()
+        .single();
+
+    return ProductUnitModel.fromMap(row);
   }
 
-  @override
+  /// Deletes a non-base unit conversion.
   Future<void> deleteProductUnit(String productUnitId) async {
-    try {
-      await _remoteDataSource.deleteProductUnit(productUnitId);
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'deleteProductUnit');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'deleteProductUnit');
-    } on ProductException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'deleteProductUnit');
-    }
+    final SupabaseClient client = _requireClient();
+
+    await client.from('product_units').delete().eq('id', productUnitId);
   }
 
   // ---------------------------------------------------------------------------
-  // Error mapping
+  // Internal helpers
   // ---------------------------------------------------------------------------
 
-  static ProductException _mapInvalidResponse(
-    FormatException error,
-    StackTrace stackTrace, {
-    required String operation,
-  }) {
-    AppLogger.error(
-      'Invalid response during "$operation" (FormatException).',
-      error,
-      stackTrace,
-    );
-    return ProductException(
-      type: ProductFailureType.invalidResponse,
-      cause: error,
-      stackTrace: stackTrace,
-    );
+  SupabaseClient _requireClient() {
+    final SupabaseClient? client = _client;
+    if (client == null) {
+      throw const ProductException(
+        type: ProductFailureType.unknown,
+        cause: _supabaseUnavailableMessage,
+      );
+    }
+    return client;
   }
 
-  static ProductException _mapPostgrest(
-    supabase.PostgrestException error,
-    StackTrace stackTrace, {
-    required String operation,
-  }) {
-    final ProductFailureType type = _classifyPostgrest(error);
-
-    AppLogger.warning(
-      'PostgREST error during "$operation" mapped to ${type.name} '
-      '(code: ${error.code ?? 'n/a'}).',
-    );
-
-    return ProductException(
-      type: type,
-      cause: error,
-      stackTrace: stackTrace,
-    );
-  }
-
-  static ProductException _mapAuth(
-    supabase.AuthException error,
-    StackTrace stackTrace, {
-    required String operation,
-  }) {
-    AppLogger.warning(
-      'Auth error during "$operation" mapped to unauthorized '
-      '(code: ${error.code ?? 'n/a'}).',
-    );
-
-    return ProductException(
-      type: ProductFailureType.unauthorized,
-      cause: error,
-      stackTrace: stackTrace,
-    );
-  }
-
-  static ProductException _mapUnknown(
-    Object error,
-    StackTrace stackTrace, {
-    required String operation,
-  }) {
-    final ProductFailureType type = _looksLikeNetworkFailure(error)
-        ? ProductFailureType.network
-        : ProductFailureType.unknown;
-
-    AppLogger.error(
-      'Unhandled error during "$operation" '
-      '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
-      error,
-      stackTrace,
-    );
-
-    return ProductException(
-      type: type,
-      cause: error,
-      stackTrace: stackTrace,
-    );
-  }
-
-  /// Classifies a PostgREST error into a safe [ProductFailureType].
-  ///
-  /// Constraint names referenced below are declared in the Phase 4
-  /// migrations:
-  /// * `uniq_products_company_sku`      → skuConflict
-  /// * `uniq_products_company_barcode`  → barcodeConflict
-  /// * `products_category_company_fk`   → categoryNotFound
-  /// * `products_default_unit_company_fk` → unitNotFound
-  /// * `product_units_unit_company_fk`  → unitNotFound
-  /// * `product_units_product_company_fk` → notFound (product row gone)
-  /// * `product_units_product_unit_unique` → invalidResponse (duplicate
-  ///   conversion, not a first-class Domain failure for Phase 4)
-  static ProductFailureType _classifyPostgrest(
-    supabase.PostgrestException error,
-  ) {
-    final String code = (error.code ?? '').toUpperCase();
-    final String message = error.message.toLowerCase();
-    final String full = error.toString().toLowerCase();
-
-    if (code == '23505') {
-      if (full.contains('uniq_products_company_sku')) {
-        return ProductFailureType.skuConflict;
-      }
-      if (full.contains('uniq_products_company_barcode')) {
-        return ProductFailureType.barcodeConflict;
-      }
-      if (full.contains('product_units_product_unit_unique')) {
-        return ProductFailureType.invalidResponse;
-      }
-      return ProductFailureType.skuConflict;
-    }
-
-    if (code == '23503') {
-      if (full.contains('products_category_company_fk')) {
-        return ProductFailureType.categoryNotFound;
-      }
-      if (full.contains('products_default_unit_company_fk') ||
-          full.contains('product_units_unit_company_fk')) {
-        return ProductFailureType.unitNotFound;
-      }
-      if (full.contains('product_units_product_company_fk')) {
-        return ProductFailureType.notFound;
-      }
-      return ProductFailureType.notFound;
-    }
-
-    if (code == 'PGRST116') {
-      return ProductFailureType.notFound;
-    }
-    if (code.startsWith('42501') || code.startsWith('28')) {
-      return ProductFailureType.unauthorized;
-    }
-    if (code.startsWith('42')) {
-      return ProductFailureType.invalidResponse;
-    }
-
-    if (message.contains('permission denied') ||
-        message.contains('row level security') ||
-        message.contains('jwt')) {
-      return ProductFailureType.unauthorized;
-    }
-
-    // Textual fallbacks for environments where the constraint name is not
-    // included in `error.code` (older PostgREST versions).
-    if (full.contains('uniq_products_company_sku')) {
-      return ProductFailureType.skuConflict;
-    }
-    if (full.contains('uniq_products_company_barcode')) {
-      return ProductFailureType.barcodeConflict;
-    }
-    if (full.contains('products_category_company_fk')) {
-      return ProductFailureType.categoryNotFound;
-    }
-    if (full.contains('products_default_unit_company_fk') ||
-        full.contains('product_units_unit_company_fk')) {
-      return ProductFailureType.unitNotFound;
-    }
-    if (full.contains('product_units_product_company_fk')) {
-      return ProductFailureType.notFound;
-    }
-
-    if (message.contains('duplicate key') ||
-        message.contains('unique constraint')) {
-      return ProductFailureType.skuConflict;
-    }
-
-    if (message.contains('foreign key') ||
-        message.contains('violates foreign key')) {
-      return ProductFailureType.notFound;
-    }
-
-    if (_messageLooksLikeNetwork(message)) {
-      return ProductFailureType.network;
-    }
-
-    return ProductFailureType.unknown;
-  }
-
-  static bool _looksLikeNetworkFailure(Object error) {
-    final String description = error.toString().toLowerCase();
-    return _messageLooksLikeNetwork(description);
-  }
-
-  static bool _messageLooksLikeNetwork(String value) {
-    return value.contains('socket') ||
-        value.contains('network') ||
-        value.contains('connection') ||
-        value.contains('timeout') ||
-        value.contains('timed out') ||
-        value.contains('unreachable') ||
-        value.contains('failed host lookup') ||
-        value.contains('clientexception');
-  }
+  static const String _supabaseUnavailableMessage =
+      'Supabase client is not initialised.';
 }
