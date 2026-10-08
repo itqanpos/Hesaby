@@ -22,10 +22,15 @@ import 'product_units_dialog.dart';
 
 /// Product management page.
 ///
-/// Displays the products of the currently selected company, with a
-/// client-side search across name, SKU and barcode. All mutations are
-/// routed through [ProductsNotifier], which delegates to the repository and
-/// therefore to Row Level Security in the database.
+/// Layout (top → bottom):
+/// 1. KPI row (total / active / inactive).
+/// 2. Search field (name / SKU / barcode).
+/// 3. Status chips + Category dropdown + Sort dropdown.
+/// 4. Product list (rich card with meta and price info).
+///
+/// All filtering and sorting are local. Loading is currently eager — a
+/// paginated data layer will replace it in a follow-up step without
+/// changing this page's structure.
 class ProductsPage extends ConsumerStatefulWidget {
   const ProductsPage({super.key});
 
@@ -35,7 +40,11 @@ class ProductsPage extends ConsumerStatefulWidget {
 
 class _ProductsPageState extends ConsumerState<ProductsPage> {
   final TextEditingController _searchController = TextEditingController();
+
   String _searchQuery = '';
+  _StatusFilter _statusFilter = _StatusFilter.all;
+  String? _categoryFilterId;
+  _SortOption _sort = _SortOption.nameAsc;
 
   @override
   void dispose() {
@@ -43,9 +52,14 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     super.dispose();
   }
 
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
-    final AsyncValue<List<Product>> productsAsync = ref.watch(productsProvider);
+    final AsyncValue<List<Product>> productsAsync =
+        ref.watch(productsProvider);
     final AsyncValue<List<ProductCategory>> categoriesAsync =
         ref.watch(categoriesProvider);
     final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
@@ -94,7 +108,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
               categoriesAsync.value ?? const <ProductCategory>[];
           final List<Unit> units = unitsAsync.value ?? const <Unit>[];
 
-          // Fast lookups from id -> display name.
+          // Fast lookups by id.
           final Map<String, String> categoryNames = <String, String>{
             for (final ProductCategory category in categories)
               category.id: category.name,
@@ -103,22 +117,54 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
             for (final Unit unit in units) unit.id: unit.name,
           };
 
-          final List<Product> filtered = _filter(allProducts, _searchQuery);
+          final List<Product> visible = _applyFiltersAndSort(allProducts);
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              // ---- KPI row ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 12),
-                child: AppTextField(
-                  controller: _searchController,
-                  hint: 'ابحث بالاسم أو SKU أو الباركود',
-                  prefixIcon: Icons.search,
-                  onChanged: (String value) {
-                    setState(() => _searchQuery = value);
-                  },
-                ),
+                child: _KpiRow(products: allProducts),
               ),
+
+              // ---- Search ----
+              AppTextField(
+                controller: _searchController,
+                hint: 'ابحث بالاسم أو SKU أو الباركود',
+                prefixIcon: Icons.search,
+                suffixIcon: _searchQuery.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'مسح',
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      ),
+                onChanged: (String value) {
+                  setState(() => _searchQuery = value);
+                },
+              ),
+
+              const SizedBox(height: 10),
+
+              // ---- Status + Category + Sort ----
+              _FilterBar(
+                status: _statusFilter,
+                categoryId: _categoryFilterId,
+                sort: _sort,
+                categories: categories,
+                onStatusChanged: (v) => setState(() => _statusFilter = v),
+                onCategoryChanged: (v) =>
+                    setState(() => _categoryFilterId = v),
+                onSortChanged: (v) => setState(() => _sort = v),
+              ),
+
+              const SizedBox(height: 8),
+
+              // ---- List ----
               Expanded(
                 child: Builder(
                   builder: (BuildContext context) {
@@ -139,30 +185,36 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                       );
                     }
 
-                    if (filtered.isEmpty) {
-                      return const AppEmptyView(
+                    if (visible.isEmpty) {
+                      return AppEmptyView(
                         icon: Icons.search_off_outlined,
                         title: 'لا نتائج',
-                        message: 'لم يُطابق أي منتج كلمة البحث.',
+                        message:
+                            'لم يُطابق أي منتج الفلاتر أو كلمة البحث.',
+                        action: AppButton(
+                          label: 'مسح الفلاتر',
+                          icon: Icons.filter_alt_off_outlined,
+                          variant: AppButtonVariant.secondary,
+                          onPressed: _clearAllFilters,
+                        ),
                       );
                     }
 
                     return ListView.separated(
                       padding: const EdgeInsets.only(bottom: 24),
-                      itemCount: filtered.length,
-                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemCount: visible.length,
+                      separatorBuilder: (_, __) =>
+                          const SizedBox(height: 8),
                       itemBuilder: (BuildContext context, int index) {
-                        final Product product = filtered[index];
+                        final Product product = visible[index];
                         return _ProductCard(
                           product: product,
                           categoryName: product.categoryId == null
                               ? null
                               : categoryNames[product.categoryId],
                           unitName: unitNames[product.defaultUnitId],
-                          onEdit: () => _openProductForm(
-                            context,
-                            product: product,
-                          ),
+                          onEdit: () =>
+                              _openProductForm(context, product: product),
                           onToggleActive: () =>
                               _toggleActive(context, product),
                           onDelete: () => _confirmDelete(context, product),
@@ -182,22 +234,73 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Search
+  // Filtering + sorting
   // ---------------------------------------------------------------------------
 
-  List<Product> _filter(List<Product> products, String query) {
-    final String trimmed = query.trim().toLowerCase();
-    if (trimmed.isEmpty) {
-      return products;
+  List<Product> _applyFiltersAndSort(List<Product> products) {
+    final String trimmed = _searchQuery.trim().toLowerCase();
+
+    Iterable<Product> result = products;
+
+    // ---- Status filter ----
+    switch (_statusFilter) {
+      case _StatusFilter.all:
+        break;
+      case _StatusFilter.active:
+        result = result.where((p) => p.isActive);
+      case _StatusFilter.inactive:
+        result = result.where((p) => !p.isActive);
     }
-    return products.where((Product product) {
-      final String name = product.name.toLowerCase();
-      final String sku = (product.sku ?? '').toLowerCase();
-      final String barcode = (product.barcode ?? '').toLowerCase();
-      return name.contains(trimmed) ||
-          sku.contains(trimmed) ||
-          barcode.contains(trimmed);
-    }).toList(growable: false);
+
+    // ---- Category filter ----
+    if (_categoryFilterId != null) {
+      result = result.where((p) => p.categoryId == _categoryFilterId);
+    }
+
+    // ---- Search ----
+    if (trimmed.isNotEmpty) {
+      result = result.where((Product product) {
+        final String name = product.name.toLowerCase();
+        final String sku = (product.sku ?? '').toLowerCase();
+        final String barcode = (product.barcode ?? '').toLowerCase();
+        return name.contains(trimmed) ||
+            sku.contains(trimmed) ||
+            barcode.contains(trimmed);
+      });
+    }
+
+    // ---- Sort ----
+    final List<Product> list = result.toList(growable: false);
+    switch (_sort) {
+      case _SortOption.nameAsc:
+        list.sort((a, b) => a.name.compareTo(b.name));
+      case _SortOption.nameDesc:
+        list.sort((a, b) => b.name.compareTo(a.name));
+      case _SortOption.newest:
+        list.sort((a, b) => b.createdAt.compareTo(a.createdAt));
+      case _SortOption.oldest:
+        list.sort((a, b) => a.createdAt.compareTo(b.createdAt));
+      case _SortOption.sellingAsc:
+        list.sort((a, b) => a.sellingPrice.compareTo(b.sellingPrice));
+      case _SortOption.sellingDesc:
+        list.sort((a, b) => b.sellingPrice.compareTo(a.sellingPrice));
+      case _SortOption.costAsc:
+        list.sort((a, b) => a.costPrice.compareTo(b.costPrice));
+      case _SortOption.costDesc:
+        list.sort((a, b) => b.costPrice.compareTo(a.costPrice));
+    }
+
+    return list;
+  }
+
+  void _clearAllFilters() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _statusFilter = _StatusFilter.all;
+      _categoryFilterId = null;
+      _sort = _SortOption.nameAsc;
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -309,9 +412,315 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
   }
 }
 
-// -----------------------------------------------------------------------------
+// ============================================================================
+// KPI row
+// ============================================================================
+
+class _KpiRow extends StatelessWidget {
+  const _KpiRow({required this.products});
+
+  final List<Product> products;
+
+  @override
+  Widget build(BuildContext context) {
+    int active = 0;
+    int inactive = 0;
+    for (final Product p in products) {
+      if (p.isActive) {
+        active++;
+      } else {
+        inactive++;
+      }
+    }
+
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: _KpiCard(
+            icon: Icons.inventory_2_outlined,
+            label: 'الإجمالي',
+            value: products.length.toString(),
+            color: const Color(0xFF0288D1),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _KpiCard(
+            icon: Icons.check_circle_outline,
+            label: 'نشط',
+            value: active.toString(),
+            color: const Color(0xFF0F7B6C),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _KpiCard(
+            icon: Icons.pause_circle_outline,
+            label: 'معطّل',
+            value: inactive.toString(),
+            color: const Color(0xFF7B5E3A),
+            emphasize: inactive > 0,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _KpiCard extends StatelessWidget {
+  const _KpiCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+    this.emphasize = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: emphasize
+              ? color.withValues(alpha: 0.5)
+              : scheme.outlineVariant,
+          width: emphasize ? 1.5 : 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(icon, size: 14, color: color),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: emphasize ? color : scheme.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Filter bar (status + category + sort)
+// ============================================================================
+
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.status,
+    required this.categoryId,
+    required this.sort,
+    required this.categories,
+    required this.onStatusChanged,
+    required this.onCategoryChanged,
+    required this.onSortChanged,
+  });
+
+  final _StatusFilter status;
+  final String? categoryId;
+  final _SortOption sort;
+  final List<ProductCategory> categories;
+  final ValueChanged<_StatusFilter> onStatusChanged;
+  final ValueChanged<String?> onCategoryChanged;
+  final ValueChanged<_SortOption> onSortChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return SingleChildScrollView(
+      scrollDirection: Axis.horizontal,
+      child: Row(
+        children: <Widget>[
+          // Status chips
+          for (final _StatusFilter option in _StatusFilter.values) ...<Widget>[
+            ChoiceChip(
+              label: Text(_statusLabel(option)),
+              selected: status == option,
+              onSelected: (_) => onStatusChanged(option),
+              visualDensity: VisualDensity.compact,
+            ),
+            const SizedBox(width: 6),
+          ],
+
+          const SizedBox(width: 4),
+
+          // Category dropdown
+          _CategoryChip(
+            categories: categories,
+            selectedId: categoryId,
+            onChanged: onCategoryChanged,
+          ),
+
+          const SizedBox(width: 6),
+
+          // Sort dropdown
+          _SortChip(
+            sort: sort,
+            onChanged: onSortChanged,
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _statusLabel(_StatusFilter filter) {
+    switch (filter) {
+      case _StatusFilter.all:
+        return 'الكل';
+      case _StatusFilter.active:
+        return 'نشط';
+      case _StatusFilter.inactive:
+        return 'معطّل';
+    }
+  }
+}
+
+class _CategoryChip extends StatelessWidget {
+  const _CategoryChip({
+    required this.categories,
+    required this.selectedId,
+    required this.onChanged,
+  });
+
+  final List<ProductCategory> categories;
+  final String? selectedId;
+  final ValueChanged<String?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    if (categories.isEmpty) {
+      return const SizedBox.shrink();
+    }
+
+    final bool hasSelection = selectedId != null;
+    final String label = hasSelection
+        ? categories.firstWhere((c) => c.id == selectedId).name
+        : 'التصنيف';
+
+    return PopupMenuButton<String?>(
+      tooltip: 'اختر تصنيفًا',
+      onSelected: onChanged,
+      itemBuilder: (BuildContext _) => <PopupMenuEntry<String?>>[
+        const PopupMenuItem<String?>(
+          value: null,
+          child: Text('كل التصنيفات'),
+        ),
+        const PopupMenuDivider(),
+        for (final ProductCategory c in categories)
+          PopupMenuItem<String?>(
+            value: c.id,
+            child: Text(c.name),
+          ),
+      ],
+      child: Chip(
+        avatar: Icon(
+          hasSelection ? Icons.filter_alt : Icons.category_outlined,
+          size: 16,
+        ),
+        label: Text(label),
+        backgroundColor:
+            hasSelection ? Theme.of(context).colorScheme.primaryContainer : null,
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+  }
+}
+
+class _SortChip extends StatelessWidget {
+  const _SortChip({
+    required this.sort,
+    required this.onChanged,
+  });
+
+  final _SortOption sort;
+  final ValueChanged<_SortOption> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_SortOption>(
+      tooltip: 'ترتيب',
+      onSelected: onChanged,
+      itemBuilder: (BuildContext _) => <PopupMenuEntry<_SortOption>>[
+        for (final _SortOption option in _SortOption.values)
+          CheckedPopupMenuItem<_SortOption>(
+            value: option,
+            checked: option == sort,
+            child: Text(_label(option)),
+          ),
+      ],
+      child: Chip(
+        avatar: const Icon(Icons.sort, size: 16),
+        label: Text(_label(sort)),
+        visualDensity: VisualDensity.compact,
+      ),
+    );
+  }
+
+  static String _label(_SortOption option) {
+    switch (option) {
+      case _SortOption.nameAsc:
+        return 'الاسم (أ-ي)';
+      case _SortOption.nameDesc:
+        return 'الاسم (ي-أ)';
+      case _SortOption.newest:
+        return 'الأحدث';
+      case _SortOption.oldest:
+        return 'الأقدم';
+      case _SortOption.sellingAsc:
+        return 'سعر البيع ↑';
+      case _SortOption.sellingDesc:
+        return 'سعر البيع ↓';
+      case _SortOption.costAsc:
+        return 'التكلفة ↑';
+      case _SortOption.costDesc:
+        return 'التكلفة ↓';
+    }
+  }
+}
+
+// ============================================================================
 // Product card
-// -----------------------------------------------------------------------------
+// ============================================================================
 
 class _ProductCard extends StatelessWidget {
   const _ProductCard({
@@ -345,16 +754,18 @@ class _ProductCard extends StatelessWidget {
 
     return Material(
       color: scheme.surface,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         onTap: onEdit,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              // ---- Leading avatar ----
               CircleAvatar(
+                radius: 20,
                 backgroundColor: isActive
                     ? scheme.primaryContainer
                     : scheme.surfaceContainerHighest,
@@ -363,66 +774,98 @@ class _ProductCard extends StatelessWidget {
                     : scheme.onSurfaceVariant,
                 child: Text(
                   product.name.characters.first.toUpperCase(),
+                  style: theme.textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
               ),
               const SizedBox(width: 12),
+
+              // ---- Main content ----
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
+                    // Name + status badge
                     Row(
                       children: <Widget>[
                         Expanded(
                           child: Text(
                             product.name,
-                            style: theme.textTheme.titleMedium,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
                         if (!isActive)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 8,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: scheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(999),
-                            ),
-                            child: Text(
-                              'معطّل',
-                              style: theme.textTheme.labelSmall,
-                            ),
+                          _Badge(
+                            label: 'معطّل',
+                            background: scheme.surfaceContainerHighest,
+                            foreground: scheme.onSurfaceVariant,
                           ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    _MetaLine(
-                      product: product,
-                      categoryName: categoryName,
-                      unitName: unitName,
-                    ),
-                    const SizedBox(height: 6),
+
+                    // SKU + Barcode (only if present)
+                    if (product.hasSku || product.hasBarcode) ...<Widget>[
+                      const SizedBox(height: 3),
+                      _CodeLine(product: product),
+                    ],
+
+                    // Category + unit badges
+                    if (categoryName != null || unitName != null) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Wrap(
+                        spacing: 4,
+                        runSpacing: 4,
+                        children: <Widget>[
+                          if (categoryName != null)
+                            _Badge(
+                              icon: Icons.category_outlined,
+                              label: categoryName!,
+                              background: scheme.tertiaryContainer,
+                              foreground: scheme.onTertiaryContainer,
+                            ),
+                          if (unitName != null)
+                            _Badge(
+                              icon: Icons.straighten_outlined,
+                              label: unitName!,
+                              background: scheme.secondaryContainer,
+                              foreground: scheme.onSecondaryContainer,
+                            ),
+                        ],
+                      ),
+                    ],
+
+                    // Price row
+                    const SizedBox(height: 8),
                     Row(
+                      crossAxisAlignment: CrossAxisAlignment.baseline,
+                      textBaseline: TextBaseline.alphabetic,
                       children: <Widget>[
                         Text(
                           priceFormat.format(product.sellingPrice),
                           style: theme.textTheme.titleSmall?.copyWith(
                             color: scheme.primary,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 8),
                         Text(
-                          'التكلفة: ${priceFormat.format(product.costPrice)}',
-                          style: theme.textTheme.bodySmall,
+                          'تكلفة: ${priceFormat.format(product.costPrice)}',
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
                         ),
                       ],
                     ),
                   ],
                 ),
               ),
+
+              // ---- Actions ----
               PopupMenuButton<_ProductAction>(
                 tooltip: 'خيارات',
                 onSelected: (_ProductAction action) {
@@ -485,55 +928,110 @@ class _ProductCard extends StatelessWidget {
   }
 }
 
-class _MetaLine extends StatelessWidget {
-  const _MetaLine({
-    required this.product,
-    required this.categoryName,
-    required this.unitName,
-  });
+// -----------------------------------------------------------------------------
+// Small pieces
+// -----------------------------------------------------------------------------
+
+class _CodeLine extends StatelessWidget {
+  const _CodeLine({required this.product});
 
   final Product product;
-  final String? categoryName;
-  final String? unitName;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final TextStyle? style = theme.textTheme.bodySmall;
+    final ColorScheme scheme = theme.colorScheme;
 
     final List<String> parts = <String>[];
-    final String? sku = product.sku;
-    if (sku != null && sku.isNotEmpty) {
-      parts.add('SKU: $sku');
+    if (product.hasSku) {
+      parts.add('SKU: ${product.sku}');
     }
-    final String? barcode = product.barcode;
-    if (barcode != null && barcode.isNotEmpty) {
-      parts.add('Barcode: $barcode');
-    }
-    if (categoryName != null) {
-      parts.add(categoryName!);
-    }
-    if (unitName != null) {
-      parts.add(unitName!);
-    }
-
-    if (parts.isEmpty) {
-      return const SizedBox.shrink();
+    if (product.hasBarcode) {
+      parts.add('Barcode: ${product.barcode}');
     }
 
     return Text(
-      parts.join(' · '),
-      style: style,
+      parts.join('  ·  '),
+      style: theme.textTheme.bodySmall?.copyWith(
+        color: scheme.onSurfaceVariant,
+        fontFeatures: const <FontFeature>[FontFeature.tabularFigures()],
+        letterSpacing: 0.2,
+      ),
+      maxLines: 1,
       overflow: TextOverflow.ellipsis,
     );
   }
 }
 
+class _Badge extends StatelessWidget {
+  const _Badge({
+    required this.label,
+    required this.background,
+    required this.foreground,
+    this.icon,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+  final IconData? icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (icon != null) ...<Widget>[
+              Icon(icon, size: 12, color: foreground),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: foreground,
+                fontWeight: FontWeight.w700,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
 enum _ProductAction { edit, manageUnits, toggleActive, delete }
 
-// -----------------------------------------------------------------------------
+enum _StatusFilter { all, active, inactive }
+
+enum _SortOption {
+  nameAsc,
+  nameDesc,
+  newest,
+  oldest,
+  sellingAsc,
+  sellingDesc,
+  costAsc,
+  costDesc,
+}
+
+// ============================================================================
 // Localization helpers
-// -----------------------------------------------------------------------------
+// ============================================================================
 
 String _errorMessage(Object error) {
   if (error is ProductException) {
