@@ -190,45 +190,145 @@ class _SupplierSelector extends StatelessWidget {
       context: context,
       showDragHandle: true,
       useSafeArea: true,
-      builder: (BuildContext sheetContext) {
-        return SafeArea(
-          top: false,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Padding(
-                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                child: Text(
-                  'اختر المورد',
-                  style: Theme.of(sheetContext).textTheme.titleLarge,
-                ),
-              ),
-              Flexible(
-                child: ListView.separated(
-                  shrinkWrap: true,
-                  itemCount: suppliers.length,
-                  separatorBuilder: (_, __) => const Divider(height: 1),
-                  itemBuilder: (BuildContext itemContext, int index) {
-                    final Supplier s = suppliers[index];
-                    return ListTile(
-                      leading: const Icon(Icons.local_shipping_outlined),
-                      title: Text(s.name),
-                      subtitle: s.hasPhone ? Text(s.phone!) : null,
-                      onTap: () => Navigator.of(sheetContext).pop(s),
-                    );
-                  },
-                ),
-              ),
-            ],
-          ),
-        );
-      },
+      isScrollControlled: true,
+      builder: (BuildContext sheetContext) =>
+          _SupplierPickerSheet(suppliers: suppliers),
     );
 
     if (picked != null) {
       onSelected(picked);
     }
+  }
+}
+
+// ============================================================================
+// Supplier picker sheet with search
+// ============================================================================
+
+class _SupplierPickerSheet extends StatefulWidget {
+  const _SupplierPickerSheet({required this.suppliers});
+
+  final List<Supplier> suppliers;
+
+  @override
+  State<_SupplierPickerSheet> createState() => _SupplierPickerSheetState();
+}
+
+class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
+  final TextEditingController _searchController = TextEditingController();
+  String _query = '';
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  List<Supplier> get _filtered {
+    final String q = _query.trim().toLowerCase();
+    if (q.isEmpty) {
+      return widget.suppliers;
+    }
+    return widget.suppliers.where((Supplier s) {
+      final String name = s.name.toLowerCase();
+      final String code = (s.code ?? '').toLowerCase();
+      final String phone = (s.phone ?? '').toLowerCase();
+      return name.contains(q) || code.contains(q) || phone.contains(q);
+    }).toList(growable: false);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final List<Supplier> filtered = _filtered;
+
+    return SafeArea(
+      top: false,
+      child: Padding(
+        padding: EdgeInsets.only(
+          bottom: MediaQuery.viewInsetsOf(context).bottom,
+        ),
+        child: SizedBox(
+          height: MediaQuery.sizeOf(context).height * 0.7,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
+                child: Text(
+                  'اختر المورد',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                child: TextField(
+                  controller: _searchController,
+                  autofocus: true,
+                  textInputAction: TextInputAction.search,
+                  onChanged: (String v) => setState(() => _query = v),
+                  decoration: InputDecoration(
+                    hintText: 'ابحث بالاسم أو الكود أو الهاتف',
+                    prefixIcon: const Icon(Icons.search),
+                    contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 12,
+                      vertical: 12,
+                    ),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    suffixIcon: _query.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _query = '');
+                            },
+                          ),
+                  ),
+                ),
+              ),
+              const Divider(height: 1),
+              Expanded(
+                child: filtered.isEmpty
+                    ? Center(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            'لا نتائج مطابقة.',
+                            style: theme.textTheme.bodyMedium?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                      )
+                    : ListView.separated(
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) =>
+                            const Divider(height: 1),
+                        itemBuilder: (BuildContext itemContext, int index) {
+                          final Supplier s = filtered[index];
+                          return ListTile(
+                            leading: const Icon(
+                              Icons.local_shipping_outlined,
+                            ),
+                            title: Text(s.name),
+                            subtitle: s.hasPhone ? Text(s.phone!) : null,
+                            onTap: () =>
+                                Navigator.of(context).pop(s),
+                          );
+                        },
+                      ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
 
