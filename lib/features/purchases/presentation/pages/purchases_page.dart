@@ -22,10 +22,15 @@ import '../providers/purchase_providers.dart';
 
 /// Purchases list page.
 ///
-/// Displays the purchase orders of the currently selected company, with
-/// client-side filters on status and invoice number. Every mutation (create,
-/// edit, confirm, cancel) is performed on dedicated pages or via contextual
-/// actions; this page is read-mostly.
+/// Layout (top → bottom):
+/// 1. KPI row (total / drafts / confirmed this month / value this month).
+/// 2. Search by invoice number or supplier name.
+/// 3. Status filter chips + Sort dropdown.
+/// 4. Rich purchase card with status badge, supplier, date and total.
+///
+/// All filtering and sorting are local; the underlying list is capped by
+/// the repository (`defaultLimit` = 100) and covers the vast majority of
+/// SME usage without pagination.
 class PurchasesPage extends ConsumerStatefulWidget {
   const PurchasesPage({super.key});
 
@@ -35,16 +40,20 @@ class PurchasesPage extends ConsumerStatefulWidget {
 
 class _PurchasesPageState extends ConsumerState<PurchasesPage> {
   final TextEditingController _searchController = TextEditingController();
-  String _searchQuery = '';
 
-  /// `null` means "all statuses".
+  String _searchQuery = '';
   String? _statusFilter;
+  _SortOption _sort = _SortOption.dateDesc;
 
   @override
   void dispose() {
     _searchController.dispose();
     super.dispose();
   }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -65,6 +74,16 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
       appBar: AppBar(
         title: const Text('فواتير الشراء'),
         actions: <Widget>[
+          IconButton(
+            tooltip: 'تحديث',
+            onPressed: anyLoading || firstError != null
+                ? null
+                : () {
+                    ref.invalidate(purchasesProvider);
+                    ref.invalidate(suppliersProvider);
+                  },
+            icon: const Icon(Icons.refresh),
+          ),
           IconButton(
             tooltip: 'إضافة فاتورة',
             onPressed: anyLoading || firstError != null || branchId == null
@@ -110,35 +129,57 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
               supplier.id: supplier.name,
           };
 
-          final List<Purchase> filtered = _applyFilters(
+          final List<Purchase> visible = _applyFiltersAndSort(
             allPurchases,
-            _statusFilter,
-            _searchQuery,
+            supplierNames,
           );
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              // ---- KPI ----
               Padding(
-                padding: const EdgeInsets.only(top: 8, bottom: 8),
-                child: AppTextField(
-                  controller: _searchController,
-                  hint: 'ابحث برقم الفاتورة',
-                  prefixIcon: Icons.search,
-                  onChanged: (String value) {
-                    setState(() => _searchQuery = value);
-                  },
-                ),
+                padding: const EdgeInsets.only(top: 8, bottom: 12),
+                child: _KpiRow(purchases: allPurchases),
               ),
-              Padding(
-                padding: const EdgeInsets.only(bottom: 12),
-                child: _StatusFilterChips(
-                  selected: _statusFilter,
-                  onChanged: (String? status) {
-                    setState(() => _statusFilter = status);
-                  },
-                ),
+
+              // ---- Search ----
+              AppTextField(
+                controller: _searchController,
+                hint: 'ابحث برقم الفاتورة أو اسم المورد',
+                prefixIcon: Icons.search,
+                suffixIcon: _searchQuery.isEmpty
+                    ? null
+                    : IconButton(
+                        tooltip: 'مسح',
+                        icon: const Icon(Icons.close),
+                        onPressed: () {
+                          _searchController.clear();
+                          setState(() => _searchQuery = '');
+                        },
+                      ),
+                onChanged: (String value) {
+                  setState(() => _searchQuery = value);
+                },
               ),
+
+              const SizedBox(height: 10),
+
+              // ---- Status + Sort ----
+              _FilterBar(
+                status: _statusFilter,
+                sort: _sort,
+                onStatusChanged: (String? v) {
+                  setState(() => _statusFilter = v);
+                },
+                onSortChanged: (_SortOption v) {
+                  setState(() => _sort = v);
+                },
+              ),
+
+              const SizedBox(height: 8),
+
+              // ---- List ----
               Expanded(
                 child: allPurchases.isEmpty
                     ? AppEmptyView(
@@ -153,20 +194,27 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
                               context.pushNamed(AppRouter.purchaseNewName),
                         ),
                       )
-                    : filtered.isEmpty
-                        ? const AppEmptyView(
+                    : visible.isEmpty
+                        ? AppEmptyView(
                             icon: Icons.search_off_outlined,
                             title: 'لا نتائج',
-                            message: 'لم تُطابق أي فاتورة معايير البحث.',
+                            message:
+                                'لم تُطابق أي فاتورة معايير البحث أو الفلترة.',
+                            action: AppButton(
+                              label: 'مسح الفلاتر',
+                              icon: Icons.filter_alt_off_outlined,
+                              variant: AppButtonVariant.secondary,
+                              onPressed: _clearAllFilters,
+                            ),
                           )
                         : ListView.separated(
                             padding: const EdgeInsets.only(bottom: 24),
-                            itemCount: filtered.length,
+                            itemCount: visible.length,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 8),
                             itemBuilder:
                                 (BuildContext context, int index) {
-                              final Purchase purchase = filtered[index];
+                              final Purchase purchase = visible[index];
                               final String supplierName =
                                   supplierNames[purchase.supplierId] ??
                                       'مورد محذوف';
@@ -201,26 +249,65 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Filtering
+  // Filtering + sorting
   // ---------------------------------------------------------------------------
 
-  List<Purchase> _applyFilters(
+  List<Purchase> _applyFiltersAndSort(
     List<Purchase> purchases,
-    String? status,
-    String query,
+    Map<String, String> supplierNames,
   ) {
-    final String trimmed = query.trim().toLowerCase();
-    return purchases.where((Purchase purchase) {
-      if (status != null && purchase.status != status) {
-        return false;
-      }
-      if (trimmed.isEmpty) {
-        return true;
-      }
-      final String invoice =
-          (purchase.invoiceNumber ?? '').toLowerCase();
-      return invoice.contains(trimmed);
-    }).toList(growable: false);
+    final String trimmed = _searchQuery.trim().toLowerCase();
+
+    Iterable<Purchase> result = purchases;
+
+    // ---- Status filter ----
+    if (_statusFilter != null) {
+      result = result.where((p) => p.status == _statusFilter);
+    }
+
+    // ---- Search ----
+    if (trimmed.isNotEmpty) {
+      result = result.where((Purchase p) {
+        final String invoice =
+            (p.invoiceNumber ?? '').toLowerCase();
+        if (invoice.contains(trimmed)) {
+          return true;
+        }
+        final String supplier =
+            (supplierNames[p.supplierId] ?? '').toLowerCase();
+        return supplier.contains(trimmed);
+      });
+    }
+
+    // ---- Sort ----
+    final List<Purchase> list = result.toList(growable: false);
+    switch (_sort) {
+      case _SortOption.dateDesc:
+        list.sort((a, b) => b.purchaseDate.compareTo(a.purchaseDate));
+      case _SortOption.dateAsc:
+        list.sort((a, b) => a.purchaseDate.compareTo(b.purchaseDate));
+      case _SortOption.totalDesc:
+        list.sort((a, b) => b.total.compareTo(a.total));
+      case _SortOption.totalAsc:
+        list.sort((a, b) => a.total.compareTo(b.total));
+      case _SortOption.invoiceAsc:
+        list.sort((a, b) => (a.invoiceNumber ?? '')
+            .compareTo(b.invoiceNumber ?? ''));
+      case _SortOption.invoiceDesc:
+        list.sort((a, b) => (b.invoiceNumber ?? '')
+            .compareTo(a.invoiceNumber ?? ''));
+    }
+
+    return list;
+  }
+
+  void _clearAllFilters() {
+    _searchController.clear();
+    setState(() {
+      _searchQuery = '';
+      _statusFilter = null;
+      _sort = _SortOption.dateDesc;
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -249,7 +336,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('تأكيد الفاتورة'),
-        content: Text(
+        content: const Text(
           'سيتم تأكيد الفاتورة وإضافة الكميات إلى المخزون. '
           'لا يمكن التعديل بعد التأكيد.',
         ),
@@ -275,16 +362,12 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
       await ref
           .read(purchasesProvider.notifier)
           .confirmPurchase(purchase.id);
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تأكيد الفاتورة')),
       );
     } on PurchaseException catch (error) {
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       _showError(context, error);
     }
   }
@@ -328,36 +411,258 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
       await ref
           .read(purchasesProvider.notifier)
           .cancelPurchase(purchase.id);
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم إلغاء الفاتورة')),
       );
     } on PurchaseException catch (error) {
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       _showError(context, error);
     }
   }
 }
 
-// -----------------------------------------------------------------------------
-// Filter chips
-// -----------------------------------------------------------------------------
+// ============================================================================
+// KPI row
+// ============================================================================
 
-class _StatusFilterChips extends StatelessWidget {
-  const _StatusFilterChips({
-    required this.selected,
-    required this.onChanged,
+class _KpiRow extends StatelessWidget {
+  const _KpiRow({required this.purchases});
+
+  final List<Purchase> purchases;
+
+  @override
+  Widget build(BuildContext context) {
+    final DateTime now = DateTime.now();
+    int draft = 0;
+    int confirmed = 0;
+    int cancelled = 0;
+    double monthValue = 0;
+
+    for (final Purchase p in purchases) {
+      if (p.isDraft) draft++;
+      if (p.isConfirmed) confirmed++;
+      if (p.isCancelled) cancelled++;
+
+      if (p.isConfirmed) {
+        final DateTime d = p.purchaseDate.toLocal();
+        if (d.year == now.year && d.month == now.month) {
+          monthValue += p.total;
+        }
+      }
+    }
+
+    return Column(
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: _KpiCard(
+                icon: Icons.edit_note_outlined,
+                label: 'مسودات',
+                value: '$draft',
+                color: const Color(0xFFE65100),
+                emphasize: draft > 0,
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _KpiCard(
+                icon: Icons.check_circle_outline,
+                label: 'مؤكدة',
+                value: '$confirmed',
+                color: const Color(0xFF0F7B6C),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _KpiCard(
+                icon: Icons.cancel_outlined,
+                label: 'ملغاة',
+                value: '$cancelled',
+                color: const Color(0xFFC62828),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        _MonthValueCard(
+          purchasesThisMonth:
+              purchases.where((p) => p.isConfirmed).length,
+          monthValue: monthValue,
+        ),
+      ],
+    );
+  }
+}
+
+class _KpiCard extends StatelessWidget {
+  const _KpiCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+    this.emphasize = false,
   });
 
-  /// Currently selected status, or `null` for "all".
-  final String? selected;
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  final bool emphasize;
 
-  /// Called with the new selection (`null` means "all").
-  final ValueChanged<String?> onChanged;
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: emphasize
+              ? color.withValues(alpha: 0.5)
+              : scheme.outlineVariant,
+          width: emphasize ? 1.5 : 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(icon, size: 14, color: color),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: theme.textTheme.titleMedium?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: emphasize ? color : scheme.onSurface,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _MonthValueCard extends StatelessWidget {
+  const _MonthValueCard({
+    required this.purchasesThisMonth,
+    required this.monthValue,
+  });
+
+  final int purchasesThisMonth;
+  final double monthValue;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final NumberFormat moneyFormat = NumberFormat.currency(
+      locale: 'ar_EG',
+      symbol: 'ج.م ',
+      decimalDigits: 2,
+    );
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: <Color>[
+            scheme.primary.withValues(alpha: 0.10),
+            scheme.primary.withValues(alpha: 0.04),
+          ],
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+        ),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.25)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.shopping_bag_outlined,
+              color: scheme.primary,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'مشتريات مؤكدة هذا الشهر',
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  moneyFormat.format(monthValue),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                    color: scheme.primary,
+                  ),
+                ),
+                Text(
+                  '$purchasesThisMonth فاتورة',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Filter bar (status chips + sort)
+// ============================================================================
+
+class _FilterBar extends StatelessWidget {
+  const _FilterBar({
+    required this.status,
+    required this.sort,
+    required this.onStatusChanged,
+    required this.onSortChanged,
+  });
+
+  final String? status;
+  final _SortOption sort;
+  final ValueChanged<String?> onStatusChanged;
+  final ValueChanged<_SortOption> onSortChanged;
 
   @override
   Widget build(BuildContext context) {
@@ -365,30 +670,95 @@ class _StatusFilterChips extends StatelessWidget {
       scrollDirection: Axis.horizontal,
       child: Row(
         children: <Widget>[
-          _chip(context, 'الكل', null),
-          const SizedBox(width: 8),
-          _chip(context, 'مسودة', PurchaseStatus.draft),
-          const SizedBox(width: 8),
-          _chip(context, 'مؤكدة', PurchaseStatus.confirmed),
-          const SizedBox(width: 8),
-          _chip(context, 'ملغاة', PurchaseStatus.cancelled),
+          ChoiceChip(
+            label: const Text('الكل'),
+            selected: status == null,
+            onSelected: (_) => onStatusChanged(null),
+            visualDensity: VisualDensity.compact,
+          ),
+          const SizedBox(width: 6),
+          ChoiceChip(
+            label: const Text('مسودة'),
+            selected: status == PurchaseStatus.draft,
+            onSelected: (_) => onStatusChanged(PurchaseStatus.draft),
+            visualDensity: VisualDensity.compact,
+          ),
+          const SizedBox(width: 6),
+          ChoiceChip(
+            label: const Text('مؤكدة'),
+            selected: status == PurchaseStatus.confirmed,
+            onSelected: (_) => onStatusChanged(PurchaseStatus.confirmed),
+            visualDensity: VisualDensity.compact,
+          ),
+          const SizedBox(width: 6),
+          ChoiceChip(
+            label: const Text('ملغاة'),
+            selected: status == PurchaseStatus.cancelled,
+            onSelected: (_) => onStatusChanged(PurchaseStatus.cancelled),
+            visualDensity: VisualDensity.compact,
+          ),
+          const SizedBox(width: 10),
+          _SortChip(
+            sort: sort,
+            onChanged: onSortChanged,
+          ),
         ],
       ),
     );
   }
+}
 
-  Widget _chip(BuildContext context, String label, String? value) {
-    return ChoiceChip(
-      label: Text(label),
-      selected: selected == value,
-      onSelected: (_) => onChanged(value),
+class _SortChip extends StatelessWidget {
+  const _SortChip({
+    required this.sort,
+    required this.onChanged,
+  });
+
+  final _SortOption sort;
+  final ValueChanged<_SortOption> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return PopupMenuButton<_SortOption>(
+      tooltip: 'ترتيب',
+      onSelected: onChanged,
+      itemBuilder: (BuildContext _) => <PopupMenuEntry<_SortOption>>[
+        for (final _SortOption option in _SortOption.values)
+          CheckedPopupMenuItem<_SortOption>(
+            value: option,
+            checked: option == sort,
+            child: Text(_label(option)),
+          ),
+      ],
+      child: Chip(
+        avatar: const Icon(Icons.sort, size: 16),
+        label: Text(_label(sort)),
+        visualDensity: VisualDensity.compact,
+      ),
     );
+  }
+
+  static String _label(_SortOption option) {
+    switch (option) {
+      case _SortOption.dateDesc:
+        return 'الأحدث';
+      case _SortOption.dateAsc:
+        return 'الأقدم';
+      case _SortOption.totalDesc:
+        return 'الأعلى قيمة';
+      case _SortOption.totalAsc:
+        return 'الأقل قيمة';
+      case _SortOption.invoiceAsc:
+        return 'رقم الفاتورة ↑';
+      case _SortOption.invoiceDesc:
+        return 'رقم الفاتورة ↓';
+    }
   }
 }
 
-// -----------------------------------------------------------------------------
+// ============================================================================
 // Purchase card
-// -----------------------------------------------------------------------------
+// ============================================================================
 
 class _PurchaseCard extends StatelessWidget {
   const _PurchaseCard({
@@ -403,14 +773,8 @@ class _PurchaseCard extends StatelessWidget {
   final Purchase purchase;
   final String supplierName;
   final VoidCallback onTap;
-
-  /// `null` when edit is not allowed (purchase is not in draft).
   final VoidCallback? onEdit;
-
-  /// `null` when confirm is not allowed (purchase is not in draft).
   final VoidCallback? onConfirm;
-
-  /// `null` when cancel is not allowed (already cancelled).
   final VoidCallback? onCancel;
 
   @override
@@ -433,25 +797,34 @@ class _PurchaseCard extends StatelessWidget {
 
     final String? invoice = purchase.invoiceNumber;
     final String headerTitle =
-        (invoice != null && invoice.isNotEmpty) ? invoice : 'بدون رقم فاتورة';
+        (invoice != null && invoice.isNotEmpty)
+            ? invoice
+            : 'بدون رقم فاتورة';
 
     return Material(
       color: scheme.surface,
-      borderRadius: BorderRadius.circular(16),
+      borderRadius: BorderRadius.circular(14),
       child: InkWell(
-        borderRadius: BorderRadius.circular(16),
+        borderRadius: BorderRadius.circular(14),
         onTap: onTap,
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: <Widget>[
+              // ---- Status avatar ----
               CircleAvatar(
+                radius: 20,
                 backgroundColor: badgeBg,
                 foregroundColor: badgeFg,
-                child: const Icon(Icons.receipt_long_outlined),
+                child: const Icon(
+                  Icons.receipt_long_outlined,
+                  size: 20,
+                ),
               ),
               const SizedBox(width: 12),
+
+              // ---- Content ----
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
@@ -462,49 +835,58 @@ class _PurchaseCard extends StatelessWidget {
                         Expanded(
                           child: Text(
                             headerTitle,
-                            style: theme.textTheme.titleMedium,
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontWeight: FontWeight.w700,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: badgeBg,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 2,
-                            ),
-                            child: Text(
-                              statusLabel,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: badgeFg,
-                              ),
-                            ),
+                        _StatusBadge(
+                          label: statusLabel,
+                          background: badgeBg,
+                          foreground: badgeFg,
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 4),
+                    Row(
+                      children: <Widget>[
+                        Icon(
+                          Icons.local_shipping_outlined,
+                          size: 14,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        const SizedBox(width: 4),
+                        Expanded(
+                          child: Text(
+                            supplierName,
+                            style: theme.textTheme.bodyMedium,
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
-                    Text(
-                      supplierName,
-                      style: theme.textTheme.bodyMedium,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
                     Row(
                       children: <Widget>[
-                        Text(
-                          dateFormat.format(purchase.purchaseDate),
-                          style: theme.textTheme.bodySmall,
+                        Icon(
+                          Icons.calendar_today_outlined,
+                          size: 12,
+                          color: scheme.onSurfaceVariant,
                         ),
-                        const SizedBox(width: 12),
+                        const SizedBox(width: 4),
+                        Text(
+                          dateFormat.format(purchase.purchaseDate.toLocal()),
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                        ),
+                        const Spacer(),
                         Text(
                           moneyFormat.format(purchase.total),
                           style: theme.textTheme.titleSmall?.copyWith(
                             color: scheme.primary,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w800,
                           ),
                         ),
                       ],
@@ -512,6 +894,8 @@ class _PurchaseCard extends StatelessWidget {
                   ],
                 ),
               ),
+
+              // ---- Menu ----
               _buildMenu(context),
             ],
           ),
@@ -582,11 +966,57 @@ class _PurchaseCard extends StatelessWidget {
   }
 }
 
+class _StatusBadge extends StatelessWidget {
+  const _StatusBadge({
+    required this.label,
+    required this.background,
+    required this.foreground,
+  });
+
+  final String label;
+  final Color background;
+  final Color foreground;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: background,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
+        child: Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: foreground,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Enums
+// ============================================================================
+
 enum _PurchaseAction { edit, confirm, cancel }
 
-// -----------------------------------------------------------------------------
+enum _SortOption {
+  dateDesc,
+  dateAsc,
+  totalDesc,
+  totalAsc,
+  invoiceAsc,
+  invoiceDesc,
+}
+
+// ============================================================================
 // Localization helpers
-// -----------------------------------------------------------------------------
+// ============================================================================
 
 String _statusLabel(String status) {
   switch (status) {
