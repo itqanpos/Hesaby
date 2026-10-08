@@ -7,13 +7,18 @@ import 'pdf_receipt_builder.dart';
 
 /// Centralises the POS-related preference keys and their typed accessors.
 ///
-/// Currently the only persisted POS preference is the default paper size
-/// used by the thermal printer dialog. It is stored as a plain string
-/// (`'mm58'`, `'mm80'` or `'a4'`) so it stays human-readable in the
-/// platform's preferences file.
+/// Persisted POS preferences:
+///   * default receipt paper size (used by the PDF builder);
+///   * the default thermal printer (Phase D), stored as a JSON blob.
+///
+/// Every value is stored as a plain string so it stays human-readable in
+/// the platform's preferences file and easy to migrate.
 abstract final class PosPreferences {
   /// Storage key for the default receipt paper size.
   static const String paperSizeKey = 'pos.paper_size';
+
+  /// Storage key for the default thermal printer (JSON encoded).
+  static const String savedPrinterKey = 'pos.saved_printer';
 
   /// Default when nothing has been stored yet.
   ///
@@ -51,6 +56,7 @@ class PosPaperSizeNotifier extends AsyncNotifier<ReceiptPaperSize> {
 
   @override
   Future<ReceiptPaperSize> build() async {
+    _isDisposed = false;
     ref.onDispose(() => _isDisposed = true);
 
     final PreferencesStorage storage =
