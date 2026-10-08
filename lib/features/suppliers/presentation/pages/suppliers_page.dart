@@ -10,6 +10,7 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../purchases/presentation/dialogs/supplier_payment_dialog.dart';
 import '../../domain/entities/supplier.dart';
 import '../../domain/repositories/supplier_repository.dart';
 import '../providers/supplier_providers.dart';
@@ -17,9 +18,9 @@ import '../providers/supplier_providers.dart';
 /// Supplier management page.
 ///
 /// Lists all suppliers of the currently selected company, and exposes
-/// create / edit / toggle-active / delete actions. All actions go through
-/// [SuppliersNotifier], which delegates to the repository and therefore to
-/// Row Level Security in the database.
+/// record-payment / create / edit / toggle-active / delete actions. All
+/// actions go through [SuppliersNotifier], which delegates to the
+/// repository and therefore to Row Level Security in the database.
 class SuppliersPage extends ConsumerStatefulWidget {
   const SuppliersPage({super.key});
 
@@ -107,6 +108,8 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
                               final Supplier supplier = filtered[index];
                               return _SupplierCard(
                                 supplier: supplier,
+                                onRecordPayment: () =>
+                                    _recordPayment(context, supplier),
                                 onEdit: () => _openSupplierForm(
                                   context,
                                   existing: supplier,
@@ -148,6 +151,17 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
+
+  Future<void> _recordPayment(
+    BuildContext context,
+    Supplier supplier,
+  ) async {
+    await showSupplierPaymentDialog(
+      context: context,
+      supplierId: supplier.id,
+      supplierName: supplier.name,
+    );
+  }
 
   Future<void> _openSupplierForm(
     BuildContext context, {
@@ -255,12 +269,14 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
 class _SupplierCard extends StatelessWidget {
   const _SupplierCard({
     required this.supplier,
+    required this.onRecordPayment,
     required this.onEdit,
     required this.onToggleActive,
     required this.onDelete,
   });
 
   final Supplier supplier;
+  final VoidCallback onRecordPayment;
   final VoidCallback onEdit;
   final VoidCallback onToggleActive;
   final VoidCallback onDelete;
@@ -348,6 +364,8 @@ class _SupplierCard extends StatelessWidget {
                 tooltip: 'خيارات',
                 onSelected: (_SupplierAction action) {
                   switch (action) {
+                    case _SupplierAction.recordPayment:
+                      onRecordPayment();
                     case _SupplierAction.edit:
                       onEdit();
                     case _SupplierAction.toggleActive:
@@ -358,6 +376,15 @@ class _SupplierCard extends StatelessWidget {
                 },
                 itemBuilder: (BuildContext context) =>
                     <PopupMenuEntry<_SupplierAction>>[
+                  const PopupMenuItem<_SupplierAction>(
+                    value: _SupplierAction.recordPayment,
+                    child: ListTile(
+                      leading: Icon(Icons.payments_outlined),
+                      title: Text('تسجيل دفعة'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  const PopupMenuDivider(),
                   const PopupMenuItem<_SupplierAction>(
                     value: _SupplierAction.edit,
                     child: ListTile(
@@ -396,7 +423,7 @@ class _SupplierCard extends StatelessWidget {
   }
 }
 
-enum _SupplierAction { edit, toggleActive, delete }
+enum _SupplierAction { recordPayment, edit, toggleActive, delete }
 
 // -----------------------------------------------------------------------------
 // Form dialog
