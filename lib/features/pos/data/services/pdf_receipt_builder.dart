@@ -17,14 +17,13 @@ enum ReceiptPaperSize {
 
 /// Builds a PDF document from a [Receipt].
 ///
-/// Design follows the classic small-business invoice layout:
-/// * Centred company name + branch.
-/// * Bordered "فاتورة مبيعات" title.
-/// * Dashed divider, then a labelled info block.
-/// * A bordered 5-column table: الإجمالي / السعر / الكمية / الصنف / م.
-/// * Subtotal row inside the table.
-/// * Bottom summary with boxed values.
-/// * Custom footer, read from `receipt.footer` with a built-in fallback.
+/// Layout is optimised for thermal receipt printers:
+/// * B/W/grey only — no colours (thermal printers cannot render them).
+/// * Generous vertical rhythm so the cashier can scan the total at a
+///   glance.
+/// * Tables use alternating row backgrounds (zebra) to make multi-line
+///   orders easy to read.
+/// * Currency is shown explicitly on money values; quantities stay bare.
 abstract final class PdfReceiptBuilder {
   // ---------------------------------------------------------------------------
   // Font cache
@@ -40,7 +39,7 @@ abstract final class PdfReceiptBuilder {
       _boldFontFuture ??= PdfGoogleFonts.cairoBold();
 
   // ---------------------------------------------------------------------------
-  // Arabic day names (1 = Monday ... 7 = Sunday).
+  // Constants
   // ---------------------------------------------------------------------------
 
   static const List<String> _arabicDays = <String>[
@@ -53,8 +52,8 @@ abstract final class PdfReceiptBuilder {
     'الأحد',
   ];
 
-  /// Fallback footer when the receipt carries no custom one.
   static const String _defaultFooter = 'شكرًا لتعاملكم معنا';
+  static const String _currency = 'ج.م';
 
   // ---------------------------------------------------------------------------
   // Thermal sizing
@@ -142,159 +141,158 @@ abstract final class PdfReceiptBuilder {
     required Receipt receipt,
     required ReceiptPaperSize paperSize,
   }) {
-    final bool isThermal = paperSize != ReceiptPaperSize.a4;
-    final double baseFont = isThermal ? 8 : 10;
-    final double headerFont = isThermal ? 11 : 16;
-    final double titleFont = isThermal ? 9 : 12;
-    final double grandFont = isThermal ? 10 : 13;
-    final double tableFont = isThermal ? 7.5 : 9;
+    final _Sizes s = _Sizes.forSize(paperSize);
 
     return <pw.Widget>[
-      // ---- Company header ----
-      pw.Center(
-        child: pw.Text(
-          receipt.companyName,
-          style: pw.TextStyle(
-            fontSize: headerFont,
-            fontWeight: pw.FontWeight.bold,
-          ),
-          textAlign: pw.TextAlign.center,
-        ),
-      ),
-      pw.SizedBox(height: 2),
-      pw.Center(
-        child: pw.Text(
-          receipt.branchName,
-          style: pw.TextStyle(fontSize: baseFont),
-          textAlign: pw.TextAlign.center,
-        ),
-      ),
+      // ---- Header ----
+      _header(receipt, s),
+      pw.SizedBox(height: s.sectionGap),
 
-      pw.SizedBox(height: 8),
+      // ---- Meta ----
+      _metaBlock(receipt, s),
+      pw.SizedBox(height: s.sectionGap),
 
-      // ---- Boxed "فاتورة مبيعات" ----
-      pw.Center(
-        child: pw.Container(
-          padding: const pw.EdgeInsets.symmetric(
-            horizontal: 16,
-            vertical: 3,
-          ),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(
-              color: PdfColors.black,
-              width: 0.8,
-            ),
-            borderRadius: const pw.BorderRadius.all(
-              pw.Radius.circular(2),
-            ),
-          ),
-          child: pw.Text(
-            'فاتورة مبيعات',
-            style: pw.TextStyle(
-              fontSize: titleFont,
-              fontWeight: pw.FontWeight.bold,
-            ),
-          ),
-        ),
-      ),
+      _divider(double: true),
 
-      pw.SizedBox(height: 8),
+      pw.SizedBox(height: s.sectionGap),
 
-      // ---- Dashed divider ----
-      pw.Container(
-        width: double.infinity,
-        decoration: const pw.BoxDecoration(
-          border: pw.Border(
-            bottom: pw.BorderSide(
-              width: 0.6,
-              color: PdfColors.grey700,
-              style: pw.BorderStyle.dashed,
-            ),
-          ),
-        ),
-      ),
+      // ---- Items ----
+      _itemsTable(receipt, s),
 
-      pw.SizedBox(height: 6),
+      pw.SizedBox(height: s.sectionGap),
 
-      // ---- Info block ----
-      _infoRow('رقم الفاتورة', receipt.invoiceNumber ?? '—', baseFont,
-          boldValue: true),
-      _infoRow('التاريخ', _formatDayAndDate(receipt.dateTime), baseFont),
-      if (receipt.hasCustomer)
-        _infoRow('العميل', receipt.customerName!, baseFont),
-      if (receipt.cashierName != null)
-        _infoRow('الكاشير', receipt.cashierName!, baseFont),
+      // ---- Grand total ----
+      _grandTotal(receipt, s),
 
-      pw.SizedBox(height: 6),
+      pw.SizedBox(height: s.sectionGap),
 
-      // ---- Items table ----
-      _buildItemsTable(
-        receipt: receipt,
-        isThermal: isThermal,
-        baseFont: tableFont,
-        headerFont: tableFont,
-      ),
+      // ---- Payment block ----
+      _paymentBlock(receipt, s),
 
-      pw.SizedBox(height: 8),
+      // ---- Balance (only when applicable) ----
+      if (receipt.hasBalanceChange) ...<pw.Widget>[
+        pw.SizedBox(height: s.sectionGap),
+        _divider(),
+        pw.SizedBox(height: s.sectionGap),
+        _balanceBlock(receipt, s),
+      ],
 
-      // ---- Bottom summary ----
-      _buildBottomSummary(
-        receipt: receipt,
-        labelFont: baseFont,
-        valueFont: isThermal ? 9 : 11,
-        grandFont: grandFont,
-      ),
+      pw.SizedBox(height: s.sectionGap * 1.5),
 
-      pw.SizedBox(height: 12),
-
-      // ---- Footer (custom, with fallback) ----
-      pw.Center(
-        child: pw.Text(
-          _footerText(receipt),
-          style: pw.TextStyle(
-            fontSize: baseFont,
-            color: PdfColors.grey700,
-          ),
-          textAlign: pw.TextAlign.center,
-        ),
-      ),
+      // ---- Footer ----
+      _divider(),
+      pw.SizedBox(height: s.sectionGap),
+      _footer(receipt, s),
     ];
   }
 
-  /// Resolves the footer text of a receipt.
-  ///
-  /// Falls back to a built-in default when the receipt carries no custom
-  /// footer (for example older receipts printed before
-  /// `company_settings.receipt_footer` was introduced).
-  static String _footerText(Receipt receipt) {
-    final String? custom = receipt.footer;
-    if (custom != null && custom.trim().isNotEmpty) {
-      return custom.trim();
-    }
-    return _defaultFooter;
+  // ---------------------------------------------------------------------------
+  // Header
+  // ---------------------------------------------------------------------------
+
+  static pw.Widget _header(Receipt receipt, _Sizes s) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: <pw.Widget>[
+        pw.Center(
+          child: pw.Text(
+            receipt.companyName,
+            style: pw.TextStyle(
+              fontSize: s.companyName,
+              fontWeight: pw.FontWeight.bold,
+              letterSpacing: 0.3,
+            ),
+            textAlign: pw.TextAlign.center,
+          ),
+        ),
+        pw.SizedBox(height: 3),
+        pw.Center(
+          child: pw.Text(
+            receipt.branchName,
+            style: pw.TextStyle(
+              fontSize: s.branchName,
+              color: PdfColors.grey700,
+            ),
+            textAlign: pw.TextAlign.center,
+          ),
+        ),
+        pw.SizedBox(height: s.sectionGap),
+
+        // ---- Title chip ----
+        pw.Center(
+          child: pw.Container(
+            padding: const pw.EdgeInsets.symmetric(
+              horizontal: 20,
+              vertical: 5,
+            ),
+            decoration: pw.BoxDecoration(
+              border: pw.Border.all(
+                color: PdfColors.black,
+                width: 1,
+              ),
+              borderRadius: const pw.BorderRadius.all(
+                pw.Radius.circular(3),
+              ),
+            ),
+            child: pw.Text(
+              'فاتورة مبيعات',
+              style: pw.TextStyle(
+                fontSize: s.title,
+                fontWeight: pw.FontWeight.bold,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ),
+        ),
+      ],
+    );
   }
 
   // ---------------------------------------------------------------------------
-  // Info row
+  // Meta block (invoice, date, customer, cashier)
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _infoRow(
+  static pw.Widget _metaBlock(Receipt receipt, _Sizes s) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: <pw.Widget>[
+        _metaRow(
+          'رقم الفاتورة',
+          receipt.invoiceNumber ?? '—',
+          s,
+          boldValue: true,
+        ),
+        _metaRow(
+          'التاريخ',
+          _formatDayAndDate(receipt.dateTime),
+          s,
+        ),
+        if (receipt.hasCustomer)
+          _metaRow('العميل', receipt.customerName!, s),
+        if (receipt.cashierName != null &&
+            receipt.cashierName!.trim().isNotEmpty)
+          _metaRow('الكاشير', receipt.cashierName!, s),
+      ],
+    );
+  }
+
+  static pw.Widget _metaRow(
     String label,
     String value,
-    double fontSize, {
+    _Sizes s, {
     bool boldValue = false,
   }) {
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 1),
+      padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
       child: pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: <pw.Widget>[
           pw.SizedBox(
-            width: 76,
+            width: s.metaLabelWidth,
             child: pw.Text(
               '$label:',
               style: pw.TextStyle(
-                fontSize: fontSize,
+                fontSize: s.meta,
                 fontWeight: pw.FontWeight.bold,
               ),
             ),
@@ -303,7 +301,7 @@ abstract final class PdfReceiptBuilder {
             child: pw.Text(
               value,
               style: pw.TextStyle(
-                fontSize: fontSize,
+                fontSize: s.meta,
                 fontWeight: boldValue
                     ? pw.FontWeight.bold
                     : pw.FontWeight.normal,
@@ -321,127 +319,115 @@ abstract final class PdfReceiptBuilder {
   // Items table
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildItemsTable({
-    required Receipt receipt,
-    required bool isThermal,
-    required double baseFont,
-    required double headerFont,
-  }) {
-    const double padH = 3;
-    const double padV = 3;
+  static pw.Widget _itemsTable(Receipt receipt, _Sizes s) {
+    final Map<int, pw.TableColumnWidth> columnWidths =
+        <int, pw.TableColumnWidth>{
+      0: pw.FlexColumnWidth(1.4), // الإجمالي
+      1: pw.FlexColumnWidth(1.2), // السعر
+      2: pw.FlexColumnWidth(1.3), // الكمية
+      3: pw.FlexColumnWidth(3.0), // الصنف
+      4: pw.FixedColumnWidth(s.rowNumWidth), // م
+    };
 
-    final Map<int, pw.TableColumnWidth> columnWidths = isThermal
-        ? const <int, pw.TableColumnWidth>{
-            0: pw.FlexColumnWidth(1.5),
-            1: pw.FlexColumnWidth(1.2),
-            2: pw.FlexColumnWidth(1.4),
-            3: pw.FlexColumnWidth(3.0),
-            4: pw.FixedColumnWidth(16),
-          }
-        : const <int, pw.TableColumnWidth>{
-            0: pw.FlexColumnWidth(1.5),
-            1: pw.FlexColumnWidth(1.2),
-            2: pw.FlexColumnWidth(1.3),
-            3: pw.FlexColumnWidth(3.0),
-            4: pw.FixedColumnWidth(28),
-          };
+    final List<pw.TableRow> rows = <pw.TableRow>[
+      // ---- Header row ----
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: PdfColors.grey300),
+        children: <pw.Widget>[
+          _cell('الإجمالي',
+              fontSize: s.tableHeader, bold: true, center: true, s: s),
+          _cell('السعر',
+              fontSize: s.tableHeader, bold: true, center: true, s: s),
+          _cell('الكمية',
+              fontSize: s.tableHeader, bold: true, center: true, s: s),
+          _cell('الصنف',
+              fontSize: s.tableHeader, bold: true, s: s),
+          _cell('م',
+              fontSize: s.tableHeader, bold: true, center: true, s: s),
+        ],
+      ),
+    ];
+
+    // ---- Item rows (zebra) ----
+    for (int i = 0; i < receipt.lines.length; i++) {
+      final bool zebra = i.isOdd;
+      final ReceiptLine line = receipt.lines[i];
+      rows.add(
+        pw.TableRow(
+          decoration: zebra
+              ? const pw.BoxDecoration(color: PdfColors.grey100)
+              : null,
+          children: <pw.Widget>[
+            _cell(
+              _money(line.lineTotal),
+              fontSize: s.tableRow, bold: true, center: true, s: s,
+            ),
+            _cell(
+              _money(line.unitPrice),
+              fontSize: s.tableRow, center: true, s: s,
+            ),
+            _cell(
+              '${_qty(line.quantity)} ${line.unitName}',
+              fontSize: s.tableRow, center: true, s: s,
+            ),
+            _cell(
+              line.productName,
+              fontSize: s.tableRow, s: s,
+            ),
+            _cell(
+              '${i + 1}',
+              fontSize: s.tableRow, center: true, s: s,
+            ),
+          ],
+        ),
+      );
+    }
+
+    // ---- Subtotal row ----
+    rows.add(
+      pw.TableRow(
+        decoration: const pw.BoxDecoration(color: PdfColors.grey200),
+        children: <pw.Widget>[
+          _cell(
+            _money(receipt.subtotal),
+            fontSize: s.tableRow, bold: true, center: true, s: s,
+          ),
+          _cell('', fontSize: s.tableRow, s: s),
+          _cell(
+            '${receipt.lines.length}',
+            fontSize: s.tableRow, center: true, s: s,
+          ),
+          _cell(
+            'المجموع الفرعي',
+            fontSize: s.tableRow, bold: true, s: s,
+          ),
+          _cell('', fontSize: s.tableRow, s: s),
+        ],
+      ),
+    );
 
     return pw.Table(
       border: pw.TableBorder.all(
-        color: PdfColors.grey800,
+        color: PdfColors.grey700,
         width: 0.5,
       ),
       defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
       columnWidths: columnWidths,
-      children: <pw.TableRow>[
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.grey200),
-          children: <pw.Widget>[
-            _cell('الإجمالي',
-                fontSize: headerFont, bold: true, center: true,
-                padH: padH, padV: padV),
-            _cell('السعر',
-                fontSize: headerFont, bold: true, center: true,
-                padH: padH, padV: padV),
-            _cell('الكمية',
-                fontSize: headerFont, bold: true, center: true,
-                padH: padH, padV: padV),
-            _cell('الصنف',
-                fontSize: headerFont, bold: true,
-                padH: padH, padV: padV),
-            _cell('م',
-                fontSize: headerFont, bold: true, center: true,
-                padH: padH, padV: padV),
-          ],
-        ),
-
-        for (int i = 0; i < receipt.lines.length; i++)
-          pw.TableRow(
-            children: <pw.Widget>[
-              _cell(
-                _formatNumber(receipt.lines[i].lineTotal),
-                fontSize: baseFont, bold: true, center: true,
-                padH: padH, padV: padV,
-              ),
-              _cell(
-                _formatNumber(receipt.lines[i].unitPrice),
-                fontSize: baseFont, center: true,
-                padH: padH, padV: padV,
-              ),
-              _cell(
-                '${_formatQuantity(receipt.lines[i].quantity)} '
-                '${receipt.lines[i].unitName}',
-                fontSize: baseFont, center: true,
-                padH: padH, padV: padV,
-              ),
-              _cell(
-                receipt.lines[i].productName,
-                fontSize: baseFont,
-                padH: padH,
-                padV: padV,
-              ),
-              _cell('${i + 1}',
-                  fontSize: baseFont, center: true,
-                  padH: padH, padV: padV),
-            ],
-          ),
-
-        pw.TableRow(
-          decoration: const pw.BoxDecoration(color: PdfColors.grey100),
-          children: <pw.Widget>[
-            _cell(_formatNumber(receipt.subtotal),
-                fontSize: baseFont, bold: true, center: true,
-                padH: padH, padV: padV),
-            _cell('',
-                fontSize: baseFont,
-                padH: padH, padV: padV),
-            _cell('${receipt.lines.length}',
-                fontSize: baseFont, center: true,
-                padH: padH, padV: padV),
-            _cell('المجموع الفرعي',
-                fontSize: baseFont, bold: true,
-                padH: padH, padV: padV),
-            _cell('',
-                fontSize: baseFont,
-                padH: padH, padV: padV),
-          ],
-        ),
-      ],
+      children: rows,
     );
   }
 
   static pw.Widget _cell(
     String text, {
     required double fontSize,
+    required _Sizes s,
     bool bold = false,
     bool center = false,
-    required double padH,
-    required double padV,
   }) {
     return pw.Padding(
       padding: pw.EdgeInsets.symmetric(
-        horizontal: padH,
-        vertical: padV,
+        horizontal: s.cellPadH,
+        vertical: s.cellPadV,
       ),
       child: pw.Text(
         text,
@@ -457,171 +443,215 @@ abstract final class PdfReceiptBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Bottom summary
+  // Grand total
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildBottomSummary({
-    required Receipt receipt,
-    required double labelFont,
-    required double valueFont,
-    required double grandFont,
-  }) {
+  static pw.Widget _grandTotal(Receipt receipt, _Sizes s) {
+    return pw.Container(
+      padding: pw.EdgeInsets.symmetric(
+        horizontal: s.cellPadH * 2,
+        vertical: s.cellPadV * 1.5,
+      ),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(
+          color: PdfColors.black,
+          width: 1.2,
+        ),
+        borderRadius: const pw.BorderRadius.all(
+          pw.Radius.circular(3),
+        ),
+      ),
+      child: pw.Row(
+        children: <pw.Widget>[
+          pw.Expanded(
+            child: pw.Text(
+              'إجمالي الفاتورة',
+              style: pw.TextStyle(
+                fontSize: s.grandTotal,
+                fontWeight: pw.FontWeight.bold,
+              ),
+            ),
+          ),
+          pw.Text(
+            _money(receipt.total),
+            style: pw.TextStyle(
+              fontSize: s.grandTotal,
+              fontWeight: pw.FontWeight.bold,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Payment block
+  // ---------------------------------------------------------------------------
+
+  static pw.Widget _paymentBlock(Receipt receipt, _Sizes s) {
     final double remaining = receipt.total - receipt.paidAmount;
     final double amountRemaining = remaining > 0 ? remaining : 0;
-
-    final double previousBalance = receipt.previousBalance ?? 0;
-    final double currentBalance = receipt.newBalance ??
-        (previousBalance + amountRemaining);
 
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
-        _boxedRow(
-          label: 'إجمالي الفاتورة',
-          value: _formatNumber(receipt.total),
-          labelFont: labelFont,
-          valueFont: grandFont,
-          boldValue: true,
+        _kvRow(
+          'طريقة الدفع',
+          _paymentMethodLabel(receipt),
+          s,
         ),
-
-        pw.SizedBox(height: 4),
-
-        _plainRow(
-          label: 'طريقة الدفع',
-          value: _paymentMethodLabel(receipt),
-          labelFont: labelFont,
+        _kvRow(
+          'المدفوع',
+          _money(receipt.paidAmount),
+          s,
         ),
-
-        pw.SizedBox(height: 4),
-
-        _boxedRow(
-          label: 'المدفوع',
-          value: _formatNumber(receipt.paidAmount),
-          labelFont: labelFont,
-          valueFont: valueFont,
-        ),
-
-        if (amountRemaining > 0) ...<pw.Widget>[
-          pw.SizedBox(height: 4),
-          _boxedRow(
-            label: 'المتبقي على العميل',
-            value: _formatNumber(amountRemaining),
-            labelFont: labelFont,
-            valueFont: valueFont,
+        if (amountRemaining > 0)
+          _kvRow(
+            'المتبقي على العميل',
+            _money(amountRemaining),
+            s,
+            emphasized: true,
           ),
-        ],
+        if (receipt.hasChange)
+          _kvRow(
+            'الباقي للعميل',
+            _money(receipt.change),
+            s,
+          ),
+      ],
+    );
+  }
 
-        pw.SizedBox(height: 6),
+  // ---------------------------------------------------------------------------
+  // Balance block
+  // ---------------------------------------------------------------------------
 
-        _plainRow(
-          label: 'الرصيد السابق',
-          value: _formatNumber(previousBalance),
-          labelFont: labelFont,
+  static pw.Widget _balanceBlock(Receipt receipt, _Sizes s) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: <pw.Widget>[
+        _kvRow(
+          'الرصيد السابق',
+          _money(receipt.previousBalance ?? 0),
+          s,
         ),
-
-        pw.SizedBox(height: 2),
-
-        _plainRow(
-          label: 'الرصيد الحالي',
-          value: _formatNumber(currentBalance),
-          labelFont: labelFont,
+        _kvRow(
+          'الرصيد الحالي',
+          _money(receipt.newBalance ?? 0),
+          s,
+          emphasized: true,
         ),
       ],
     );
   }
 
-  static pw.Widget _boxedRow({
-    required String label,
-    required String value,
-    required double labelFont,
-    required double valueFont,
-    bool boldValue = false,
+  // ---------------------------------------------------------------------------
+  // KV row (used by payment + balance blocks)
+  // ---------------------------------------------------------------------------
+
+  static pw.Widget _kvRow(
+    String label,
+    String value,
+    _Sizes s, {
+    bool emphasized = false,
   }) {
-    return pw.Row(
-      crossAxisAlignment: pw.CrossAxisAlignment.center,
-      children: <pw.Widget>[
-        pw.Expanded(
-          child: pw.Text(
-            label,
-            style: pw.TextStyle(
-              fontSize: labelFont,
-              fontWeight: pw.FontWeight.bold,
-            ),
-            softWrap: true,
-          ),
-        ),
-        pw.SizedBox(width: 6),
-        pw.Container(
-          constraints: const pw.BoxConstraints(minWidth: 72),
-          padding: const pw.EdgeInsets.symmetric(
-            horizontal: 8,
-            vertical: 3,
-          ),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(
-              color: PdfColors.grey700,
-              width: 0.5,
-            ),
-            borderRadius: const pw.BorderRadius.all(
-              pw.Radius.circular(2),
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        children: <pw.Widget>[
+          pw.Expanded(
+            child: pw.Text(
+              label,
+              style: pw.TextStyle(
+                fontSize: s.kvLabel,
+                fontWeight: pw.FontWeight.bold,
+              ),
             ),
           ),
-          child: pw.Text(
+          pw.Text(
             value,
             style: pw.TextStyle(
-              fontSize: valueFont,
-              fontWeight: boldValue
+              fontSize: emphasized ? s.kvValueLarge : s.kvValue,
+              fontWeight: emphasized
                   ? pw.FontWeight.bold
                   : pw.FontWeight.normal,
             ),
-            textAlign: pw.TextAlign.center,
+            textAlign: pw.TextAlign.left,
           ),
-        ),
-      ],
+        ],
+      ),
     );
   }
 
-  static pw.Widget _plainRow({
-    required String label,
-    required String value,
-    required double labelFont,
-  }) {
-    return pw.Row(
-      children: <pw.Widget>[
-        pw.Expanded(
-          child: pw.Text(
-            label,
-            style: pw.TextStyle(
-              fontSize: labelFont,
-              fontWeight: pw.FontWeight.bold,
-            ),
-          ),
+  // ---------------------------------------------------------------------------
+  // Footer
+  // ---------------------------------------------------------------------------
+
+  static pw.Widget _footer(Receipt receipt, _Sizes s) {
+    return pw.Center(
+      child: pw.Text(
+        _footerText(receipt),
+        style: pw.TextStyle(
+          fontSize: s.footer,
+          color: PdfColors.grey700,
+          fontStyle: pw.FontStyle.italic,
         ),
-        pw.SizedBox(width: 6),
-        pw.SizedBox(
-          width: 88,
-          child: pw.Text(
-            value,
-            style: pw.TextStyle(fontSize: labelFont),
-            textAlign: pw.TextAlign.center,
-          ),
-        ),
-      ],
+        textAlign: pw.TextAlign.center,
+      ),
     );
   }
+
+  static String _footerText(Receipt receipt) {
+    final String? custom = receipt.footer;
+    if (custom != null && custom.trim().isNotEmpty) {
+      return custom.trim();
+    }
+    return _defaultFooter;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Dividers
+  // ---------------------------------------------------------------------------
+
+  /// A thin horizontal rule. When [double] is true, two stacked rules are
+  /// drawn to visually separate the top of the receipt from its body.
+  static pw.Widget _divider({bool double = false}) {
+    if (double) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: <pw.Widget>[
+          _singleRule(),
+          pw.SizedBox(height: 2),
+          _singleRule(),
+        ],
+      );
+    }
+    return _singleRule();
+  }
+
+  static pw.Widget _singleRule() => pw.Container(
+        height: 0.6,
+        color: PdfColors.grey600,
+      );
 
   // ---------------------------------------------------------------------------
   // Formatting
   // ---------------------------------------------------------------------------
 
-  static String _formatNumber(double value) {
+  /// Money: `1,234.50 ج.م` — thousands separator for integers, two
+  /// decimals otherwise, always suffixed with the currency.
+  static String _money(double value) {
+    final String number;
     if (value == value.roundToDouble()) {
-      return _addThousandsSeparator(value.toInt().toString());
+      number = _addThousandsSeparator(value.toInt().toString());
+    } else {
+      number = value.toStringAsFixed(2);
     }
-    return value.toStringAsFixed(2);
+    return '$number $_currency';
   }
 
-  static String _formatQuantity(double value) {
+  /// Quantity: bare number, no currency.
+  static String _qty(double value) {
     if (value == value.roundToDouble()) {
       return value.toInt().toString();
     }
@@ -668,4 +698,112 @@ abstract final class PdfReceiptBuilder {
     }
     return 'نقدي (جزئي)';
   }
+}
+
+// ============================================================================
+// Size profile
+// ============================================================================
+
+/// Bundle of font sizes and paddings for one paper format.
+///
+/// Keeps the layout maths out of the widget builders. A4 uses noticeably
+/// larger values so the same content stays legible on a full page.
+class _Sizes {
+  const _Sizes({
+    required this.companyName,
+    required this.branchName,
+    required this.title,
+    required this.meta,
+    required this.metaLabelWidth,
+    required this.tableHeader,
+    required this.tableRow,
+    required this.rowNumWidth,
+    required this.cellPadH,
+    required this.cellPadV,
+    required this.grandTotal,
+    required this.kvLabel,
+    required this.kvValue,
+    required this.kvValueLarge,
+    required this.footer,
+    required this.sectionGap,
+  });
+
+  factory _Sizes.forSize(ReceiptPaperSize size) {
+    switch (size) {
+      case ReceiptPaperSize.mm58:
+        return const _Sizes(
+          companyName: 12,
+          branchName: 8,
+          title: 9,
+          meta: 7.5,
+          metaLabelWidth: 62,
+          tableHeader: 7,
+          tableRow: 7,
+          rowNumWidth: 14,
+          cellPadH: 2.5,
+          cellPadV: 3,
+          grandTotal: 11,
+          kvLabel: 8,
+          kvValue: 8.5,
+          kvValueLarge: 10,
+          footer: 7,
+          sectionGap: 5,
+        );
+      case ReceiptPaperSize.mm80:
+        return const _Sizes(
+          companyName: 14,
+          branchName: 9,
+          title: 10,
+          meta: 8,
+          metaLabelWidth: 78,
+          tableHeader: 7.5,
+          tableRow: 7.5,
+          rowNumWidth: 16,
+          cellPadH: 3,
+          cellPadV: 3.5,
+          grandTotal: 12,
+          kvLabel: 8.5,
+          kvValue: 9.5,
+          kvValueLarge: 11,
+          footer: 8,
+          sectionGap: 6,
+        );
+      case ReceiptPaperSize.a4:
+        return const _Sizes(
+          companyName: 20,
+          branchName: 11,
+          title: 14,
+          meta: 10,
+          metaLabelWidth: 110,
+          tableHeader: 10,
+          tableRow: 10,
+          rowNumWidth: 24,
+          cellPadH: 6,
+          cellPadV: 6,
+          grandTotal: 16,
+          kvLabel: 11,
+          kvValue: 12,
+          kvValueLarge: 14,
+          footer: 10,
+          sectionGap: 10,
+        );
+    }
+  }
+
+  final double companyName;
+  final double branchName;
+  final double title;
+  final double meta;
+  final double metaLabelWidth;
+  final double tableHeader;
+  final double tableRow;
+  final double rowNumWidth;
+  final double cellPadH;
+  final double cellPadV;
+  final double grandTotal;
+  final double kvLabel;
+  final double kvValue;
+  final double kvValueLarge;
+  final double footer;
+  final double sectionGap;
 }
