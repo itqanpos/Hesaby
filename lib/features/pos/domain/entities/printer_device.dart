@@ -33,7 +33,6 @@ class PrinterDevice extends Equatable {
     required this.connectionType,
     this.vendorId,
     this.productId,
-    this.description,
   });
 
   /// Human-readable name, e.g. "Xprinter XP-58".
@@ -52,9 +51,6 @@ class PrinterDevice extends Equatable {
   /// USB product id (only meaningful for USB printers).
   final String? productId;
 
-  /// Optional extra description (only meaningful for USB printers).
-  final String? description;
-
   /// Stable identifier used as a map key and in persistence.
   String get id => '${connectionType.name}:$address';
 
@@ -70,7 +66,6 @@ class PrinterDevice extends Equatable {
         connectionType,
         vendorId,
         productId,
-        description,
       ];
 
   @override
@@ -90,6 +85,8 @@ class SavedPrinter extends Equatable {
     required this.name,
     required this.address,
     required this.connectionType,
+    this.vendorId,
+    this.productId,
   });
 
   /// Builds a [SavedPrinter] from a discovered [device].
@@ -97,11 +94,19 @@ class SavedPrinter extends Equatable {
         name: device.name,
         address: device.address,
         connectionType: device.connectionType,
+        vendorId: device.vendorId,
+        productId: device.productId,
       );
 
   final String name;
   final String address;
   final PrinterConnectionType connectionType;
+
+  /// USB vendor id, when applicable.
+  final String? vendorId;
+
+  /// USB product id, when applicable.
+  final String? productId;
 
   /// Stable identifier, matching [PrinterDevice.id].
   String get id => '${connectionType.name}:$address';
@@ -111,6 +116,8 @@ class SavedPrinter extends Equatable {
         name: name,
         address: address,
         connectionType: connectionType,
+        vendorId: vendorId,
+        productId: productId,
       );
 
   /// Serialises to a JSON-compatible map.
@@ -118,6 +125,8 @@ class SavedPrinter extends Equatable {
         'name': name,
         'address': address,
         'connection_type': connectionType.name,
+        'vendor_id': vendorId,
+        'product_id': productId,
       };
 
   /// Parses a map produced by [toJson].
@@ -143,15 +152,20 @@ class SavedPrinter extends Equatable {
     if (type == null) {
       return null;
     }
+    final Object? vendorId = json['vendor_id'];
+    final Object? productId = json['product_id'];
     return SavedPrinter(
       name: name,
       address: address,
       connectionType: type,
+      vendorId: vendorId is String ? vendorId : null,
+      productId: productId is String ? productId : null,
     );
   }
 
   @override
-  List<Object?> get props => <Object?>[name, address, connectionType];
+  List<Object?> get props =>
+      <Object?>[name, address, connectionType, vendorId, productId];
 
   @override
   String toString() =>
