@@ -67,22 +67,91 @@ jobs:
           sed -i 's/android:label="hesabi"/android:label="حسابي"/' \
             android/app/src/main/AndroidManifest.xml
 
-      - name: Set minSdkVersion to 23
+      - name: Set minSdkVersion and compileSdkVersion to 23 / 34
         run: |
-          # `flutter_pos_printer_platform_image_3` requires Android API 23
-          # (Marshmallow) because it uses the newer Bluetooth permission
-          # model and BluetoothLeScanner APIs. Flutter's default template
-          # uses `flutter.minSdkVersion` (currently 21), so we override it
-          # here. This runs after `flutter create` has generated the file.
+          # `flutter_pos_printer_platform_image_3` requires Android API 23.
+          # Additionally, its dependencies require compileSdk >= 33, so the
+          # app itself must also compile against a modern SDK. We override
+          # both values here, after `flutter create` has generated the file.
           for f in android/app/build.gradle android/app/build.gradle.kts; do
             if [ -f "$f" ]; then
               sed -i 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 23/' "$f" || true
               sed -i 's/minSdk = flutter\.minSdkVersion/minSdk = 23/' "$f" || true
               sed -i 's/minSdkVersion 21/minSdkVersion 23/' "$f" || true
+
+              sed -i 's/compileSdkVersion flutter\.compileSdkVersion/compileSdkVersion 34/' "$f" || true
+              sed -i 's/compileSdk = flutter\.compileSdkVersion/compileSdk = 34/' "$f" || true
+              sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/' "$f" || true
+              sed -i 's/compileSdk = [0-9]*/compileSdk = 34/' "$f" || true
+
               echo "--- $f (sdk section) ---"
-              grep -n 'minSdk\|targetSdk\|compileSdk' "$f" || true
+              grep -n 'minSdk\|compileSdk\|targetSdk' "$f" || true
             fi
           done
+
+      - name: Patch plugin compileSdkVersion in pub cache
+        run: |
+          # `flutter_pos_printer_platform_image_3` is hard-coded to
+          # compileSdkVersion 31, but its dependencies (network_info_plus,
+          # androidx.*) require 33 or 34. We patch the plugin's own
+          # build.gradle file inside the pub-cache before Gradle runs.
+          #
+          # This runs entirely inside the CI runner; the repository is
+          # untouched and the patch does not need to be committed.
+          set -e
+
+          PLUGIN_DIR=$(find "$HOME/.pub-cache/hosted/pub.dev" \
+            -maxdepth 1 -type d -name "flutter_pos_printer_platform_image_3-*" \
+            | head -1)
+
+          if [ -z "$PLUGIN_DIR" ]; then
+            echo "!! Plugin not found in pub-cache"
+            exit 1
+          fi
+          echo "Plugin directory: $PLUGIN_DIR"
+
+          python3 - <<PY
+          import re, pathlib, sys
+
+          plugin_dir = "$PLUGIN_DIR"
+          patched = False
+
+          for name in ['build.gradle', 'build.gradle.kts']:
+              f = pathlib.Path(plugin_dir) / 'android' / name
+              if not f.exists():
+                  continue
+              text = f.read_text()
+              original = text
+
+              # Groovy: compileSdkVersion 31, compileSdkVersion = 31
+              text = re.sub(r'compileSdkVersion\s*=?\s*\d+',
+                            'compileSdkVersion 34', text)
+              # Groovy: compileSdkVersion(31)
+              text = re.sub(r'compileSdkVersion\(\s*\d+\s*\)',
+                            'compileSdkVersion(34)', text)
+              # Kotlin DSL: compileSdk = 31
+              text = re.sub(r'compileSdk\s*=\s*\d+',
+                            'compileSdk = 34', text)
+              # Kotlin DSL: compileSdk 31 (space form)
+              text = re.sub(r'compileSdk\s+\d+',
+                            'compileSdk 34', text)
+              # Kotlin DSL: compileSdk(31)
+              text = re.sub(r'compileSdk\(\s*\d+\s*\)',
+                            'compileSdk(34)', text)
+
+              if text != original:
+                  f.write_text(text)
+                  patched = True
+                  print(f"Patched: {f}")
+                  for line in text.splitlines():
+                      if 'compileSdk' in line:
+                          print(f"  {line.strip()}")
+
+          if not patched:
+              print("WARNING: no compileSdk declaration found to patch",
+                    file=sys.stderr)
+              sys.exit(1)
+          PY
 
       - name: Add Android permissions
         run: |
@@ -215,3 +284,4 @@ jobs:
           make_latest: true
           draft: false
           prerelease: true
+      
