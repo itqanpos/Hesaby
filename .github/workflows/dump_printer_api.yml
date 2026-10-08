@@ -1,0 +1,59 @@
+# ============================================================================
+# HESABI — Dump printer package API (one-shot diagnostic)
+# ----------------------------------------------------------------------------
+# Prints the source of `flutter_pos_printer_platform_image_3` so we can
+# write `printer_service.dart` against its real API instead of guessing.
+# Safe to delete after the API has been captured.
+# ============================================================================
+
+name: Dump printer package API
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  dump:
+    name: Dump API
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Locate and print printer package source
+        run: |
+          PUB_CACHE="${PUB_CACHE:-$HOME/.pub-cache}"
+          echo "=== pub cache: $PUB_CACHE ==="
+          PKG_DIR=$(find "$PUB_CACHE" -maxdepth 5 -type d -name "flutter_pos_printer_platform_image_3-*" | head -1)
+          if [ -z "$PKG_DIR" ]; then
+            echo "!! Package not found. Listing similar names:"
+            find "$PUB_CACHE" -maxdepth 4 -type d -name "*flutter_pos_printer*" || true
+            exit 1
+          fi
+          echo "=== Package: $PKG_DIR ==="
+          echo ""
+          echo "### lib/ tree:"
+          find "$PKG_DIR/lib" -name "*.dart" -type f | sort
+          echo ""
+          echo "### ========== FULL SOURCE =========="
+          for f in $(find "$PKG_DIR/lib" -name "*.dart" -type f | sort); do
+            echo ""
+            echo "═══════════════════════════════════════════"
+            echo "FILE: $f"
+            echo "═══════════════════════════════════════════"
+            cat "$f"
+            echo ""
+          done
