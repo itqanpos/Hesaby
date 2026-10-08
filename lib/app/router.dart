@@ -13,6 +13,7 @@ import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
 import '../features/inventory/presentation/pages/stock_movements_page.dart';
 import '../features/pos/presentation/pages/pos_page.dart';
+import '../features/pos/presentation/pages/printer_settings_page.dart';
 import '../features/products/presentation/pages/categories_page.dart';
 import '../features/products/presentation/pages/products_page.dart';
 import '../features/products/presentation/pages/units_page.dart';
@@ -121,6 +122,9 @@ abstract final class AppRouter {
 
   static const String profilePath = '/settings/profile';
   static const String profileName = 'profile';
+
+  static const String printerSettingsPath = '/settings/printer';
+  static const String printerSettingsName = 'printer-settings';
 
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
@@ -368,6 +372,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
             name: AppRouter.profileName,
             builder: (BuildContext context, GoRouterState state) =>
                 const ProfilePage(),
+          ),
+          GoRoute(
+            path: 'printer',
+            name: AppRouter.printerSettingsName,
+            builder: (BuildContext context, GoRouterState state) =>
+                const PrinterSettingsPage(),
           ),
         ],
       ),
