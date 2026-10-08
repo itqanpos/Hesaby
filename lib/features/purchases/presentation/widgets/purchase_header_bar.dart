@@ -1,4 +1,5 @@
 // lib/features/purchases/presentation/widgets/purchase_header_bar.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
@@ -8,13 +9,15 @@ import '../../../suppliers/presentation/providers/supplier_providers.dart';
 import '../../domain/entities/purchase_cart.dart';
 import '../state/purchase_cart_notifier.dart';
 import '../state/purchase_providers.dart';
+
 /// Compact header bar for the purchase form.
 ///
 /// Layout (RTL):
 /// ```
 /// ┌──────────────────────────────────────────────────────┐
 /// │ المورد: [شركة الأمل ▾]   التاريخ: [2026/10/09 📅]  │
-/// │ رقم الفاتورة: [INV-2026-001_____________________]   │
+/// │ رقم الفاتورة: [_________________________________]   │
+/// │ ℹ️ اتركه فارغًا ليُولَّد تلقائيًا                     │
 /// └──────────────────────────────────────────────────────┘
 /// ```
 class PurchaseHeaderBar extends ConsumerWidget {
@@ -122,7 +125,10 @@ class _SupplierSelector extends StatelessWidget {
       child: InkWell(
         borderRadius: BorderRadius.circular(10),
         onTap: enabled
-            ? () => _openSupplierPicker(context, suppliers.value ?? const <Supplier>[])
+            ? () => _openSupplierPicker(
+                  context,
+                  suppliers.value ?? const <Supplier>[],
+                )
             : null,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
@@ -258,7 +264,8 @@ class _DateSelector extends StatelessWidget {
             initialDate: date ?? DateTime.now(),
             firstDate: DateTime(2000),
             lastDate: DateTime(2100),
-          ) ?? DateTime.now();
+          ) ??
+              DateTime.now();
           onPicked(picked);
         },
         child: Padding(
@@ -332,7 +339,10 @@ class _InvoiceNumberFieldState extends State<_InvoiceNumberField> {
       decoration: InputDecoration(
         isDense: true,
         labelText: 'رقم الفاتورة — اختياري',
-        hintText: 'مثال: INV-2026-001',
+        hintText: 'اتركه فارغًا ليُولَّد تلقائيًا',
+        helperText: 'إذا تركته فارغًا سيعطيك النظام رقمًا داخليًا '
+            'مثل PUR-2026-0001',
+        helperMaxLines: 2,
         prefixIcon: const Icon(Icons.numbers, size: 18),
         contentPadding: const EdgeInsets.symmetric(
           horizontal: 12,
