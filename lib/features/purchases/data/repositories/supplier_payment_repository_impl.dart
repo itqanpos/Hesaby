@@ -31,15 +31,15 @@ class SupplierPaymentRepositoryImpl implements SupplierPaymentRepository {
     try {
       final supabase.SupabaseClient client = _requireClient();
 
-      // RLS scopes rows to the caller's company.
-      var query = client
-          .from('supplier_payments')
-          .select()
-          .eq('supplier_id', supplierId);
-
       final int effectiveLimit = (limit == null || limit <= 0) ? 200 : limit;
 
-      final List<Map<String, dynamic>> rows = await query
+      // RLS scopes rows to the caller's company. The chain is built in a
+      // single expression because `.order()` / `.limit()` return a
+      // different builder type from `.eq()`.
+      final List<Map<String, dynamic>> rows = await client
+          .from('supplier_payments')
+          .select()
+          .eq('supplier_id', supplierId)
           .order('payment_date', ascending: false)
           .order('created_at', ascending: false)
           .limit(effectiveLimit);
