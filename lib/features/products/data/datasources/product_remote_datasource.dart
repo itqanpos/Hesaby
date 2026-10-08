@@ -112,30 +112,33 @@ class ProductRemoteDataSource {
   }) async {
     final SupabaseClient client = _requireClient();
 
-    var query = client.from('products').select().eq('company_id', companyId);
+    // Build the filter chain with a `PostgrestFilterBuilder` variable.
+    // `.order()` and `.range()` return different builder types, so they
+    // are applied in a single trailing chain instead of being reassigned.
+    var filterBuilder =
+        client.from('products').select().eq('company_id', companyId);
 
     if (isActive != null) {
-      query = query.eq('is_active', isActive);
+      filterBuilder = filterBuilder.eq('is_active', isActive);
     }
     if (categoryId != null) {
-      query = query.eq('category_id', categoryId);
+      filterBuilder = filterBuilder.eq('category_id', categoryId);
     }
 
     final String? rawSearch = searchQuery?.trim();
     if (rawSearch != null && rawSearch.isNotEmpty) {
       final String term = _sanitizeSearchTerm(rawSearch);
       if (term.isNotEmpty) {
-        query = query.or(
+        filterBuilder = filterBuilder.or(
           'name.ilike.%$term%,sku.ilike.%$term%,barcode.ilike.%$term%',
         );
       }
     }
 
-    query = query.order(sortColumn, ascending: sortAscending);
-    query = query.order('id', ascending: true);
-
-    final List<Map<String, dynamic>> rows =
-        await query.range(offset, offset + limit - 1);
+    final List<Map<String, dynamic>> rows = await filterBuilder
+        .order(sortColumn, ascending: sortAscending)
+        .order('id', ascending: true)
+        .range(offset, offset + limit - 1);
 
     return rows.map(ProductModel.fromMap).toList(growable: false);
   }
