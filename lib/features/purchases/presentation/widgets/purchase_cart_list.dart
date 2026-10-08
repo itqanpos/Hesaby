@@ -5,9 +5,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../domain/entities/purchase_cart.dart';
 import '../../domain/entities/purchase_cart_line.dart';
+import '../state/purchase_cart_notifier.dart';
 import '../state/purchase_providers.dart';
 import 'purchase_cart_line_tile.dart';
-
 /// Renders the current purchase cart, or an empty-state hint.
 class PurchaseCartList extends ConsumerWidget {
   const PurchaseCartList({super.key});
