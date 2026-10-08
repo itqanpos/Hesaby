@@ -15,7 +15,7 @@ import 'purchase_product_result_tile.dart';
 ///
 /// When the user taps a product, the largest available unit is used by
 /// default (e.g. a carton rather than a piece), with the unit cost derived
-/// from the base cost times the unit's conversion factor.
+/// from the base cost multiplied by the unit's conversion factor.
 class PurchaseResultsList extends ConsumerWidget {
   const PurchaseResultsList({super.key});
 
@@ -89,7 +89,8 @@ class PurchaseResultsList extends ConsumerWidget {
       // Pick the unit with the highest conversion factor, if any.
       ProductUnit? largest;
       for (final ProductUnit pu in productUnits) {
-        if (largest == null || pu.conversionFactor > largest.conversionFactor) {
+        if (largest == null ||
+            pu.conversionFactor > largest.conversionFactor) {
           largest = pu;
         }
       }
