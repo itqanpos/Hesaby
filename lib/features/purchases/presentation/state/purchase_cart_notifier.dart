@@ -22,20 +22,24 @@ class PurchaseCartNotifier extends Notifier<PurchaseCart> {
 
   /// Adds [product] (with [unit]) to the cart.
   ///
-  /// When [unitCost] is `null`, the product's current `costPrice` is used.
-  /// When the same `(productId, unitId)` already exists, its quantity is
-  /// increased instead of adding a second line.
+  /// When [unitCost] is `null`, the product's current `costPrice` multiplied
+  /// by [conversionFactor] is used. When the same `(productId, unitId)`
+  /// already exists, its quantity is increased instead of adding a second
+  /// line.
   void addProduct({
     required Product product,
     required Unit unit,
     double quantity = 1,
     double? unitCost,
+    double conversionFactor = 1,
   }) {
     if (quantity <= 0) {
       return;
     }
 
-    final double cost = unitCost ?? product.costPrice;
+    final double factor =
+        conversionFactor > 0 ? conversionFactor : 1;
+    final double cost = unitCost ?? (product.costPrice * factor);
     final PurchaseCartLine? existing = state.findLine(
       productId: product.id,
       unitId: unit.id,
@@ -59,7 +63,7 @@ class PurchaseCartNotifier extends Notifier<PurchaseCart> {
       productName: product.name,
       unitId: unit.id,
       unitName: unit.name,
-      conversionFactor: 1,
+      conversionFactor: factor,
       quantity: quantity,
       unitCost: cost,
     );
