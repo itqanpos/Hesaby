@@ -1,0 +1,435 @@
+// lib/features/pos/presentation/pages/printer_settings_page.dart
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../../../core/utils/logger.dart';
+import '../../../../shared/layouts/app_shell.dart';
+import '../../../../shared/widgets/app_button.dart';
+import '../../data/services/esc_pos_test_ticket.dart';
+import '../../data/services/printer_service.dart';
+import '../../domain/entities/printer_device.dart';
+import '../providers/printer_providers.dart';
+import '../widgets/printer_scan_sheet.dart';
+
+/// Printer settings page — pick a default thermal printer, test it, and
+/// forget it when needed.
+class PrinterSettingsPage extends ConsumerStatefulWidget {
+  const PrinterSettingsPage({super.key});
+
+  @override
+  ConsumerState<PrinterSettingsPage> createState() =>
+      _PrinterSettingsPageState();
+}
+
+class _PrinterSettingsPageState
+    extends ConsumerState<PrinterSettingsPage> {
+  /// Local connection state, owned by this page (not the app session).
+  bool _isConnecting = false;
+  bool _isConnected = false;
+  bool _isTesting = false;
+
+  @override
+  void initState() {
+    super.initState();
+    // Try to reconnect to the saved printer as soon as the page opens.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _autoConnect());
+  }
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
+  Future<void> _autoConnect() async {
+    final SavedPrinter? saved =
+        ref.read(savedPrinterProvider).valueOrNull;
+    if (saved == null) return;
+    await _connect(saved);
+  }
+
+  Future<void> _connect(SavedPrinter printer) async {
+    setState(() {
+      _isConnecting = true;
+      _isConnected = false;
+    });
+
+    final PrinterService service = ref.read(printerServiceProvider);
+    final bool ok = await service.connect(printer.toDevice());
+
+    if (!mounted) return;
+    setState(() {
+      _isConnecting = false;
+      _isConnected = ok;
+    });
+
+    if (!ok && mounted) {
+      _snack('تعذّر الاتصال بالطابعة. تأكد من تشغيلها.');
+    }
+  }
+
+  Future<void> _disconnect() async {
+    await ref.read(printerServiceProvider).disconnect();
+    if (!mounted) return;
+    setState(() => _isConnected = false);
+  }
+
+  Future<void> _pickPrinter() async {
+    final PrinterDevice? picked =
+        await showPrinterScanSheet(context: context);
+    if (picked == null || !mounted) return;
+
+    final SavedPrinter saved = SavedPrinter.fromDevice(picked);
+    try {
+      await ref.read(savedPrinterProvider.notifier).save(saved);
+      if (!mounted) return;
+      await _connect(saved);
+    } on Object catch (error, stackTrace) {
+      AppLogger.error('Failed to save printer', error, stackTrace);
+      if (!mounted) return;
+      _snack('تعذّر حفظ الطابعة. حاول مرة أخرى.');
+    }
+  }
+
+  Future<void> _forgetPrinter() async {
+    await _disconnect();
+    try {
+      await ref.read(savedPrinterProvider.notifier).clear();
+      if (!mounted) return;
+      _snack('تم نسيان الطابعة.');
+    } on Object catch (error, stackTrace) {
+      AppLogger.error('Failed to forget printer', error, stackTrace);
+      if (!mounted) return;
+      _snack('تعذّر نسيان الطابعة.');
+    }
+  }
+
+  Future<void> _testPrint() async {
+    setState(() => _isTesting = true);
+
+    try {
+      final List<int> bytes = await EscPosTestTicket.build();
+      await ref.read(printerServiceProvider).sendBytes(bytes);
+      if (!mounted) return;
+      _snack('تم إرسال الأمر للطابعة.');
+    } on PrinterException catch (error) {
+      if (!mounted) return;
+      _snack(_messageFor(error.type));
+    } on Object catch (error, stackTrace) {
+      AppLogger.error('Test print failed', error, stackTrace);
+      if (!mounted) return;
+      _snack('تعذّرت الطباعة. تحقق من الطابعة.');
+    } finally {
+      if (mounted) setState(() => _isTesting = false);
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  static String _messageFor(PrinterFailureType type) {
+    switch (type) {
+      case PrinterFailureType.notSupported:
+        return 'الطباعة غير مدعومة على هذه المنصة.';
+      case PrinterFailureType.connectFailed:
+        return 'تعذّر الاتصال بالطابعة.';
+      case PrinterFailureType.notConnected:
+        return 'لا توجد طابعة متصلة.';
+      case PrinterFailureType.sendFailed:
+        return 'تعذّر إرسال البيانات للطابعة.';
+      case PrinterFailureType.unknown:
+        return 'حدث خطأ غير متوقع.';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final AsyncValue<SavedPrinter?> savedAsync =
+        ref.watch(savedPrinterProvider);
+
+    return AppShell(
+      appBar: AppBar(title: const Text('إعدادات الطابعة')),
+      body: savedAsync.when(
+        loading: () => const Center(child: CircularProgressIndicator()),
+        error: (Object error, StackTrace _) => _ErrorBody(
+          message: 'تعذّر تحميل إعدادات الطابعة.',
+          onRetry: () => ref.invalidate(savedPrinterProvider),
+        ),
+        data: (SavedPrinter? saved) => _buildBody(saved),
+      ),
+    );
+  }
+
+  Widget _buildBody(SavedPrinter? saved) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    if (saved == null) {
+      return ListView(
+        padding: const EdgeInsets.only(top: 24, bottom: 24),
+        children: <Widget>[
+          Icon(
+            Icons.print_disabled_outlined,
+            size: 56,
+            color: scheme.onSurfaceVariant,
+          ),
+          const SizedBox(height: 16),
+          Text(
+            'لم تختر طابعة بعد',
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 8),
+          Text(
+            'اختر طابعة حرارية لطباعة إيصالات نقطة البيع مباشرة.',
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+            textAlign: TextAlign.center,
+          ),
+          const SizedBox(height: 24),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24),
+            child: AppButton(
+              label: 'اختيار طابعة',
+              icon: Icons.search,
+              expanded: true,
+              size: AppButtonSize.large,
+              onPressed: _pickPrinter,
+            ),
+          ),
+        ],
+      );
+    }
+
+    return ListView(
+      padding: const EdgeInsets.only(top: 12, bottom: 24),
+      children: <Widget>[
+        // ---- Current printer card ----
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: DecoratedBox(
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              borderRadius: BorderRadius.circular(14),
+              border: Border.all(color: scheme.outlineVariant),
+            ),
+            child: Padding(
+              padding: const EdgeInsets.all(14),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Icon(Icons.print_outlined, color: scheme.primary),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Text(
+                              saved.name,
+                              style: theme.textTheme.titleMedium?.copyWith(
+                                fontWeight: FontWeight.w700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
+                            Text(
+                              saved.address,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      _StatusChip(
+                        isConnecting: _isConnecting,
+                        isConnected: _isConnected,
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    _typeLabel(saved.connectionType),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        // ---- Actions ----
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              if (!_isConnected && !_isConnecting)
+                AppButton(
+                  label: 'الاتصال بالطابعة',
+                  icon: Icons.link,
+                  expanded: true,
+                  size: AppButtonSize.large,
+                  onPressed: () => _connect(saved),
+                ),
+              if (_isConnected)
+                AppButton(
+                  label: 'طباعة تجريبية',
+                  icon: Icons.print_outlined,
+                  expanded: true,
+                  size: AppButtonSize.large,
+                  isLoading: _isTesting,
+                  onPressed: _isTesting ? null : _testPrint,
+                ),
+              const SizedBox(height: 8),
+              AppButton(
+                label: 'اختيار طابعة أخرى',
+                icon: Icons.swap_horiz,
+                variant: AppButtonVariant.secondary,
+                expanded: true,
+                onPressed: _isConnecting ? null : _pickPrinter,
+              ),
+              const SizedBox(height: 8),
+              AppButton(
+                label: 'نسيان الطابعة',
+                icon: Icons.delete_outline,
+                variant: AppButtonVariant.danger,
+                expanded: true,
+                onPressed: _isConnecting ? null : _forgetPrinter,
+              ),
+            ],
+          ),
+        ),
+
+        const SizedBox(height: 16),
+
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 8),
+          child: Text(
+            'ملاحظة: الاتصال بالطابعة يبقى نشطًا أثناء استخدام التطبيق فقط. '
+            'عند إعادة فتح التطبيق، سيُعاد الاتصال تلقائيًا بالطابعة المحفوظة.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: scheme.onSurfaceVariant,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static String _typeLabel(PrinterConnectionType type) {
+    switch (type) {
+      case PrinterConnectionType.bluetoothClassic:
+        return 'بلوتوث (Classic)';
+      case PrinterConnectionType.bluetoothBle:
+        return 'بلوتوث (BLE)';
+      case PrinterConnectionType.usb:
+        return 'USB';
+      case PrinterConnectionType.network:
+        return 'شبكة';
+    }
+  }
+}
+
+// ============================================================================
+// Status chip
+// ============================================================================
+
+class _StatusChip extends StatelessWidget {
+  const _StatusChip({
+    required this.isConnecting,
+    required this.isConnected,
+  });
+
+  final bool isConnecting;
+  final bool isConnected;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    final ThemeData theme = Theme.of(context);
+
+    final String label;
+    final Color color;
+    if (isConnecting) {
+      label = 'جارٍ الاتصال…';
+      color = scheme.tertiary;
+    } else if (isConnected) {
+      label = 'متصل';
+      color = scheme.primary;
+    } else {
+      label = 'غير متصل';
+      color = scheme.onSurfaceVariant;
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.12),
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+        child: Text(
+          label,
+          style: theme.textTheme.labelSmall?.copyWith(
+            color: color,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Error body
+// ============================================================================
+
+class _ErrorBody extends StatelessWidget {
+  const _ErrorBody({required this.message, required this.onRetry});
+
+  final String message;
+  final VoidCallback onRetry;
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              Icons.error_outline,
+              size: 48,
+              color: Theme.of(context).colorScheme.error,
+            ),
+            const SizedBox(height: 12),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 16),
+            AppButton(
+              label: 'إعادة المحاولة',
+              icon: Icons.refresh,
+              onPressed: onRetry,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
