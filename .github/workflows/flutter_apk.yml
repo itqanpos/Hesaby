@@ -32,7 +32,7 @@ jobs:
   build-apk:
     name: Build APK
     runs-on: ubuntu-24.04
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
       - name: Checkout repository
@@ -91,96 +91,138 @@ jobs:
             fi
           done
 
-      - name: Patch all plugins' compileSdk in pub cache
+      - name: Patch EVERY plugin in pub-cache (compileSdk 31 -> 36)
         run: |
-          # Several third-party plugins ship with a hard-coded
-          # `compileSdkVersion` that is lower than what their own
-          # dependencies now require (androidx 1.13+, androidx.window,
-          # androidx.fragment 1.7+, etc.). Every such plugin has to be
-          # brought up to 36 before Gradle's AAR metadata check passes.
+          # Walks through every hosted package in the Flutter pub-cache and
+          # rewrites any `compileSdkVersion` / `compileSdk` declaration it
+          # finds to 36. This handles every legacy plugin (printer, native
+          # splash, network_info_plus, etc.) in one shot, and does not need
+          # to be updated when a new plugin is added.
           #
-          # This step walks through the known offenders inside the pub-cache
-          # and rewrites their Android build files. It runs entirely inside
-          # the CI runner; the repository itself is untouched.
+          # Skipped intentionally:
+          #   * packages whose build.gradle has no compileSdk declaration
+          #     (they inherit Flutter's default, already 36);
+          #   * the Flutter SDK itself (not under pub-cache);
+          #   * any `compileSdkPreview` line (preview toolchains).
+          #
+          # Runs only inside the CI runner — the repository is untouched.
           set -e
 
-          PLUGINS="
-          flutter_pos_printer_platform_image_3
-          network_info_plus
-          shared_preferences_android
-          url_launcher_android
-          app_links
-          jni
-          jni_flutter
-          mobile_scanner
-          "
-
-          PLUGIN_ROOT="$HOME/.pub-cache/hosted/pub.dev"
-          if [ ! -d "$PLUGIN_ROOT" ]; then
-            echo "!! pub-cache root not found at $PLUGIN_ROOT"
+          PUB_ROOT="$HOME/.pub-cache/hosted/pub.dev"
+          if [ ! -d "$PUB_ROOT" ]; then
+            echo "!! pub-cache not found at $PUB_ROOT"
             exit 1
           fi
 
-          PATCHED_COUNT=0
+          TOTAL=0
+          PATCHED=0
 
-          for NAME in $PLUGINS; do
-            DIR=$(find "$PLUGIN_ROOT" -maxdepth 1 -type d -name "${NAME}-*" | head -1)
-            if [ -z "$DIR" ]; then
-              echo "-- ${NAME}: not present in pub-cache (skipping)"
-              continue
-            fi
-            echo "== ${NAME}: $DIR"
-
+          for DIR in "$PUB_ROOT"/*/; do
+            [ -d "$DIR" ] || continue
+            TOTAL=$((TOTAL + 1))
             PATCHED_THIS=$(
               python3 - "$DIR" <<'PY'
           import re, pathlib, sys
 
-          plugin_dir = sys.argv[1]
-          patched_any = False
+          plugin_dir = pathlib.Path(sys.argv[1])
+          changed = False
 
-          for name in ['build.gradle', 'build.gradle.kts']:
-              f = pathlib.Path(plugin_dir) / 'android' / name
+          for candidate in ['android/build.gradle', 'android/build.gradle.kts']:
+              f = plugin_dir / candidate
               if not f.exists():
                   continue
               text = f.read_text()
               original = text
 
-              # Groovy DSL
-              text = re.sub(r'compileSdkVersion\s*=?\s*[0-9]+',
-                            'compileSdkVersion 36', text)
-              text = re.sub(r'compileSdkVersion\(\s*[0-9]+\s*\)',
-                            'compileSdkVersion(36)', text)
-              # Kotlin DSL
-              text = re.sub(r'compileSdk\s*=\s*[0-9]+',
-                            'compileSdk = 36', text)
-              text = re.sub(r'compileSdk\(\s*[0-9]+\s*\)',
-                            'compileSdk(36)', text)
-              text = re.sub(r'\bcompileSdk\s+[0-9]+\b',
-                            'compileSdk 36', text)
+              # Protect compileSdkPreview lines by temporarily masking them.
+              text = re.sub(
+                  r'compileSdkPreview\b',
+                  '__CDK_PREVIEW__',
+                  text,
+              )
+
+              # Groovy DSL: `compileSdkVersion 31`, `compileSdkVersion = 31`
+              text = re.sub(
+                  r'compileSdkVersion\s*=?\s*[0-9]+',
+                  'compileSdkVersion 36',
+                  text,
+              )
+              # Groovy DSL: `compileSdkVersion(31)`
+              text = re.sub(
+                  r'compileSdkVersion\(\s*[0-9]+\s*\)',
+                  'compileSdkVersion(36)',
+                  text,
+              )
+              # Kotlin DSL: `compileSdk = 31`
+              text = re.sub(
+                  r'\bcompileSdk\s*=\s*[0-9]+',
+                  'compileSdk = 36',
+                  text,
+              )
+              # Kotlin DSL: `compileSdk(31)`
+              text = re.sub(
+                  r'\bcompileSdk\(\s*[0-9]+\s*\)',
+                  'compileSdk(36)',
+                  text,
+              )
+              # Kotlin DSL: `compileSdk 31` (space form, rarer)
+              text = re.sub(
+                  r'\bcompileSdk\s+[0-9]+\b',
+                  'compileSdk 36',
+                  text,
+              )
+
+              # Restore preview markers.
+              text = text.replace('__CDK_PREVIEW__', 'compileSdkPreview')
 
               if text != original:
                   f.write_text(text)
-                  patched_any = True
-                  print(f"   patched: {f}")
-                  for line in text.splitlines():
-                      if 'compileSdk' in line:
-                          print(f"     {line.strip()}")
+                  changed = True
 
-          sys.exit(0 if patched_any else 2)
+          sys.exit(0 if changed else 2)
           PY
-            ) && PATCHED_COUNT=$((PATCHED_COUNT + 1)) || {
+            ) && true || {
               RC=$?
               if [ $RC -eq 2 ]; then
-                echo "   (no compileSdk declaration found — plugin may use the shared Flutter default)"
+                : # no change — silently skip
               else
-                echo "   !! patch failed with exit code $RC"
+                echo "!! patch failed in $DIR (exit $RC)"
               fi
             }
-            echo "$PATCHED_THIS"
+
+            if [ -n "$PATCHED_THIS" ]; then
+              PATCHED=$((PATCHED + 1))
+              echo "patched: $DIR"
+            fi
           done
 
           echo "---"
-          echo "Total plugins patched: $PATCHED_COUNT"
+          echo "Scanned $TOTAL packages, patched $PATCHED."
+
+      - name: Verify no plugin still compiles against < 34
+        run: |
+          # After the previous step, no plugin's build file should still
+          # declare compileSdk / compileSdkVersion below 34. This is a
+          # sanity check: if it fails, a plugin uses an unusual syntax the
+          # regexes did not catch and needs a manual entry.
+          set -e
+
+          PUB_ROOT="$HOME/.pub-cache/hosted/pub.dev"
+          OFFENDERS=0
+
+          while IFS= read -r line; do
+            echo "OFFENDER: $line"
+            OFFENDERS=$((OFFENDERS + 1))
+          done < <(grep -rEn \
+            'compileSdk(Version)?\s*=?\s*(2[0-9]|3[0-3])\b' \
+            "$PUB_ROOT" --include='build.gradle' --include='build.gradle.kts' \
+            || true)
+
+          if [ "$OFFENDERS" -gt 0 ]; then
+            echo "!! Found $OFFENDERS plugin file(s) still below compileSdk 34."
+            exit 1
+          fi
+          echo "OK: every plugin compiles against 34+."
 
       - name: Add Android permissions
         run: |
