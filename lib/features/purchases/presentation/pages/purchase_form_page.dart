@@ -20,7 +20,6 @@ import '../../domain/repositories/purchase_repository.dart';
 import '../providers/purchase_providers.dart';
 import '../state/purchase_cart_notifier.dart';
 import '../state/purchase_providers.dart';
-import '../state/purchase_search_notifier.dart';
 import 'purchase_mobile_layout.dart';
 
 /// Purchase form page — POS-style split layout.
