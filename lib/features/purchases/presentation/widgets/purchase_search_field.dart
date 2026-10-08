@@ -1,4 +1,4 @@
-// lib/features/purchases/presentation/widgets/purchase_search_field.dart
+// lib/features/purchases/presentation/widgets/purchase_search_field.dar
 
 import 'dart:async';
 
@@ -14,6 +14,7 @@ import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
 import '../state/purchase_focus_providers.dart';
 import '../state/purchase_providers.dart';
+import '../state/purchase_search_notifier.dart';
 
 /// Search field for the purchase form.
 ///
