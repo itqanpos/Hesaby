@@ -650,10 +650,15 @@ class _SupplierCard extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
     final bool isActive = supplier.isActive;
 
-    final List<String> meta = <String>[];
-    if (supplier.hasCode) meta.add('كود: ${supplier.code}');
-    if (supplier.hasPhone) meta.add(supplier.phone!);
-    else if (supplier.hasEmail) meta.add(supplier.email!);
+ final List<String> meta = <String>[];
+    if (supplier.hasCode) {
+      meta.add('كود: ${supplier.code}');
+    }
+    if (supplier.hasPhone) {
+      meta.add(supplier.phone!);
+    } else if (supplier.hasEmail) {
+      meta.add(supplier.email!);
+    }
 
     return Material(
       color: scheme.surface,
