@@ -13,19 +13,12 @@ import '../models/purchase_model.dart';
 /// Supabase directly. Everything above this class deals with
 /// [PurchaseModel] / [PurchaseItemModel] and never sees Supabase types.
 ///
-/// Transactionality caveat:
-/// The Supabase client cannot issue multi-statement transactions. Creating a
-/// purchase therefore proceeds as: insert header (status = draft), then
-/// batch-insert the items. If the second step fails, the header remains in
-/// `draft` with no items; a best-effort cancellation is issued to keep the
-/// list clean, and the original error is rethrown. The database trigger
-/// guarantees that any state transition performed inside a single statement
-/// (for example, confirming) is atomic.
-///
-/// Tenant isolation is enforced by Row Level Security, and cross-tenant
-/// integrity by composite foreign keys. The data source never accepts a
-/// `userId`; the active identity is always `auth.uid()`, evaluated inside
-/// the database.
+/// Invoice numbering:
+/// When the caller does not supply an `invoice_number`, the data source
+/// calls the `next_purchase_invoice_number` RPC, which returns a
+/// company-scoped `PUR-YYYY-NNNN` value. This lets a user keep the
+/// supplier's own invoice number when they have it, and still get a
+/// stable internal number otherwise.
 class PurchaseRemoteDataSource {
   const PurchaseRemoteDataSource(this._client);
 
@@ -55,8 +48,6 @@ class PurchaseRemoteDataSource {
     final int effectiveLimit =
         (limit == null || limit <= 0) ? defaultLimit : limit;
 
-    // `var` infers `PostgrestFilterBuilder<PostgrestList>`. Reassignment is
-    // used because filters are applied conditionally.
     var query = client.from('purchases').select().eq('company_id', companyId);
 
     if (branchId != null) {
@@ -108,6 +99,10 @@ class PurchaseRemoteDataSource {
 
   /// Creates a draft purchase and its items.
   ///
+  /// When [invoiceNumber] is `null` or empty, the server generates a
+  /// `PUR-YYYY-NNNN` number for the company. When non-empty, the supplied
+  /// value is stored as-is (typically the supplier's own invoice number).
+  ///
   /// On failure of the item batch insert, the header is left in `draft` and
   /// a best-effort cancellation is issued before rethrowing.
   Future<PurchaseModel> createPurchase({
@@ -125,15 +120,18 @@ class PurchaseRemoteDataSource {
 
     final String? createdBy = client.auth.currentUser?.id;
 
+    // ---- Resolve the invoice number (user-supplied or auto-generated) ----
+    final String? effectiveInvoiceNumber =
+        await _resolveInvoiceNumber(client, companyId, invoiceNumber);
+
     final Map<String, dynamic> headerPayload = <String, dynamic>{
       'company_id': companyId,
       'branch_id': branchId,
       'supplier_id': supplierId,
       'purchase_date': _formatDate(purchaseDate),
+      'invoice_number': effectiveInvoiceNumber,
       'discount': discount,
       'tax_amount': taxAmount,
-      if (invoiceNumber != null && invoiceNumber.trim().isNotEmpty)
-        'invoice_number': invoiceNumber.trim(),
       if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
       if (createdBy != null) 'created_by': createdBy,
     };
@@ -182,6 +180,10 @@ class PurchaseRemoteDataSource {
   }
 
   /// Replaces the header and items of an existing draft purchase.
+  ///
+  /// Unlike [createPurchase], this method never auto-generates a number:
+  /// the existing invoice number is preserved when [invoiceNumber] is
+  /// empty, so an edit does not silently rotate the number.
   Future<PurchaseModel> updateDraft({
     required String purchaseId,
     required String companyId,
@@ -276,6 +278,43 @@ class PurchaseRemoteDataSource {
         .single();
 
     return PurchaseModel.fromMap(row);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Invoice number resolution
+  // ---------------------------------------------------------------------------
+
+  /// Returns the invoice number to store, generating one when [supplied]
+  /// is null or empty.
+  ///
+  /// Throws [PurchaseException] with type
+  /// [PurchaseFailureType.invalidResponse] when the server returns an
+  /// unexpected value (the RPC is guaranteed to return a non-empty string
+  /// on success).
+  static Future<String> _resolveInvoiceNumber(
+    SupabaseClient client,
+    String companyId,
+    String? supplied,
+  ) async {
+    final String trimmed = (supplied ?? '').trim();
+    if (trimmed.isNotEmpty) {
+      return trimmed;
+    }
+
+    final Object? raw = await client.rpc(
+      'next_purchase_invoice_number',
+      params: <String, dynamic>{'p_company_id': companyId},
+    );
+
+    if (raw is String && raw.trim().isNotEmpty) {
+      return raw.trim();
+    }
+
+    throw const PurchaseException(
+      type: PurchaseFailureType.invalidResponse,
+      cause:
+          'next_purchase_invoice_number returned an unexpected value.',
+    );
   }
 
   // ---------------------------------------------------------------------------
