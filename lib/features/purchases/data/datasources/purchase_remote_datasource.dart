@@ -121,7 +121,7 @@ class PurchaseRemoteDataSource {
     final String? createdBy = client.auth.currentUser?.id;
 
     // ---- Resolve the invoice number (user-supplied or auto-generated) ----
-    final String? effectiveInvoiceNumber =
+    final String effectiveInvoiceNumber =
         await _resolveInvoiceNumber(client, companyId, invoiceNumber);
 
     final Map<String, dynamic> headerPayload = <String, dynamic>{
