@@ -6,50 +6,23 @@ import 'package:flutter/foundation.dart';
 import '../entities/product.dart';
 import '../entities/product_unit.dart';
 
-/// Categories of failures that the presentation layer can safely translate
-/// into localized user messages.
-///
-/// Mirrors the Phase 1 and Phase 3 conventions so the application has a
-/// single, consistent way of categorising safe failures. Backend-specific
-/// error codes and raw messages never leave the data layer.
+// ============================================================================
+// Failure types (unchanged from previous version)
+// ============================================================================
+
 enum ProductFailureType {
-  /// The request could not reach the backend.
   network,
-
-  /// The backend rejected the request as unauthorised (RLS or session).
   unauthorized,
-
-  /// The requested product does not exist or is not accessible.
   notFound,
-
-  /// A product with the same SKU already exists for this company.
   skuConflict,
-
-  /// A product with the same barcode already exists for this company.
   barcodeConflict,
-
-  /// The referenced category does not exist, is not accessible, or belongs
-  /// to a different company.
   categoryNotFound,
-
-  /// The referenced unit does not exist, is not accessible, or belongs to a
-  /// different company.
   unitNotFound,
-
-  /// The product cannot be deleted because other rows still reference it.
   inUse,
-
-  /// The response could not be interpreted.
   invalidResponse,
-
-  /// Any other unclassified failure.
   unknown,
 }
 
-/// Domain-level exception raised by [ProductRepository] operations.
-///
-/// Carries a safe [ProductFailureType] rather than a raw backend message so
-/// the presentation layer can produce localized, user-friendly errors.
 @immutable
 class ProductException extends Equatable implements Exception {
   const ProductException({
@@ -58,13 +31,8 @@ class ProductException extends Equatable implements Exception {
     this.stackTrace,
   });
 
-  /// Safe, categorized reason for the failure.
   final ProductFailureType type;
-
-  /// Original error, kept for logging. Never displayed to end users.
   final Object? cause;
-
-  /// Original stack trace, kept for logging.
   final StackTrace? stackTrace;
 
   @override
@@ -74,24 +42,89 @@ class ProductException extends Equatable implements Exception {
   String toString() => 'ProductException(type: ${type.name})';
 }
 
-/// Contract for product operations, including their non-base unit
-/// conversions.
-///
-/// All access decisions are ultimately enforced by Row Level Security in the
-/// database: the data layer never accepts a `userId`, and `companyId` is
-/// only ever used to filter results — RLS rejects any attempt to read or
-/// write rows outside the caller's memberships.
+// ============================================================================
+// Pagination / sort helpers
+// ============================================================================
+
+/// Sort field for paginated product listings.
+enum ProductSortField {
+  name('name'),
+  sellingPrice('selling_price'),
+  costPrice('cost_price'),
+  createdAt('created_at');
+
+  const ProductSortField(this.column);
+
+  /// The database column name.
+  final String column;
+}
+
+/// A single page of products.
+@immutable
+class ProductsPageResult extends Equatable {
+  const ProductsPageResult({
+    required this.items,
+    required this.offset,
+    required this.limit,
+    required this.hasMore,
+  });
+
+  /// Items in this page.
+  final List<Product> items;
+
+  /// Offset used to fetch this page.
+  final int offset;
+
+  /// Maximum number of items requested.
+  final int limit;
+
+  /// Whether more items are likely available after this page.
+  ///
+  /// Computed as `items.length == limit` — a heuristic that avoids an
+  /// extra count query. It may be `true` when the page happens to end
+  /// exactly on the last item; the next request then returns an empty
+  /// page and closes the loop.
+  final bool hasMore;
+
+  @override
+  List<Object?> get props => <Object?>[items, offset, limit, hasMore];
+}
+
+/// Total counts per stock status, used by the KPI header.
+@immutable
+class ProductCounts extends Equatable {
+  const ProductCounts({
+    required this.total,
+    required this.active,
+    required this.inactive,
+  });
+
+  const ProductCounts.zero()
+      : total = 0,
+        active = 0,
+        inactive = 0;
+
+  final int total;
+  final int active;
+  final int inactive;
+
+  @override
+  List<Object?> get props => <Object?>[total, active, inactive];
+}
+
+// ============================================================================
+// Repository interface
+// ============================================================================
+
 abstract interface class ProductRepository {
   // ---------------------------------------------------------------------------
-  // Products
+  // Products — legacy (used by POS and other features)
   // ---------------------------------------------------------------------------
 
   /// Returns every product of [companyId] visible to the current user.
   ///
-  /// When [includeInactive] is `false` (the default), inactive products are
-  /// omitted. When [categoryId] is provided, only products of that category
-  /// are returned.
-  /// Throws [ProductException] when the request fails.
+  /// Kept for existing consumers (POS, sales dialogs). New UI surfaces
+  /// should prefer [listProductsPaged].
   Future<List<Product>> listProducts(
     String companyId, {
     bool includeInactive = false,
@@ -99,21 +132,39 @@ abstract interface class ProductRepository {
   });
 
   /// Returns a single product by id.
-  ///
-  /// Throws [ProductException] with type [ProductFailureType.notFound] when
-  /// the product does not exist or is not accessible to the current user.
   Future<Product> getProduct(String productId);
 
-  /// Creates a new product inside [companyId].
+  // ---------------------------------------------------------------------------
+  // Products — paginated / filtered / sorted
+  // ---------------------------------------------------------------------------
+
+  /// Returns one page of products, with optional filter, search and sort.
   ///
-  /// [defaultUnitId] must reference a unit of the same company.
-  /// [categoryId], when provided, must reference a category of the same
-  /// company.
+  /// [searchQuery], when provided, matches name, SKU or barcode using a
+  /// case-insensitive substring search performed server-side. [isActive]
+  /// filters by active flag; `null` means "both".
+  Future<ProductsPageResult> listProductsPaged({
+    required String companyId,
+    required int offset,
+    required int limit,
+    String? categoryId,
+    bool? isActive,
+    String? searchQuery,
+    ProductSortField sortField = ProductSortField.name,
+    bool sortAscending = true,
+  });
+
+  /// Returns global counts of products for [companyId].
   ///
-  /// Throws [ProductException] with type
-  /// [ProductFailureType.skuConflict] / [ProductFailureType.barcodeConflict]
-  /// on uniqueness violations, or [ProductFailureType.categoryNotFound] /
-  /// [ProductFailureType.unitNotFound] when a referenced row is unavailable.
+  /// Used by the KPI header so the numbers reflect the whole company and
+  /// not just the current filter. Does not take a category or status
+  /// filter.
+  Future<ProductCounts> countProducts(String companyId);
+
+  // ---------------------------------------------------------------------------
+  // Products — mutations
+  // ---------------------------------------------------------------------------
+
   Future<Product> createProduct({
     required String companyId,
     required String name,
@@ -128,16 +179,6 @@ abstract interface class ProductRepository {
     double? taxRate,
   });
 
-  /// Updates an existing product.
-  ///
-  /// Passing `null` for a nullable parameter leaves it unchanged, except for
-  /// the six nullable fields that carry an explicit `clear*` flag:
-  /// `categoryId`, `sku`, `barcode`, `description`, `minSellingPrice` and
-  /// `taxRate`. This resolves the ambiguity of `null` meaning both "leave as
-  /// is" and "set to null".
-  ///
-  /// Throws [ProductException] with the same typed failures as
-  /// [createProduct].
   Future<Product> updateProduct({
     required String productId,
     String? name,
@@ -159,50 +200,24 @@ abstract interface class ProductRepository {
     bool? isActive,
   });
 
-  /// Deletes a product.
-  ///
-  /// Throws [ProductException] with type [ProductFailureType.inUse] when the
-  /// product is still referenced by other rows in a way that prevents
-  /// deletion. Callers should prefer [updateProduct] with `isActive: false`
-  /// for a soft disable.
   Future<void> deleteProduct(String productId);
 
   // ---------------------------------------------------------------------------
-  // Product units (non-base conversions)
+  // Product units
   // ---------------------------------------------------------------------------
 
-  /// Returns every non-base unit conversion of [productId].
-  ///
-  /// The base unit of the product (`Product.defaultUnitId`) is intentionally
-  /// not included: it is a property of the product itself.
-  /// Throws [ProductException] when the request fails.
   Future<List<ProductUnit>> listProductUnits(String productId);
 
-  /// Adds a new non-base unit conversion to [productId].
-  ///
-  /// [conversionFactor] must be strictly positive. [unitId] must reference a
-  /// unit of the same company, and must not equal the product's base unit.
-  ///
-  /// Throws [ProductException] with type [ProductFailureType.unitNotFound]
-  /// when the unit is unavailable, or with [ProductFailureType.invalidResponse]
-  /// when the DB rejects the row (duplicate unit or base-unit collision).
   Future<ProductUnit> addProductUnit({
     required String productId,
     required String unitId,
     required double conversionFactor,
   });
 
-  /// Updates the conversion factor of an existing product-unit row.
-  ///
-  /// Throws [ProductException] when the row is not accessible or the factor
-  /// is not strictly positive.
   Future<ProductUnit> updateProductUnit({
     required String productUnitId,
     required double conversionFactor,
   });
 
-  /// Deletes a non-base unit conversion.
-  ///
-  /// Throws [ProductException] when the row is not accessible.
   Future<void> deleteProductUnit(String productUnitId);
 }
