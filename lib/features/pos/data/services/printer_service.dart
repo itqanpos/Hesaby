@@ -71,14 +71,18 @@ abstract interface class PrinterService {
 /// The service is stateful: it remembers the currently connected device
 /// so [sendBytes] does not require the caller to pass it every time.
 /// It is not thread-safe; concurrent [connect] calls are undefined.
+///
+/// The plugin distinguishes the three transports via `PrinterType`, and
+/// uses a `isBle` boolean on Bluetooth calls to select between Classic
+/// SPP (default) and BLE. This service maps domain-side
+/// [PrinterConnectionType] to that shape.
 class FlutterPosPrinterService implements PrinterService {
   FlutterPosPrinterService();
 
-  final fpp.PrinterManager _manager = fpp.PrinterManager();
+  final fpp.PrinterManager _manager = fpp.PrinterManager.instance;
 
   PrinterDevice? _connected;
   fpp.PrinterType? _connectedManagerType;
-  bool _connectedIsBle = false;
 
   @override
   bool get isConnected => _connected != null;
@@ -92,7 +96,7 @@ class FlutterPosPrinterService implements PrinterService {
     final bool isBle = type == PrinterConnectionType.bluetoothBle;
 
     return _manager
-        .discovery(managerType, isBle: isBle)
+        .discovery(type: managerType, isBle: isBle)
         .map((fpp.PrinterDevice device) => _toDomain(device, type));
   }
 
@@ -104,19 +108,16 @@ class FlutterPosPrinterService implements PrinterService {
 
     try {
       final fpp.PrinterType managerType = _toManagerType(device.connectionType);
-      final bool isBle =
-          device.connectionType == PrinterConnectionType.bluetoothBle;
+      final fpp.BasePrinterInput input = _toManagerInput(device);
 
       final bool ok = await _manager.connect(
-        _toManagerDevice(device),
-        managerType,
-        isBle: isBle,
+        type: managerType,
+        model: input,
       );
 
       if (ok) {
         _connected = device;
         _connectedManagerType = managerType;
-        _connectedIsBle = isBle;
       }
       return ok;
     } on Object catch (error, stackTrace) {
@@ -132,14 +133,13 @@ class FlutterPosPrinterService implements PrinterService {
     final fpp.PrinterType? type = _connectedManagerType;
     if (type != null) {
       try {
-        await _manager.disconnect(type);
+        await _manager.disconnect(type: type);
       } on Object catch (error, stackTrace) {
         AppLogger.error('Printer disconnect failed', error, stackTrace);
       }
     }
     _connected = null;
     _connectedManagerType = null;
-    _connectedIsBle = false;
   }
 
   @override
@@ -149,7 +149,12 @@ class FlutterPosPrinterService implements PrinterService {
       throw const PrinterException(PrinterFailureType.notConnected);
     }
     try {
-      await _manager.sendBytes(bytes, type);
+      final bool ok = await _manager.send(type: type, bytes: bytes);
+      if (!ok) {
+        throw const PrinterException(PrinterFailureType.sendFailed);
+      }
+    } on PrinterException {
+      rethrow;
     } on Object catch (error, stackTrace) {
       AppLogger.error('Printer sendBytes failed', error, stackTrace);
       throw PrinterException(
@@ -179,18 +184,33 @@ class FlutterPosPrinterService implements PrinterService {
     }
   }
 
-  /// Builds a plugin-side [fpp.PrinterDevice] from a domain device.
+  /// Builds the plugin-side input object matching [device]'s transport.
   ///
-  /// The plugin class exposes nullable mutable fields without a
-  /// constructor, so the object is created empty and populated.
-  static fpp.PrinterDevice _toManagerDevice(PrinterDevice device) {
-    final fpp.PrinterDevice result = fpp.PrinterDevice();
-    result.name = device.name;
-    result.address = device.address;
-    result.vendorId = device.vendorId;
-    result.productId = device.productId;
-    result.description = device.description;
-    return result;
+  /// Each transport has its own `*PrinterInput` class; the manager
+  /// dispatches on the runtime type, so a wrong pairing throws at runtime.
+  static fpp.BasePrinterInput _toManagerInput(PrinterDevice device) {
+    switch (device.connectionType) {
+      case PrinterConnectionType.bluetoothClassic:
+        return fpp.BluetoothPrinterInput(
+          address: device.address,
+          name: device.name,
+          isBle: false,
+        );
+      case PrinterConnectionType.bluetoothBle:
+        return fpp.BluetoothPrinterInput(
+          address: device.address,
+          name: device.name,
+          isBle: true,
+        );
+      case PrinterConnectionType.usb:
+        return fpp.UsbPrinterInput(
+          name: device.name,
+          vendorId: device.vendorId,
+          productId: device.productId,
+        );
+      case PrinterConnectionType.network:
+        return fpp.TcpPrinterInput(ipAddress: device.address);
+    }
   }
 
   /// Builds a domain [PrinterDevice] from a plugin-side device.
@@ -199,12 +219,11 @@ class FlutterPosPrinterService implements PrinterService {
     PrinterConnectionType type,
   ) {
     return PrinterDevice(
-      name: device.name ?? 'طابعة بدون اسم',
+      name: device.name,
       address: device.address ?? '',
       connectionType: type,
       vendorId: device.vendorId,
       productId: device.productId,
-      description: device.description,
     );
   }
 }
