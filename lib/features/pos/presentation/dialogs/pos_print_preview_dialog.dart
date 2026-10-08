@@ -3,20 +3,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/utils/logger.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../data/services/esc_pos_receipt_builder.dart';
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
+import '../../data/services/printer_service.dart';
 import '../../data/services/receipt_printer.dart';
+import '../../domain/entities/printer_device.dart';
 import '../../domain/entities/receipt.dart';
+import '../providers/printer_providers.dart';
 
 /// Opens the print preview dialog for [receipt].
 ///
-/// The dialog only performs two actions — print or share as PDF — and
-/// shows which paper size will be used. **The paper size itself is no
-/// longer selectable here**; the cashier changes it from
-/// `PosActionsSheet → إعدادات الطباعة`, and the choice is persisted in
-/// `PreferencesStorage`. This keeps the print flow one-tap for the common
-/// case (roll of 80 mm) and avoids repeating the picker on every sale.
+/// Offers three actions:
+///   * **Print via PDF** — opens the system print dialog (works everywhere).
+///   * **Print via Bluetooth** — renders the receipt as a raster image and
+///     sends it to the saved thermal printer. Only shown when the user has
+///     a printer configured. Works around the lack of an Arabic code page
+///     on most budget printers.
+///   * **Share as PDF** — opens the system share sheet.
 Future<void> showPosPrintPreviewDialog({
   required BuildContext context,
   required Receipt receipt,
@@ -45,60 +51,139 @@ class _PosPrintPreviewDialog extends ConsumerStatefulWidget {
 
 class _PosPrintPreviewDialogState
     extends ConsumerState<_PosPrintPreviewDialog> {
-  static const ReceiptPrinter _printer = ReceiptPrinterImpl();
+  static const ReceiptPrinter _pdfPrinter = ReceiptPrinterImpl();
 
   bool _isPrinting = false;
   bool _isSharing = false;
+  bool _isBluetoothPrinting = false;
 
-  bool get _isBusy => _isPrinting || _isSharing;
+  bool get _isBusy => _isPrinting || _isSharing || _isBluetoothPrinting;
 
   // ---------------------------------------------------------------------------
-  // Actions
+  // PDF actions
   // ---------------------------------------------------------------------------
 
   Future<void> _print() async {
     setState(() => _isPrinting = true);
 
-    final bool ok = await _printer.printReceipt(
+    final bool ok = await _pdfPrinter.printReceipt(
       receipt: widget.receipt,
       size: _currentPaperSize(),
     );
 
-    if (!mounted) {
-      return;
-    }
-
+    if (!mounted) return;
     setState(() => _isPrinting = false);
 
     if (ok) {
       Navigator.of(context).pop();
       return;
     }
-
     _showFailure('تعذّرت الطباعة. يرجى المحاولة مرة أخرى.');
   }
 
   Future<void> _share() async {
     setState(() => _isSharing = true);
 
-    final bool ok = await _printer.shareReceipt(
+    final bool ok = await _pdfPrinter.shareReceipt(
       receipt: widget.receipt,
       size: _currentPaperSize(),
     );
 
-    if (!mounted) {
-      return;
-    }
-
+    if (!mounted) return;
     setState(() => _isSharing = false);
 
     if (ok) {
       Navigator.of(context).pop();
       return;
     }
-
     _showFailure('تعذّرت مشاركة الإيصال.');
   }
+
+  // ---------------------------------------------------------------------------
+  // Bluetooth action
+  // ---------------------------------------------------------------------------
+
+  Future<void> _printBluetooth(SavedPrinter saved) async {
+    setState(() => _isBluetoothPrinting = true);
+
+    final PrinterService service = ref.read(printerServiceProvider);
+
+    try {
+      // 1) Ensure connected — reconnect if the session dropped it.
+      if (!service.isConnected) {
+        final bool connected = await service.connect(saved.toDevice());
+        if (!connected) {
+          if (!mounted) return;
+          _showFailure('تعذّر الاتصال بالطابعة. تأكد من تشغيلها.');
+          return;
+        }
+      }
+
+      // 2) Render the receipt to ESC/POS raster bytes.
+      final int widthDots = _bluetoothWidthDots(saved);
+      final List<int> bytes = await EscPosReceiptBuilder.build(
+        receipt: widget.receipt,
+        paperWidthDots: widthDots,
+      );
+
+      // 3) Send.
+      await service.sendBytes(bytes);
+
+      if (!mounted) return;
+      Navigator.of(context).pop();
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('تم إرسال الإيصال للطابعة.')),
+        );
+    } on PrinterException catch (error) {
+      AppLogger.error('Bluetooth print failed', error);
+      if (!mounted) return;
+      _showFailure(_bluetoothFailureMessage(error.type));
+    } on Object catch (error, stackTrace) {
+      AppLogger.error('Bluetooth print failed', error, stackTrace);
+      if (!mounted) return;
+      _showFailure('تعذّرت الطباعة عبر Bluetooth. حاول مرة أخرى.');
+    } finally {
+      if (mounted) {
+        setState(() => _isBluetoothPrinting = false);
+      }
+    }
+  }
+
+  /// Maps the saved paper size to the raster width.
+  ///
+  /// `ReceiptPaperSize.mm58` → 384 dots; everything else → 576 dots (80 mm).
+  /// A4 is not meaningful for a thermal printer, so it defaults to 80 mm.
+  int _bluetoothWidthDots(SavedPrinter _) {
+    final ReceiptPaperSize size = _currentPaperSize();
+    switch (size) {
+      case ReceiptPaperSize.mm58:
+        return EscPosReceiptBuilder.widthMm58;
+      case ReceiptPaperSize.mm80:
+      case ReceiptPaperSize.a4:
+        return EscPosReceiptBuilder.widthMm80;
+    }
+  }
+
+  static String _bluetoothFailureMessage(PrinterFailureType type) {
+    switch (type) {
+      case PrinterFailureType.notSupported:
+        return 'الطباعة عبر Bluetooth غير مدعومة على هذا الجهاز.';
+      case PrinterFailureType.connectFailed:
+        return 'تعذّر الاتصال بالطابعة. تأكد من تشغيلها.';
+      case PrinterFailureType.notConnected:
+        return 'لا توجد طابعة متصلة.';
+      case PrinterFailureType.sendFailed:
+        return 'تعذّر إرسال الإيصال للطابعة.';
+      case PrinterFailureType.unknown:
+        return 'حدث خطأ غير متوقع أثناء الطباعة.';
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
 
   void _showFailure(String message) {
     ScaffoldMessenger.of(context)
@@ -106,15 +191,6 @@ class _PosPrintPreviewDialogState
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
-  /// Reads the persisted paper size at the exact moment an action runs.
-  ///
-  /// Falls back to [PosPreferences.defaultPaperSize] while the async
-  /// provider is still loading or when it has errored out, so the cashier
-  /// can always complete a sale.
   ReceiptPaperSize _currentPaperSize() {
     return ref.read(posPaperSizeProvider).valueOrNull ??
         PosPreferences.defaultPaperSize;
@@ -145,6 +221,9 @@ class _PosPrintPreviewDialogState
         ref.watch(posPaperSizeProvider);
     final ReceiptPaperSize currentSize = asyncSize.valueOrNull ??
         PosPreferences.defaultPaperSize;
+    final AsyncValue<SavedPrinter?> savedAsync =
+        ref.watch(savedPrinterProvider);
+    final SavedPrinter? savedPrinter = savedAsync.valueOrNull;
 
     return AlertDialog(
       title: Row(
@@ -195,6 +274,18 @@ class _PosPrintPreviewDialogState
                 ),
               ),
             ),
+
+            const SizedBox(height: 12),
+
+            // ---- Bluetooth printer status ----
+            if (savedPrinter != null)
+              _BluetoothPrinterRow(printer: savedPrinter)
+            else
+              _NoBluetoothPrinterHint(
+                onConfigure: () {
+                  Navigator.of(context).pop();
+                },
+              ),
 
             const SizedBox(height: 12),
 
@@ -252,11 +343,25 @@ class _PosPrintPreviewDialogState
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
+            if (savedPrinter != null)
+              AppButton(
+                label: 'طباعة عبر Bluetooth',
+                icon: Icons.bluetooth,
+                expanded: true,
+                size: AppButtonSize.large,
+                isLoading: _isBluetoothPrinting,
+                onPressed: _isBusy
+                    ? null
+                    : () => _printBluetooth(savedPrinter),
+              ),
+            if (savedPrinter != null) const SizedBox(height: 8),
             AppButton(
-              label: 'طباعة',
+              label: 'طباعة (PDF)',
               icon: Icons.print_outlined,
               expanded: true,
-              size: AppButtonSize.large,
+              size: savedPrinter != null
+                  ? AppButtonSize.medium
+                  : AppButtonSize.large,
               isLoading: _isPrinting,
               onPressed: _isBusy ? null : _print,
             ),
@@ -277,10 +382,6 @@ class _PosPrintPreviewDialogState
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Summary row helper
-  // ---------------------------------------------------------------------------
-
   Widget _summaryRow(
     ThemeData theme, {
     required String label,
@@ -288,17 +389,11 @@ class _PosPrintPreviewDialogState
     bool emphasized = false,
   }) {
     final ColorScheme scheme = theme.colorScheme;
-
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: <Widget>[
-          Expanded(
-            child: Text(
-              label,
-              style: theme.textTheme.bodyMedium,
-            ),
-          ),
+          Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
           Text(
             value,
             style: (emphasized
@@ -317,5 +412,101 @@ class _PosPrintPreviewDialogState
   static String _formatMoney(double value) {
     final String fixed = value.toStringAsFixed(2);
     return '$fixed ج.م';
+  }
+}
+
+// ============================================================================
+// Bluetooth status widgets
+// ============================================================================
+
+class _BluetoothPrinterRow extends StatelessWidget {
+  const _BluetoothPrinterRow({required this.printer});
+
+  final SavedPrinter printer;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.bluetooth, size: 18, color: scheme.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    printer.name,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'سيتم استخدام الطابعة المحفوظة',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _NoBluetoothPrinterHint extends StatelessWidget {
+  const _NoBluetoothPrinterHint({required this.onConfigure});
+
+  final VoidCallback onConfigure;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.bluetooth_disabled,
+              size: 18,
+              color: scheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'لا توجد طابعة محفوظة. '
+                'اضبط طابعة من الإعدادات لتفعيل الطباعة المباشرة.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
