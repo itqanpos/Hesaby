@@ -86,15 +86,13 @@ class SettingsPage extends ConsumerWidget {
           _SettingsTile(
             icon: Icons.print_outlined,
             title: 'إعدادات الطابعة',
-            subtitle: 'البحث عن طابعة بلوتوث وربطها',
-            enabled: false,
-            badge: 'قريبًا',
-            onTap: null,
+            subtitle: 'اختيار طابعة حرارية للطباعة المباشرة',
+            onTap: () => context.pushNamed(AppRouter.printerSettingsName),
           ),
 
           const SizedBox(height: 8),
 
-          // ---- الحساب (تسجيل الخروج) ----
+          // ---- الجلسة ----
           const _SectionHeader(title: 'الجلسة'),
           _SettingsTile(
             icon: Icons.logout,
