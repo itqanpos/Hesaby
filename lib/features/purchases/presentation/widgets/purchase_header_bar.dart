@@ -1,13 +1,13 @@
 // lib/features/purchases/presentation/widgets/purchase_header_bar.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../suppliers/domain/entities/supplier.dart';
 import '../../../suppliers/presentation/providers/supplier_providers.dart';
+import '../../domain/entities/purchase_cart.dart';
+import '../state/purchase_cart_notifier.dart';
 import '../state/purchase_providers.dart';
-
 /// Compact header bar for the purchase form.
 ///
 /// Layout (RTL):
