@@ -67,22 +67,32 @@ jobs:
           sed -i 's/android:label="hesabi"/android:label="حسابي"/' \
             android/app/src/main/AndroidManifest.xml
 
-      - name: Set minSdkVersion and compileSdkVersion to 23 / 34
+      - name: Set minSdkVersion 23 / compileSdkVersion 36 / targetSdkVersion 36
         run: |
           # `flutter_pos_printer_platform_image_3` requires Android API 23.
-          # Additionally, its dependencies require compileSdk >= 33, so the
-          # app itself must also compile against a modern SDK. We override
-          # both values here, after `flutter create` has generated the file.
+          # Other modern plugins (app_links, jni, shared_preferences_android,
+          # url_launcher_android) require compileSdk 36, so the app itself
+          # must compile against 36. We override all three SDK values here,
+          # after `flutter create` has generated the file.
           for f in android/app/build.gradle android/app/build.gradle.kts; do
             if [ -f "$f" ]; then
+              # minSdk → 23
               sed -i 's/minSdkVersion flutter\.minSdkVersion/minSdkVersion 23/' "$f" || true
               sed -i 's/minSdk = flutter\.minSdkVersion/minSdk = 23/' "$f" || true
               sed -i 's/minSdkVersion 21/minSdkVersion 23/' "$f" || true
+              sed -i 's/minSdk = 21/minSdk = 23/' "$f" || true
 
-              sed -i 's/compileSdkVersion flutter\.compileSdkVersion/compileSdkVersion 34/' "$f" || true
-              sed -i 's/compileSdk = flutter\.compileSdkVersion/compileSdk = 34/' "$f" || true
-              sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 34/' "$f" || true
-              sed -i 's/compileSdk = [0-9]*/compileSdk = 34/' "$f" || true
+              # compileSdk → 36
+              sed -i 's/compileSdkVersion flutter\.compileSdkVersion/compileSdkVersion 36/' "$f" || true
+              sed -i 's/compileSdk = flutter\.compileSdkVersion/compileSdk = 36/' "$f" || true
+              sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 36/' "$f" || true
+              sed -i 's/compileSdk = [0-9]*/compileSdk = 36/' "$f" || true
+
+              # targetSdk → 36
+              sed -i 's/targetSdkVersion flutter\.targetSdkVersion/targetSdkVersion 36/' "$f" || true
+              sed -i 's/targetSdk = flutter\.targetSdkVersion/targetSdk = 36/' "$f" || true
+              sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 36/' "$f" || true
+              sed -i 's/targetSdk = [0-9]*/targetSdk = 36/' "$f" || true
 
               echo "--- $f (sdk section) ---"
               grep -n 'minSdk\|compileSdk\|targetSdk' "$f" || true
@@ -125,19 +135,19 @@ jobs:
 
               # Groovy: compileSdkVersion 31, compileSdkVersion = 31
               text = re.sub(r'compileSdkVersion\s*=?\s*\d+',
-                            'compileSdkVersion 34', text)
+                            'compileSdkVersion 36', text)
               # Groovy: compileSdkVersion(31)
               text = re.sub(r'compileSdkVersion\(\s*\d+\s*\)',
-                            'compileSdkVersion(34)', text)
+                            'compileSdkVersion(36)', text)
               # Kotlin DSL: compileSdk = 31
               text = re.sub(r'compileSdk\s*=\s*\d+',
-                            'compileSdk = 34', text)
+                            'compileSdk = 36', text)
               # Kotlin DSL: compileSdk 31 (space form)
               text = re.sub(r'compileSdk\s+\d+',
-                            'compileSdk 34', text)
+                            'compileSdk 36', text)
               # Kotlin DSL: compileSdk(31)
               text = re.sub(r'compileSdk\(\s*\d+\s*\)',
-                            'compileSdk(34)', text)
+                            'compileSdk(36)', text)
 
               if text != original:
                   f.write_text(text)
@@ -284,4 +294,3 @@ jobs:
           make_latest: true
           draft: false
           prerelease: true
-      
