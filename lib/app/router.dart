@@ -20,6 +20,7 @@ import '../features/products/presentation/pages/units_page.dart';
 import '../features/purchases/presentation/pages/purchase_detail_page.dart';
 import '../features/purchases/presentation/pages/purchase_form_page.dart';
 import '../features/purchases/presentation/pages/purchases_page.dart';
+import '../features/reports/presentation/pages/cashier_report_page.dart';
 import '../features/reports/presentation/pages/dead_stock_page.dart';
 import '../features/reports/presentation/pages/low_stock_page.dart';
 import '../features/reports/presentation/pages/payables_page.dart';
@@ -71,9 +72,6 @@ abstract final class AppRouter {
 
   static const String suppliersPath = '/suppliers';
   static const String suppliersName = 'suppliers';
-
-  static const String supplierStatementPath = '/suppliers/statement';
-  static const String supplierStatementName = 'supplier-statement';
 
   static const String purchasesPath = '/purchases';
   static const String purchasesName = 'purchases';
@@ -135,6 +133,9 @@ abstract final class AppRouter {
 
   static const String reportSalesSummaryPath = '/reports/sales-summary';
   static const String reportSalesSummaryName = 'report-sales-summary';
+
+  static const String reportCashierPath = '/reports/cashier';
+  static const String reportCashierName = 'report-cashier';
 
   static const String reportTopProductsPath = '/reports/top-products';
   static const String reportTopProductsName = 'report-top-products';
@@ -396,6 +397,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.reportSalesSummaryName,
         builder: (BuildContext context, GoRouterState state) =>
             const SalesSummaryPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportCashierPath,
+        name: AppRouter.reportCashierName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const CashierReportPage(),
       ),
       GoRoute(
         path: AppRouter.reportTopProductsPath,
