@@ -15,9 +15,6 @@ import '../../domain/repositories/user_profile_repository.dart';
 import '../providers/user_profile_providers.dart';
 
 /// Personal profile page — user's display name, phone, email, and password.
-///
-/// The email is read-only (managed by Supabase Auth). Changing the password
-/// opens a bottom sheet and calls `AuthNotifier.changePassword`.
 class ProfilePage extends ConsumerStatefulWidget {
   const ProfilePage({super.key});
 
@@ -55,10 +52,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     _fullNameController.text = profile.fullName ?? '';
     _phoneController.text = profile.phone ?? '';
   }
-
-  // ---------------------------------------------------------------------------
-  // Save (profile)
-  // ---------------------------------------------------------------------------
 
   Future<void> _saveProfile() async {
     FocusScope.of(context).unfocus();
@@ -102,10 +95,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     return trimmed.isEmpty ? null : trimmed;
   }
 
-  // ---------------------------------------------------------------------------
-  // Change password
-  // ---------------------------------------------------------------------------
-
   Future<void> _openChangePasswordSheet() async {
     await showModalBottomSheet<void>(
       context: context,
@@ -117,13 +106,9 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Validators
-  // ---------------------------------------------------------------------------
-
   String? _validateFullName(String? value) {
     final String trimmed = value?.trim() ?? '';
-    if (trimmed.isEmpty) return null; // Optional.
+    if (trimmed.isEmpty) return null;
     if (trimmed.length > 200) {
       return 'الاسم طويل جدًا (الحد الأقصى 200 حرف)';
     }
@@ -138,10 +123,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
     }
     return null;
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -203,14 +184,11 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               ),
             ],
           ),
-
           if (_saveFailure != null) ...<Widget>[
             const SizedBox(height: 16),
             _ErrorBanner(message: _profileFailureMessage(_saveFailure!)),
           ],
-
           const SizedBox(height: 16),
-
           AppButton(
             label: 'حفظ التعديلات',
             icon: Icons.save_outlined,
@@ -219,9 +197,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
             isLoading: _isSaving,
             onPressed: _isSaving ? null : _saveProfile,
           ),
-
           const SizedBox(height: 24),
-
           const _SectionHeader(
             title: 'البريد الإلكتروني',
             icon: Icons.mail_outline,
@@ -241,9 +217,7 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
               ),
             ],
           ),
-
           const SizedBox(height: 24),
-
           const _SectionHeader(
             title: 'الأمان',
             icon: Icons.lock_outline,
@@ -269,10 +243,6 @@ class _ProfilePageState extends ConsumerState<ProfilePage> {
       ),
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Localization
-  // ---------------------------------------------------------------------------
 
   static String _errorMessage(Object error) {
     if (error is UserProfileException) {
@@ -407,7 +377,6 @@ class _ChangePasswordSheetState
                   ),
                 ),
                 const SizedBox(height: 16),
-
                 AppTextField(
                   controller: _passwordController,
                   label: 'كلمة المرور الجديدة',
@@ -423,14 +392,11 @@ class _ChangePasswordSheetState
                   enabled: !_isSaving,
                   validator: _validateConfirm,
                 ),
-
                 if (_failure != null) ...<Widget>[
                   const SizedBox(height: 12),
                   _ErrorBanner(message: _authFailureMessage(_failure!)),
                 ],
-
                 const SizedBox(height: 20),
-
                 AppButton(
                   label: 'تحديث كلمة المرور',
                   icon: Icons.check_circle_outline,
@@ -667,6 +633,8 @@ String _authFailureMessage(AuthFailureType type) {
       return 'محاولات كثيرة. يرجى المحاولة بعد قليل.';
     case AuthFailureType.weakPassword:
       return 'كلمة المرور ضعيفة. استخدم 8 أحرف على الأقل مع أرقام وحروف.';
+    case AuthFailureType.emailAlreadyInUse:
+      return 'هذا البريد الإلكتروني مُستخدم بالفعل.';
     case AuthFailureType.network:
       return 'تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت.';
     case AuthFailureType.unknown:
