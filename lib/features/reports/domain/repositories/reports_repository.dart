@@ -3,6 +3,7 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
+import '../entities/aging_reports.dart';
 import '../entities/financial_reports.dart';
 import '../entities/inventory_reports.dart';
 import '../entities/report_period.dart';
@@ -145,5 +146,18 @@ abstract interface class ReportsRepository {
     required String companyId,
     required ReportPeriod period,
     required Map<String, String> supplierNames,
+  });
+
+  // ---------------------------------------------------------------------------
+  // Aging
+  // ---------------------------------------------------------------------------
+
+  /// Returns the current customer aging report.
+  ///
+  /// Each customer's outstanding balance is distributed across their
+  /// confirmed invoices using a simplified FIFO rule, then classified into
+  /// four buckets (0–30 / 31–60 / 61–90 / 90+ days).
+  Future<AgingReport> getCustomerAging({
+    required String companyId,
   });
 }
