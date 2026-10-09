@@ -12,7 +12,6 @@ import '../../features/companies/presentation/providers/company_context_state.da
 // Destinations
 // ============================================================================
 
-/// A single entry in the app-wide navigation.
 @immutable
 class _NavDestination {
   const _NavDestination({
@@ -25,13 +24,9 @@ class _NavDestination {
   final String label;
   final String path;
   final IconData icon;
-
-  /// Base tint used for the icon badge. Kept per-destination so the list
-  /// stays easy to scan even when the active state changes.
   final Color color;
 }
 
-/// A group of destinations displayed under a shared label.
 @immutable
 class _NavSection {
   const _NavSection({required this.title, required this.items});
@@ -149,7 +144,7 @@ bool _isActive(String location, String path) {
 class AppSidebar extends StatelessWidget {
   const AppSidebar({super.key});
 
-  static const double width = 264;
+  static const double width = 260;
 
   @override
   Widget build(BuildContext context) {
@@ -205,10 +200,10 @@ class _NavigationBody extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         const _Header(),
-        Divider(height: 1, color: scheme.outlineVariant),
+        Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.6)),
         Expanded(
           child: ListView(
-            padding: const EdgeInsets.symmetric(vertical: 8),
+            padding: const EdgeInsets.symmetric(vertical: 4),
             children: <Widget>[
               for (final _NavSection section in _sections)
                 _SectionGroup(
@@ -218,7 +213,7 @@ class _NavigationBody extends StatelessWidget {
             ],
           ),
         ),
-        Divider(height: 1, color: scheme.outlineVariant),
+        Divider(height: 1, color: scheme.outlineVariant.withValues(alpha: 0.6)),
         const _Footer(),
       ],
     );
@@ -226,7 +221,7 @@ class _NavigationBody extends StatelessWidget {
 }
 
 // ============================================================================
-// Header — company + branch + user email
+// Header
 // ============================================================================
 
 class _Header extends ConsumerWidget {
@@ -253,68 +248,50 @@ class _Header extends ConsumerWidget {
     }
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(20, 24, 20, 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
+      child: Row(
         children: <Widget>[
-          Row(
-            children: <Widget>[
-              Container(
-                width: 48,
-                height: 48,
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    colors: <Color>[
-                      scheme.primary,
-                      scheme.primaryContainer,
-                    ],
-                    begin: AlignmentDirectional.topStart,
-                    end: AlignmentDirectional.bottomEnd,
+          // ---- Flat logo ----
+          Container(
+            width: 42,
+            height: 42,
+            decoration: BoxDecoration(
+              color: scheme.primary,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            child: Icon(
+              Icons.point_of_sale_outlined,
+              color: scheme.onPrimary,
+              size: 22,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  companyName,
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
                   ),
-                  borderRadius: BorderRadius.circular(14),
-                  boxShadow: <BoxShadow>[
-                    BoxShadow(
-                      color: scheme.primary.withValues(alpha: 0.25),
-                      blurRadius: 12,
-                      offset: const Offset(0, 4),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+                if (meta.isNotEmpty) ...<Widget>[
+                  const SizedBox(height: 2),
+                  Text(
+                    meta.join(' · '),
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
                     ),
-                  ],
-                ),
-                child: Icon(
-                  Icons.point_of_sale_outlined,
-                  color: scheme.onPrimary,
-                  size: 24,
-                ),
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      companyName,
-                      style: theme.textTheme.titleMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    if (meta.isNotEmpty) ...<Widget>[
-                      const SizedBox(height: 3),
-                      Text(
-                        meta.join(' · '),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ],
-                ),
-              ),
-            ],
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ],
+            ),
           ),
         ],
       ),
@@ -341,18 +318,19 @@ class _SectionGroup extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.only(bottom: 6),
+      padding: const EdgeInsets.only(top: 12),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Padding(
-            padding: const EdgeInsets.fromLTRB(24, 12, 24, 6),
+            padding: const EdgeInsets.fromLTRB(20, 4, 20, 6),
             child: Text(
-              section.title,
+              section.title.toUpperCase(),
               style: theme.textTheme.labelSmall?.copyWith(
-                color: scheme.onSurfaceVariant,
+                color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
                 fontWeight: FontWeight.w800,
-                letterSpacing: 1.2,
+                letterSpacing: 1.4,
+                fontSize: 10,
               ),
             ),
           ),
@@ -390,54 +368,57 @@ class _NavigationTile extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
+    // Active: subtle neutral surface, colored icon badge, bold text.
+    // Inactive: transparent background, faint colored badge, muted text.
+    final Color background = isActive
+        ? scheme.onSurface.withValues(alpha: 0.06)
+        : Colors.transparent;
+    final Color badgeBackground = isActive
+        ? destination.color.withValues(alpha: 0.16)
+        : destination.color.withValues(alpha: 0.10);
     final Color iconColor =
-        isActive ? destination.color : scheme.onSurfaceVariant;
-    final Color iconBg = isActive
-        ? destination.color.withValues(alpha: 0.14)
-        : scheme.surfaceContainerHighest.withValues(alpha: 0.6);
+        isActive ? destination.color : destination.color.withValues(alpha: 0.75);
     final Color titleColor =
         isActive ? scheme.onSurface : scheme.onSurfaceVariant;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 2),
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
       child: Material(
-        color: isActive
-            ? scheme.primaryContainer.withValues(alpha: 0.35)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(12),
+        color: background,
+        borderRadius: BorderRadius.circular(10),
         child: InkWell(
-          borderRadius: BorderRadius.circular(12),
+          borderRadius: BorderRadius.circular(10),
           onTap: () => _handleTap(context),
           child: Stack(
             children: <Widget>[
+              // ---- Active accent bar (on the start side) ----
+              if (isActive)
+                PositionedDirectional(
+                  start: 0,
+                  top: 8,
+                  bottom: 8,
+                  child: Container(
+                    width: 3,
+                    decoration: BoxDecoration(
+                      color: destination.color,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
               Padding(
                 padding: const EdgeInsets.symmetric(
                   horizontal: 10,
-                  vertical: 10,
+                  vertical: 9,
                 ),
                 child: Row(
                   children: <Widget>[
-                    // ---- Active accent bar (on the start side) ----
-                    AnimatedContainer(
-                      duration: const Duration(milliseconds: 180),
-                      width: 3,
-                      height: 22,
-                      decoration: BoxDecoration(
-                        color: isActive
-                            ? scheme.primary
-                            : Colors.transparent,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-
                     // ---- Icon badge ----
                     Container(
                       width: 32,
                       height: 32,
                       decoration: BoxDecoration(
-                        color: iconBg,
-                        borderRadius: BorderRadius.circular(9),
+                        color: badgeBackground,
+                        borderRadius: BorderRadius.circular(8),
                       ),
                       child: Icon(
                         destination.icon,
@@ -452,22 +433,13 @@ class _NavigationTile extends StatelessWidget {
                       child: Text(
                         destination.label,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: isActive
-                              ? FontWeight.w700
-                              : FontWeight.w500,
+                          fontWeight:
+                              isActive ? FontWeight.w700 : FontWeight.w500,
                           color: titleColor,
                         ),
                         overflow: TextOverflow.ellipsis,
                       ),
                     ),
-
-                    // ---- Chevron on the end side (active only) ----
-                    if (isActive)
-                      Icon(
-                        Icons.chevron_left,
-                        size: 18,
-                        color: scheme.primary,
-                      ),
                   ],
                 ),
               ),
@@ -492,18 +464,21 @@ class _Footer extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
         children: <Widget>[
-          Icon(
-            Icons.circle,
-            size: 8,
-            color: scheme.primary,
+          Container(
+            width: 6,
+            height: 6,
+            decoration: BoxDecoration(
+              color: scheme.primary,
+              shape: BoxShape.circle,
+            ),
           ),
           const SizedBox(width: 8),
           Text(
             'حسابي',
-            style: theme.textTheme.bodySmall?.copyWith(
+            style: theme.textTheme.labelSmall?.copyWith(
               fontWeight: FontWeight.w700,
               color: scheme.onSurfaceVariant,
             ),
@@ -512,7 +487,7 @@ class _Footer extends StatelessWidget {
           Text(
             'v0.1.0',
             style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant,
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
             ),
           ),
         ],
