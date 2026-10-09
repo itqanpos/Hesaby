@@ -19,6 +19,7 @@ import '../../../suppliers/domain/entities/supplier.dart';
 import '../../../suppliers/presentation/providers/supplier_providers.dart';
 import '../../data/datasources/reports_remote_datasource.dart';
 import '../../data/repositories/reports_repository_impl.dart';
+import '../../domain/entities/aging_reports.dart';
 import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_period.dart';
@@ -377,7 +378,6 @@ final deadStockProvider = AsyncNotifierProvider.family<
 // Profit & Loss
 // ============================================================================
 
-/// Profit & loss summary for the current company over [period].
 class ProfitLossNotifier
     extends FamilyAsyncNotifier<ProfitLossSummary, ReportPeriod> {
   @override
@@ -412,10 +412,6 @@ final profitLossProvider = AsyncNotifierProvider.family<
 // Receivables
 // ============================================================================
 
-/// Current accounts receivable for the selected company.
-///
-/// This is a *state* report, not a time-window report: no [ReportPeriod] is
-/// involved.
 class ReceivablesNotifier extends AsyncNotifier<ReceivablesReport> {
   @override
   Future<ReceivablesReport> build() async {
@@ -448,7 +444,6 @@ final receivablesProvider =
 // Payables
 // ============================================================================
 
-/// Accounts payable for the current company over [period].
 class PayablesNotifier
     extends FamilyAsyncNotifier<PayablesReport, ReportPeriod> {
   @override
@@ -487,14 +482,42 @@ final payablesProvider = AsyncNotifierProvider.family<
 );
 
 // ============================================================================
+// Customer aging
+// ============================================================================
+
+/// Current customer aging report (state report — no period filter).
+class CustomerAgingNotifier extends AsyncNotifier<AgingReport> {
+  @override
+  Future<AgingReport> build() async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return AgingReport.empty();
+    }
+
+    return ref.read(reportsRepositoryProvider).getCustomerAging(
+          companyId: companyId,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final customerAgingProvider =
+    AsyncNotifierProvider<CustomerAgingNotifier, AgingReport>(
+  CustomerAgingNotifier.new,
+);
+
+// ============================================================================
 // Currently selected period (per page)
 // ============================================================================
 
-/// Notifier holding the period selected on a single report page.
-///
-/// Each page keeps its own instance via `autoDispose`, so navigating between
-/// pages does not leak the period into unrelated screens. The default is
-/// "this month".
 class ReportPagePeriodNotifier extends Notifier<ReportPeriod> {
   @override
   ReportPeriod build() => const ReportPeriod(
@@ -515,7 +538,6 @@ final reportPagePeriodProvider = NotifierProvider<
 // Currently selected dead-stock window (per page)
 // ============================================================================
 
-/// Notifier holding the dead-stock lookback window on the report page.
 class DeadStockWindowNotifier extends Notifier<DeadStockWindow> {
   @override
   DeadStockWindow build() => DeadStockWindow.days90;
