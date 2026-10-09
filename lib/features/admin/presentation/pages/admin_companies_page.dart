@@ -11,9 +11,9 @@ import '../../../../shared/widgets/app_text_field.dart';
 import '../../../companies/domain/entities/company.dart';
 import '../../../companies/domain/entities/company_subscription.dart';
 import '../../../companies/domain/repositories/company_repository.dart';
-import '../../../settings/presentation/providers/user_profile_providers.dart';
 import '../dialogs/admin_company_actions_dialog.dart';
 import '../providers/admin_companies_provider.dart';
+import '../providers/platform_admin_provider.dart';
 
 /// Phase T-2: platform admin dashboard.
 ///
