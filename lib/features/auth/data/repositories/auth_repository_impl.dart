@@ -8,7 +8,6 @@ import '../../domain/repositories/auth_repository.dart';
 import '../datasources/auth_remote_datasource.dart';
 import '../models/auth_session_model.dart';
 
-/// Concrete implementation of [AuthRepository] backed by Supabase Auth.
 class AuthRepositoryImpl implements AuthRepository {
   const AuthRepositoryImpl(this._remoteDataSource);
 
@@ -31,10 +30,7 @@ class AuthRepositoryImpl implements AuthRepository {
   }) async {
     try {
       final AuthSessionModel model = await _remoteDataSource
-          .signInWithPassword(
-            email: email,
-            password: password,
-          );
+          .signInWithPassword(email: email, password: password);
       return model.toEntity();
     } on supabase.AuthException catch (error, stackTrace) {
       throw _mapSupabaseAuthException(error, stackTrace);
@@ -42,6 +38,30 @@ class AuthRepositoryImpl implements AuthRepository {
       rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknownException(error, stackTrace, operation: 'login');
+    }
+  }
+
+  @override
+  Future<AuthSession?> signUp({
+    required String email,
+    required String password,
+    String? fullName,
+    String? companyName,
+  }) async {
+    try {
+      final AuthSessionModel? model = await _remoteDataSource.signUp(
+        email: email,
+        password: password,
+        fullName: fullName,
+        companyName: companyName,
+      );
+      return model?.toEntity();
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapSupabaseAuthException(error, stackTrace);
+    } on AuthException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknownException(error, stackTrace, operation: 'signUp');
     }
   }
 
@@ -67,11 +87,7 @@ class AuthRepositoryImpl implements AuthRepository {
     } on AuthException {
       rethrow;
     } on Object catch (error, stackTrace) {
-      throw _mapUnknownException(
-        error,
-        stackTrace,
-        operation: 'changePassword',
-      );
+      throw _mapUnknownException(error, stackTrace, operation: 'changePassword');
     }
   }
 
@@ -83,18 +99,12 @@ class AuthRepositoryImpl implements AuthRepository {
     StackTrace stackTrace,
   ) {
     final AuthFailureType type = _classify(error);
-
     AppLogger.warning(
       'Supabase auth error mapped to ${type.name} '
       '(code: ${error.code ?? 'n/a'}, '
       'status: ${error.statusCode ?? 'n/a'}).',
     );
-
-    return AuthException(
-      type: type,
-      cause: error,
-      stackTrace: stackTrace,
-    );
+    return AuthException(type: type, cause: error, stackTrace: stackTrace);
   }
 
   static AuthException _mapUnknownException(
@@ -102,23 +112,16 @@ class AuthRepositoryImpl implements AuthRepository {
     StackTrace stackTrace, {
     required String operation,
   }) {
-    final bool looksLikeNetwork = _looksLikeNetworkFailure(error);
-    final AuthFailureType type = looksLikeNetwork
+    final AuthFailureType type = _looksLikeNetworkFailure(error)
         ? AuthFailureType.network
         : AuthFailureType.unknown;
-
     AppLogger.error(
       'Unhandled auth error during "$operation" '
       '(runtimeType: ${error.runtimeType}).',
       error,
       stackTrace,
     );
-
-    return AuthException(
-      type: type,
-      cause: error,
-      stackTrace: stackTrace,
-    );
+    return AuthException(type: type, cause: error, stackTrace: stackTrace);
   }
 
   static AuthFailureType _classify(supabase.AuthException error) {
@@ -138,6 +141,9 @@ class AuthRepositoryImpl implements AuthRepository {
         return AuthFailureType.emailNotConfirmed;
       case 'user_not_found':
         return AuthFailureType.userNotFound;
+      case 'user_already_exists':
+      case 'email_exists':
+        return AuthFailureType.emailAlreadyInUse;
       case 'over_request_rate_limit':
       case 'over_email_send_rate_limit':
       case 'too_many_requests':
@@ -149,34 +155,28 @@ class AuthRepositoryImpl implements AuthRepository {
         return AuthFailureType.network;
     }
 
-    if (status == 400) {
-      return AuthFailureType.invalidCredentials;
-    }
-    if (status == 401) {
-      return AuthFailureType.invalidCredentials;
-    }
-    if (status == 403) {
-      return AuthFailureType.emailNotConfirmed;
-    }
-    if (status == 404) {
-      return AuthFailureType.userNotFound;
-    }
+    if (status == 400) return AuthFailureType.invalidCredentials;
+    if (status == 401) return AuthFailureType.invalidCredentials;
+    if (status == 403) return AuthFailureType.emailNotConfirmed;
+    if (status == 404) return AuthFailureType.userNotFound;
     if (status == 422) {
-      // Supabase uses 422 for validation failures, most commonly a weak
-      // password during an updateUser call.
       if (message.contains('password')) {
         return AuthFailureType.weakPassword;
       }
+      if (message.contains('already') || message.contains('exists')) {
+        return AuthFailureType.emailAlreadyInUse;
+      }
       return AuthFailureType.unknown;
     }
-    if (status == 429) {
-      return AuthFailureType.tooManyRequests;
+    if (status == 429) return AuthFailureType.tooManyRequests;
+
+    if (message.contains('already') && message.contains('regist')) {
+      return AuthFailureType.emailAlreadyInUse;
     }
 
     if (_messageLooksLikeNetwork(message)) {
       return AuthFailureType.network;
     }
-
     return AuthFailureType.unknown;
   }
 
@@ -184,8 +184,7 @@ class AuthRepositoryImpl implements AuthRepository {
     if (error is AuthException) {
       return error.type == AuthFailureType.network;
     }
-    final String description = error.toString().toLowerCase();
-    return _messageLooksLikeNetwork(description);
+    return _messageLooksLikeNetwork(error.toString().toLowerCase());
   }
 
   static bool _messageLooksLikeNetwork(String value) {
