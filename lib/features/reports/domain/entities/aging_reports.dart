@@ -3,13 +3,8 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
-/// Four time-based buckets used by every aging report (customer and, in a
-/// follow-up, supplier).
-///
-/// All values are non-negative. The buckets are computed from the customer's
-/// current `balance`, distributed across their confirmed invoices using a
-/// simplified FIFO rule: the balance is "consumed" from the oldest invoice
-/// first. Whatever remains on an invoice is classified by its age.
+/// Four time-based buckets used by every aging report (customer and
+/// supplier).
 @immutable
 class AgingBuckets extends Equatable {
   const AgingBuckets({
@@ -25,25 +20,13 @@ class AgingBuckets extends Equatable {
         days61to90 = 0,
         days90plus = 0;
 
-  /// Amount attributed to invoices aged 0–30 days.
   final double days0to30;
-
-  /// Amount attributed to invoices aged 31–60 days.
   final double days31to60;
-
-  /// Amount attributed to invoices aged 61–90 days.
   final double days61to90;
-
-  /// Amount attributed to invoices aged more than 90 days.
   final double days90plus;
 
-  /// Sum of all four buckets.
   double get total => days0to30 + days31to60 + days61to90 + days90plus;
-
-  /// Amount that is considered "current" (0–60 days).
   double get current => days0to30 + days31to60;
-
-  /// Amount that is considered "overdue" (60+ days).
   double get overdue => days61to90 + days90plus;
 
   @override
@@ -51,7 +34,10 @@ class AgingBuckets extends Equatable {
       <Object?>[days0to30, days31to60, days61to90, days90plus];
 }
 
-/// Aging breakdown for a single customer.
+// ============================================================================
+// Customer aging
+// ============================================================================
+
 @immutable
 class CustomerAgingRow extends Equatable {
   const CustomerAgingRow({
@@ -65,11 +51,7 @@ class CustomerAgingRow extends Equatable {
   final String customerId;
   final String customerName;
   final String? phone;
-
-  /// Current outstanding balance from `customers.balance`.
   final double balance;
-
-  /// Distribution of [balance] across the four time buckets.
   final AgingBuckets buckets;
 
   @override
@@ -77,7 +59,6 @@ class CustomerAgingRow extends Equatable {
       <Object?>[customerId, customerName, phone, balance, buckets];
 }
 
-/// Complete customer aging report.
 @immutable
 class AgingReport extends Equatable {
   const AgingReport({
@@ -99,7 +80,6 @@ class AgingReport extends Equatable {
   bool get isEmpty => rows.isEmpty;
   bool get isNotEmpty => rows.isNotEmpty;
 
-  /// Average balance per customer (0 when empty).
   double get averageBalance {
     if (customerCount == 0) return 0;
     return totals.total / customerCount;
@@ -107,4 +87,59 @@ class AgingReport extends Equatable {
 
   @override
   List<Object?> get props => <Object?>[rows, totals, customerCount];
+}
+
+// ============================================================================
+// Supplier aging
+// ============================================================================
+
+@immutable
+class SupplierAgingRow extends Equatable {
+  const SupplierAgingRow({
+    required this.supplierId,
+    required this.supplierName,
+    required this.balance,
+    required this.buckets,
+    this.phone,
+  });
+
+  final String supplierId;
+  final String supplierName;
+  final String? phone;
+  final double balance;
+  final AgingBuckets buckets;
+
+  @override
+  List<Object?> get props =>
+      <Object?>[supplierId, supplierName, phone, balance, buckets];
+}
+
+@immutable
+class SupplierAgingReport extends Equatable {
+  const SupplierAgingReport({
+    required this.rows,
+    required this.totals,
+    required this.supplierCount,
+  });
+
+  factory SupplierAgingReport.empty() => const SupplierAgingReport(
+        rows: <SupplierAgingRow>[],
+        totals: AgingBuckets.zero(),
+        supplierCount: 0,
+      );
+
+  final List<SupplierAgingRow> rows;
+  final AgingBuckets totals;
+  final int supplierCount;
+
+  bool get isEmpty => rows.isEmpty;
+  bool get isNotEmpty => rows.isNotEmpty;
+
+  double get averageBalance {
+    if (supplierCount == 0) return 0;
+    return totals.total / supplierCount;
+  }
+
+  @override
+  List<Object?> get props => <Object?>[rows, totals, supplierCount];
 }
