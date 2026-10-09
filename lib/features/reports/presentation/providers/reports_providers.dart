@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show Supabase, SupabaseClient;
 
+import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
@@ -12,6 +13,8 @@ import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
+import '../../../settings/domain/entities/user_profile.dart';
+import '../../../settings/presentation/providers/user_profile_providers.dart';
 import '../../../suppliers/domain/entities/supplier.dart';
 import '../../../suppliers/presentation/providers/supplier_providers.dart';
 import '../../data/datasources/reports_remote_datasource.dart';
@@ -203,10 +206,28 @@ class SalesByCashierNotifier
       return const <CashierSales>[];
     }
 
+    // Inject the current user's own profile name so their row shows a
+    // readable label. Other cashiers fall back to a short id because RLS
+    // restricts `profiles` reads to the current user's own row.
+    final Map<String, String> cashierNames = <String, String>{};
+    final String? currentUserId = ref.watch(
+      authProvider.select((AuthState s) => s.session?.userId),
+    );
+    final String? currentUserName = ref.watch(
+      userProfileProvider.select(
+        (AsyncValue<UserProfile?> v) => v.valueOrNull?.fullName,
+      ),
+    );
+    if (currentUserId != null &&
+        currentUserName != null &&
+        currentUserName.trim().isNotEmpty) {
+      cashierNames[currentUserId] = currentUserName.trim();
+    }
+
     return ref.read(reportsRepositoryProvider).getSalesByCashier(
           companyId: companyId,
           period: period,
-          cashierNames: const <String, String>{},
+          cashierNames: cashierNames,
         );
   }
 
