@@ -17,6 +17,7 @@ class UserProfile extends Equatable {
     required this.updatedAt,
     this.fullName,
     this.phone,
+    this.isPlatformAdmin = false,
   });
 
   /// Identifier matching `auth.users.id`.
@@ -31,6 +32,11 @@ class UserProfile extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
 
+  /// Phase T-2: true when this user is flagged as a platform administrator.
+  /// Grants read/update access to every company (via RLS policies) so the
+  /// owner can activate subscriptions from inside the app.
+  final bool isPlatformAdmin;
+
   @override
   List<Object?> get props => <Object?>[
         userId,
@@ -38,6 +44,7 @@ class UserProfile extends Equatable {
         phone,
         createdAt,
         updatedAt,
+        isPlatformAdmin,
       ];
 
   UserProfile copyWith({
@@ -46,6 +53,7 @@ class UserProfile extends Equatable {
     String? phone,
     bool clearPhone = false,
     DateTime? updatedAt,
+    bool? isPlatformAdmin,
   }) {
     return UserProfile(
       userId: userId,
@@ -54,10 +62,12 @@ class UserProfile extends Equatable {
       phone: clearPhone ? null : (phone ?? this.phone),
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
+      isPlatformAdmin: isPlatformAdmin ?? this.isPlatformAdmin,
     );
   }
 
   @override
   String toString() =>
-      'UserProfile(userId: $userId, fullName: $fullName, hasPhone: ${phone != null})';
+      'UserProfile(userId: $userId, fullName: $fullName, '
+      'hasPhone: ${phone != null}, isPlatformAdmin: $isPlatformAdmin)';
 }
