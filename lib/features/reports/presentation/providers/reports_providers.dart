@@ -26,11 +26,6 @@ import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
 import '../../domain/repositories/reports_repository.dart';
 
-// ============================================================================
-// Repository provider
-// ============================================================================
-
-/// The application's reports repository.
 final Provider<ReportsRepository> reportsRepositoryProvider =
     Provider<ReportsRepository>((ref) {
   SupabaseClient? client;
@@ -42,11 +37,6 @@ final Provider<ReportsRepository> reportsRepositoryProvider =
   return ReportsRepositoryImpl(ReportsRemoteDataSource(client));
 });
 
-// ============================================================================
-// Shared map builders
-// ============================================================================
-
-/// Builds `{productId: productName}` from the current catalogue.
 Map<String, String> _buildProductNames(Ref ref) {
   final List<Product> products =
       ref.watch(productsProvider).value ?? const <Product>[];
@@ -55,21 +45,17 @@ Map<String, String> _buildProductNames(Ref ref) {
   };
 }
 
-/// Builds `{productId: defaultUnitName}` from the current catalogue.
 Map<String, String> _buildUnitNamesByProduct(Ref ref) {
   final List<Product> products =
       ref.watch(productsProvider).value ?? const <Product>[];
   final List<Unit> units =
       ref.watch(unitsProvider).value ?? const <Unit>[];
-
   final Map<String, String> unitNameById = <String, String>{
     for (final Unit u in units) u.id: u.name,
   };
-
   final Map<String, String> result = <String, String>{};
   for (final Product p in products) {
-    final String unitId = p.defaultUnitId;
-    final String name = unitNameById[unitId] ?? '';
+    final String name = unitNameById[p.defaultUnitId] ?? '';
     if (name.isNotEmpty) {
       result[p.id] = name;
     }
@@ -90,11 +76,9 @@ class SalesSummaryNotifier
         (CompanyContextState s) => s.currentCompany?.id,
       ),
     );
-
     if (companyId == null) {
       return SalesSummary.empty(period);
     }
-
     return ref.read(reportsRepositoryProvider).getSalesSummary(
           companyId: companyId,
           period: period,
@@ -128,13 +112,10 @@ class TopProductsNotifier
     if (companyId == null) {
       return const <TopProduct>[];
     }
-
-    final Map<String, String> productNames = _buildProductNames(ref);
-
     return ref.read(reportsRepositoryProvider).getTopProducts(
           companyId: companyId,
           period: period,
-          productNames: productNames,
+          productNames: _buildProductNames(ref),
         );
   }
 
@@ -165,13 +146,11 @@ class TopCustomersNotifier
     if (companyId == null) {
       return const <TopCustomer>[];
     }
-
     final List<Customer> customers =
         ref.watch(customersProvider).value ?? const <Customer>[];
     final Map<String, String> customerNames = <String, String>{
       for (final Customer c in customers) c.id: c.name,
     };
-
     return ref.read(reportsRepositoryProvider).getTopCustomers(
           companyId: companyId,
           period: period,
@@ -206,10 +185,6 @@ class SalesByCashierNotifier
     if (companyId == null) {
       return const <CashierSales>[];
     }
-
-    // Inject the current user's own profile name so their row shows a
-    // readable label. Other cashiers fall back to a short id because RLS
-    // restricts `profiles` reads to the current user's own row.
     final Map<String, String> cashierNames = <String, String>{};
     final String? currentUserId = ref.watch(
       authProvider.select((AuthState s) => s.session?.userId),
@@ -224,7 +199,6 @@ class SalesByCashierNotifier
         currentUserName.trim().isNotEmpty) {
       cashierNames[currentUserId] = currentUserName.trim();
     }
-
     return ref.read(reportsRepositoryProvider).getSalesByCashier(
           companyId: companyId,
           period: period,
@@ -263,15 +237,11 @@ class StockValuationNotifier extends AsyncNotifier<StockValuationReport> {
         (CompanyContextState s) => s.currentBranch?.id,
       ),
     );
-
-    final Map<String, String> productNames = _buildProductNames(ref);
-    final Map<String, String> unitNames = _buildUnitNamesByProduct(ref);
-
     return ref.read(reportsRepositoryProvider).getStockValuation(
           companyId: companyId,
           branchId: branchId,
-          productNames: productNames,
-          unitNames: unitNames,
+          productNames: _buildProductNames(ref),
+          unitNames: _buildUnitNamesByProduct(ref),
         );
   }
 
@@ -306,15 +276,11 @@ class LowStockNotifier extends AsyncNotifier<List<LowStockItem>> {
         (CompanyContextState s) => s.currentBranch?.id,
       ),
     );
-
-    final Map<String, String> productNames = _buildProductNames(ref);
-    final Map<String, String> unitNames = _buildUnitNamesByProduct(ref);
-
     return ref.read(reportsRepositoryProvider).getLowStockItems(
           companyId: companyId,
           branchId: branchId,
-          productNames: productNames,
-          unitNames: unitNames,
+          productNames: _buildProductNames(ref),
+          unitNames: _buildUnitNamesByProduct(ref),
         );
   }
 
@@ -350,16 +316,12 @@ class DeadStockNotifier
         (CompanyContextState s) => s.currentBranch?.id,
       ),
     );
-
-    final Map<String, String> productNames = _buildProductNames(ref);
-    final Map<String, String> unitNames = _buildUnitNamesByProduct(ref);
-
     return ref.read(reportsRepositoryProvider).getDeadStockItems(
           companyId: companyId,
           branchId: branchId,
           window: window,
-          productNames: productNames,
-          unitNames: unitNames,
+          productNames: _buildProductNames(ref),
+          unitNames: _buildUnitNamesByProduct(ref),
         );
   }
 
@@ -390,7 +352,6 @@ class ProfitLossNotifier
     if (companyId == null) {
       return ProfitLossSummary.empty(period);
     }
-
     return ref.read(reportsRepositoryProvider).getProfitLoss(
           companyId: companyId,
           period: period,
@@ -423,7 +384,6 @@ class ReceivablesNotifier extends AsyncNotifier<ReceivablesReport> {
     if (companyId == null) {
       return ReceivablesReport.empty();
     }
-
     return ref.read(reportsRepositoryProvider).getReceivables(
           companyId: companyId,
         );
@@ -456,13 +416,11 @@ class PayablesNotifier
     if (companyId == null) {
       return PayablesReport.empty(period);
     }
-
     final List<Supplier> suppliers =
         ref.watch(suppliersProvider).value ?? const <Supplier>[];
     final Map<String, String> supplierNames = <String, String>{
       for (final Supplier s in suppliers) s.id: s.name,
     };
-
     return ref.read(reportsRepositoryProvider).getPayables(
           companyId: companyId,
           period: period,
@@ -485,7 +443,6 @@ final payablesProvider = AsyncNotifierProvider.family<
 // Customer aging
 // ============================================================================
 
-/// Current customer aging report (state report — no period filter).
 class CustomerAgingNotifier extends AsyncNotifier<AgingReport> {
   @override
   Future<AgingReport> build() async {
@@ -497,7 +454,6 @@ class CustomerAgingNotifier extends AsyncNotifier<AgingReport> {
     if (companyId == null) {
       return AgingReport.empty();
     }
-
     return ref.read(reportsRepositoryProvider).getCustomerAging(
           companyId: companyId,
         );
@@ -515,7 +471,38 @@ final customerAgingProvider =
 );
 
 // ============================================================================
-// Currently selected period (per page)
+// Supplier aging
+// ============================================================================
+
+class SupplierAgingNotifier extends AsyncNotifier<SupplierAgingReport> {
+  @override
+  Future<SupplierAgingReport> build() async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return SupplierAgingReport.empty();
+    }
+    return ref.read(reportsRepositoryProvider).getSupplierAging(
+          companyId: companyId,
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final supplierAgingProvider =
+    AsyncNotifierProvider<SupplierAgingNotifier, SupplierAgingReport>(
+  SupplierAgingNotifier.new,
+);
+
+// ============================================================================
+// Per-page period / window
 // ============================================================================
 
 class ReportPagePeriodNotifier extends Notifier<ReportPeriod> {
@@ -533,10 +520,6 @@ final reportPagePeriodProvider = NotifierProvider<
     ReportPagePeriodNotifier, ReportPeriod>(
   ReportPagePeriodNotifier.new,
 );
-
-// ============================================================================
-// Currently selected dead-stock window (per page)
-// ============================================================================
 
 class DeadStockWindowNotifier extends Notifier<DeadStockWindow> {
   @override
