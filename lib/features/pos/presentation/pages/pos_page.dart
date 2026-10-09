@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/responsive/responsive_helper.dart';
 import '../../../../shared/layouts/app_shell.dart';
+import '../../../companies/presentation/widgets/subscription_guard.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../dialogs/pos_payment_dialog.dart';
 import '../state/pos_focus_providers.dart';
@@ -30,6 +31,10 @@ import 'pos_tablet_layout.dart';
 /// covered by the on-screen keyboard. This matches how POS apps behave:
 /// the cashier types into the search field while the pay panel stays out
 /// of the way.
+///
+/// **Phase T-1:** the payment entry point is guarded by
+/// [SubscriptionGuard.ensureCanWrite] — an expired account can browse the
+/// catalog and build a cart, but cannot complete a sale.
 class PosPage extends ConsumerWidget {
   const PosPage({super.key});
 
@@ -83,11 +88,21 @@ class PosPage extends ConsumerWidget {
     ref.read(posSearchProvider.notifier).clear();
   }
 
-  void _handlePay(BuildContext context, WidgetRef ref) {
+  /// Opens the payment dialog when the cart is non-empty and the current
+  /// account is allowed to write. When the subscription is expired the
+  /// guard surfaces an informative dialog and the payment flow is aborted.
+  Future<void> _handlePay(BuildContext context, WidgetRef ref) async {
     final PosCart cart = ref.read(posCartProvider);
     if (cart.isEmpty) {
       return;
     }
+
+    final bool allowed = await SubscriptionGuard.ensureCanWrite(
+      context: context,
+      ref: ref,
+    );
+    if (!allowed || !context.mounted) return;
+
     showPosPaymentDialog(context: context);
   }
 }
