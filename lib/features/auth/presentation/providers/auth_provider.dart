@@ -148,6 +148,21 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
+  /// Starts the Google OAuth flow.
+  ///
+  /// The returned value reflects only the ability to *launch* the flow.
+  /// The actual session arrives asynchronously through the auth state
+  /// stream owned by this notifier — by the time it fires, `state` is
+  /// already updated and every listener (including the router) reacts.
+  Future<AuthFailureType?> signInWithGoogle() async {
+    try {
+      await ref.read(authRepositoryProvider).signInWithGoogle();
+      return null;
+    } on AuthException catch (error) {
+      return error.type;
+    }
+  }
+
   Future<AuthFailureType?> logout() async {
     try {
       await ref.read(logoutUseCaseProvider)();
