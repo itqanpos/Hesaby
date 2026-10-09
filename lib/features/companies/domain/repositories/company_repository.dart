@@ -88,6 +88,17 @@ abstract interface class CompanyRepository {
   /// Throws [CompanyException] when the request fails.
   Future<List<Company>> getMyCompanies();
 
+  /// Phase T-2: returns **every** company in the platform, regardless of
+  /// membership.
+  ///
+  /// Only succeeds when the current user is flagged as a platform admin —
+  /// the RLS policy `companies_platform_admin_select_all` grants this.
+  /// Any other caller receives an empty list (RLS filters all rows).
+  ///
+  /// Unlike [getMyCompanies], inactive companies are included so the admin
+  /// can see the full tenant inventory.
+  Future<List<Company>> getAllCompanies();
+
   /// Updates the profile of [companyId] and returns the updated row.
   ///
   /// [name], [currency] and [timezone] are mandatory: the database columns
@@ -105,6 +116,28 @@ abstract interface class CompanyRepository {
     String? phone,
     String? email,
     String? address,
+  });
+
+  /// Phase T-2: updates only the subscription-related fields of [companyId].
+  ///
+  /// Only succeeds when the current user is a platform admin (via RLS). The
+  /// profile fields (name, phone, address, …) are left untouched.
+  ///
+  /// Passing `null` for [planId] / [billingCycle] / [subscribedUntil]
+  /// explicitly clears those columns. Callers should pass matching values
+  /// for the chosen [subscriptionStatus]:
+  ///   * `active`  → planId, billingCycle, subscribedUntil all set.
+  ///   * `trial`   → planId, billingCycle, subscribedUntil all null.
+  ///   * `expired` / `cancelled` → preserved as-is for audit.
+  ///
+  /// Throws [CompanyException] when the request fails or when the current
+  /// user is not a platform admin.
+  Future<Company> updateCompanySubscription({
+    required String companyId,
+    required String subscriptionStatus,
+    String? planId,
+    String? billingCycle,
+    DateTime? subscribedUntil,
   });
 
   // ---------------------------------------------------------------------------
