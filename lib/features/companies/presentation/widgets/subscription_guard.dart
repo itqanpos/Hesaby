@@ -76,7 +76,7 @@ Future<void> _showBlockedDialog(BuildContext context) async {
   );
 
   if (goToSubscription == true && context.mounted) {
-    context.pushNamed(AppRouter.subscriptionName);
+    await context.pushNamed(AppRouter.subscriptionName);
   }
 }
 
