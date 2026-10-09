@@ -38,6 +38,7 @@ import '../features/sales/presentation/pages/sales_page.dart';
 import '../features/settings/presentation/pages/company_settings_page.dart';
 import '../features/settings/presentation/pages/profile_page.dart';
 import '../features/settings/presentation/pages/settings_page.dart';
+import '../features/suppliers/presentation/pages/supplier_statement_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
@@ -71,6 +72,9 @@ abstract final class AppRouter {
 
   static const String suppliersPath = '/suppliers';
   static const String suppliersName = 'suppliers';
+
+  static const String supplierStatementPath = '/suppliers/statement';
+  static const String supplierStatementName = 'supplier-statement';
 
   static const String purchasesPath = '/purchases';
   static const String purchasesName = 'purchases';
