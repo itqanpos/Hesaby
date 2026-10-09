@@ -66,6 +66,23 @@ class AuthRepositoryImpl implements AuthRepository {
   }
 
   @override
+  Future<void> signInWithGoogle() async {
+    try {
+      await _remoteDataSource.signInWithOAuth();
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapSupabaseAuthException(error, stackTrace);
+    } on AuthException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknownException(
+        error,
+        stackTrace,
+        operation: 'signInWithGoogle',
+      );
+    }
+  }
+
+  @override
   Future<void> logout() async {
     try {
       await _remoteDataSource.signOut();
