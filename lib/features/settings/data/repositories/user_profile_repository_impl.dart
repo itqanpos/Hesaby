@@ -108,6 +108,7 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
       phone: _optionalString(map, 'phone'),
       createdAt: _requireTimestamp(map, 'created_at'),
       updatedAt: _requireTimestamp(map, 'updated_at'),
+      isPlatformAdmin: _optionalBool(map, 'is_platform_admin') ?? false,
     );
   }
 
@@ -131,6 +132,19 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
       return trimmed.isEmpty ? null : trimmed;
     }
     return value.toString();
+  }
+
+  static bool? _optionalBool(Map<String, dynamic> map, String key) {
+    final Object? value = map[key];
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
+    if (value is String) {
+      final String lower = value.toLowerCase();
+      if (lower == 'true' || lower == 't' || lower == '1') return true;
+      if (lower == 'false' || lower == 'f' || lower == '0') return false;
+    }
+    return null;
   }
 
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
