@@ -9,6 +9,7 @@ import '../../../../core/preferences/app_preferences_providers.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../companies/presentation/providers/members_providers.dart';
 
 /// Application settings page.
 class SettingsPage extends ConsumerWidget {
@@ -19,6 +20,7 @@ class SettingsPage extends ConsumerWidget {
     final ThemeMode themeMode =
         ref.watch(themeModeProvider).valueOrNull ?? ThemeMode.system;
     final Locale? locale = ref.watch(localeProvider).valueOrNull;
+    final bool canManageMembers = ref.watch(isManagerProvider);
 
     return AppShell(
       appBar: AppBar(title: const Text('الإعدادات')),
@@ -56,6 +58,13 @@ class SettingsPage extends ConsumerWidget {
             subtitle: 'الضريبة والخصم وقواعد البيع وتذييل الإيصال',
             onTap: () => context.pushNamed(AppRouter.companySettingsName),
           ),
+          if (canManageMembers)
+            _SettingsTile(
+              icon: Icons.groups_outlined,
+              title: 'الأعضاء والصلاحيات',
+              subtitle: 'إدارة الفريق وتحديد صلاحيات كل عضو',
+              onTap: () => context.pushNamed(AppRouter.membersName),
+            ),
 
           const SizedBox(height: 8),
 
@@ -322,6 +331,7 @@ class _SettingsTile extends StatelessWidget {
     this.onTap,
     this.enabled = true,
     this.isDestructive = false,
+    this.badge,
   });
 
   final IconData icon;
@@ -330,6 +340,7 @@ class _SettingsTile extends StatelessWidget {
   final VoidCallback? onTap;
   final bool enabled;
   final bool isDestructive;
+  final String? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -389,7 +400,27 @@ class _SettingsTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          if (enabled)
+          if (badge != null)
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(999),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 8,
+                  vertical: 3,
+                ),
+                child: Text(
+                  badge!,
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              ),
+            )
+          else if (enabled)
             Icon(
               Icons.chevron_left,
               color: scheme.onSurfaceVariant,
