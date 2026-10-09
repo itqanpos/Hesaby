@@ -5,8 +5,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../features/auth/presentation/providers/auth_provider.dart';
+import '../../features/companies/domain/entities/company_member.dart';
+import '../../features/companies/domain/entities/member_permission.dart';
 import '../../features/companies/presentation/providers/company_context_provider.dart';
 import '../../features/companies/presentation/providers/company_context_state.dart';
+import '../../features/companies/presentation/providers/members_providers.dart';
 
 // ============================================================================
 // Destinations
@@ -19,12 +22,19 @@ class _NavDestination {
     required this.path,
     required this.icon,
     required this.color,
+    this.requiredPermission,
   });
 
   final String label;
   final String path;
   final IconData icon;
   final Color color;
+
+  /// Permission code required to see this destination.
+  ///
+  /// `null` means "always visible" (e.g. the dashboard and the settings
+  /// entry, which must remain reachable even for restricted members).
+  final String? requiredPermission;
 }
 
 @immutable
@@ -44,12 +54,15 @@ const List<_NavSection> _sections = <_NavSection>[
         path: '/',
         icon: Icons.space_dashboard_outlined,
         color: Color(0xFF0288D1),
+        // Always visible — the home dashboard is the entry point for every
+        // member, including cashiers.
       ),
       _NavDestination(
         label: 'نقطة البيع',
         path: '/pos',
         icon: Icons.point_of_sale_outlined,
         color: Color(0xFF0F7B6C),
+        requiredPermission: MemberPermission.posUse,
       ),
     ],
   ),
@@ -61,24 +74,28 @@ const List<_NavSection> _sections = <_NavSection>[
         path: '/products',
         icon: Icons.inventory_2_outlined,
         color: Color(0xFF0F7B6C),
+        requiredPermission: MemberPermission.productsView,
       ),
       _NavDestination(
         label: 'الفواتير',
         path: '/sales',
         icon: Icons.receipt_long_outlined,
         color: Color(0xFF6A1B9A),
+        requiredPermission: MemberPermission.salesView,
       ),
       _NavDestination(
         label: 'المشتريات',
         path: '/purchases',
         icon: Icons.shopping_bag_outlined,
         color: Color(0xFF0288D1),
+        requiredPermission: MemberPermission.purchasesView,
       ),
       _NavDestination(
         label: 'المرتجعات',
         path: '/returns',
         icon: Icons.assignment_return_outlined,
         color: Color(0xFF00838F),
+        requiredPermission: MemberPermission.returnsView,
       ),
     ],
   ),
@@ -90,18 +107,21 @@ const List<_NavSection> _sections = <_NavSection>[
         path: '/customers',
         icon: Icons.people_outline,
         color: Color(0xFFEF6C00),
+        requiredPermission: MemberPermission.customersView,
       ),
       _NavDestination(
         label: 'الموردون',
         path: '/suppliers',
         icon: Icons.local_shipping_outlined,
         color: Color(0xFF00838F),
+        requiredPermission: MemberPermission.suppliersView,
       ),
       _NavDestination(
         label: 'التقارير',
         path: '/reports',
         icon: Icons.analytics_outlined,
         color: Color(0xFFB71C1C),
+        requiredPermission: MemberPermission.reportsView,
       ),
     ],
   ),
@@ -113,6 +133,8 @@ const List<_NavSection> _sections = <_NavSection>[
         path: '/settings',
         icon: Icons.settings_outlined,
         color: Color(0xFF455A64),
+        // Always visible — every member can change theme/locale and log
+        // out, even without any other permission.
       ),
     ],
   ),
@@ -135,6 +157,58 @@ bool _isActive(String location, String path) {
     return location == '/';
   }
   return location == path || location.startsWith('$path/');
+}
+
+/// Returns the sections the current user is allowed to see, filtered by
+/// their permissions.
+///
+/// A destination is kept when its [requiredPermission] is `null` or when
+/// the current member holds that permission. Sections whose items are all
+/// hidden are dropped entirely.
+///
+/// While the member is still loading, we optimistically show everything so
+/// the sidebar does not flash empty on first paint.
+List<_NavSection> _visibleSections(WidgetRef ref) {
+  final AsyncValue<CompanyMember?> memberAsync =
+      ref.watch(currentMemberProvider);
+
+  // Show everything during the initial load — avoids a jarring flash of
+  // an almost-empty sidebar.
+  if (memberAsync.isLoading && !memberAsync.hasValue) {
+    return _sections;
+  }
+
+  final CompanyMember? member = memberAsync.valueOrNull;
+
+  // No member row available (unauthenticated, or a company was not yet
+  // resolved): keep the sidebar minimal but not broken.
+  if (member == null) {
+    return _sections
+        .map(
+          (_NavSection s) => _NavSection(
+            title: s.title,
+            items: s.items
+                .where((_NavDestination d) => d.requiredPermission == null)
+                .toList(growable: false),
+          ),
+        )
+        .where((_NavSection s) => s.items.isNotEmpty)
+        .toList(growable: false);
+  }
+
+  final List<_NavSection> result = <_NavSection>[];
+  for (final _NavSection section in _sections) {
+    final List<_NavDestination> visible = section.items
+        .where(
+          (_NavDestination d) =>
+              d.requiredPermission == null ||
+              member.hasPermission(d.requiredPermission!),
+        )
+        .toList(growable: false);
+    if (visible.isEmpty) continue;
+    result.add(_NavSection(title: section.title, items: visible));
+  }
+  return result;
 }
 
 // ============================================================================
@@ -188,13 +262,14 @@ class AppDrawer extends StatelessWidget {
 // Shared body
 // ============================================================================
 
-class _NavigationBody extends StatelessWidget {
+class _NavigationBody extends ConsumerWidget {
   const _NavigationBody();
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final String location = _currentLocation(context);
+    final List<_NavSection> visible = _visibleSections(ref);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -205,7 +280,7 @@ class _NavigationBody extends StatelessWidget {
           child: ListView(
             padding: const EdgeInsets.symmetric(vertical: 4),
             children: <Widget>[
-              for (final _NavSection section in _sections)
+              for (final _NavSection section in visible)
                 _SectionGroup(
                   section: section,
                   location: location,
@@ -251,7 +326,6 @@ class _Header extends ConsumerWidget {
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
       child: Row(
         children: <Widget>[
-          // ---- Flat logo ----
           Container(
             width: 42,
             height: 42,
@@ -368,16 +442,15 @@ class _NavigationTile extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    // Active: subtle neutral surface, colored icon badge, bold text.
-    // Inactive: transparent background, faint colored badge, muted text.
     final Color background = isActive
         ? scheme.onSurface.withValues(alpha: 0.06)
         : Colors.transparent;
     final Color badgeBackground = isActive
         ? destination.color.withValues(alpha: 0.16)
         : destination.color.withValues(alpha: 0.10);
-    final Color iconColor =
-        isActive ? destination.color : destination.color.withValues(alpha: 0.75);
+    final Color iconColor = isActive
+        ? destination.color
+        : destination.color.withValues(alpha: 0.75);
     final Color titleColor =
         isActive ? scheme.onSurface : scheme.onSurfaceVariant;
 
@@ -391,7 +464,6 @@ class _NavigationTile extends StatelessWidget {
           onTap: () => _handleTap(context),
           child: Stack(
             children: <Widget>[
-              // ---- Active accent bar (on the start side) ----
               if (isActive)
                 PositionedDirectional(
                   start: 0,
@@ -412,7 +484,6 @@ class _NavigationTile extends StatelessWidget {
                 ),
                 child: Row(
                   children: <Widget>[
-                    // ---- Icon badge ----
                     Container(
                       width: 32,
                       height: 32,
@@ -427,8 +498,6 @@ class _NavigationTile extends StatelessWidget {
                       ),
                     ),
                     const SizedBox(width: 12),
-
-                    // ---- Label ----
                     Expanded(
                       child: Text(
                         destination.label,
