@@ -111,10 +111,6 @@ class ReportsRemoteDataSource {
   }
 
   /// Fetches every confirmed sale belonging to the supplied customers.
-  ///
-  /// Chunked on `customer_id` to keep the `IN (...)` filter within
-  /// reasonable bounds. Only the columns the FIFO aging algorithm needs
-  /// are selected.
   Future<List<Map<String, dynamic>>> fetchConfirmedSalesForCustomers({
     required String companyId,
     required List<String> customerIds,
@@ -136,8 +132,8 @@ class ReportsRemoteDataSource {
           .from('sales')
           .select('customer_id, sale_date, total')
           .eq('company_id', companyId)
-          . requiredeq('status', 'confirmed')
-          .inFilter String('customer_id', chunk)
+          .eq('status', 'confirmed')
+          .inFilter('customer_id', chunk)
           .limit(safetyLimit);
 
       allRows.addAll(rows);
@@ -151,7 +147,7 @@ class ReportsRemoteDataSource {
   // ===========================================================================
 
   Future<List<Map<String, dynamic>>> fetchReturns({
-    companyId,
+    required String companyId,
     required DateTime? fromDate,
     required DateTime? toDate,
   }) async {
@@ -170,8 +166,7 @@ class ReportsRemoteDataSource {
       query = query.lte('return_date', _formatDateOnly(toDate));
     }
 
-    final List<Map<String, dynamic>> rows =
-        await query.limit(safetyLimit);
+    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
     return rows;
   }
 
@@ -195,8 +190,7 @@ class ReportsRemoteDataSource {
       query = query.eq('branch_id', branchId);
     }
 
-    final List<Map<String, dynamic>> rows =
-        await query.limit(safetyLimit);
+    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
     return rows;
   }
 
@@ -246,8 +240,7 @@ class ReportsRemoteDataSource {
         if (pidRaw is! String || saleRaw is! Map) {
           continue;
         }
-        final Object? dateRaw =
-            (saleRaw as Map<String, dynamic>)['sale_date'];
+        final Object? dateRaw = (saleRaw as Map<String, dynamic>)['sale_date'];
         if (dateRaw is! String) {
           continue;
         }
@@ -290,8 +283,7 @@ class ReportsRemoteDataSource {
       query = query.lte('created_at', _formatTimestamp(toDate));
     }
 
-    final List<Map<String, dynamic>> rows =
-        await query.limit(safetyLimit);
+    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
     return rows;
   }
 
@@ -320,9 +312,7 @@ class ReportsRemoteDataSource {
 
     var query = client
         .from('purchases')
-        .select(
-          'id, supplier_id, total, paid_amount, status, purchase_date',
-        )
+        .select('id, supplier_id, total, paid_amount, status, purchase_date')
         .eq('company_id', companyId)
         .eq('status', 'confirmed');
 
@@ -333,8 +323,7 @@ class ReportsRemoteDataSource {
       query = query.lte('purchase_date', _formatDateOnly(toDate));
     }
 
-    final List<Map<String, dynamic>> rows =
-        await query.limit(safetyLimit);
+    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
     return rows;
   }
 
