@@ -12,13 +12,8 @@ class ReportsRemoteDataSource {
 
   bool get isAvailable => _client != null;
 
-  /// Safety cap for report queries.
   static const int safetyLimit = 5000;
-
-  /// Higher cap used for the "last sold date" query (one row per sale item).
   static const int saleItemsSafetyLimit = 50000;
-
-  /// How many ids to pass to a single `IN (...)` filter.
   static const int inFilterChunkSize = 150;
 
   // ===========================================================================
@@ -51,8 +46,7 @@ class ReportsRemoteDataSource {
     final int effectiveLimit =
         (limit == null || limit <= 0) ? safetyLimit : limit;
 
-    final List<Map<String, dynamic>> rows = await query.limit(effectiveLimit);
-    return rows;
+    return await query.limit(effectiveLimit);
   }
 
   Future<List<String>> fetchConfirmedSaleIds({
@@ -166,8 +160,7 @@ class ReportsRemoteDataSource {
       query = query.lte('return_date', _formatDateOnly(toDate));
     }
 
-    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
-    return rows;
+    return await query.limit(safetyLimit);
   }
 
   // ===========================================================================
@@ -190,8 +183,7 @@ class ReportsRemoteDataSource {
       query = query.eq('branch_id', branchId);
     }
 
-    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
-    return rows;
+    return await query.limit(safetyLimit);
   }
 
   Future<List<Map<String, dynamic>>> fetchProductsWithMinStock({
@@ -199,14 +191,12 @@ class ReportsRemoteDataSource {
   }) async {
     final SupabaseClient client = _requireClient();
 
-    final List<Map<String, dynamic>> rows = await client
+    return await client
         .from('products')
         .select('id, name, default_unit_id, min_stock')
         .eq('company_id', companyId)
         .not('min_stock', 'is', null)
         .limit(safetyLimit);
-
-    return rows;
   }
 
   Future<Map<String, DateTime>> fetchLastSoldDateByProduct({
@@ -237,17 +227,12 @@ class ReportsRemoteDataSource {
       for (final Map<String, dynamic> row in rows) {
         final Object? pidRaw = row['product_id'];
         final Object? saleRaw = row['sales'];
-        if (pidRaw is! String || saleRaw is! Map) {
-          continue;
-        }
-        final Object? dateRaw = (saleRaw as Map<String, dynamic>)['sale_date'];
-        if (dateRaw is! String) {
-          continue;
-        }
+        if (pidRaw is! String || saleRaw is! Map) continue;
+        final Object? dateRaw =
+            (saleRaw as Map<String, dynamic>)['sale_date'];
+        if (dateRaw is! String) continue;
         final DateTime? parsed = DateTime.tryParse(dateRaw);
-        if (parsed == null) {
-          continue;
-        }
+        if (parsed == null) continue;
         final DateTime utc = parsed.toUtc();
         final DateTime? existing = result[pidRaw];
         if (existing == null || utc.isAfter(existing)) {
@@ -283,8 +268,7 @@ class ReportsRemoteDataSource {
       query = query.lte('created_at', _formatTimestamp(toDate));
     }
 
-    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
-    return rows;
+    return await query.limit(safetyLimit);
   }
 
   Future<List<Map<String, dynamic>>> fetchCustomersWithBalance({
@@ -292,15 +276,13 @@ class ReportsRemoteDataSource {
   }) async {
     final SupabaseClient client = _requireClient();
 
-    final List<Map<String, dynamic>> rows = await client
+    return await client
         .from('customers')
         .select('id, name, phone, balance')
         .eq('company_id', companyId)
         .gt('balance', 0)
         .order('balance', ascending: false)
         .limit(safetyLimit);
-
-    return rows;
   }
 
   Future<List<Map<String, dynamic>>> fetchPurchases({
@@ -323,8 +305,84 @@ class ReportsRemoteDataSource {
       query = query.lte('purchase_date', _formatDateOnly(toDate));
     }
 
-    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
-    return rows;
+    return await query.limit(safetyLimit);
+  }
+
+  /// Fetches every confirmed purchase belonging to the supplied suppliers.
+  Future<List<Map<String, dynamic>>> fetchConfirmedPurchasesForSuppliers({
+    required String companyId,
+    required List<String> supplierIds,
+  }) async {
+    if (supplierIds.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    final SupabaseClient client = _requireClient();
+    final List<Map<String, dynamic>> allRows = <Map<String, dynamic>>[];
+
+    for (int i = 0; i < supplierIds.length; i += inFilterChunkSize) {
+      final int end = (i + inFilterChunkSize < supplierIds.length)
+          ? i + inFilterChunkSize
+          : supplierIds.length;
+      final List<String> chunk = supplierIds.sublist(i, end);
+
+      final List<Map<String, dynamic>> rows = await client
+          .from('purchases')
+          .select('supplier_id, purchase_date, total')
+          .eq('company_id', companyId)
+          .eq('status', 'confirmed')
+          .inFilter('supplier_id', chunk)
+          .limit(safetyLimit);
+
+      allRows.addAll(rows);
+    }
+
+    return allRows;
+  }
+
+  /// Fetches every payment made to the supplied suppliers.
+  Future<List<Map<String, dynamic>>> fetchPaymentsForSuppliers({
+    required String companyId,
+    required List<String> supplierIds,
+  }) async {
+    if (supplierIds.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    final SupabaseClient client = _requireClient();
+    final List<Map<String, dynamic>> allRows = <Map<String, dynamic>>[];
+
+    for (int i = 0; i < supplierIds.length; i += inFilterChunkSize) {
+      final int end = (i + inFilterChunkSize < supplierIds.length)
+          ? i + inFilterChunkSize
+          : supplierIds.length;
+      final List<String> chunk = supplierIds.sublist(i, end);
+
+      final List<Map<String, dynamic>> rows = await client
+          .from('supplier_payments')
+          .select('supplier_id, amount')
+          .eq('company_id', companyId)
+          .inFilter('supplier_id', chunk)
+          .limit(safetyLimit);
+
+      allRows.addAll(rows);
+    }
+
+    return allRows;
+  }
+
+  /// Returns suppliers of a company (active only) with minimal fields.
+  Future<List<Map<String, dynamic>>> fetchAllSuppliers({
+    required String companyId,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    return await client
+        .from('suppliers')
+        .select('id, name, phone')
+        .eq('company_id', companyId)
+        .eq('is_active', true)
+        .limit(safetyLimit);
   }
 
   // ===========================================================================
