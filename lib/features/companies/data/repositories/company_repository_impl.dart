@@ -171,6 +171,41 @@ class CompanyRepositoryImpl implements CompanyRepository {
     }
   }
 
+  @override
+  Future<Company> createMyCompany({required String name}) async {
+    try {
+      final CompanyModel model =
+          await _remoteDataSource.createMyCompany(name: name);
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'createMyCompany',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'createMyCompany',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'createMyCompany',
+      );
+    } on CompanyException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'createMyCompany',
+      );
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Branches — reads
   // ---------------------------------------------------------------------------
