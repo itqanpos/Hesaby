@@ -16,6 +16,7 @@ import '../../domain/entities/supplier.dart';
 import '../../domain/repositories/supplier_repository.dart';
 import '../providers/supplier_providers.dart';
 import '../providers/supplier_stats_providers.dart';
+import 'supplier_statement_page.dart';
 
 /// Supplier management page.
 ///
@@ -182,6 +183,8 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
                                     SupplierBalance.zero(
                                       supplierId: supplier.id,
                                     ),
+                                onViewStatement: () =>
+                                    _viewStatement(context, supplier),
                                 onRecordPayment: () =>
                                     _recordPayment(context, supplier),
                                 onEdit: () => _openSupplierForm(
@@ -275,6 +278,18 @@ class _SuppliersPageState extends ConsumerState<SuppliersPage> {
   // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
+
+  Future<void> _viewStatement(
+    BuildContext context,
+    Supplier supplier,
+  ) async {
+    await Navigator.of(context).push<void>(
+      MaterialPageRoute<void>(
+        builder: (BuildContext routeContext) =>
+            SupplierStatementPage(supplier: supplier),
+      ),
+    );
+  }
 
   Future<void> _recordPayment(
     BuildContext context,
@@ -625,6 +640,7 @@ class _SupplierCard extends StatelessWidget {
   const _SupplierCard({
     required this.supplier,
     required this.balance,
+    required this.onViewStatement,
     required this.onRecordPayment,
     required this.onEdit,
     required this.onToggleActive,
@@ -633,6 +649,7 @@ class _SupplierCard extends StatelessWidget {
 
   final Supplier supplier;
   final SupplierBalance balance;
+  final VoidCallback onViewStatement;
   final VoidCallback onRecordPayment;
   final VoidCallback onEdit;
   final VoidCallback onToggleActive;
@@ -650,7 +667,7 @@ class _SupplierCard extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
     final bool isActive = supplier.isActive;
 
- final List<String> meta = <String>[];
+    final List<String> meta = <String>[];
     if (supplier.hasCode) {
       meta.add('كود: ${supplier.code}');
     }
@@ -726,6 +743,8 @@ class _SupplierCard extends StatelessWidget {
                 tooltip: 'خيارات',
                 onSelected: (_SupplierAction action) {
                   switch (action) {
+                    case _SupplierAction.statement:
+                      onViewStatement();
                     case _SupplierAction.recordPayment:
                       onRecordPayment();
                     case _SupplierAction.edit:
@@ -738,6 +757,15 @@ class _SupplierCard extends StatelessWidget {
                 },
                 itemBuilder: (BuildContext context) =>
                     <PopupMenuEntry<_SupplierAction>>[
+                  const PopupMenuItem<_SupplierAction>(
+                    value: _SupplierAction.statement,
+                    child: ListTile(
+                      leading: Icon(Icons.receipt_long_outlined),
+                      title: Text('كشف حساب'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  const PopupMenuDivider(),
                   const PopupMenuItem<_SupplierAction>(
                     value: _SupplierAction.recordPayment,
                     child: ListTile(
@@ -1221,7 +1249,7 @@ class _FailureBanner extends StatelessWidget {
 // Enums
 // ============================================================================
 
-enum _SupplierAction { recordPayment, edit, toggleActive, delete }
+enum _SupplierAction { statement, recordPayment, edit, toggleActive, delete }
 
 enum _StatusFilter { all, active, inactive }
 
