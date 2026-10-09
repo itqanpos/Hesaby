@@ -52,6 +52,43 @@ class CompanyRepositoryImpl implements CompanyRepository {
   }
 
   @override
+  Future<List<Company>> getAllCompanies() async {
+    try {
+      final List<CompanyModel> models =
+          await _remoteDataSource.fetchAllCompanies();
+      return models
+          .map((CompanyModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'getAllCompanies',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'getAllCompanies',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'getAllCompanies',
+      );
+    } on CompanyException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'getAllCompanies',
+      );
+    }
+  }
+
+  @override
   Future<Company> updateCompany({
     required String companyId,
     required String name,
@@ -84,6 +121,53 @@ class CompanyRepositoryImpl implements CompanyRepository {
       rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(error, stackTrace, operation: 'updateCompany');
+    }
+  }
+
+  @override
+  Future<Company> updateCompanySubscription({
+    required String companyId,
+    required String subscriptionStatus,
+    String? planId,
+    String? billingCycle,
+    DateTime? subscribedUntil,
+  }) async {
+    try {
+      final CompanyModel model =
+          await _remoteDataSource.updateCompanySubscription(
+        companyId: companyId,
+        subscriptionStatus: subscriptionStatus,
+        planId: planId,
+        billingCycle: billingCycle,
+        subscribedUntil: subscribedUntil,
+      );
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'updateCompanySubscription',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'updateCompanySubscription',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'updateCompanySubscription',
+      );
+    } on CompanyException {
+      rethrow;
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'updateCompanySubscription',
+      );
     }
   }
 
