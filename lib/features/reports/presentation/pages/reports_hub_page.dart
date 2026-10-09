@@ -31,6 +31,13 @@ class ReportsHubPage extends StatelessWidget {
                 routeName: AppRouter.reportSalesSummaryName,
               ),
               _ReportTile(
+                icon: Icons.badge_outlined,
+                color: Color(0xFF6A1B9A),
+                title: 'أداء الكاشير',
+                subtitle: 'مبيعات ومحصَّل لكل كاشير',
+                routeName: AppRouter.reportCashierName,
+              ),
+              _ReportTile(
                 icon: Icons.local_fire_department_outlined,
                 color: Color(0xFFE65100),
                 title: 'المنتجات الأكثر مبيعًا',
