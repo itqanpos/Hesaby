@@ -8,6 +8,7 @@ import '../../../../app/router.dart';
 import '../../../../core/preferences/app_preferences_providers.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../admin/presentation/providers/platform_admin_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../companies/domain/entities/company_subscription.dart';
 import '../../../companies/presentation/providers/members_providers.dart';
@@ -24,6 +25,7 @@ class SettingsPage extends ConsumerWidget {
     final Locale? locale = ref.watch(localeProvider).valueOrNull;
     final bool canManageMembers = ref.watch(isManagerProvider);
     final bool isOwner = ref.watch(isOwnerProvider);
+    final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
     final CompanySubscription? subscription = ref.watch(subscriptionProvider);
 
     return AppShell(
@@ -77,6 +79,19 @@ class SettingsPage extends ConsumerWidget {
               subtitle: 'إدارة الفريق وتحديد صلاحيات كل عضو',
               onTap: () => context.pushNamed(AppRouter.membersName),
             ),
+
+          // ---- المالك (Platform Admin) ----
+          if (isPlatformAdmin) ...<Widget>[
+            const SizedBox(height: 8),
+            const _SectionHeader(title: 'لوحة المالك'),
+            _SettingsTile(
+              icon: Icons.admin_panel_settings_outlined,
+              title: 'إدارة الشركات',
+              subtitle: 'عرض كل الشركات وتفعيل اشتراكاتها',
+              onTap: () =>
+                  context.pushNamed(AppRouter.adminCompaniesName),
+            ),
+          ],
 
           const SizedBox(height: 8),
 
