@@ -99,6 +99,13 @@ class ReportsHubPage extends StatelessWidget {
                 routeName: AppRouter.reportReceivablesName,
               ),
               _ReportTile(
+                icon: Icons.timelapse_outlined,
+                color: Color(0xFFB71C1C),
+                title: 'أعمار ديون العملاء',
+                subtitle: 'توزيع الأرصدة على الفترات الزمنية',
+                routeName: AppRouter.reportCustomerAgingName,
+              ),
+              _ReportTile(
                 icon: Icons.local_shipping_outlined,
                 color: Color(0xFF00838F),
                 title: 'الموردون',
