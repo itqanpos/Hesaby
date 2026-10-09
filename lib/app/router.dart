@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
+import '../features/admin/presentation/pages/admin_companies_page.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/signup_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
@@ -147,6 +148,10 @@ abstract final class AppRouter {
   static const String subscriptionPath = '/subscription';
   static const String subscriptionName = 'subscription';
 
+  // ---- Phase T-2: Platform Admin ----
+  static const String adminCompaniesPath = '/admin/companies';
+  static const String adminCompaniesName = 'admin-companies';
+
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
   static const String reportsName = 'reports';
@@ -204,7 +209,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (auth.isUnauthenticated) {
-        // /login and /signup are public.
         if (location == AppRouter.loginPath ||
             location == AppRouter.signupPath) {
           return null;
@@ -218,9 +222,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         return AppRouter.homePath;
       }
 
-      // Note: no subscription guard here on purpose. Expired accounts
-      // stay in "read-only" mode (see Phase T-1 decisions). Write
-      // enforcement happens at the action points (Part 3+).
       return null;
     },
     routes: <RouteBase>[
@@ -253,6 +254,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.subscriptionName,
         builder: (BuildContext context, GoRouterState state) =>
             const SubscriptionPage(),
+      ),
+      GoRoute(
+        path: AppRouter.adminCompaniesPath,
+        name: AppRouter.adminCompaniesName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const AdminCompaniesPage(),
       ),
       GoRoute(
         path: AppRouter.productsPath,
