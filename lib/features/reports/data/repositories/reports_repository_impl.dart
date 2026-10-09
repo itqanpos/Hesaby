@@ -3,6 +3,7 @@
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../../../../core/utils/logger.dart';
+import '../../domain/entities/aging_reports.dart';
 import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_period.dart';
@@ -735,6 +736,162 @@ class ReportsRepositoryImpl implements ReportsRepository {
   }
 
   // ---------------------------------------------------------------------------
+  // Aging (customer)
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<AgingReport> getCustomerAging({
+    required String companyId,
+  }) async {
+    try {
+      // 1) Customers with a positive balance (RLS scopes to current company).
+      final List<Map<String, dynamic>> customerRows =
+          await _remoteDataSource.fetchCustomersWithBalance(
+        companyId: companyId,
+      );
+
+      if (customerRows.isEmpty) {
+        return AgingReport.empty();
+      }
+
+      // 2) Build an in-memory map of the customers we care about.
+      final Map<String, _AgingCustomer> customers =
+          <String, _AgingCustomer>{};
+      for (final Map<String, dynamic> row in customerRows) {
+        final String id = _asString(row['id']);
+        if (id.isEmpty) continue;
+        customers[id] = _AgingCustomer(
+          id: id,
+          name: _asString(row['name']),
+          phone: _asNullableString(row['phone']),
+          balance: _asDouble(row['balance']),
+        );
+      }
+
+      if (customers.isEmpty) {
+        return AgingReport.empty();
+      }
+
+      // 3) Confirmed sales belonging to those customers.
+      final List<Map<String, dynamic>> saleRows =
+          await _remoteDataSource.fetchConfirmedSalesForCustomers(
+        companyId: companyId,
+        customerIds: customers.keys.toList(growable: false),
+      );
+
+      // 4) Group sales by customer, then sort each group ascending.
+      final Map<String, List<_AgingSale>> salesByCustomer =
+          <String, List<_AgingSale>>{};
+      for (final Map<String, dynamic> row in saleRows) {
+        final String? cid = _asNullableString(row['customer_id']);
+        if (cid == null) continue;
+        salesByCustomer
+            .putIfAbsent(cid, () => <_AgingSale>[])
+            .add(
+              _AgingSale(
+                date: _asDate(row['sale_date']),
+                total: _asDouble(row['total']),
+              ),
+            );
+      }
+      for (final List<_AgingSale> list in salesByCustomer.values) {
+        list.sort((_AgingSale a, _AgingSale b) => a.date.compareTo(b.date));
+      }
+
+      // 5) FIFO allocation + bucket classification.
+      final DateTime now = DateTime.now().toUtc();
+      final List<CustomerAgingRow> rows = <CustomerAgingRow>[];
+
+      for (final _AgingCustomer customer in customers.values) {
+        final List<_AgingSale> sales =
+            salesByCustomer[customer.id] ?? const <_AgingSale>[];
+
+        double remaining = customer.balance;
+        double b0to30 = 0;
+        double b31to60 = 0;
+        double b61to90 = 0;
+        double b90plus = 0;
+
+        for (final _AgingSale sale in sales) {
+          if (remaining <= 0) break;
+          final double allocated =
+              remaining < sale.total ? remaining : sale.total;
+          remaining -= allocated;
+
+          final int days = now.difference(sale.date).inDays;
+          if (days <= 30) {
+            b0to30 += allocated;
+          } else if (days <= 60) {
+            b31to60 += allocated;
+          } else if (days <= 90) {
+            b61to90 += allocated;
+          } else {
+            b90plus += allocated;
+          }
+        }
+
+        // Residue (balance exceeds sum of invoices — e.g. opening balance
+        // adjustments) is assigned to the oldest bucket so the totals
+        // reconcile with `customer.balance`.
+        if (remaining > 0) {
+          b90plus += remaining;
+        }
+
+        rows.add(
+          CustomerAgingRow(
+            customerId: customer.id,
+            customerName:
+                customer.name.isEmpty ? 'عميل محذوف' : customer.name,
+            phone: customer.phone,
+            balance: customer.balance,
+            buckets: AgingBuckets(
+              days0to30: b0to30,
+              days31to60: b31to60,
+              days61to90: b61to90,
+              days90plus: b90plus,
+            ),
+          ),
+        );
+      }
+
+      // 6) Sort by descending balance.
+      rows.sort((CustomerAgingRow a, CustomerAgingRow b) =>
+          b.balance.compareTo(a.balance));
+
+      // 7) Grand totals.
+      double t0to30 = 0;
+      double t31to60 = 0;
+      double t61to90 = 0;
+      double t90plus = 0;
+      for (final CustomerAgingRow r in rows) {
+        t0to30 += r.buckets.days0to30;
+        t31to60 += r.buckets.days31to60;
+        t61to90 += r.buckets.days61to90;
+        t90plus += r.buckets.days90plus;
+      }
+
+      return AgingReport(
+        rows: rows,
+        totals: AgingBuckets(
+          days0to30: t0to30,
+          days31to60: t31to60,
+          days61to90: t61to90,
+          days90plus: t90plus,
+        ),
+        customerCount: rows.length,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getCustomerAging');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getCustomerAging');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getCustomerAging');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Internal helpers
   // ---------------------------------------------------------------------------
 
@@ -752,6 +909,24 @@ class ReportsRepositoryImpl implements ReportsRepository {
       if (parsed != null) return parsed;
     }
     return 0;
+  }
+
+  static String? _asNullableString(Object? value) {
+    if (value == null) return null;
+    if (value is String) {
+      final String t = value.trim();
+      return t.isEmpty ? null : t;
+    }
+    return value.toString();
+  }
+
+  static DateTime _asDate(Object? value) {
+    if (value is DateTime) return value.toUtc();
+    if (value is String) {
+      final DateTime? parsed = DateTime.tryParse(value);
+      if (parsed != null) return parsed.toUtc();
+    }
+    return DateTime.now().toUtc();
   }
 
   static String _shortId(String id) {
@@ -822,6 +997,27 @@ class _SupplierAgg {
     purchases += total;
     paid += paidAmount;
   }
+}
+
+class _AgingCustomer {
+  _AgingCustomer({
+    required this.id,
+    required this.name,
+    required this.balance,
+    this.phone,
+  });
+
+  final String id;
+  final String name;
+  final String? phone;
+  final double balance;
+}
+
+class _AgingSale {
+  _AgingSale({required this.date, required this.total});
+
+  final DateTime date;
+  final double total;
 }
 
 // ============================================================================
