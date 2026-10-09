@@ -13,6 +13,7 @@ import '../../../companies/presentation/providers/company_context_provider.dart'
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../companies/presentation/widgets/branch_selector.dart';
 import '../../../companies/presentation/widgets/company_selector.dart';
+import '../../../companies/presentation/widgets/subscription_banner.dart';
 import '../../../reports/domain/entities/financial_reports.dart';
 import '../../../reports/domain/entities/inventory_reports.dart';
 import '../../../reports/presentation/providers/reports_providers.dart';
@@ -24,13 +25,14 @@ import '../../../settings/presentation/providers/user_profile_providers.dart';
 /// Dashboard Home — the primary navigation hub.
 ///
 /// Sections (top to bottom):
-/// 1. Greeting + company/branch context.
-/// 2. POS hero CTA.
-/// 3. KPI grid (today's sales, today's invoices, low stock, receivables).
-/// 4. Quick actions.
-/// 5. Low-stock preview.
-/// 6. Receivables preview.
-/// 7. Reports banner.
+/// 1. Subscription reminder (only when trial / expiring / expired).
+/// 2. Greeting + company/branch context.
+/// 3. POS hero CTA.
+/// 4. KPI grid (today's sales, today's invoices, low stock, receivables).
+/// 5. Quick actions.
+/// 6. Low-stock preview.
+/// 7. Receivables preview.
+/// 8. Reports banner.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -54,6 +56,7 @@ class HomePage extends ConsumerWidget {
       body: ListView(
         padding: const EdgeInsets.only(top: 8, bottom: 32),
         children: <Widget>[
+          const SubscriptionBanner(),
           const _GreetingCard(),
           const SizedBox(height: 16),
 
