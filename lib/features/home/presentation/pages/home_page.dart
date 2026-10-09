@@ -8,6 +8,9 @@ import 'package:intl/intl.dart';
 import '../../../../app/config/app_config.dart';
 import '../../../../app/router.dart';
 import '../../../../shared/layouts/app_shell.dart';
+import '../../../../shared/widgets/app_button.dart';
+import '../../../../shared/widgets/app_error.dart';
+import '../../../../shared/widgets/app_loader.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
@@ -24,15 +27,18 @@ import '../../../settings/presentation/providers/user_profile_providers.dart';
 
 /// Dashboard Home — the primary navigation hub.
 ///
-/// Sections (top to bottom):
+/// Layout (top → bottom):
 /// 1. Subscription reminder (only when trial / expiring / expired).
 /// 2. Greeting + company/branch context.
-/// 3. POS hero CTA.
-/// 4. KPI grid (today's sales, today's invoices, low stock, receivables).
-/// 5. Quick actions.
-/// 6. Low-stock preview.
-/// 7. Receivables preview.
-/// 8. Reports banner.
+/// 3. **Onboarding / context area** — one of:
+///    * loading spinner while companies are being fetched,
+///    * error card with a retry button,
+///    * **onboarding card** when the user has no company yet (fresh
+///      Google sign-up), pushing them to `/create-company`,
+///    * **choose-company card** when the user is a member of several
+///      companies but has not picked one yet,
+///    * the full dashboard otherwise.
+/// 4. Infrastructure footer.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -40,7 +46,6 @@ class HomePage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final AppConfig config = ref.watch(appConfigProvider);
     final CompanyContextState ctx = ref.watch(companyContextProvider);
-    final bool hasCompany = ctx.currentCompany != null;
 
     return AppShell(
       appBar: AppBar(
@@ -59,38 +64,284 @@ class HomePage extends ConsumerWidget {
           const SubscriptionBanner(),
           const _GreetingCard(),
           const SizedBox(height: 16),
-
-          if (hasCompany) ...<Widget>[
-            const _PosHeroBanner(),
-            const SizedBox(height: 20),
-
-            const _KpiGrid(),
-            const SizedBox(height: 24),
-
-            const _SectionHeader(
-              title: 'إجراءات سريعة',
-              icon: Icons.flash_on_outlined,
-            ),
-            const SizedBox(height: 10),
-            const _QuickActionsGrid(),
-            const SizedBox(height: 24),
-
-            const _LowStockSection(),
-            const SizedBox(height: 16),
-
-            const _ReceivablesSection(),
-            const SizedBox(height: 24),
-
-            const _ReportsBanner(),
-          ] else ...<Widget>[
-            const SizedBox(height: 16),
-            const _EmptyCompanyHint(),
-          ],
-
+          _ContextArea(state: ctx),
           const SizedBox(height: 32),
           _InfrastructureFooter(config: config),
         ],
       ),
+    );
+  }
+}
+
+// ============================================================================
+// Context area — decides what to show below the greeting.
+// ============================================================================
+
+class _ContextArea extends ConsumerWidget {
+  const _ContextArea({required this.state});
+
+  final CompanyContextState state;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // 1) Still loading the very first list of companies.
+    if (state.isLoadingCompanies && state.companies.isEmpty) {
+      return const Padding(
+        padding: EdgeInsets.symmetric(vertical: 48),
+        child: AppLoader(),
+      );
+    }
+
+    // 2) Loaded, but the request failed.
+    if (state.companiesFailure != null && state.companies.isEmpty) {
+      return AppErrorView(
+        title: 'تعذّر تحميل بيانات الشركات',
+        message: _failureMessage(state.companiesFailure!),
+        retryLabel: 'إعادة المحاولة',
+        onRetry: () => ref.read(companyContextProvider.notifier).refresh(),
+      );
+    }
+
+    // 3) No company at all — brand-new Google user, or a user whose
+    //    membership list is empty. Push them into the onboarding flow.
+    if (state.companies.isEmpty) {
+      return const _OnboardingCard();
+    }
+
+    // 4) Companies exist but none is selected (multi-company user who has
+    //    not picked one yet). Offer a compact chooser.
+    if (state.currentCompany == null) {
+      return const _ChooseCompanyCard();
+    }
+
+    // 5) Full dashboard.
+    return const _DashboardContent();
+  }
+
+  static String _failureMessage(CompanyFailureType type) => switch (type) {
+        CompanyFailureType.network =>
+          'تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت.',
+        CompanyFailureType.unauthorized =>
+          'انتهت الجلسة. يرجى تسجيل الدخول من جديد.',
+        CompanyFailureType.noCompanies => 'لا توجد شركات.',
+        CompanyFailureType.companyNotAccessible =>
+          'لا يمكن الوصول إلى هذه الشركة.',
+        CompanyFailureType.noBranches => 'لا توجد فروع.',
+        CompanyFailureType.invalidResponse =>
+          'تعذّر قراءة البيانات من الخادم.',
+        CompanyFailureType.unknown =>
+          'حدث خطأ غير متوقع. حاول مرة أخرى.',
+      };
+}
+
+// ============================================================================
+// Onboarding card — shown when the user has no company yet.
+// ============================================================================
+
+class _OnboardingCard extends ConsumerStatefulWidget {
+  const _OnboardingCard();
+
+  @override
+  ConsumerState<_OnboardingCard> createState() => _OnboardingCardState();
+}
+
+class _OnboardingCardState extends ConsumerState<_OnboardingCard> {
+  Future<void> _goToCreateCompany() async {
+    await context.pushNamed(AppRouter.createCompanyName);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        gradient: LinearGradient(
+          colors: <Color>[
+            scheme.primary.withValues(alpha: 0.10),
+            scheme.tertiary.withValues(alpha: 0.08),
+          ],
+          begin: AlignmentDirectional.topStart,
+          end: AlignmentDirectional.bottomEnd,
+        ),
+        border: Border.all(
+          color: scheme.primary.withValues(alpha: 0.25),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(20, 24, 20, 24),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Align(
+              alignment: AlignmentDirectional.centerStart,
+              child: Container(
+                width: 56,
+                height: 56,
+                decoration: BoxDecoration(
+                  color: scheme.primary,
+                  borderRadius: BorderRadius.circular(16),
+                ),
+                child: Icon(
+                  Icons.rocket_launch_outlined,
+                  color: scheme.onPrimary,
+                  size: 28,
+                ),
+              ),
+            ),
+            const SizedBox(height: 18),
+            Text(
+              'ابدأ رحلتك مع حسابي',
+              style: theme.textTheme.titleLarge?.copyWith(
+                fontWeight: FontWeight.w800,
+                height: 1.2,
+              ),
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'أنشئ شركتك في خطوة واحدة لتبدأ البيع، إدارة المخزون، '
+              'وتتبع الأرباح. سننشئ لك فرعًا رئيسيًا وتجربة مجانية 7 أيام.',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: scheme.onSurfaceVariant,
+                height: 1.5,
+              ),
+            ),
+            const SizedBox(height: 20),
+            AppButton(
+              label: 'أنشئ شركتك الآن',
+              icon: Icons.arrow_forward,
+              expanded: true,
+              size: AppButtonSize.large,
+              onPressed: _goToCreateCompany,
+            ),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Icon(
+                  Icons.verified_outlined,
+                  size: 16,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 6),
+                Text(
+                  'مجانًا · بدون بطاقة بنكية',
+                  style: theme.textTheme.labelSmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Choose-company card — shown when several companies exist and none is
+// currently selected.
+// ============================================================================
+
+class _ChooseCompanyCard extends StatelessWidget {
+  const _ChooseCompanyCard();
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(20),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  width: 44,
+                  height: 44,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.apartment_outlined,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        'اختر شركة للبدء',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                      ),
+                      const SizedBox(height: 2),
+                      Text(
+                        'أنت عضو في أكثر من شركة. اختر واحدة للمتابعة.',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 16),
+            const CompanySelector(),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Dashboard content — full widget tree for a selected company.
+// ============================================================================
+
+class _DashboardContent extends StatelessWidget {
+  const _DashboardContent();
+
+  @override
+  Widget build(BuildContext context) {
+    return const Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        _PosHeroBanner(),
+        SizedBox(height: 20),
+        _KpiGrid(),
+        SizedBox(height: 24),
+        _SectionHeader(
+          title: 'إجراءات سريعة',
+          icon: Icons.flash_on_outlined,
+        ),
+        SizedBox(height: 10),
+        _QuickActionsGrid(),
+        SizedBox(height: 24),
+        _LowStockSection(),
+        SizedBox(height: 16),
+        _ReceivablesSection(),
+        SizedBox(height: 24),
+        _ReportsBanner(),
+      ],
     );
   }
 }
@@ -1019,58 +1270,8 @@ class _SeeAllLink extends StatelessWidget {
 }
 
 // ============================================================================
-// Empty hint + footer
+// Infrastructure footer
 // ============================================================================
-
-class _EmptyCompanyHint extends StatelessWidget {
-  const _EmptyCompanyHint();
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.primaryContainer.withValues(alpha: 0.4),
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: scheme.primary.withValues(alpha: 0.3)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(20),
-        child: Row(
-          children: <Widget>[
-            Icon(
-              Icons.apartment_outlined,
-              color: scheme.primary,
-              size: 36,
-            ),
-            const SizedBox(width: 14),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    'لم تختر شركة بعد',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    'اختر شركة من الأعلى لعرض أدوات العمل.',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
 
 class _InfrastructureFooter extends StatelessWidget {
   const _InfrastructureFooter({required this.config});
