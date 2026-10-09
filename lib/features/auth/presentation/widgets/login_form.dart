@@ -2,7 +2,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 
+import '../../../../app/router.dart';
 import '../../../../core/utils/validators.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
@@ -10,11 +12,6 @@ import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_provider.dart';
 
 /// Arabic RTL sign-in form.
-///
-/// Owns its own local UI state (controllers, obfuscation, submit flag, and
-/// the current failure). It does not embed business rules: validation is
-/// delegated to [Validators], authentication to [AuthNotifier], and error
-/// categorisation to [AuthFailureType].
 class LoginForm extends ConsumerStatefulWidget {
   const LoginForm({super.key});
 
@@ -52,10 +49,11 @@ class _LoginFormState extends ConsumerState<LoginForm> {
 
     setState(() => _isSubmitting = true);
 
-    final AuthFailureType? failure = await ref.read(authProvider.notifier).login(
-          email: _emailController.text,
-          password: _passwordController.text,
-        );
+    final AuthFailureType? failure =
+        await ref.read(authProvider.notifier).login(
+              email: _emailController.text,
+              password: _passwordController.text,
+            );
 
     if (!mounted) {
       return;
@@ -115,13 +113,16 @@ class _LoginFormState extends ConsumerState<LoginForm> {
               textInputAction: TextInputAction.done,
               prefixIcon: Icons.lock_outline,
               suffixIcon: IconButton(
-                onPressed: _isSubmitting ? null : _togglePasswordVisibility,
+                onPressed:
+                    _isSubmitting ? null : _togglePasswordVisibility,
                 icon: Icon(
                   _obscurePassword
                       ? Icons.visibility_outlined
                       : Icons.visibility_off_outlined,
                 ),
-                tooltip: _obscurePassword ? 'إظهار كلمة المرور' : 'إخفاء كلمة المرور',
+                tooltip: _obscurePassword
+                    ? 'إظهار كلمة المرور'
+                    : 'إخفاء كلمة المرور',
               ),
               enabled: !_isSubmitting,
               validator: _validatePassword,
@@ -140,6 +141,13 @@ class _LoginFormState extends ConsumerState<LoginForm> {
               isLoading: _isSubmitting,
               onPressed: _isSubmitting ? null : _submit,
             ),
+            const SizedBox(height: 12),
+            TextButton(
+              onPressed: _isSubmitting
+                  ? null
+                  : () => context.goNamed(AppRouter.signupName),
+              child: const Text('ليس لديك حساب؟ أنشئ حسابًا جديدًا'),
+            ),
           ],
         ),
       ),
@@ -157,11 +165,6 @@ class _LoginFormState extends ConsumerState<LoginForm> {
   }
 }
 
-/// Inline Arabic strings.
-///
-/// These will migrate into `AppLocalizations` once the localization files
-/// are updated in a later step. Keeping them in this file preserves the
-/// one-file-per-step constraint of Phase 1.
 String _validationMessage(ValidationError error) => switch (error) {
       ValidationError.required => 'هذا الحقل مطلوب',
       ValidationError.invalidEmail => 'صيغة البريد الإلكتروني غير صحيحة',
@@ -173,20 +176,24 @@ String _validationMessage(ValidationError error) => switch (error) {
     };
 
 String _failureMessage(AuthFailureType type) => switch (type) {
-      AuthFailureType.invalidCredentials => 'البريد الإلكتروني أو كلمة المرور غير صحيحة',
+      AuthFailureType.invalidCredentials =>
+        'البريد الإلكتروني أو كلمة المرور غير صحيحة',
       AuthFailureType.emailNotConfirmed =>
         'لم يتم تأكيد البريد الإلكتروني بعد. يرجى مراجعة بريدك.',
-      AuthFailureType.userNotFound => 'لا يوجد حساب مرتبط بهذا البريد الإلكتروني.',
+      AuthFailureType.userNotFound =>
+        'لا يوجد حساب مرتبط بهذا البريد الإلكتروني.',
       AuthFailureType.tooManyRequests =>
         'تمت محاولات كثيرة. يرجى المحاولة بعد قليل.',
       AuthFailureType.weakPassword =>
         'كلمة المرور ضعيفة. يرجى استخدام كلمة مرور أقوى.',
+      AuthFailureType.emailAlreadyInUse =>
+        'هذا البريد الإلكتروني مُستخدم بالفعل. جرّب تسجيل الدخول.',
       AuthFailureType.network =>
         'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
-      AuthFailureType.unknown => 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.',
+      AuthFailureType.unknown =>
+        'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.',
     };
 
-/// Compact inline banner used to display a safe authentication failure.
 class _FailureBanner extends StatelessWidget {
   const _FailureBanner({required this.message});
 
@@ -207,7 +214,11 @@ class _FailureBanner extends StatelessWidget {
         child: Row(
           crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
-            Icon(Icons.error_outline, color: scheme.onErrorContainer, size: 20),
+            Icon(
+              Icons.error_outline,
+              color: scheme.onErrorContainer,
+              size: 20,
+            ),
             const SizedBox(width: 10),
             Expanded(
               child: Text(
