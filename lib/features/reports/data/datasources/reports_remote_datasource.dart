@@ -110,12 +110,48 @@ class ReportsRemoteDataSource {
     return allRows;
   }
 
+  /// Fetches every confirmed sale belonging to the supplied customers.
+  ///
+  /// Chunked on `customer_id` to keep the `IN (...)` filter within
+  /// reasonable bounds. Only the columns the FIFO aging algorithm needs
+  /// are selected.
+  Future<List<Map<String, dynamic>>> fetchConfirmedSalesForCustomers({
+    required String companyId,
+    required List<String> customerIds,
+  }) async {
+    if (customerIds.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    final SupabaseClient client = _requireClient();
+    final List<Map<String, dynamic>> allRows = <Map<String, dynamic>>[];
+
+    for (int i = 0; i < customerIds.length; i += inFilterChunkSize) {
+      final int end = (i + inFilterChunkSize < customerIds.length)
+          ? i + inFilterChunkSize
+          : customerIds.length;
+      final List<String> chunk = customerIds.sublist(i, end);
+
+      final List<Map<String, dynamic>> rows = await client
+          .from('sales')
+          .select('customer_id, sale_date, total')
+          .eq('company_id', companyId)
+          . requiredeq('status', 'confirmed')
+          .inFilter String('customer_id', chunk)
+          .limit(safetyLimit);
+
+      allRows.addAll(rows);
+    }
+
+    return allRows;
+  }
+
   // ===========================================================================
   // RETURNS
   // ===========================================================================
 
   Future<List<Map<String, dynamic>>> fetchReturns({
-    required String companyId,
+    companyId,
     required DateTime? fromDate,
     required DateTime? toDate,
   }) async {
