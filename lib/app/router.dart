@@ -12,6 +12,7 @@ import '../features/companies/presentation/pages/branches_page.dart';
 import '../features/companies/presentation/pages/company_profile_page.dart';
 import '../features/companies/presentation/pages/member_permissions_page.dart';
 import '../features/companies/presentation/pages/members_page.dart';
+import '../features/companies/presentation/pages/subscription_page.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
 import '../features/inventory/presentation/pages/stock_movements_page.dart';
@@ -142,6 +143,10 @@ abstract final class AppRouter {
   static const String printerSettingsPath = '/settings/printer';
   static const String printerSettingsName = 'printer-settings';
 
+  // ---- Phase T-1: Subscription ----
+  static const String subscriptionPath = '/subscription';
+  static const String subscriptionName = 'subscription';
+
   // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
   static const String reportsName = 'reports';
@@ -213,6 +218,9 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         return AppRouter.homePath;
       }
 
+      // Note: no subscription guard here on purpose. Expired accounts
+      // stay in "read-only" mode (see Phase T-1 decisions). Write
+      // enforcement happens at the action points (Part 3+).
       return null;
     },
     routes: <RouteBase>[
@@ -239,6 +247,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.loadingName,
         builder: (BuildContext context, GoRouterState state) =>
             const _AuthLoadingPage(),
+      ),
+      GoRoute(
+        path: AppRouter.subscriptionPath,
+        name: AppRouter.subscriptionName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const SubscriptionPage(),
       ),
       GoRoute(
         path: AppRouter.productsPath,
