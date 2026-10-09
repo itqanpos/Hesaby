@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/admin/presentation/pages/admin_companies_page.dart';
+import '../features/auth/presentation/pages/create_company_page.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/signup_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
@@ -64,6 +65,10 @@ abstract final class AppRouter {
 
   static const String loadingPath = '/loading';
   static const String loadingName = 'loading';
+
+  // ---- Phase T-3: Google Sign-In onboarding ----
+  static const String createCompanyPath = '/create-company';
+  static const String createCompanyName = 'create-company';
 
   static const String productsPath = '/products';
   static const String productsName = 'products';
@@ -248,6 +253,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.loadingName,
         builder: (BuildContext context, GoRouterState state) =>
             const _AuthLoadingPage(),
+      ),
+      GoRoute(
+        path: AppRouter.createCompanyPath,
+        name: AppRouter.createCompanyName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const CreateCompanyPage(),
       ),
       GoRoute(
         path: AppRouter.subscriptionPath,
