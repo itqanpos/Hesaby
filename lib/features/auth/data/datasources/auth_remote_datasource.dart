@@ -1,9 +1,12 @@
 // lib/features/auth/data/datasources/auth_remote_datasource.dart
 
+import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart'
     show
         AuthResponse,
         AuthState,
+        LaunchMode,
+        OAuthProvider,
         Session,
         SupabaseClient,
         UserAttributes,
@@ -114,6 +117,36 @@ class AuthRemoteDataSource {
     }
 
     return AuthSessionModel.fromSupabaseSession(session);
+  }
+
+  /// Starts the Google OAuth flow.
+  ///
+  /// On web, [Uri.base] resolves to the current page URL, which is exactly
+  /// the redirect target Supabase needs to send the user back to. On other
+  /// platforms a custom URL scheme is used; the mobile build configures
+  /// that scheme natively.
+  ///
+  /// [LaunchMode.externalApplication] keeps the OAuth screen in the system
+  /// browser on mobile and in a full-page redirect on web, so the user
+  /// can complete the flow without the app interfering.
+  Future<void> signInWithOAuth() async {
+    final SupabaseClient? client = _client;
+    if (client == null) {
+      throw const AuthException(
+        type: AuthFailureType.unknown,
+        cause: _supabaseUnavailableMessage,
+      );
+    }
+
+    final String redirectTo = kIsWeb
+        ? '${Uri.base.scheme}://${Uri.base.host}${Uri.base.path}'
+        : 'io.supabase.hesabi://login-callback';
+
+    await client.auth.signInWithOAuth(
+      OAuthProvider.google,
+      redirectTo: redirectTo,
+      authScreenLaunchMode: LaunchMode.externalApplication,
+    );
   }
 
   Future<void> signOut() async {
