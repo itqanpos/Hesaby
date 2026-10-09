@@ -9,7 +9,9 @@ import '../../../../core/preferences/app_preferences_providers.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../companies/domain/entities/company_subscription.dart';
 import '../../../companies/presentation/providers/members_providers.dart';
+import '../../../companies/presentation/providers/subscription_providers.dart';
 
 /// Application settings page.
 class SettingsPage extends ConsumerWidget {
@@ -21,6 +23,8 @@ class SettingsPage extends ConsumerWidget {
         ref.watch(themeModeProvider).valueOrNull ?? ThemeMode.system;
     final Locale? locale = ref.watch(localeProvider).valueOrNull;
     final bool canManageMembers = ref.watch(isManagerProvider);
+    final bool isOwner = ref.watch(isOwnerProvider);
+    final CompanySubscription? subscription = ref.watch(subscriptionProvider);
 
     return AppShell(
       appBar: AppBar(title: const Text('الإعدادات')),
@@ -58,6 +62,14 @@ class SettingsPage extends ConsumerWidget {
             subtitle: 'الضريبة والخصم وقواعد البيع وتذييل الإيصال',
             onTap: () => context.pushNamed(AppRouter.companySettingsName),
           ),
+          if (isOwner)
+            _SettingsTile(
+              icon: Icons.workspace_premium_outlined,
+              title: 'الاشتراك',
+              subtitle: _subscriptionSubtitle(subscription),
+              onTap: () =>
+                  context.pushNamed(AppRouter.subscriptionName),
+            ),
           if (canManageMembers)
             _SettingsTile(
               icon: Icons.groups_outlined,
@@ -130,6 +142,35 @@ class SettingsPage extends ConsumerWidget {
         ],
       ),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Subscription subtitle
+  // ---------------------------------------------------------------------------
+
+  static String _subscriptionSubtitle(CompanySubscription? sub) {
+    if (sub == null) {
+      return 'حالة الاشتراك والباقة';
+    }
+
+    if (sub.isCancelled) {
+      return 'ملغى — جدّد للعودة';
+    }
+    if (sub.isExpired) {
+      return 'انتهى — جدّد الآن';
+    }
+
+    final int? days = sub.daysRemaining;
+
+    if (sub.isTrial) {
+      if (days == null) return 'تجربة مجانية';
+      return 'تجربة مجانية — $days ${days == 1 ? "يوم" : "أيام"} متبقية';
+    }
+
+    // Active
+    final String planLabel = sub.plan?.label ?? 'برو';
+    if (days == null) return 'باقة $planLabel';
+    return 'باقة $planLabel · متبقي $days ${days == 1 ? "يوم" : "أيام"}';
   }
 
   // ---------------------------------------------------------------------------
