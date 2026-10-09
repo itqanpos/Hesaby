@@ -14,12 +14,11 @@ import '../models/company_model.dart';
 ///
 /// Tenant isolation is enforced by Row Level Security in the database:
 /// * `select * from companies` only returns companies where the current
-///   user has an active membership.
-/// * `select * from branches where company_id = X` only returns branches
-///   of companies the current user may access.
+///   user has an active membership (or every company, if the caller is a
+///   platform admin).
 /// * `insert / update / delete` on `companies` and `branches` only succeed
 ///   when the current user holds the `owner` or `admin` role in the target
-///   company.
+///   company — or is a platform admin.
 ///
 /// The data source therefore never accepts a `userId` and never trusts a
 /// client-supplied identity. The active identity is always `auth.uid()`,
@@ -40,7 +39,8 @@ class CompanyRemoteDataSource {
   /// Returns every active company the current user may access.
   ///
   /// The query is filtered and ordered server-side; RLS applies the tenant
-  /// boundary transparently.
+  /// boundary transparently. For a platform admin, RLS returns every active
+  /// company in the platform.
   Future<List<CompanyModel>> fetchMyCompanies() async {
     final SupabaseClient client = _requireClient();
 
@@ -48,6 +48,24 @@ class CompanyRemoteDataSource {
         .from('companies')
         .select()
         .eq('is_active', true)
+        .order('name', ascending: true);
+
+    return rows.map(CompanyModel.fromMap).toList(growable: false);
+  }
+
+  /// Phase T-2: returns every company in the platform (active and inactive).
+  ///
+  /// Relies exclusively on the `companies_platform_admin_select_all` RLS
+  /// policy. A non-admin caller receives an empty list (RLS silently filters
+  /// every row), which the repository surfaces as an empty result — never
+  /// as an error. This mirrors the "no companies" behaviour of
+  /// [fetchMyCompanies].
+  Future<List<CompanyModel>> fetchAllCompanies() async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('companies')
+        .select()
         .order('name', ascending: true);
 
     return rows.map(CompanyModel.fromMap).toList(growable: false);
@@ -93,6 +111,44 @@ class CompanyRemoteDataSource {
       throw const CompanyException(
         type: CompanyFailureType.unauthorized,
         cause: 'Update affected no rows (RLS role check likely failed).',
+      );
+    }
+
+    return CompanyModel.fromMap(row);
+  }
+
+  /// Phase T-2: updates only the subscription fields of [companyId].
+  ///
+  /// Same `maybeSingle` reasoning as [updateCompany]: a zero-row result
+  /// means RLS refused the write (caller is not a platform admin).
+  Future<CompanyModel> updateCompanySubscription({
+    required String companyId,
+    required String subscriptionStatus,
+    String? planId,
+    String? billingCycle,
+    DateTime? subscribedUntil,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    final Map<String, dynamic> payload = <String, dynamic>{
+      'subscription_status': subscriptionStatus,
+      'plan_id': planId,
+      'billing_cycle': billingCycle,
+      'subscribed_until': subscribedUntil?.toUtc().toIso8601String(),
+    };
+
+    final Map<String, dynamic>? row = await client
+        .from('companies')
+        .update(payload)
+        .eq('id', companyId)
+        .select()
+        .maybeSingle();
+
+    if (row == null) {
+      throw const CompanyException(
+        type: CompanyFailureType.unauthorized,
+        cause: 'Subscription update affected no rows '
+            '(RLS: caller is not a platform admin).',
       );
     }
 
