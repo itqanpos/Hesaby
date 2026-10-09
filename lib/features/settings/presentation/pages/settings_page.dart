@@ -331,7 +331,6 @@ class _SettingsTile extends StatelessWidget {
     this.onTap,
     this.enabled = true,
     this.isDestructive = false,
-    this.badge,
   });
 
   final IconData icon;
@@ -340,7 +339,6 @@ class _SettingsTile extends StatelessWidget {
   final VoidCallback? onTap;
   final bool enabled;
   final bool isDestructive;
-  final String? badge;
 
   @override
   Widget build(BuildContext context) {
@@ -400,27 +398,7 @@ class _SettingsTile extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 8),
-          if (badge != null)
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(999),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 8,
-                  vertical: 3,
-                ),
-                child: Text(
-                  badge!,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                    fontWeight: FontWeight.w700,
-                  ),
-                ),
-              ),
-            )
-          else if (enabled)
+          if (enabled)
             Icon(
               Icons.chevron_left,
               color: scheme.onSurfaceVariant,
