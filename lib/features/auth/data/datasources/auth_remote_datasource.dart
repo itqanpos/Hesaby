@@ -1,7 +1,8 @@
 // lib/features/auth/data/datasources/auth_remote_datasource.dart
 
 import 'package:flutter/foundation.dart' show kIsWeb;
-import 'package:supabase_flutter/supabase_flutter.dart'
+import 'package:supabase_flutter/supabase_flutter.dart' hide AuthException;
+
 import '../../domain/repositories/auth_repository.dart';
 import '../models/auth_session_model.dart';
 
