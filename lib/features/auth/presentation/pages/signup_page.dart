@@ -12,7 +12,6 @@ import '../../../../shared/widgets/app_text_field.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_provider.dart';
 
-/// Sign-up page — creates a user account and bootstraps a company.
 class SignUpPage extends ConsumerStatefulWidget {
   const SignUpPage({super.key});
 
@@ -51,10 +50,6 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
     super.dispose();
   }
 
-  // ---------------------------------------------------------------------------
-  // Submit
-  // ---------------------------------------------------------------------------
-
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
 
@@ -63,29 +58,31 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
     }
 
     final bool valid = _formKey.currentState?.validate() ?? false;
-    if (!valid) return;
+    if (!valid) {
+      return;
+    }
 
     setState(() => _isSubmitting = true);
+
+    final String name = _nameController.text.trim();
+    final String company = _companyController.text.trim();
 
     final Object? result = await ref.read(authProvider.notifier).signUp(
           email: _emailController.text.trim(),
           password: _passwordController.text,
-          fullName: _nameController.text.trim().isEmpty
-              ? null
-              : _nameController.text.trim(),
-          companyName: _companyController.text.trim().isEmpty
-              ? null
-              : _companyController.text.trim(),
+          fullName: name.isEmpty ? null : name,
+          companyName: company.isEmpty ? null : company,
         );
 
-    if (!mounted) return;
+    if (!mounted) {
+      return;
+    }
 
-    // Success + session → router will redirect to home automatically.
     if (result == null) {
       context.goNamed(AppRouter.homeName);
-      return }
+      return;
+    }
 
-    // Success + no session → email confirmation required.
     if (result == AuthSignUpResult.needsEmailConfirmation) {
       setState(() {
         _isSubmitting = false;
@@ -94,49 +91,57 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
       return;
     }
 
-    // Failure.
     setState(() {
       _isSubmitting = false;
-      _failure = result is AuthFailureType ? result : AuthFailureType.unknown;
+      _failure =
+          result is AuthFailureType ? result : AuthFailureType.unknown;
     });
   }
 
-  // ---------------------------------------------------------------------------
-  // Validators
-  // ---------------------------------------------------------------------------
-
   String? _validateName(String? value) {
     final String v = value?.trim() ?? '';
-    if (v.isEmpty) return 'الرجاء إدخال اسمك';
-    if (v.length > 200) return 'الاسم طويل جدًا';
+    if (v.isEmpty) {
+      return 'الرجاء إدخال اسمك';
+    }
+    if (v.length > 200) {
+      return 'الاسم طويل جدًا';
+    }
     return null;
   }
 
   String? _validateCompany(String? value) {
     final String v = value?.trim() ?? '';
-    if (v.isEmpty) return 'الرجاء إدخال اسم الشركة';
-    if (v.length > 200) return 'اسم الشركة طويل جدًا';
+    if (v.isEmpty) {
+      return 'الرجاء إدخال اسم الشركة';
+    }
+    if (v.length > 200) {
+      return 'اسم الشركة طويل جدًا';
+    }
     return null;
   }
 
   String? _validateEmail(String? value) {
     final String v = value?.trim() ?? '';
-    if (v.isEmpty) return 'الرجاء إدخال البريد الإلكتروني';
+    if (v.isEmpty) {
+      return 'الرجاء إدخال البريد الإلكتروني';
+    }
     final RegExp pattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
-    if (!pattern.hasMatch(v)) return 'صيغة البريد غير صحيحة';
+    if (!pattern.hasMatch(v)) {
+      return 'صيغة البريد غير صحيحة';
+    }
     return null;
   }
 
   String? _validatePassword(String? value) {
     final String v = value ?? '';
-    if (v.isEmpty) return 'الرجاء إدخال كلمة المرور';
-    if (v.length < 6) return 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
+    if (v.isEmpty) {
+      return 'الرجاء إدخال كلمة المرور';
+    }
+    if (v.length < 6) {
+      return 'كلمة المرور يجب أن تكون 6 أحرف على الأقل';
+    }
     return null;
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -191,7 +196,6 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
             style: theme.textTheme.bodyMedium,
           ),
           const SizedBox(height: 20),
-
           AppTextField(
             controller: _nameController,
             label: 'الاسم الكامل',
@@ -202,7 +206,6 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
             validator: _validateName,
           ),
           const SizedBox(height: 12),
-
           AppTextField(
             controller: _companyController,
             label: 'اسم الشركة',
@@ -212,7 +215,6 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
             validator: _validateCompany,
           ),
           const SizedBox(height: 12),
-
           AppTextField(
             controller: _emailController,
             label: 'البريد الإلكتروني',
@@ -223,7 +225,6 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
             validator: _validateEmail,
           ),
           const SizedBox(height: 12),
-
           AppTextField(
             controller: _passwordController,
             label: 'كلمة المرور',
@@ -245,14 +246,11 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
             validator: _validatePassword,
             onSubmitted: (_) => _isSubmitting ? null : _submit(),
           ),
-
           if (_failure != null) ...<Widget>[
             const SizedBox(height: 12),
             _ErrorBanner(message: _failureMessage(_failure!)),
           ],
-
           const SizedBox(height: 24),
-
           AppButton(
             label: 'إنشاء الحساب',
             icon: Icons.person_add_alt,
@@ -294,10 +292,6 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
     }
   }
 }
-
-// ============================================================================
-// Card shell
-// ============================================================================
 
 class _SignUpCard extends StatelessWidget {
   const _SignUpCard({required this.theme, required this.child});
@@ -353,10 +347,6 @@ class _SignUpCard extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Confirmation sent state
-// ============================================================================
-
 class _ConfirmationSentBody extends StatelessWidget {
   const _ConfirmationSentBody({required this.email});
 
@@ -399,10 +389,6 @@ class _ConfirmationSentBody extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Error banner
-// ============================================================================
 
 class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner({required this.message});
