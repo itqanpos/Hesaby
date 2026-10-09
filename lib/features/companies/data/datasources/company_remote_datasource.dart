@@ -155,6 +155,42 @@ class CompanyRemoteDataSource {
     return CompanyModel.fromMap(row);
   }
 
+  /// Phase T-3: creates a company owned by the current user via RPC.
+  ///
+  /// The RPC `create_my_company` is the only writable entry point into
+  /// `companies` for a regular authenticated user — the client never
+  /// inserts directly. It returns the new company id; the row is then
+  /// re-fetched so the caller receives a fully populated [CompanyModel]
+  /// (with all subscription columns defaulted by the database).
+  Future<CompanyModel> createMyCompany({required String name}) async {
+    final SupabaseClient client = _requireClient();
+
+    final dynamic rpcResult = await client.rpc(
+      'create_my_company',
+      params: <String, dynamic>{'p_name': name},
+    );
+
+    final String companyId;
+    if (rpcResult is String) {
+      companyId = rpcResult;
+    } else if (rpcResult != null) {
+      companyId = rpcResult.toString();
+    } else {
+      throw const CompanyException(
+        type: CompanyFailureType.invalidResponse,
+        cause: 'create_my_company returned no id.',
+      );
+    }
+
+    final Map<String, dynamic> row = await client
+        .from('companies')
+        .select()
+        .eq('id', companyId)
+        .single();
+
+    return CompanyModel.fromMap(row);
+  }
+
   // ---------------------------------------------------------------------------
   // Branches — reads
   // ---------------------------------------------------------------------------
