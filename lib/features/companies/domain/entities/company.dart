@@ -5,13 +5,9 @@ import 'package:flutter/foundation.dart';
 
 /// Represents a tenant company inside HESABI.
 ///
-/// This is a pure Domain entity. It knows nothing about Supabase, PostgreSQL,
-/// or Flutter widgets. The data layer is responsible for mapping database
-/// rows into this entity.
-///
-/// Phase 3 scope only: it carries the fields required to display and select
-/// a company. Business relationships (owner, members, subscription plan,
-/// billing) are intentionally out of scope.
+/// Subscription fields mirror the columns on `public.companies`. They are
+/// optional in the constructor with sensible defaults so existing call
+/// sites (tests, widget previews) keep compiling without changes.
 @immutable
 class Company extends Equatable {
   const Company({
@@ -26,37 +22,51 @@ class Company extends Equatable {
     this.phone,
     this.email,
     this.address,
+    this.subscriptionStatus = 'trial',
+    this.trialEndsAt,
+    this.subscriptionStartedAt,
+    this.planId,
+    this.billingCycle,
+    this.subscribedUntil,
   });
 
-  /// Unique identifier of the company (uuid).
   final String id;
-
-  /// Display name of the company. Always present.
   final String name;
-
-  /// Optional registered / legal name used on invoices.
   final String? legalName;
-
-  /// Optional contact phone number.
   final String? phone;
-
-  /// Optional contact email address.
   final String? email;
-
-  /// Optional postal / physical address.
   final String? address;
-
-  /// ISO 4217 currency code (3 uppercase letters), e.g. `EGP`.
   final String currency;
-
-  /// IANA timezone identifier, e.g. `Africa/Cairo`.
   final String timezone;
-
-  /// Whether the company is currently active.
   final bool isActive;
-
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  // ---- Subscription ----
+
+  /// Raw status stored in the database.
+  ///
+  /// One of `trial` / `active` / `expired` / `cancelled`. Prefer
+  /// `CompanySubscription.effectiveStatus` (which folds in the dates) for
+  /// any access decision.
+  final String subscriptionStatus;
+
+  /// When the 7-day free trial ends. Meaningful only while
+  /// [subscriptionStatus] is `trial`.
+  final DateTime? trialEndsAt;
+
+  /// When the trial (or the very first paid period) started.
+  final DateTime? subscriptionStartedAt;
+
+  /// `basic` | `pro` — null while on trial.
+  final String? planId;
+
+  /// `monthly` | `yearly` — null while on trial.
+  final String? billingCycle;
+
+  /// End of the current paid period. Meaningful only while
+  /// [subscriptionStatus] is `active`.
+  final DateTime? subscribedUntil;
 
   @override
   List<Object?> get props => <Object?>[
@@ -71,8 +81,16 @@ class Company extends Equatable {
         isActive,
         createdAt,
         updatedAt,
+        subscriptionStatus,
+        trialEndsAt,
+        subscriptionStartedAt,
+        planId,
+        billingCycle,
+        subscribedUntil,
       ];
 
   @override
-  String toString() => 'Company(id: $id, name: $name, isActive: $isActive)';
+  String toString() =>
+      'Company(id: $id, name: $name, isActive: $isActive, '
+      'subscriptionStatus: $subscriptionStatus, planId: $planId)';
 }
