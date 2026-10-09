@@ -259,10 +259,8 @@ class ReportsRepositoryImpl implements ReportsRepository {
         final String? createdBy =
             row['created_by'] is String ? row['created_by'] as String : null;
         final String key = createdBy ?? '__unknown__';
-
         final double total = _asDouble(row['total']);
         final double paid = _asDouble(row['paid_amount']);
-
         byCashier.putIfAbsent(key, () => _CashierAgg()).add(total, paid);
       }
 
@@ -736,7 +734,7 @@ class ReportsRepositoryImpl implements ReportsRepository {
   }
 
   // ---------------------------------------------------------------------------
-  // Aging (customer)
+  // Customer aging
   // ---------------------------------------------------------------------------
 
   @override
@@ -744,7 +742,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
     required String companyId,
   }) async {
     try {
-      // 1) Customers with a positive balance (RLS scopes to current company).
       final List<Map<String, dynamic>> customerRows =
           await _remoteDataSource.fetchCustomersWithBalance(
         companyId: companyId,
@@ -754,7 +751,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         return AgingReport.empty();
       }
 
-      // 2) Build an in-memory map of the customers we care about.
       final Map<String, _AgingCustomer> customers =
           <String, _AgingCustomer>{};
       for (final Map<String, dynamic> row in customerRows) {
@@ -772,14 +768,12 @@ class ReportsRepositoryImpl implements ReportsRepository {
         return AgingReport.empty();
       }
 
-      // 3) Confirmed sales belonging to those customers.
       final List<Map<String, dynamic>> saleRows =
           await _remoteDataSource.fetchConfirmedSalesForCustomers(
         companyId: companyId,
         customerIds: customers.keys.toList(growable: false),
       );
 
-      // 4) Group sales by customer, then sort each group ascending.
       final Map<String, List<_AgingSale>> salesByCustomer =
           <String, List<_AgingSale>>{};
       for (final Map<String, dynamic> row in saleRows) {
@@ -798,7 +792,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         list.sort((_AgingSale a, _AgingSale b) => a.date.compareTo(b.date));
       }
 
-      // 5) FIFO allocation + bucket classification.
       final DateTime now = DateTime.now().toUtc();
       final List<CustomerAgingRow> rows = <CustomerAgingRow>[];
 
@@ -830,9 +823,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
           }
         }
 
-        // Residue (balance exceeds sum of invoices — e.g. opening balance
-        // adjustments) is assigned to the oldest bucket so the totals
-        // reconcile with `customer.balance`.
         if (remaining > 0) {
           b90plus += remaining;
         }
@@ -854,11 +844,9 @@ class ReportsRepositoryImpl implements ReportsRepository {
         );
       }
 
-      // 6) Sort by descending balance.
       rows.sort((CustomerAgingRow a, CustomerAgingRow b) =>
           b.balance.compareTo(a.balance));
 
-      // 7) Grand totals.
       double t0to30 = 0;
       double t31to60 = 0;
       double t61to90 = 0;
@@ -888,6 +876,180 @@ class ReportsRepositoryImpl implements ReportsRepository {
       throw _mapAuth(error, stackTrace, operation: 'getCustomerAging');
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(error, stackTrace, operation: 'getCustomerAging');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Supplier aging
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<SupplierAgingReport> getSupplierAging({
+    required String companyId,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> supplierRows =
+          await _remoteDataSource.fetchAllSuppliers(companyId: companyId);
+
+      if (supplierRows.isEmpty) {
+        return SupplierAgingReport.empty();
+      }
+
+      final Map<String, _AgingSupplier> suppliers =
+          <String, _AgingSupplier>{};
+      for (final Map<String, dynamic> row in supplierRows) {
+        final String id = _asString(row['id']);
+        if (id.isEmpty) continue;
+        suppliers[id] = _AgingSupplier(
+          id: id,
+          name: _asString(row['name']),
+          phone: _asNullableString(row['phone']),
+        );
+      }
+
+      if (suppliers.isEmpty) {
+        return SupplierAgingReport.empty();
+      }
+
+      final List<String> ids = suppliers.keys.toList(growable: false);
+
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchConfirmedPurchasesForSuppliers(
+          companyId: companyId,
+          supplierIds: ids,
+        ),
+        _remoteDataSource.fetchPaymentsForSuppliers(
+          companyId: companyId,
+          supplierIds: ids,
+        ),
+      ]);
+
+      final List<Map<String, dynamic>> purchases =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> payments =
+          (results[1] as List<Map<String, dynamic>>);
+
+      final Map<String, List<_AgingSale>> purchasesBySupplier =
+          <String, List<_AgingSale>>{};
+      for (final Map<String, dynamic> row in purchases) {
+        final String? sid = _asNullableString(row['supplier_id']);
+        if (sid == null) continue;
+        purchasesBySupplier
+            .putIfAbsent(sid, () => <_AgingSale>[])
+            .add(
+              _AgingSale(
+                date: _asDate(row['purchase_date']),
+                total: _asDouble(row['total']),
+              ),
+            );
+      }
+      for (final List<_AgingSale> list in purchasesBySupplier.values) {
+        list.sort((_AgingSale a, _AgingSale b) => a.date.compareTo(b.date));
+      }
+
+      final Map<String, double> totalPaidBySupplier = <String, double>{};
+      for (final Map<String, dynamic> row in payments) {
+        final String? sid = _asNullableString(row['supplier_id']);
+        if (sid == null) continue;
+        totalPaidBySupplier[sid] =
+            (totalPaidBySupplier[sid] ?? 0) + _asDouble(row['amount']);
+      }
+
+      final DateTime now = DateTime.now().toUtc();
+      final List<SupplierAgingRow> rows = <SupplierAgingRow>[];
+
+      for (final _AgingSupplier supplier in suppliers.values) {
+        final List<_AgingSale> list =
+            purchasesBySupplier[supplier.id] ?? const <_AgingSale>[];
+        double totalPurchased = 0;
+        for (final _AgingSale s in list) {
+          totalPurchased += s.total;
+        }
+        final double totalPaid = totalPaidBySupplier[supplier.id] ?? 0;
+        double remaining = totalPurchased - totalPaid;
+
+        if (remaining <= 0 || list.isEmpty) {
+          continue;
+        }
+
+        double b0to30 = 0;
+        double b31to60 = 0;
+        double b61to90 = 0;
+        double b90plus = 0;
+
+        for (final _AgingSale sale in list) {
+          if (remaining <= 0) break;
+          final double allocated =
+              remaining < sale.total ? remaining : sale.total;
+          remaining -= allocated;
+
+          final int days = now.difference(sale.date).inDays;
+          if (days <= 30) {
+            b0to30 += allocated;
+          } else if (days <= 60) {
+            b31to60 += allocated;
+          } else if (days <= 90) {
+            b61to90 += allocated;
+          } else {
+            b90plus += allocated;
+          }
+        }
+
+        if (remaining > 0) {
+          b90plus += remaining;
+        }
+
+        final double balance = b0to30 + b31to60 + b61to90 + b90plus;
+
+        rows.add(
+          SupplierAgingRow(
+            supplierId: supplier.id,
+            supplierName:
+                supplier.name.isEmpty ? 'مورد محذوف' : supplier.name,
+            phone: supplier.phone,
+            balance: balance,
+            buckets: AgingBuckets(
+              days0to30: b0to30,
+              days31to60: b31to60,
+              days61to90: b61to90,
+              days90plus: b90plus,
+            ),
+          ),
+        );
+      }
+
+      rows.sort((SupplierAgingRow a, SupplierAgingRow b) =>
+          b.balance.compareTo(a.balance));
+
+      double t0to30 = 0;
+      double t31to60 = 0;
+      double t61to90 = 0;
+      double t90plus = 0;
+      for (final SupplierAgingRow r in rows) {
+        t0to30 += r.buckets.days0to30;
+        t31to60 += r.buckets.days31to60;
+        t61to90 += r.buckets.days61to90;
+        t90plus += r.buckets.days90plus;
+      }
+
+      return SupplierAgingReport(
+        rows: rows,
+        totals: AgingBuckets(
+          days0to30: t0to30,
+          days31to60: t31to60,
+          days61to90: t61to90,
+          days90plus: t90plus,
+        ),
+        supplierCount: rows.length,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getSupplierAging');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getSupplierAging');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getSupplierAging');
     }
   }
 
@@ -1013,6 +1175,18 @@ class _AgingCustomer {
   final double balance;
 }
 
+class _AgingSupplier {
+  _AgingSupplier({
+    required this.id,
+    required this.name,
+    this.phone,
+  });
+
+  final String id;
+  final String name;
+  final String? phone;
+}
+
 class _AgingSale {
   _AgingSale({required this.date, required this.total});
 
@@ -1047,8 +1221,7 @@ ReportException _mapAuth(
   required String operation,
 }) {
   AppLogger.warning(
-    'Report auth error during "$operation" mapped to unauthorized '
-    '(code: ${error.code ?? 'n/a'}).',
+    'Report auth error during "$operation" mapped to unauthorized.',
   );
   return ReportException(
     type: ReportFailureType.unauthorized,
