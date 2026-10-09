@@ -62,4 +62,17 @@ abstract interface class AuthRepository {
     String? fullName,
     String? companyName,
   });
+
+  /// Starts the Google OAuth flow.
+  ///
+  /// On web the current page is redirected to Google and back; on mobile
+  /// the platform browser is opened (deep-link handling is configured
+  /// separately). The returned Future completes when the browser step is
+  /// finished — the actual session arrives through [authStateChanges].
+  ///
+  /// Throws [AuthException] when the flow cannot be launched. A user who
+  /// simply closes the browser without completing the flow receives no
+  /// session, and no error surfaces here — the app remains in its
+  /// previous authentication state.
+  Future<void> signInWithGoogle();
 }
