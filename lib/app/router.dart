@@ -9,6 +9,8 @@ import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/companies/presentation/pages/branch_form_page.dart';
 import '../features/companies/presentation/pages/branches_page.dart';
 import '../features/companies/presentation/pages/company_profile_page.dart';
+import '../features/companies/presentation/pages/member_permissions_page.dart';
+import '../features/companies/presentation/pages/members_page.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
 import '../features/inventory/presentation/pages/stock_movements_page.dart';
@@ -30,6 +32,7 @@ import '../features/reports/presentation/pages/receivables_page.dart';
 import '../features/reports/presentation/pages/reports_hub_page.dart';
 import '../features/reports/presentation/pages/sales_summary_page.dart';
 import '../features/reports/presentation/pages/stock_valuation_page.dart';
+import '../features/reports/presentation/pages/supplier_aging_page.dart';
 import '../features/reports/presentation/pages/top_customers_page.dart';
 import '../features/reports/presentation/pages/top_products_page.dart';
 import '../features/sales/presentation/pages/customers_page.dart';
@@ -122,6 +125,13 @@ abstract final class AppRouter {
   static const String branchEditPath = '/settings/branches/:id/edit';
   static const String branchEditName = 'branch-edit';
 
+  static const String membersPath = '/settings/members';
+  static const String membersName = 'members';
+
+  static const String memberPermissionsPath =
+      '/settings/members/:id/permissions';
+  static const String memberPermissionsName = 'member-permissions';
+
   static const String profilePath = '/settings/profile';
   static const String profileName = 'profile';
 
@@ -161,6 +171,9 @@ abstract final class AppRouter {
 
   static const String reportCustomerAgingPath = '/reports/customer-aging';
   static const String reportCustomerAgingName = 'report-customer-aging';
+
+  static const String reportSupplierAgingPath = '/reports/supplier-aging';
+  static const String reportSupplierAgingName = 'report-supplier-aging';
 
   static const String reportPayablesPath = '/reports/payables';
   static const String reportPayablesName = 'report-payables';
@@ -376,6 +389,25 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
             ],
           ),
           GoRoute(
+            path: 'members',
+            name: AppRouter.membersName,
+            builder: (BuildContext context, GoRouterState state) =>
+                const MembersPage(),
+            routes: <RouteBase>[
+              GoRoute(
+                path: ':id/permissions',
+                name: AppRouter.memberPermissionsName,
+                builder: (BuildContext context, GoRouterState state) {
+                  final String? id = state.pathParameters['id'];
+                  return MemberPermissionsPage(
+                    key: ValueKey<String>('member-perm-${id ?? ''}'),
+                    memberId: id ?? '',
+                  );
+                },
+              ),
+            ],
+          ),
+          GoRoute(
             path: 'profile',
             name: AppRouter.profileName,
             builder: (BuildContext context, GoRouterState state) =>
@@ -455,6 +487,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.reportCustomerAgingName,
         builder: (BuildContext context, GoRouterState state) =>
             const CustomerAgingPage(),
+      ),
+      GoRoute(
+        path: AppRouter.reportSupplierAgingPath,
+        name: AppRouter.reportSupplierAgingName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const SupplierAgingPage(),
       ),
       GoRoute(
         path: AppRouter.reportPayablesPath,
