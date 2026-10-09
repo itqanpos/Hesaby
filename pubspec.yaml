@@ -35,6 +35,11 @@ dependencies:
   equatable: ^2.0.5
   uuid: ^4.5.1
 
+  # Phase T-1 — external links (WhatsApp, phone dialer, web URLs).
+  # Used by the subscription page to reach the support channel without
+  # leaving the user staring at a phone number they have to retype.
+  url_launcher: ^6.3.1
+
   # POS — Phase 7 additions
   # `mobile_scanner` powers the in-app camera barcode scanner.
   # `printing` provides the system print dialog on all supported platforms
