@@ -3,143 +3,128 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart';
 
 import '../../../../app/config/app_config.dart';
 import '../../../../app/router.dart';
-import '../../../../core/responsive/responsive_helper.dart';
-import '../../../../l10n/app_localizations.dart';
 import '../../../../shared/layouts/app_shell.dart';
+import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../companies/presentation/widgets/branch_selector.dart';
 import '../../../companies/presentation/widgets/company_selector.dart';
+import '../../../reports/domain/entities/financial_reports.dart';
+import '../../../reports/domain/entities/inventory_reports.dart';
+import '../../../reports/presentation/providers/reports_providers.dart';
+import '../../../sales/domain/entities/sale_entities.dart';
+import '../../../sales/presentation/providers/sales_providers.dart';
+import '../../../settings/domain/entities/user_profile.dart';
+import '../../../settings/presentation/providers/user_profile_providers.dart';
 
-/// Home screen — the primary navigation hub.
+/// Dashboard Home — the primary navigation hub.
 ///
-/// Layout (top to bottom):
-/// 1. Context card (company + branch).
-/// 2. Large POS hero banner.
-/// 3. Quick-actions row (sales / purchases / returns).
-/// 4. Catalog & inventory section.
-/// 5. People section (customers / suppliers).
-/// 6. Analytics section (reports).
-///
-/// The page holds no business logic: every action is navigation or a state
-/// read.
+/// Sections (top to bottom):
+/// 1. Greeting + company/branch context.
+/// 2. POS hero CTA.
+/// 3. KPI grid (today's sales, today's invoices, low stock, receivables).
+/// 4. Quick actions.
+/// 5. Low-stock preview.
+/// 6. Receivables preview.
+/// 7. Reports banner.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AppLocalizations l10n = AppLocalizations.of(context);
     final AppConfig config = ref.watch(appConfigProvider);
-    final CompanyContextState contextState =
-        ref.watch(companyContextProvider);
-
-    final bool hasCompany = contextState.currentCompany != null;
+    final CompanyContextState ctx = ref.watch(companyContextProvider);
+    final bool hasCompany = ctx.currentCompany != null;
 
     return AppShell(
       appBar: AppBar(
-        title: Text(l10n.appName),
+        title: const Text('الرئيسية'),
         actions: <Widget>[
           IconButton(
             tooltip: 'الإعدادات',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => context.pushNamed(AppRouter.settingsName),
           ),
-          _EnvironmentPill(config: config),
-          const SizedBox(width: 12),
         ],
       ),
-      body: LayoutBuilder(
-        builder: (BuildContext context, BoxConstraints constraints) {
-          final double availableWidth = constraints.maxWidth.isFinite
-              ? constraints.maxWidth
-              : ResponsiveHelper.contentMaxWidth;
+      body: ListView(
+        padding: const EdgeInsets.only(top: 8, bottom: 32),
+        children: <Widget>[
+          const _GreetingCard(),
+          const SizedBox(height: 16),
 
-          return SingleChildScrollView(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                const SizedBox(height: 8),
+          if (hasCompany) ...<Widget>[
+            const _PosHeroBanner(),
+            const SizedBox(height: 20),
 
-                // ---- Context ----
-                const _ContextCard(),
+            const _KpiGrid(),
+            const SizedBox(height: 24),
 
-                if (hasCompany) ...<Widget>[
-                  const SizedBox(height: 16),
-
-                  // ---- POS hero ----
-                  const _PosHeroBanner(),
-
-                  const SizedBox(height: 24),
-
-                  // ---- Quick actions ----
-                  const _SectionHeader(
-                    title: 'العمليات',
-                    icon: Icons.flash_on_outlined,
-                  ),
-                  const SizedBox(height: 10),
-                  _QuickActionsRow(availableWidth: availableWidth),
-
-                  const SizedBox(height: 24),
-
-                  // ---- Catalog & inventory ----
-                  const _SectionHeader(
-                    title: 'الكتالوج والمخزون',
-                    icon: Icons.inventory_2_outlined,
-                  ),
-                  const SizedBox(height: 10),
-                  _CatalogGrid(availableWidth: availableWidth),
-
-                  const SizedBox(height: 24),
-
-                  // ---- People ----
-                  const _SectionHeader(
-                    title: 'العلاقات',
-                    icon: Icons.people_outline,
-                  ),
-                  const SizedBox(height: 10),
-                  _PeopleGrid(availableWidth: availableWidth),
-
-                  const SizedBox(height: 24),
-
-                  // ---- Analytics ----
-                  const _SectionHeader(
-                    title: 'التحليلات',
-                    icon: Icons.analytics_outlined,
-                  ),
-                  const SizedBox(height: 10),
-                  const _ReportsBanner(),
-                ] else ...<Widget>[
-                  const SizedBox(height: 16),
-                  const _EmptyCompanyHint(),
-                ],
-
-                const SizedBox(height: 32),
-
-                _InfrastructureFooter(config: config),
-                const SizedBox(height: 16),
-              ],
+            const _SectionHeader(
+              title: 'إجراءات سريعة',
+              icon: Icons.flash_on_outlined,
             ),
-          );
-        },
+            const SizedBox(height: 10),
+            const _QuickActionsGrid(),
+            const SizedBox(height: 24),
+
+            const _LowStockSection(),
+            const SizedBox(height: 16),
+
+            const _ReceivablesSection(),
+            const SizedBox(height: 24),
+
+            const _ReportsBanner(),
+          ] else ...<Widget>[
+            const SizedBox(height: 16),
+            const _EmptyCompanyHint(),
+          ],
+
+          const SizedBox(height: 32),
+          _InfrastructureFooter(config: config),
+        ],
       ),
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-// Context card
-// -----------------------------------------------------------------------------
+// ============================================================================
+// Greeting card
+// ============================================================================
 
-class _ContextCard extends StatelessWidget {
-  const _ContextCard();
+class _GreetingCard extends ConsumerWidget {
+  const _GreetingCard();
+
+  static String _greeting() {
+    final int h = DateTime.now().hour;
+    if (h < 12) return 'صباح الخير';
+    if (h < 17) return 'طاب يومك';
+    return 'مساء الخير';
+  }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+
+    final AsyncValue<UserProfile?> profileAsync =
+        ref.watch(userProfileProvider);
+    final AuthState auth = ref.watch(authProvider);
+    final CompanyContextState ctx = ref.watch(companyContextProvider);
+
+    final String? fullName = profileAsync.valueOrNull?.fullName;
+    final String email = auth.session?.email ?? '';
+    final String displayName =
+        (fullName != null && fullName.trim().isNotEmpty)
+            ? fullName.trim()
+            : (email.isNotEmpty ? email.split('@').first : 'أهلًا');
+
+    final String companyName = ctx.currentCompany?.name ?? 'حسابي';
+    final String? branchName = ctx.currentBranch?.name;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -148,30 +133,54 @@ class _ContextCard extends StatelessWidget {
         border: Border.all(color: scheme.outlineVariant),
       ),
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+        padding: const EdgeInsets.fromLTRB(14, 14, 14, 12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Padding(
-              padding: const EdgeInsetsDirectional.only(start: 4, bottom: 8),
-              child: Row(
-                children: <Widget>[
-                  Icon(
-                    Icons.business_center_outlined,
-                    size: 16,
-                    color: scheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 6),
-                  Text(
-                    'سياق العمل',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontWeight: FontWeight.w600,
+            Row(
+              children: <Widget>[
+                CircleAvatar(
+                  radius: 22,
+                  backgroundColor: scheme.primaryContainer,
+                  foregroundColor: scheme.onPrimaryContainer,
+                  child: Text(
+                    displayName.characters.first.toUpperCase(),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                ],
-              ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        '${_greeting()}، $displayName',
+                        style: theme.textTheme.titleMedium?.copyWith(
+                          fontWeight: FontWeight.w800,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        branchName != null && branchName.isNotEmpty
+                            ? '$companyName · $branchName'
+                            : companyName,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
+            const SizedBox(height: 12),
             const CompanySelector(),
             const SizedBox(height: 6),
             const BranchSelector(),
@@ -182,9 +191,9 @@ class _ContextCard extends StatelessWidget {
   }
 }
 
-// -----------------------------------------------------------------------------
-// POS hero banner
-// -----------------------------------------------------------------------------
+// ============================================================================
+// POS hero
+// ============================================================================
 
 class _PosHeroBanner extends StatelessWidget {
   const _PosHeroBanner();
@@ -281,15 +290,374 @@ class _PosHeroBanner extends StatelessWidget {
   }
 }
 
-// -----------------------------------------------------------------------------
-// Section header
-// -----------------------------------------------------------------------------
+// ============================================================================
+// KPI grid (2 x 2)
+// ============================================================================
 
-class _SectionHeader extends StatelessWidget {
-  const _SectionHeader({required this.title, required this.icon});
+class _KpiGrid extends ConsumerWidget {
+  const _KpiGrid();
 
-  final String title;
+  static final NumberFormat _money = NumberFormat.currency(
+    locale: 'en_US',
+    symbol: 'ج.م ',
+    decimalDigits: 0,
+  );
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    // ---- Today's sales + invoices ----
+    final List<Sale> sales =
+        ref.watch(salesProvider).valueOrNull ?? const <Sale>[];
+    final DateTime now = DateTime.now();
+    double todaySales = 0;
+    int todayInvoices = 0;
+    for (final Sale s in sales) {
+      if (!s.isConfirmed) continue;
+      final DateTime d = s.saleDate.toLocal();
+      if (d.year == now.year && d.month == now.month && d.day == now.day) {
+        todaySales += s.total;
+        todayInvoices++;
+      }
+    }
+
+    // ---- Low stock count ----
+    final int lowStockCount =
+        (ref.watch(lowStockProvider).valueOrNull ?? const <LowStockItem>[])
+            .length;
+
+    // ---- Receivables total ----
+    final double receivables =
+        ref.watch(receivablesProvider).valueOrNull?.totalBalance ?? 0;
+
+    return Column(
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: _KpiCard(
+                icon: Icons.trending_up_outlined,
+                color: const Color(0xFF0F7B6C),
+                label: 'مبيعات اليوم',
+                value: _money.format(todaySales),
+                onTap: () => context.pushNamed(AppRouter.salesName),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _KpiCard(
+                icon: Icons.receipt_long_outlined,
+                color: const Color(0xFF0288D1),
+                label: 'فواتير اليوم',
+                value: '$todayInvoices',
+                onTap: () => context.pushNamed(AppRouter.salesName),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+        Row(
+          children: <Widget>[
+            Expanded(
+              child: _KpiCard(
+                icon: Icons.warning_amber_outlined,
+                color: const Color(0xFFE65100),
+                label: 'مخزون منخفض',
+                value: '$lowStockCount',
+                emphasize: lowStockCount > 0,
+                onTap: () =>
+                    context.pushNamed(AppRouter.reportLowStockName),
+              ),
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: _KpiCard(
+                icon: Icons.account_balance_wallet_outlined,
+                color: const Color(0xFFC62828),
+                label: 'مستحق العملاء',
+                value: _money.format(receivables),
+                emphasize: receivables > 0,
+                onTap: () =>
+                    context.pushNamed(AppRouter.reportReceivablesName),
+              ),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+class _KpiCard extends StatelessWidget {
+  const _KpiCard({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.value,
+    required this.onTap,
+    this.emphasize = false,
+  });
+
   final IconData icon;
+  final Color color;
+  final String label;
+  final String value;
+  final VoidCallback onTap;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: onTap,
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: emphasize
+                  ? color.withValues(alpha: 0.5)
+                  : scheme.outlineVariant,
+              width: emphasize ? 1.5 : 1,
+            ),
+          ),
+          padding: const EdgeInsets.all(12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Container(
+                    width: 30,
+                    height: 30,
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.12),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Icon(icon, size: 16, color: color),
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w600,
+                      ),
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 10),
+              Text(
+                value,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
+                  color: emphasize ? color : scheme.onSurface,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Quick actions (4 tiles)
+// ============================================================================
+
+class _QuickActionsGrid extends StatelessWidget {
+  const _QuickActionsGrid();
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        const double spacing = 8;
+        final double available = constraints.maxWidth.isFinite
+            ? constraints.maxWidth
+            : MediaQuery.sizeOf(context).width - 32;
+        final double width = (available - spacing * 3) / 4;
+
+        return Row(
+          children: <Widget>[
+            SizedBox(
+              width: width,
+              child: const _QuickTile(
+                icon: Icons.point_of_sale_outlined,
+                color: Color(0xFF0F7B6C),
+                title: 'بيع جديد',
+                routeName: AppRouter.posName,
+              ),
+            ),
+            const SizedBox(width: spacing),
+            SizedBox(
+              width: width,
+              child: const _QuickTile(
+                icon: Icons.shopping_bag_outlined,
+                color: Color(0xFF0288D1),
+                title: 'شراء جديد',
+                routeName: AppRouter.purchaseNewName,
+              ),
+            ),
+            const SizedBox(width: spacing),
+            SizedBox(
+              width: width,
+              child: const _QuickTile(
+                icon: Icons.people_outline,
+                color: Color(0xFFEF6C00),
+                title: 'العملاء',
+                routeName: AppRouter.customersName,
+              ),
+            ),
+            const SizedBox(width: spacing),
+            SizedBox(
+              width: width,
+              child: const _QuickTile(
+                icon: Icons.analytics_outlined,
+                color: Color(0xFF6A1B9A),
+                title: 'التقارير',
+                routeName: AppRouter.reportsName,
+              ),
+            ),
+          ],
+        );
+      },
+    );
+  }
+}
+
+class _QuickTile extends StatelessWidget {
+  const _QuickTile({
+    required this.icon,
+    required this.color,
+    required this.title,
+    required this.routeName,
+  });
+
+  final IconData icon;
+  final Color color;
+  final String title;
+  final String routeName;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: scheme.surface,
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        onTap: () => context.pushNamed(routeName),
+        child: DecoratedBox(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 6,
+              vertical: 12,
+            ),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Container(
+                  width: 40,
+                  height: 40,
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Icon(icon, color: color, size: 20),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  title,
+                  style: theme.textTheme.labelMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                  ),
+                  textAlign: TextAlign.center,
+                  overflow: TextOverflow.ellipsis,
+                  maxLines: 2,
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Low stock section
+// ============================================================================
+
+class _LowStockSection extends ConsumerWidget {
+  const _LowStockSection();
+
+  static final NumberFormat _qty = NumberFormat.decimalPattern('en_US');
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AsyncValue<List<LowStockItem>> async = ref.watch(lowStockProvider);
+
+    return async.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (List<LowStockItem> items) {
+        if (items.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final List<LowStockItem> top =
+            items.take(5).toList(growable: false);
+        final bool hasMore = items.length > top.length;
+
+        return _SectionCard(
+          title: 'مخزون منخفض',
+          icon: Icons.warning_amber_outlined,
+          accent: const Color(0xFFE65100),
+          trailing: hasMore
+              ? _SeeAllLink(
+                  label: 'عرض الكل',
+                  onTap: () =>
+                      context.pushNamed(AppRouter.reportLowStockName),
+                )
+              : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              for (int i = 0; i < top.length; i++) ...<Widget>[
+                _LowStockRow(item: top[i], qty: _qty),
+                if (i < top.length - 1) const SizedBox(height: 6),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _LowStockRow extends StatelessWidget {
+  const _LowStockRow({required this.item, required this.qty});
+
+  final LowStockItem item;
+  final NumberFormat qty;
 
   @override
   Widget build(BuildContext context) {
@@ -299,18 +667,126 @@ class _SectionHeader extends StatelessWidget {
     return Row(
       children: <Widget>[
         Container(
-          width: 32,
-          height: 32,
-          decoration: BoxDecoration(
-            color: scheme.primary.withValues(alpha: 0.12),
-            borderRadius: BorderRadius.circular(10),
+          width: 6,
+          height: 6,
+          decoration: const BoxDecoration(
+            color: Color(0xFFE65100),
+            shape: BoxShape.circle,
           ),
-          child: Icon(icon, size: 18, color: scheme.primary),
         ),
         const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            item.productName,
+            style: theme.textTheme.bodyMedium,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
         Text(
-          title,
-          style: theme.textTheme.titleMedium?.copyWith(
+          '${qty.format(item.quantityOnHand)} / ${qty.format(item.minStock)}',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// Receivables section
+// ============================================================================
+
+class _ReceivablesSection extends ConsumerWidget {
+  const _ReceivablesSection();
+
+  static final NumberFormat _money = NumberFormat.currency(
+    locale: 'en_US',
+    symbol: 'ج.م ',
+    decimalDigits: 0,
+  );
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final AsyncValue<ReceivablesReport> async =
+        ref.watch(receivablesProvider);
+
+    return async.when(
+      loading: () => const SizedBox.shrink(),
+      error: (_, __) => const SizedBox.shrink(),
+      data: (ReceivablesReport report) {
+        if (report.items.isEmpty) {
+          return const SizedBox.shrink();
+        }
+
+        final List<ReceivableItem> top =
+            report.items.take(5).toList(growable: false);
+        final bool hasMore = report.items.length > top.length;
+
+        return _SectionCard(
+          title: 'أعلى العملاء مدينين',
+          icon: Icons.account_balance_wallet_outlined,
+          accent: const Color(0xFFC62828),
+          trailing: hasMore
+              ? _SeeAllLink(
+                  label: 'عرض الكل',
+                  onTap: () =>
+                      context.pushNamed(AppRouter.reportReceivablesName),
+                )
+              : null,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              for (int i = 0; i < top.length; i++) ...<Widget>[
+                _ReceivableRow(item: top[i], money: _money),
+                if (i < top.length - 1) const SizedBox(height: 6),
+              ],
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+class _ReceivableRow extends StatelessWidget {
+  const _ReceivableRow({required this.item, required this.money});
+
+  final ReceivableItem item;
+  final NumberFormat money;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 6,
+          height: 6,
+          decoration: const BoxDecoration(
+            color: Color(0xFFC62828),
+            shape: BoxShape.circle,
+          ),
+        ),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            item.customerName,
+            style: theme.textTheme.bodyMedium,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          money.format(item.balance),
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: scheme.error,
             fontWeight: FontWeight.w700,
           ),
         ),
@@ -319,157 +795,9 @@ class _SectionHeader extends StatelessWidget {
   }
 }
 
-// -----------------------------------------------------------------------------
-// Quick actions (3 tiles)
-// -----------------------------------------------------------------------------
-
-class _QuickActionsRow extends StatelessWidget {
-  const _QuickActionsRow({required this.availableWidth});
-
-  final double availableWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    const double spacing = 8;
-    const int columns = 3;
-    final double tileWidth =
-        (availableWidth - spacing * (columns - 1)) / columns;
-
-    final List<_TileData> tiles = <_TileData>[
-      const _TileData(
-        icon: Icons.receipt_long_outlined,
-        title: 'فواتير البيع',
-        color: Color(0xFF0F7B6C),
-        routeName: AppRouter.salesName,
-      ),
-      const _TileData(
-        icon: Icons.shopping_bag_outlined,
-        title: 'فواتير الشراء',
-        color: Color(0xFF0288D1),
-        routeName: AppRouter.purchasesName,
-      ),
-      const _TileData(
-        icon: Icons.assignment_return_outlined,
-        title: 'المرتجعات',
-        color: Color(0xFF6A1B9A),
-        routeName: AppRouter.returnsName,
-      ),
-    ];
-
-    return Row(
-      children: <Widget>[
-        for (int i = 0; i < tiles.length; i++) ...<Widget>[
-          SizedBox(
-            width: tileWidth,
-            child: _Tile(data: tiles[i]),
-          ),
-          if (i < tiles.length - 1) const SizedBox(width: spacing),
-        ],
-      ],
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Catalog & inventory (5 tiles)
-// -----------------------------------------------------------------------------
-
-class _CatalogGrid extends StatelessWidget {
-  const _CatalogGrid({required this.availableWidth});
-
-  final double availableWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    const double spacing = 8;
-    const int columns = 3;
-    final double tileWidth =
-        (availableWidth - spacing * (columns - 1)) / columns;
-
-    final List<_TileData> tiles = <_TileData>[
-      const _TileData(
-        icon: Icons.inventory_2_outlined,
-        title: 'المنتجات',
-        color: Color(0xFF0F7B6C),
-        routeName: AppRouter.productsName,
-      ),
-      const _TileData(
-        icon: Icons.warehouse_outlined,
-        title: 'المخزون',
-        color: Color(0xFF5D4037),
-        routeName: AppRouter.inventoryName,
-      ),
-      const _TileData(
-        icon: Icons.category_outlined,
-        title: 'التصنيفات',
-        color: Color(0xFFEF6C00),
-        routeName: AppRouter.categoriesName,
-      ),
-      const _TileData(
-        icon: Icons.straighten_outlined,
-        title: 'الوحدات',
-        color: Color(0xFF455A64),
-        routeName: AppRouter.unitsName,
-      ),
-      const _TileData(
-        icon: Icons.local_shipping_outlined,
-        title: 'الموردون',
-        color: Color(0xFF00838F),
-        routeName: AppRouter.suppliersName,
-      ),
-    ];
-
-    return Wrap(
-      spacing: spacing,
-      runSpacing: spacing,
-      children: <Widget>[
-        for (final _TileData tile in tiles)
-          SizedBox(
-            width: tileWidth,
-            child: _Tile(data: tile),
-          ),
-      ],
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// People grid
-// -----------------------------------------------------------------------------
-
-class _PeopleGrid extends StatelessWidget {
-  const _PeopleGrid({required this.availableWidth});
-
-  final double availableWidth;
-
-  @override
-  Widget build(BuildContext context) {
-    const double spacing = 8;
-    const int columns = 3;
-    final double tileWidth =
-        (availableWidth - spacing * (columns - 1)) / columns;
-
-    return Row(
-      children: <Widget>[
-        SizedBox(
-          width: tileWidth,
-          child: const _Tile(
-            data: _TileData(
-              icon: Icons.people_outline,
-              title: 'العملاء',
-              color: Color(0xFF0288D1),
-              routeName: AppRouter.customersName,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
+// ============================================================================
 // Reports banner
-// -----------------------------------------------------------------------------
+// ============================================================================
 
 class _ReportsBanner extends StatelessWidget {
   const _ReportsBanner();
@@ -499,10 +827,7 @@ class _ReportsBanner extends StatelessWidget {
                   height: 48,
                   decoration: BoxDecoration(
                     gradient: LinearGradient(
-                      colors: <Color>[
-                        scheme.primary,
-                        scheme.tertiary,
-                      ],
+                      colors: <Color>[scheme.primary, scheme.tertiary],
                       begin: Alignment.topLeft,
                       end: Alignment.bottomRight,
                     ),
@@ -549,89 +874,150 @@ class _ReportsBanner extends StatelessWidget {
   }
 }
 
-// -----------------------------------------------------------------------------
-// Generic tile
-// -----------------------------------------------------------------------------
+// ============================================================================
+// Section header + card
+// ============================================================================
 
-class _TileData {
-  const _TileData({
-    required this.icon,
-    required this.title,
-    required this.color,
-    required this.routeName,
-  });
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.icon});
 
-  final IconData icon;
   final String title;
-  final Color color;
-  final String routeName;
-}
-
-class _Tile extends StatelessWidget {
-  const _Tile({required this.data});
-
-  final _TileData data;
+  final IconData icon;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    return Material(
-      color: scheme.surface,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: () => context.pushNamed(data.routeName),
-        child: DecoratedBox(
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 32,
+          height: 32,
           decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: scheme.outlineVariant),
+            color: scheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
           ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 8,
-              vertical: 12,
-            ),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.center,
+          child: Icon(icon, size: 18, color: scheme.primary),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SectionCard extends StatelessWidget {
+  const _SectionCard({
+    required this.title,
+    required this.icon,
+    required this.accent,
+    required this.child,
+    this.trailing,
+  });
+
+  final String title;
+  final IconData icon;
+  final Color accent;
+  final Widget child;
+  final Widget? trailing;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.fromLTRB(14, 12, 14, 12),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
               children: <Widget>[
                 Container(
-                  width: 40,
-                  height: 40,
+                  width: 30,
+                  height: 30,
                   decoration: BoxDecoration(
-                    color: data.color.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(10),
+                    color: accent.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(8),
                   ),
-                  child: Icon(
-                    data.icon,
-                    color: data.color,
-                    size: 20,
+                  child: Icon(icon, size: 16, color: accent),
+                ),
+                const SizedBox(width: 10),
+                Expanded(
+                  child: Text(
+                    title,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                    overflow: TextOverflow.ellipsis,
                   ),
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  data.title,
-                  style: theme.textTheme.labelLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                  ),
-                  textAlign: TextAlign.center,
-                  overflow: TextOverflow.ellipsis,
-                  maxLines: 2,
-                ),
+                if (trailing != null) trailing!,
               ],
             ),
-          ),
+            const SizedBox(height: 10),
+            child,
+          ],
         ),
       ),
     );
   }
 }
 
-// -----------------------------------------------------------------------------
-// Empty company hint
-// -----------------------------------------------------------------------------
+class _SeeAllLink extends StatelessWidget {
+  const _SeeAllLink({required this.label, required this.onTap});
+
+  final String label;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return InkWell(
+      borderRadius: BorderRadius.circular(6),
+      onTap: onTap,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 3),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Text(
+              label,
+              style: theme.textTheme.labelMedium?.copyWith(
+                color: scheme.primary,
+                fontWeight: FontWeight.w700,
+              ),
+            ),
+            const SizedBox(width: 2),
+            Icon(
+              Icons.chevron_left,
+              size: 14,
+              color: scheme.primary,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Empty hint + footer
+// ============================================================================
 
 class _EmptyCompanyHint extends StatelessWidget {
   const _EmptyCompanyHint();
@@ -683,10 +1069,6 @@ class _EmptyCompanyHint extends StatelessWidget {
   }
 }
 
-// -----------------------------------------------------------------------------
-// Infrastructure footer
-// -----------------------------------------------------------------------------
-
 class _InfrastructureFooter extends StatelessWidget {
   const _InfrastructureFooter({required this.config});
 
@@ -727,51 +1109,6 @@ class _InfrastructureFooter extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-
-// -----------------------------------------------------------------------------
-// Environment pill (AppBar action)
-// -----------------------------------------------------------------------------
-
-class _EnvironmentPill extends StatelessWidget {
-  const _EnvironmentPill({required this.config});
-
-  final AppConfig config;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    final String label = switch (config.environment) {
-      AppEnvironment.development => 'تطوير',
-      AppEnvironment.staging => 'اختبار',
-      AppEnvironment.production => 'إنتاج',
-    };
-
-    final Color color = switch (config.environment) {
-      AppEnvironment.development => scheme.tertiary,
-      AppEnvironment.staging => scheme.secondary,
-      AppEnvironment.production => scheme.primary,
-    };
-
-    return Center(
-      child: Container(
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
-        decoration: BoxDecoration(
-          color: color.withValues(alpha: 0.15),
-          borderRadius: BorderRadius.circular(999),
-        ),
-        child: Text(
-          label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: color,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
       ),
     );
   }
