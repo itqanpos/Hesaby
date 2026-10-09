@@ -11,6 +11,7 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_provider.dart';
+import '../widgets/google_sign_in_button.dart';
 
 class SignUpPage extends ConsumerStatefulWidget {
   const SignUpPage({super.key});
@@ -259,6 +260,22 @@ class _SignUpPageState extends ConsumerState<SignUpPage> {
             isLoading: _isSubmitting,
             onPressed: _isSubmitting ? null : _submit,
           ),
+          const SizedBox(height: 16),
+          Row(
+            children: <Widget>[
+              const Expanded(child: Divider()),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 12),
+                child: Text(
+                  'أو',
+                  style: theme.textTheme.bodySmall,
+                ),
+              ),
+              const Expanded(child: Divider()),
+            ],
+          ),
+          const SizedBox(height: 12),
+          const GoogleSignInButton(),
           const SizedBox(height: 12),
           TextButton(
             onPressed: _isSubmitting
