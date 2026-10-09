@@ -12,6 +12,13 @@ import '../../domain/repositories/user_profile_repository.dart';
 /// omitted on purpose: the surface is only two operations (read + update of
 /// the current user's own row), so a datasource would add indirection
 /// without value — same reasoning as `CompanySettingsRepositoryImpl`.
+///
+/// **Important:** every read and write is scoped to `auth.uid()` on the
+/// client side as well as in the database. This is not a security measure
+/// (RLS already enforces it) but a correctness one: a platform admin sees
+/// every row through `profiles_platform_admin_select_all`, so an unfiltered
+/// `maybeSingle()` would fail with "multiple rows returned". Scoping by
+/// user id keeps the query result deterministic for every caller.
 class UserProfileRepositoryImpl implements UserProfileRepository {
   const UserProfileRepositoryImpl(this._client);
 
@@ -26,11 +33,22 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
     try {
       final supabase.SupabaseClient client = _requireClient();
 
-      // RLS limits the result to the current user's own row, so
-      // `maybeSingle` is safe even though the table has many rows.
+      final String? userId = client.auth.currentUser?.id;
+      if (userId == null) {
+        throw const UserProfileException(
+          type: UserProfileFailureType.unauthorized,
+          cause: 'No authenticated user.',
+        );
+      }
+
+      // Filter by the current user id explicitly. RLS would return only
+      // this row for a regular user, but a platform admin sees every row,
+      // so `maybeSingle()` needs a deterministic single-row filter to
+      // avoid throwing "multiple rows returned".
       final Map<String, dynamic>? row = await client
           .from('profiles')
           .select()
+          .eq('user_id', userId)
           .maybeSingle();
 
       if (row == null) {
@@ -64,17 +82,26 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
     try {
       final supabase.SupabaseClient client = _requireClient();
 
+      final String? userId = client.auth.currentUser?.id;
+      if (userId == null) {
+        throw const UserProfileException(
+          type: UserProfileFailureType.unauthorized,
+          cause: 'No authenticated user.',
+        );
+      }
+
       final Map<String, dynamic> payload = <String, dynamic>{
         'full_name': fullName,
         'phone': phone,
       };
 
-      // RLS limits the update to the current user's own row. Using
-      // `maybeSingle` surfaces an RLS-blocked update (zero rows) as
-      // `notFound` rather than a raw PostgREST error.
+      // Same reasoning as [getMyProfile]: scope by user_id so the returned
+      // row is exactly the current user's, regardless of the caller's
+      // platform-admin status.
       final Map<String, dynamic>? row = await client
           .from('profiles')
           .update(payload)
+          .eq('user_id', userId)
           .select()
           .maybeSingle();
 
@@ -244,7 +271,6 @@ UserProfileFailureType _classifyPostgrest(
   final String full = error.toString().toLowerCase();
 
   if (code == '23514') {
-    // Check-constraint violation: length validation on full_name or phone.
     return UserProfileFailureType.invalidInput;
   }
   if (code == 'PGRST116') {
