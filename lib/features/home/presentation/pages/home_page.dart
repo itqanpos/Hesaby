@@ -1,5 +1,4 @@
 // lib/features/home/presentation/pages/home_page.dart
-
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -12,6 +11,7 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../companies/domain/repositories/company_repository.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../companies/presentation/widgets/branch_selector.dart';
