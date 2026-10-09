@@ -6,6 +6,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../shared/widgets/app_button.dart';
+import '../../../companies/presentation/widgets/subscription_guard.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../dialogs/pos_payment_dialog.dart';
@@ -18,6 +19,11 @@ import '../state/pos_providers.dart';
 ///   panel applies `defaultTaxRate` from company settings.
 /// * **Max discount** — the discount field rejects any value above
 ///   `maxDiscountPercent` from company settings.
+///
+/// **Phase T-1:** the pay button is guarded by
+/// [SubscriptionGuard.ensureCanWrite]. An expired account may still build
+/// a cart and see the totals, but tapping "دفع" surfaces the read-only
+/// dialog instead of the payment sheet.
 class PosBottomPanel extends ConsumerWidget {
   const PosBottomPanel({super.key});
 
@@ -162,20 +168,29 @@ class _TotalRow extends StatelessWidget {
   }
 }
 
-class _PayButton extends StatelessWidget {
+class _PayButton extends ConsumerWidget {
   const _PayButton({required this.isEmpty});
 
   final bool isEmpty;
 
+  Future<void> _handlePay(BuildContext context, WidgetRef ref) async {
+    final bool allowed = await SubscriptionGuard.ensureCanWrite(
+      context: context,
+      ref: ref,
+    );
+    if (!allowed || !context.mounted) return;
+
+    await showPosPaymentDialog(context: context);
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     return AppButton(
       label: 'دفع',
       icon: Icons.check_circle_outline,
       expanded: true,
       size: AppButtonSize.large,
-      onPressed:
-          isEmpty ? null : () => showPosPaymentDialog(context: context),
+      onPressed: isEmpty ? null : () => _handlePay(context, ref),
     );
   }
 }
