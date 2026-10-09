@@ -12,6 +12,7 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/presentation/widgets/subscription_guard.dart';
 import '../../domain/entities/category.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/unit.dart';
@@ -29,6 +30,10 @@ import 'product_units_dialog.dart';
 /// 2. Search field (debounced, server-side).
 /// 3. Status chips + Category dropdown + Sort dropdown — server-side.
 /// 4. Paginated product list (20 items per page, auto-loads on scroll).
+///
+/// **Phase T-1:** all write entry points (add / edit / toggle / delete /
+/// manage units) are guarded by [SubscriptionGuard.ensureCanWrite]. An
+/// expired account can still browse, search, and filter the catalog.
 class ProductsPage extends ConsumerStatefulWidget {
   const ProductsPage({super.key});
 
@@ -349,6 +354,13 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     BuildContext context, {
     Product? product,
   }) async {
+    // Phase T-1: create AND edit are both writes.
+    final bool allowed = await SubscriptionGuard.ensureCanWrite(
+      context: context,
+      ref: ref,
+    );
+    if (!allowed || !context.mounted) return;
+
     final bool? saved = await showProductFormDialog(
       context: context,
       existing: product,
@@ -369,6 +381,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     BuildContext context,
     Product product,
   ) async {
+    final bool allowed = await SubscriptionGuard.ensureCanWrite(
+      context: context,
+      ref: ref,
+    );
+    if (!allowed || !context.mounted) return;
+
     await showProductUnitsDialog(
       context: context,
       product: product,
@@ -379,6 +397,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     BuildContext context,
     Product product,
   ) async {
+    final bool allowed = await SubscriptionGuard.ensureCanWrite(
+      context: context,
+      ref: ref,
+    );
+    if (!allowed || !context.mounted) return;
+
     try {
       await ref.read(productsProvider.notifier).updateProduct(
             productId: product.id,
@@ -406,6 +430,12 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     BuildContext context,
     Product product,
   ) async {
+    final bool allowed = await SubscriptionGuard.ensureCanWrite(
+      context: context,
+      ref: ref,
+    );
+    if (!allowed || !context.mounted) return;
+
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
