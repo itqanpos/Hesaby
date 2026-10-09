@@ -2,15 +2,6 @@
 
 import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:supabase_flutter/supabase_flutter.dart'
-    show
-        AuthResponse,
-        AuthState,
-        LaunchMode,
-        OAuthProvider,
-        Session,
-        SupabaseClient,
-        UserAttributes,
-        UserResponse;
 
 import '../../domain/repositories/auth_repository.dart';
 import '../models/auth_session_model.dart';
