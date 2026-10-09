@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../shared/widgets/app_button.dart';
+import '../../../companies/presentation/widgets/subscription_guard.dart';
 import '../dialogs/pos_payment_dialog.dart';
 import '../state/pos_providers.dart';
 
@@ -16,8 +17,12 @@ import '../state/pos_providers.dart';
 /// sell.
 ///
 /// The button is a thin wrapper around [AppButton] so that it inherits the
-/// project's theme, sizing and interaction language. No provider is read
-/// except `posTotalsProvider`.
+/// project's theme, sizing and interaction language.
+///
+/// **Phase T-1:** the pay action is guarded by
+/// [SubscriptionGuard.ensureCanWrite]. An expired account may still browse
+/// the catalog and build a cart, but tapping the button surfaces the
+/// "read-only" dialog instead of the payment dialog.
 class PosPayButton extends ConsumerWidget {
   const PosPayButton({super.key});
 
@@ -40,11 +45,17 @@ class PosPayButton extends ConsumerWidget {
       icon: Icons.check_circle_outline,
       expanded: true,
       size: AppButtonSize.large,
-      onPressed: isEmpty ? null : () => _handlePay(context),
+      onPressed: isEmpty ? null : () => _handlePay(context, ref),
     );
   }
 
-  Future<void> _handlePay(BuildContext context) async {
+  Future<void> _handlePay(BuildContext context, WidgetRef ref) async {
+    final bool allowed = await SubscriptionGuard.ensureCanWrite(
+      context: context,
+      ref: ref,
+    );
+    if (!allowed || !context.mounted) return;
+
     await showPosPaymentDialog(context: context);
   }
 }
