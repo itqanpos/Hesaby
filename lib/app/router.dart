@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/auth/presentation/pages/login_page.dart';
+import '../features/auth/presentation/pages/signup_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/companies/presentation/pages/branch_form_page.dart';
 import '../features/companies/presentation/pages/branches_page.dart';
@@ -55,6 +56,9 @@ abstract final class AppRouter {
 
   static const String loginPath = '/login';
   static const String loginName = 'login';
+
+  static const String signupPath = '/signup';
+  static const String signupName = 'signup';
 
   static const String loadingPath = '/loading';
   static const String loadingName = 'loading';
@@ -195,10 +199,16 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (auth.isUnauthenticated) {
-        return location == AppRouter.loginPath ? null : AppRouter.loginPath;
+        // /login and /signup are public.
+        if (location == AppRouter.loginPath ||
+            location == AppRouter.signupPath) {
+          return null;
+        }
+        return AppRouter.loginPath;
       }
 
       if (location == AppRouter.loginPath ||
+          location == AppRouter.signupPath ||
           location == AppRouter.loadingPath) {
         return AppRouter.homePath;
       }
@@ -217,6 +227,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.loginName,
         builder: (BuildContext context, GoRouterState state) =>
             const LoginPage(),
+      ),
+      GoRoute(
+        path: AppRouter.signupPath,
+        name: AppRouter.signupName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const SignUpPage(),
       ),
       GoRoute(
         path: AppRouter.loadingPath,
