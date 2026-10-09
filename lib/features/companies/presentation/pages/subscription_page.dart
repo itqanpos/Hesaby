@@ -3,28 +3,34 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:url_launcher/url_launcher.dart';
 
 import '../../../../shared/layouts/app_shell.dart';
 import '../../domain/entities/company_subscription.dart';
 import '../../domain/entities/plan_limits.dart';
+import '../providers/company_context_provider.dart';
+import '../providers/company_context_state.dart';
 import '../providers/subscription_providers.dart';
 
-/// Unified subscription page.
+/// Subscription page.
 ///
-/// Shown for every account state:
-/// * Trial   → encourages upgrade before the trial ends.
-/// * Active  → shows current plan + renewal info.
-/// * Expired → urges renewal + shows InstaPay instructions.
+/// Shows the current state, the available plans, and the way to activate
+/// or renew the subscription by contacting the support channel.
 ///
-/// The page is intentionally read-only about the *server* side; activation
-/// happens manually after the customer transfers via InstaPay and sends a
-/// receipt.
+/// **Activation flow (Phase T-1 final):**
+/// 1. User picks a plan.
+/// 2. Taps the WhatsApp button — a prefilled message opens in WhatsApp.
+/// 3. Support confirms and activates the account from the platform side.
+///
+/// No payment gateway is involved; the app only provides a fast, prefilled
+/// channel to reach support.
 class SubscriptionPage extends ConsumerWidget {
   const SubscriptionPage({super.key});
 
-  /// InstaPay contact details (from Phase T-1 decision).
-  static const String _instaPayNumber = '01019936233';
-  static const String _instaPayName = 'محمد السنباطي';
+  /// Support phone in E.164 format (international — no leading 0).
+  /// Local display uses the Egyptian format (with leading 0).
+  static const String _supportPhoneE164 = '201019936233';
+  static const String _supportPhoneLocal = '01019936233';
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -58,13 +64,13 @@ class SubscriptionPage extends ConsumerWidget {
           ],
           const SizedBox(height: 14),
           const _SectionTitle(
-            title: 'طريقة الدفع',
-            icon: Icons.payments_outlined,
+            title: 'تفعيل الاشتراك',
+            icon: Icons.support_agent_outlined,
           ),
           const SizedBox(height: 10),
-          const _PaymentSection(
-            number: _instaPayNumber,
-            name: _instaPayName,
+          const _SupportSection(
+            phoneE164: _supportPhoneE164,
+            phoneLocal: _supportPhoneLocal,
           ),
           const SizedBox(height: 20),
           const _HowItWorksCard(),
@@ -155,7 +161,7 @@ class _CurrentStatusCard extends StatelessWidget {
         foreground: Color(0xFFB71C1C),
         icon: Icons.error_outline,
         title: 'اشتراكك منتهي',
-        subtitle: 'حسابك في وضع القراءة فقط — جدّد لاستعادة كل الميزات',
+        subtitle: 'حسابك في وضع القراءة فقط — تواصل مع الدعم للتفعيل',
       );
     }
 
@@ -169,8 +175,8 @@ class _CurrentStatusCard extends StatelessWidget {
         icon: Icons.card_giftcard_outlined,
         title: 'أنت في الفترة التجريبية',
         subtitle: days == null
-            ? 'اختر باقتك قبل انتهاء التجربة'
-            : 'متبقٍ $days ${days == 1 ? "يوم" : "أيام"} — اختر باقتك الآن',
+            ? 'تواصل مع الدعم لتفعيل اشتراكك'
+            : 'متبقٍ $days ${days == 1 ? "يوم" : "أيام"} — تواصل مع الدعم للتفعيل',
       );
     }
 
@@ -486,33 +492,70 @@ class _PriceTag extends StatelessWidget {
 }
 
 // ============================================================================
-// Payment section
+// Support section
 // ============================================================================
 
-class _PaymentSection extends StatelessWidget {
-  const _PaymentSection({required this.number, required this.name});
+class _SupportSection extends ConsumerWidget {
+  const _SupportSection({
+    required this.phoneE164,
+    required this.phoneLocal,
+  });
 
-  final String number;
-  final String name;
+  final String phoneE164;
+  final String phoneLocal;
 
-  Future<void> _copyNumber(BuildContext context) async {
-    await Clipboard.setData(ClipboardData(text: number));
-    if (!context.mounted) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم نسخ رقم InstaPay')),
+  /// Opens the given URI in an external application, surfacing a SnackBar
+  /// when the platform refuses to handle it (e.g. no WhatsApp installed
+  /// and no browser — rare, but possible on locked-down devices).
+  static Future<void> _open(
+    BuildContext context,
+    Uri uri,
+  ) async {
+    try {
+      final bool ok = await launchUrl(
+        uri,
+        mode: LaunchMode.externalApplication,
+      );
+      if (!ok && context.mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذّر فتح الرابط على هذا الجهاز')),
+        );
+      }
+    } on Object {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذّر فتح الرابط على هذا الجهاز')),
+      );
+    }
+  }
+
+  /// Builds the prefilled WhatsApp message. Company name is included when
+  /// available so support can act without a back-and-forth.
+  Uri _whatsAppUri(WidgetRef ref) {
+    final CompanyContextState ctx = ref.read(companyContextProvider);
+    final String companyName = ctx.currentCompany?.name ?? '';
+    final StringBuffer text = StringBuffer('مرحبًا الدعم الفني،');
+    text.write(' أرغب في تفعيل اشتراك Hesaby.');
+    if (companyName.isNotEmpty) {
+      text.write(' اسم الشركة: $companyName.');
+    }
+    return Uri.parse(
+      'https://wa.me/$phoneE164?text=${Uri.encodeComponent(text.toString())}',
     );
   }
 
-  Future<void> _copyName(BuildContext context) async {
-    await Clipboard.setData(ClipboardData(text: name));
+  Uri get _phoneUri => Uri.parse('tel:+$phoneE164');
+
+  Future<void> _copyNumber(BuildContext context) async {
+    await Clipboard.setData(ClipboardData(text: phoneLocal));
     if (!context.mounted) return;
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم نسخ الاسم')),
+      const SnackBar(content: Text('تم نسخ رقم الدعم الفني')),
     );
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
@@ -537,7 +580,7 @@ class _PaymentSection extends StatelessWidget {
                     borderRadius: BorderRadius.circular(10),
                   ),
                   child: Icon(
-                    Icons.account_balance_outlined,
+                    Icons.headset_mic_outlined,
                     color: scheme.primary,
                     size: 22,
                   ),
@@ -549,13 +592,13 @@ class _PaymentSection extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
                       Text(
-                        'InstaPay',
+                        'الدعم الفني',
                         style: theme.textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w800,
                         ),
                       ),
                       Text(
-                        'حوّل المبلغ على الحساب التالي',
+                        'تواصل لتفعيل أو تجديد الاشتراك',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
@@ -566,81 +609,86 @@ class _PaymentSection extends StatelessWidget {
               ],
             ),
             const SizedBox(height: 14),
-            _CopyRow(
-              label: 'رقم InstaPay',
-              value: number,
-              onCopy: () => _copyNumber(context),
+
+            // Primary CTA: WhatsApp
+            FilledButton.icon(
+              icon: const Icon(Icons.chat_outlined, size: 20),
+              label: const Text('تواصل عبر واتساب'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+                backgroundColor: const Color(0xFF25D366),
+                foregroundColor: Colors.white,
+              ),
+              onPressed: () => _open(context, _whatsAppUri(ref)),
             ),
             const SizedBox(height: 8),
-            _CopyRow(
-              label: 'اسم المستفيد',
-              value: name,
-              onCopy: () => _copyName(context),
+
+            // Secondary actions: call + copy.
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.call_outlined, size: 18),
+                    label: const Text('اتصال'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                    onPressed: () => _open(context, _phoneUri),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: OutlinedButton.icon(
+                    icon: const Icon(Icons.copy_outlined, size: 18),
+                    label: const Text('نسخ الرقم'),
+                    style: OutlinedButton.styleFrom(
+                      minimumSize: const Size.fromHeight(44),
+                    ),
+                    onPressed: () => _copyNumber(context),
+                  ),
+                ),
+              ],
             ),
-          ],
-        ),
-      ),
-    );
-  }
-}
+            const SizedBox(height: 12),
 
-class _CopyRow extends StatelessWidget {
-  const _CopyRow({
-    required this.label,
-    required this.value,
-    required this.onCopy,
-  });
-
-  final String label;
-  final String value;
-  final VoidCallback onCopy;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: <Widget>[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    label,
-                    style: theme.textTheme.labelSmall?.copyWith(
+            // Plain number, visible for those who prefer to save it.
+            DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest.withValues(alpha: 0.5),
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 12,
+                  vertical: 10,
+                ),
+                child: Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.phone_outlined,
+                      size: 18,
                       color: scheme.onSurfaceVariant,
                     ),
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    value,
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 0.5,
+                    const SizedBox(width: 10),
+                    Text(
+                      'رقم الدعم الفني',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
-                    textDirection: TextDirection.ltr,
-                  ),
-                ],
+                    const Spacer(),
+                    Text(
+                      phoneLocal,
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w800,
+                        letterSpacing: 0.5,
+                      ),
+                      textDirection: TextDirection.ltr,
+                    ),
+                  ],
+                ),
               ),
-            ),
-            IconButton(
-              tooltip: 'نسخ',
-              icon: Icon(
-                Icons.copy_outlined,
-                color: scheme.primary,
-                size: 20,
-              ),
-              onPressed: onCopy,
             ),
           ],
         ),
@@ -691,15 +739,15 @@ class _HowItWorksCard extends StatelessWidget {
             const SizedBox(height: 10),
             const _Step(
               number: '1',
-              text: 'حوّل مبلغ الباقة على حساب InstaPay المذكور أعلاه.',
+              text: 'تواصل معنا عبر واتساب بالضغط على الزر أعلاه.',
             ),
             const _Step(
               number: '2',
-              text: 'أرسل صورة الإيصال إلى الدعم مع اسم الشركة.',
+              text: 'أخبرنا بالباقة التي تريدها (شهري أو سنوي).',
             ),
             const _Step(
               number: '3',
-              text: 'سيتم تفعيل حسابك خلال وقت قصير بعد التحقق.',
+              text: 'سيتم تفعيل حسابك خلال دقائق بعد التأكيد.',
             ),
           ],
         ),
