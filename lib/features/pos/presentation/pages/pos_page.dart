@@ -103,6 +103,6 @@ class PosPage extends ConsumerWidget {
     );
     if (!allowed || !context.mounted) return;
 
-    showPosPaymentDialog(context: context);
+    await showPosPaymentDialog(context: context);
   }
 }
