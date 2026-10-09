@@ -22,13 +22,9 @@ class AuthRemoteDataSource {
 
   AuthSessionModel? get currentSession {
     final SupabaseClient? client = _client;
-    if (client == null) {
-      return null;
-    }
+    if (client == null) return null;
     final Session? session = client.auth.currentSession;
-    if (session == null) {
-      return null;
-    }
+    if (session == null) return null;
     return AuthSessionModel.fromSupabaseSession(session);
   }
 
@@ -39,9 +35,7 @@ class AuthRemoteDataSource {
     }
     return client.auth.onAuthStateChange.map((AuthState event) {
       final Session? session = event.session;
-      if (session == null) {
-        return null;
-      }
+      if (session == null) return null;
       return AuthSessionModel.fromSupabaseSession(session);
     });
   }
@@ -74,6 +68,54 @@ class AuthRemoteDataSource {
     return AuthSessionModel.fromSupabaseSession(session);
   }
 
+  /// Registers a new user.
+  ///
+  /// Extra metadata is passed to Supabase Auth and becomes
+  /// `auth.users.raw_user_meta_data`. The database trigger
+  /// `handle_new_user` reads `company_name` from that metadata to
+  /// bootstrap a company + owner membership for the new user.
+  ///
+  /// Returns `null` when Supabase is configured to require email
+  /// confirmation: in that case no session is created until the user
+  /// confirms their address.
+  Future<AuthSessionModel?> signUp({
+    required String email,
+    required String password,
+    String? fullName,
+    String? companyName,
+  }) async {
+    final SupabaseClient? client = _client;
+    if (client == null) {
+      throw const AuthException(
+        type: AuthFailureType.unknown,
+        cause: _supabaseUnavailableMessage,
+      );
+    }
+
+    final Map<String, dynamic> metadata = <String, dynamic>{};
+    final String? name = fullName?.trim();
+    if (name != null && name.isNotEmpty) {
+      metadata['full_name'] = name;
+    }
+    final String? company = companyName?.trim();
+    if (company != null && company.isNotEmpty) {
+      metadata['company_name'] = company;
+    }
+
+    final AuthResponse response = await client.auth.signUp(
+      email: email,
+      password: password,
+      data: metadata.isEmpty ? null : metadata,
+    );
+
+    final Session? session = response.session;
+    if (session == null) {
+      return null;
+    }
+
+    return AuthSessionModel.fromSupabaseSession(session);
+  }
+
   Future<void> signOut() async {
     final SupabaseClient? client = _client;
     if (client == null) {
@@ -85,10 +127,6 @@ class AuthRemoteDataSource {
     await client.auth.signOut();
   }
 
-  /// Updates the password of the currently authenticated user.
-  ///
-  /// Supabase requires an active session; the current password is not
-  /// re-checked because the session already proves possession.
   Future<void> updatePassword({required String newPassword}) async {
     final SupabaseClient? client = _client;
     if (client == null) {
