@@ -1,4 +1,5 @@
 // lib/features/home/presentation/pages/home_page.dart
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -39,8 +40,22 @@ import '../../../settings/presentation/providers/user_profile_providers.dart';
 ///      companies but has not picked one yet,
 ///    * the full dashboard otherwise.
 /// 4. Infrastructure footer.
+///
+/// Pull-to-refresh invalidates the three providers the dashboard reads
+/// (`salesProvider`, `lowStockProvider`, `receivablesProvider`) so a
+/// manual swipe gives the user an authoritative refetch. The same
+/// invalidation surface is also applied centrally after any write, so the
+/// UI never lags behind a POS sale, purchase, or product edit.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
+
+  Future<void> _refresh(WidgetRef ref) async {
+    await Future.wait(<Future<void>>[
+      ref.refresh(salesProvider.future),
+      ref.refresh(lowStockProvider.future),
+      ref.refresh(receivablesProvider.future),
+    ]);
+  }
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -52,22 +67,31 @@ class HomePage extends ConsumerWidget {
         title: const Text('الرئيسية'),
         actions: <Widget>[
           IconButton(
+            tooltip: 'تحديث',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => _refresh(ref),
+          ),
+          IconButton(
             tooltip: 'الإعدادات',
             icon: const Icon(Icons.settings_outlined),
             onPressed: () => context.pushNamed(AppRouter.settingsName),
           ),
         ],
       ),
-      body: ListView(
-        padding: const EdgeInsets.only(top: 8, bottom: 32),
-        children: <Widget>[
-          const SubscriptionBanner(),
-          const _GreetingCard(),
-          const SizedBox(height: 16),
-          _ContextArea(state: ctx),
-          const SizedBox(height: 32),
-          _InfrastructureFooter(config: config),
-        ],
+      body: RefreshIndicator(
+        onRefresh: () => _refresh(ref),
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          padding: const EdgeInsets.only(top: 8, bottom: 32),
+          children: <Widget>[
+            const SubscriptionBanner(),
+            const _GreetingCard(),
+            const SizedBox(height: 16),
+            _ContextArea(state: ctx),
+            const SizedBox(height: 32),
+            _InfrastructureFooter(config: config),
+          ],
+        ),
       ),
     );
   }
@@ -138,20 +162,15 @@ class _ContextArea extends ConsumerWidget {
 // Onboarding card — shown when the user has no company yet.
 // ============================================================================
 
-class _OnboardingCard extends ConsumerStatefulWidget {
+class _OnboardingCard extends ConsumerWidget {
   const _OnboardingCard();
 
-  @override
-  ConsumerState<_OnboardingCard> createState() => _OnboardingCardState();
-}
-
-class _OnboardingCardState extends ConsumerState<_OnboardingCard> {
-  Future<void> _goToCreateCompany() async {
+  Future<void> _goToCreateCompany(BuildContext context) async {
     await context.pushNamed(AppRouter.createCompanyName);
   }
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
@@ -214,7 +233,7 @@ class _OnboardingCardState extends ConsumerState<_OnboardingCard> {
               icon: Icons.arrow_forward,
               expanded: true,
               size: AppButtonSize.large,
-              onPressed: _goToCreateCompany,
+              onPressed: () => _goToCreateCompany(context),
             ),
             const SizedBox(height: 12),
             Row(
