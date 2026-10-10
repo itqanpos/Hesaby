@@ -12,13 +12,16 @@ import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../data/services/pdf_statement_builder.dart';
 import '../../domain/entities/customer_statement.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/customer_adjustment_dialog.dart';
 import '../providers/sales_providers.dart';
-/// Period presets shown as chips above the statement table.
+
 enum _PeriodPreset {
   all,
   thisMonth,
@@ -28,24 +31,12 @@ enum _PeriodPreset {
 }
 
 /// Full account statement page for a single customer.
-///
-/// Layout, top to bottom:
-/// * customer info card (name, current balance, phone/code),
-/// * period-preset chips (all / this month / last 30 days / this year /
-///   custom),
-/// * entries list with an opening-balance row on top and a closing-balance
-///   card at the bottom,
-/// * AppBar actions to record a manual adjustment and to print the
-///   statement as an A4 PDF.
 class CustomerStatementPage extends ConsumerStatefulWidget {
   const CustomerStatementPage({
     super.key,
     required this.customer,
   });
 
-  /// The customer whose statement is displayed. The balance field is used
-  /// as an initial value only — once the statement loads, its own (fresh)
-  /// customer snapshot takes over.
   final Customer customer;
 
   @override
@@ -67,7 +58,7 @@ class _CustomerStatementPageState
   static final DateFormat _dateShort = DateFormat('yyyy-MM-dd');
 
   // ---------------------------------------------------------------------------
-  // Period computation
+  // Period
   // ---------------------------------------------------------------------------
 
   DateTime? get _fromDate {
@@ -98,10 +89,7 @@ class _CustomerStatementPageState
         return now;
       case _PeriodPreset.custom:
         final DateTime? end = _customRange?.end;
-        if (end == null) {
-          return null;
-        }
-        // Include the whole end day.
+        if (end == null) return null;
         return DateTime(end.year, end.month, end.day, 23, 59, 59);
     }
   }
@@ -127,16 +115,13 @@ class _CustomerStatementPageState
         helpText: 'اختر الفترة',
         saveText: 'تطبيق',
       );
-      if (picked == null || !mounted) {
-        return;
-      }
+      if (picked == null || !mounted) return;
       setState(() {
         _preset = _PeriodPreset.custom;
         _customRange = picked;
       });
       return;
     }
-
     setState(() => _preset = preset);
   }
 
@@ -153,12 +138,8 @@ class _CustomerStatementPageState
       currentBalance: balance,
     );
 
-    if (updated == null || !mounted) {
-      return;
-    }
+    if (updated == null || !mounted) return;
 
-    // The provider was invalidated by CustomersNotifier.addAdjustment;
-    // no manual invalidation is needed here.
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -166,27 +147,36 @@ class _CustomerStatementPageState
       );
   }
 
+  /// Reads the A4 print style from company settings.
+  PrintStyleSettings _readA4Style() {
+    final CompanySettings? s =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (s == null) return const PrintStyleSettings.defaults();
+    return PrintStyleSettings(
+      fontScale: s.printFontScaleA4,
+      fontWeight: s.printFontWeight,
+    );
+  }
+
   Future<void> _print() async {
     final CustomerStatement? statement =
         ref.read(customerStatementProvider(_args)).valueOrNull;
-    if (statement == null || statement.isEmpty) {
-      return;
-    }
+    if (statement == null || statement.isEmpty) return;
 
     setState(() => _isPrinting = true);
 
     try {
-      final List<int> bytes =
-          await PdfStatementBuilder.build(statement: statement);
+      final Uint8List bytes = await PdfStatementBuilder.build(
+        statement: statement,
+        style: _readA4Style(),
+      );
 
       await Printing.layoutPdf(
         name: 'statement-${statement.customer.name}.pdf',
-        onLayout: (PdfPageFormat _) async => Uint8List.fromList(bytes),
+        onLayout: (PdfPageFormat _) async => bytes,
       );
     } on Object {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -229,7 +219,8 @@ class _CustomerStatementPageState
               title: 'تعذّر تحميل كشف الحساب',
               message: _errorMessage(error),
               retryLabel: 'إعادة المحاولة',
-              onRetry: () => ref.invalidate(customerStatementProvider(_args)),
+              onRetry: () =>
+                  ref.invalidate(customerStatementProvider(_args)),
             ),
             data: (CustomerStatement statement) => _StatementBody(
               statement: statement,
@@ -294,7 +285,7 @@ class _StatementBody extends StatelessWidget {
 }
 
 // ============================================================================
-// Customer info card
+// Info card
 // ============================================================================
 
 class _CustomerInfoCard extends StatelessWidget {
@@ -313,12 +304,8 @@ class _CustomerInfoCard extends StatelessWidget {
     final Customer customer = statement.customer;
 
     final List<String> meta = <String>[];
-    if (customer.hasCode) {
-      meta.add('كود: ${customer.code}');
-    }
-    if (customer.hasPhone) {
-      meta.add(customer.phone!);
-    }
+    if (customer.hasCode) meta.add('كود: ${customer.code}');
+    if (customer.hasPhone) meta.add(customer.phone!);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -414,11 +401,7 @@ class _PeriodChips extends StatelessWidget {
           _chip(context, _PeriodPreset.thisMonth, 'هذا الشهر'),
           _chip(context, _PeriodPreset.last30Days, 'آخر 30 يومًا'),
           _chip(context, _PeriodPreset.thisYear, 'هذا العام'),
-          _chip(
-            context,
-            _PeriodPreset.custom,
-            _customLabel(),
-          ),
+          _chip(context, _PeriodPreset.custom, _customLabel()),
         ],
       ),
     );
@@ -747,7 +730,9 @@ class _ClosingBalanceCard extends StatelessWidget {
             Row(
               children: <Widget>[
                 Icon(
-                  inDebt ? Icons.warning_amber_outlined : Icons.check_circle_outline,
+                  inDebt
+                      ? Icons.warning_amber_outlined
+                      : Icons.check_circle_outline,
                   color: inDebt
                       ? scheme.onErrorContainer
                       : scheme.onPrimaryContainer,
