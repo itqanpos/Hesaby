@@ -60,15 +60,14 @@ abstract interface class EmployeeSalaryRepository {
     String? notes,
   });
 
-  /// Updates editable fields of a salary entry that is not yet paid.
-  ///
-  /// Paid entries cannot be modified (a DB-level rule ensures this in the
-  /// UI layer — this method simply refuses to change them).
+  /// Updates the components of a salary. All three amounts are required
+  /// so that `net_amount` can be recomputed.
   Future<EmployeeSalary> updateSalary({
     required String salaryId,
-    double? baseAmount,
-    double? bonuses,
-    double? deductions,
+    required double baseAmount,
+    required double bonuses,
+    required double deductions,
+    required double advancesDeducted,
     String? paymentMethod,
     String? notes,
     bool clearNotes = false,
