@@ -3,7 +3,7 @@
 import 'dart:typed_data';
 
 import 'package:supabase_flutter/supabase_flutter.dart'
-    show StorageException, Supabase, SupabaseClient;
+    show FileOptions, StorageException, Supabase, SupabaseClient;
 
 import '../../../../core/utils/logger.dart';
 
