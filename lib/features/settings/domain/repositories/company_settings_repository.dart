@@ -42,9 +42,14 @@ abstract interface class CompanySettingsRepository {
   /// Reads the settings row of [companyId].
   Future<CompanySettings> getSettings(String companyId);
 
-  /// Applies a partial update. `null` means "leave unchanged". For the
-  /// logo, pass [logoUrl] to set a new value or [clearLogo] = `true` to
-  /// remove it.
+  /// Applies a partial update.
+  ///
+  /// Passing `null` for any parameter means "leave unchanged".
+  ///
+  /// For the logo:
+  /// * Pass [logoUrl] to set a new value.
+  /// * Pass [clearLogo] = `true` to remove the current logo.
+  /// * Leave both untouched (default) to keep whatever is stored.
   Future<CompanySettings> updateSettings({
     required String companyId,
     double? defaultTaxRate,
