@@ -9,6 +9,7 @@ import 'package:printing/printing.dart' show Printing;
 
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../pos/data/services/direct_print_service.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
@@ -17,8 +18,9 @@ import '../../domain/entities/report_document.dart';
 
 /// A button that opens a print / share dialog for a [ReportDocument].
 ///
-/// **Phase P-1b:** reads the user's print-font preferences (A4 scale) and
-/// passes them to the PDF builder.
+/// **Phase P-2:** if "direct print" is enabled, the report is sent straight
+/// to the OS default printer without opening the preview dialog. On any
+/// failure, the standard dialog opens as a fallback.
 class ReportPrintAction extends ConsumerWidget {
   const ReportPrintAction({super.key, required this.documentBuilder});
 
@@ -31,44 +33,80 @@ class ReportPrintAction extends ConsumerWidget {
     return IconButton(
       tooltip: 'طباعة / مشاركة',
       icon: const Icon(Icons.ios_share),
-      onPressed: () {
-        final ReportDocument? raw = documentBuilder();
-        if (raw == null) {
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(
-              const SnackBar(
-                content: Text('لا توجد بيانات كافية للطباعة.'),
-              ),
-            );
+      onPressed: () => _onPressed(context, ref),
+    );
+  }
+
+  Future<void> _onPressed(BuildContext context, WidgetRef ref) async {
+    final ReportDocument? raw = documentBuilder();
+    if (raw == null) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('لا توجد بيانات كافية للطباعة.')),
+        );
+      return;
+    }
+
+    final CompanyContextState ctx = ref.read(companyContextProvider);
+    final ReportDocument doc = raw.copyWith(
+      companyName: ctx.currentCompany?.name ?? raw.companyName,
+      branchName: ctx.currentBranch?.name ?? raw.branchName,
+    );
+
+    // Reports are always A4, so we use the A4 font scale.
+    final CompanySettings? settings =
+        ref.read(companySettingsProvider).valueOrNull;
+    final PrintStyleSettings style = settings == null
+        ? const PrintStyleSettings.defaults()
+        : PrintStyleSettings(
+            fontScale: settings.printFontScaleA4,
+            fontWeight: settings.printFontWeight,
+          );
+
+    // ---- Direct print path ----
+    final bool direct = settings?.printDirectEnabled ?? false;
+    if (direct) {
+      try {
+        final Uint8List bytes = await PdfReportBuilder.build(
+          document: doc,
+          style: style,
+        );
+        final String name = _fileNameFor();
+        final bool ok = await DirectPrintService.tryPdfBytes(
+          bytes: bytes,
+          name: name,
+        );
+        if (ok) {
+          if (context.mounted) {
+            ScaffoldMessenger.of(context)
+              ..hideCurrentSnackBar()
+              ..showSnackBar(
+                const SnackBar(content: Text('تم إرسال التقرير للطابعة.')),
+              );
+          }
           return;
         }
+      } on Object {
+        // Fall through to the preview dialog.
+      }
+    }
 
-        final CompanyContextState ctx =
-            ref.read(companyContextProvider);
-        final ReportDocument doc = raw.copyWith(
-          companyName: ctx.currentCompany?.name ?? raw.companyName,
-          branchName: ctx.currentBranch?.name ?? raw.branchName,
-        );
-
-        // Reports are always A4, so we use the A4 font scale.
-        final CompanySettings? settings =
-            ref.read(companySettingsProvider).valueOrNull;
-        final PrintStyleSettings style = settings == null
-            ? const PrintStyleSettings.defaults()
-            : PrintStyleSettings(
-                fontScale: settings.printFontScaleA4,
-                fontWeight: settings.printFontWeight,
-              );
-
-        showDialog<void>(
-          context: context,
-          barrierDismissible: true,
-          builder: (BuildContext dialogContext) =>
-              _PrintDialog(document: doc, style: style),
-        );
-      },
+    if (!context.mounted) return;
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: true,
+      builder: (BuildContext dialogContext) =>
+          _PrintDialog(document: doc, style: style),
     );
+  }
+
+  static String _fileNameFor() {
+    final String stamp = DateTime.now()
+        .toIso8601String()
+        .replaceAll(':', '-')
+        .substring(0, 16);
+    return 'report-$stamp.pdf';
   }
 }
 
@@ -160,10 +198,7 @@ class _PrintDialogState extends State<_PrintDialog> {
           Icon(Icons.picture_as_pdf_outlined, color: scheme.primary),
           const SizedBox(width: 8),
           Expanded(
-            child: Text(
-              doc.title,
-              overflow: TextOverflow.ellipsis,
-            ),
+            child: Text(doc.title, overflow: TextOverflow.ellipsis),
           ),
           IconButton(
             onPressed: _isBusy ? null : () => Navigator.of(context).pop(),
