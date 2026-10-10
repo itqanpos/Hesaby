@@ -7,11 +7,6 @@ import '../../domain/entities/company_settings.dart';
 import '../../domain/repositories/company_settings_repository.dart';
 
 /// Concrete implementation of [CompanySettingsRepository] backed by Supabase.
-///
-/// Talks directly to the `company_settings` table. A separate datasource
-/// layer is omitted on purpose: the surface is only two operations
-/// (read + partial update), so the datasource would add indirection without
-/// value.
 class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
   const CompanySettingsRepositoryImpl(this._client);
 
@@ -63,11 +58,16 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
     bool? allowSaleWithoutStock,
     bool? allowCreditSale,
     String? receiptFooter,
+    String? logoUrl,
+    bool clearLogo = false,
+    double? printFontScale,
+    PrintFontWeight? printFontWeight,
+    double? printFontScaleA4,
+    bool? printDirectEnabled,
   }) async {
     try {
       final supabase.SupabaseClient client = _requireClient();
 
-      // Build a partial payload — only the fields the caller provided.
       final Map<String, dynamic> payload = <String, dynamic>{};
       if (defaultTaxRate != null) {
         payload['default_tax_rate'] = defaultTaxRate;
@@ -84,8 +84,24 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
       if (receiptFooter != null) {
         payload['receipt_footer'] = receiptFooter;
       }
+      if (clearLogo) {
+        payload['logo_url'] = null;
+      } else if (logoUrl != null) {
+        payload['logo_url'] = logoUrl;
+      }
+      if (printFontScale != null) {
+        payload['print_font_scale'] = printFontScale;
+      }
+      if (printFontWeight != null) {
+        payload['print_font_weight'] = printFontWeight.value;
+      }
+      if (printFontScaleA4 != null) {
+        payload['print_font_scale_a4'] = printFontScaleA4;
+      }
+      if (printDirectEnabled != null) {
+        payload['print_direct_enabled'] = printDirectEnabled;
+      }
 
-      // Nothing to update — return the current row unchanged.
       if (payload.isEmpty) {
         return await getSettings(companyId);
       }
@@ -122,6 +138,13 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
           _requireBool(map, 'allow_sale_without_stock'),
       allowCreditSale: _requireBool(map, 'allow_credit_sale'),
       receiptFooter: _requireString(map, 'receipt_footer'),
+      logoUrl: _optionalString(map, 'logo_url'),
+      printFontScale: _optionalDouble(map, 'print_font_scale') ?? 1.0,
+      printFontWeight:
+          PrintFontWeight.fromString(_optionalString(map, 'print_font_weight')),
+      printFontScaleA4: _optionalDouble(map, 'print_font_scale_a4') ?? 1.0,
+      printDirectEnabled:
+          _optionalBool(map, 'print_direct_enabled') ?? false,
       createdAt: _requireTimestamp(map, 'created_at'),
       updatedAt: _requireTimestamp(map, 'updated_at'),
     );
@@ -129,30 +152,44 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
 
   static String _requireString(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
+    if (value is String) return value;
+    throw FormatException('CompanySettings: missing or invalid "$key".');
+  }
+
+  static String? _optionalString(Map<String, dynamic> map, String key) {
+    final Object? value = map[key];
+    if (value == null) return null;
     if (value is String) {
-      return value;
+      final String t = value.trim();
+      return t.isEmpty ? null : t;
     }
-    throw FormatException(
-      'CompanySettings: missing or invalid "$key".',
-    );
+    return value.toString();
   }
 
   static double _requireDouble(Map<String, dynamic> map, String key) {
+    final double? v = _optionalDouble(map, key);
+    if (v != null) return v;
+    throw FormatException('CompanySettings: "$key" is not numeric.');
+  }
+
+  static double? _optionalDouble(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
+    if (value == null) return null;
     if (value is double) return value;
-    if (value is int) return value.toDouble();
     if (value is num) return value.toDouble();
-    if (value is String) {
-      final double? parsed = double.tryParse(value);
-      if (parsed != null) return parsed;
-    }
-    throw FormatException(
-      'CompanySettings: "$key" is not numeric.',
-    );
+    if (value is String) return double.tryParse(value);
+    return null;
   }
 
   static bool _requireBool(Map<String, dynamic> map, String key) {
+    final bool? v = _optionalBool(map, key);
+    if (v != null) return v;
+    throw FormatException('CompanySettings: "$key" is not boolean.');
+  }
+
+  static bool? _optionalBool(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
+    if (value == null) return null;
     if (value is bool) return value;
     if (value is num) return value != 0;
     if (value is String) {
@@ -160,9 +197,7 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
       if (lower == 'true' || lower == 't' || lower == '1') return true;
       if (lower == 'false' || lower == 'f' || lower == '0') return false;
     }
-    throw FormatException(
-      'CompanySettings: "$key" is not boolean.',
-    );
+    return null;
   }
 
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
@@ -176,10 +211,6 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
       'CompanySettings: "$key" is not a valid timestamp.',
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Client
-  // ---------------------------------------------------------------------------
 
   supabase.SupabaseClient _requireClient() {
     final supabase.SupabaseClient? client = _client;
@@ -203,12 +234,10 @@ CompanySettingsException _mapPostgrest(
   required String operation,
 }) {
   final CompanySettingsFailureType type = _classifyPostgrest(error);
-
   AppLogger.warning(
     'CompanySettings PostgREST error during "$operation" '
     'mapped to ${type.name} (code: ${error.code ?? 'n/a'}).',
   );
-
   return CompanySettingsException(
     type: type,
     cause: error,
@@ -222,8 +251,7 @@ CompanySettingsException _mapAuth(
   required String operation,
 }) {
   AppLogger.warning(
-    'CompanySettings auth error during "$operation" '
-    'mapped to unauthorized (code: ${error.code ?? 'n/a'}).',
+    'CompanySettings auth error during "$operation" mapped to unauthorized.',
   );
   return CompanySettingsException(
     type: CompanySettingsFailureType.unauthorized,
@@ -237,18 +265,14 @@ CompanySettingsException _mapUnknown(
   StackTrace stackTrace, {
   required String operation,
 }) {
-  final CompanySettingsFailureType type =
-      _looksLikeNetwork(error)
-          ? CompanySettingsFailureType.network
-          : CompanySettingsFailureType.unknown;
-
+  final CompanySettingsFailureType type = _looksLikeNetwork(error)
+      ? CompanySettingsFailureType.network
+      : CompanySettingsFailureType.unknown;
   AppLogger.error(
-    'Unhandled company-settings error during "$operation" '
-    '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
+    'Unhandled company-settings error during "$operation".',
     error,
     stackTrace,
   );
-
   return CompanySettingsException(
     type: type,
     cause: error,
@@ -256,10 +280,6 @@ CompanySettingsException _mapUnknown(
   );
 }
 
-/// Classifies a PostgREST error into a safe [CompanySettingsFailureType].
-///
-/// Constraint names referenced below come from migration
-/// `202610130001_company_settings.sql`.
 CompanySettingsFailureType _classifyPostgrest(
   supabase.PostgrestException error,
 ) {
@@ -267,8 +287,17 @@ CompanySettingsFailureType _classifyPostgrest(
   final String message = error.message.toLowerCase();
   final String full = error.toString().toLowerCase();
 
-  // ---- Check constraint violations (23514) ----
   if (code == '23514') {
+    if (full.contains('company_settings_font_scale_range') ||
+        full.contains('print_font_scale')) {
+      return CompanySettingsFailureType.invalidResponse;
+    }
+    if (full.contains('company_settings_font_weight_valid')) {
+      return CompanySettingsFailureType.invalidResponse;
+    }
+    if (full.contains('company_settings_logo_url_length')) {
+      return CompanySettingsFailureType.invalidResponse;
+    }
     if (full.contains('company_settings_tax_rate_valid') ||
         message.contains('default_tax_rate')) {
       return CompanySettingsFailureType.invalidTaxRate;
@@ -284,36 +313,18 @@ CompanySettingsFailureType _classifyPostgrest(
     return CompanySettingsFailureType.invalidResponse;
   }
 
-  // ---- No rows / multiple rows for single() ----
-  if (code == 'PGRST116') {
-    return CompanySettingsFailureType.notFound;
-  }
-
-  // ---- Authorization ----
+  if (code == 'PGRST116') return CompanySettingsFailureType.notFound;
   if (code.startsWith('42501') || code.startsWith('28')) {
     return CompanySettingsFailureType.unauthorized;
   }
-
-  // ---- Syntax / undefined objects ----
   if (code.startsWith('42')) {
     return CompanySettingsFailureType.invalidResponse;
   }
 
-  // ---- Textual fallbacks ----
   if (message.contains('permission denied') ||
       message.contains('row level security') ||
       message.contains('jwt')) {
     return CompanySettingsFailureType.unauthorized;
-  }
-
-  if (full.contains('company_settings_tax_rate_valid')) {
-    return CompanySettingsFailureType.invalidTaxRate;
-  }
-  if (full.contains('company_settings_max_discount_valid')) {
-    return CompanySettingsFailureType.invalidDiscountLimit;
-  }
-  if (full.contains('company_settings_footer_length')) {
-    return CompanySettingsFailureType.invalidFooter;
   }
 
   if (_messageLooksLikeNetwork(message)) {
@@ -323,10 +334,8 @@ CompanySettingsFailureType _classifyPostgrest(
   return CompanySettingsFailureType.unknown;
 }
 
-bool _looksLikeNetwork(Object error) {
-  final String s = error.toString().toLowerCase();
-  return _messageLooksLikeNetwork(s);
-}
+bool _looksLikeNetwork(Object error) =>
+    _messageLooksLikeNetwork(error.toString().toLowerCase());
 
 bool _messageLooksLikeNetwork(String value) {
   return value.contains('socket') ||
