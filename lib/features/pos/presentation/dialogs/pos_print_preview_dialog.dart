@@ -20,6 +20,21 @@ import '../../domain/entities/receipt.dart';
 import '../providers/printer_providers.dart';
 
 /// Opens the print preview dialog for [receipt].
+///
+/// Offers three actions:
+///   * **Print via PDF** — opens the system print dialog (works everywhere).
+///   * **Print via Bluetooth** — renders the receipt as a raster image and
+///     sends it to the saved thermal printer. Only shown when the user has
+///     a printer configured. Works around the lack of an Arabic code page
+///     on most budget printers.
+///   * **Share as PDF** — opens the system share sheet.
+///
+/// **Phase P-1a:** the Bluetooth path now loads the company logo (from the
+/// local cache, falling back to a network download) and passes it to the
+/// ESC/POS builder so it appears at the top of the printed receipt.
+///
+/// **Phase P-1b:** the same path now applies the user's print-font
+/// preferences (size scale + weight) to every text element.
 Future<void> showPosPrintPreviewDialog({
   required BuildContext context,
   required Receipt receipt,
@@ -115,15 +130,27 @@ class _PosPrintPreviewDialogState
         }
       }
 
+      // 1) Load the company logo bytes (cache → network → null).
       final Uint8List? logoBytes = await _loadLogoBytes();
 
+      // 2) Load user print preferences (font scale + weight).
+      final CompanySettings? printSettings =
+          ref.read(companySettingsProvider).valueOrNull;
+      final double fontScale = printSettings?.printFontScale ?? 1.0;
+      final PrintFontWeight fontWeight =
+          printSettings?.printFontWeight ?? PrintFontWeight.normal;
+
+      // 3) Render the receipt to ESC/POS raster bytes.
       final int widthDots = _bluetoothWidthDots(saved);
       final List<int> bytes = await EscPosReceiptBuilder.build(
         receipt: widget.receipt,
         paperWidthDots: widthDots,
         logoBytes: logoBytes,
+        fontScale: fontScale,
+        fontWeight: fontWeight,
       );
 
+      // 4) Send.
       await service.sendBytes(bytes);
 
       if (!mounted) return;
@@ -247,6 +274,7 @@ class _PosPrintPreviewDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
+            // ---- Receipt summary ----
             DecoratedBox(
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
@@ -281,6 +309,7 @@ class _PosPrintPreviewDialogState
 
             const SizedBox(height: 12),
 
+            // ---- Bluetooth printer status ----
             if (savedPrinter != null)
               _BluetoothPrinterRow(printer: savedPrinter)
             else
@@ -292,6 +321,7 @@ class _PosPrintPreviewDialogState
 
             const SizedBox(height: 12),
 
+            // ---- Current paper size (read-only) ----
             DecoratedBox(
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
