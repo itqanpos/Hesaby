@@ -6,38 +6,18 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/customer_statement.dart';
 
 /// Builds an A4 PDF statement from a [CustomerStatement].
 ///
-/// The layout is a single dense accounting table:
-///
-/// ```
-/// ┌──────────────────────────────────────────────────────────┐
-/// │                  اسم الشركة                              │
-/// │                  كشف حساب عميل                            │
-/// ├──────────────────────────────────────────────────────────┤
-/// │ العميل: أحمد محمد        الفترة: 01/10 → 31/10           │
-/// │ الرصيد الافتتاحي: 0.00 ج.م                                │
-/// ├──────────┬─────────────────┬────────┬────────┬──────────┤
-/// │ التاريخ  │ البيان          │ مدين   │ دائن   │ الرصيد   │
-/// ├──────────┼─────────────────┼────────┼────────┼──────────┤
-/// │ ...      │ ...             │ ...    │ ...    │ ...      │
-/// ├──────────┴─────────────────┼────────┼────────┼──────────┤
-/// │ الإجماليات                 │ X      │ Y      │ Z        │
-/// └────────────────────────────┴────────┴────────┴──────────┘
-/// ```
-///
-/// Arabic text is rendered right-to-left with the Cairo font, downloaded
-/// on demand by the `printing` package and cached afterwards.
+/// **Phase P-1b:** accepts an optional [PrintStyleSettings] that scales
+/// every font size and selects a base weight.
 abstract final class PdfStatementBuilder {
-  /// Builds the PDF and returns its bytes.
-  ///
-  /// The statement is assumed to be well-formed (typically the output of
-  /// `CustomerStatement.build`); an empty entry list produces a valid PDF
-  /// showing only the opening and closing balances.
   static Future<Uint8List> build({
     required CustomerStatement statement,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   }) async {
     final pw.ThemeData theme = await _loadTheme();
 
@@ -53,13 +33,28 @@ abstract final class PdfStatementBuilder {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(24),
         textDirection: pw.TextDirection.rtl,
-        header: (pw.Context context) => _buildPageHeader(context, statement),
-        footer: _buildPageFooter,
-        build: (pw.Context context) => _buildContent(statement),
+        header: (pw.Context context) =>
+            _buildPageHeader(context, statement, style),
+        footer: (pw.Context context) => _buildPageFooter(context, style),
+        build: (pw.Context context) => _buildContent(statement, style),
       ),
     );
 
     return document.save();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Weight resolution
+  // ---------------------------------------------------------------------------
+
+  static pw.FontWeight _weight({
+    required PrintFontWeight userWeight,
+    required bool emphasized,
+  }) {
+    if (emphasized || userWeight == PrintFontWeight.bold) {
+      return pw.FontWeight.bold;
+    }
+    return pw.FontWeight.normal;
   }
 
   // ---------------------------------------------------------------------------
@@ -79,6 +74,7 @@ abstract final class PdfStatementBuilder {
   static pw.Widget _buildPageHeader(
     pw.Context context,
     CustomerStatement statement,
+    PrintStyleSettings style,
   ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
@@ -86,8 +82,11 @@ abstract final class PdfStatementBuilder {
         pw.Text(
           'كشف حساب عميل',
           style: pw.TextStyle(
-            fontSize: 16,
-            fontWeight: pw.FontWeight.bold,
+            fontSize: style.scale(16),
+            fontWeight: _weight(
+              userWeight: style.fontWeight,
+              emphasized: true,
+            ),
           ),
           textAlign: pw.TextAlign.center,
         ),
@@ -95,8 +94,11 @@ abstract final class PdfStatementBuilder {
         pw.Text(
           statement.customer.name,
           style: pw.TextStyle(
-            fontSize: 13,
-            fontWeight: pw.FontWeight.bold,
+            fontSize: style.scale(13),
+            fontWeight: _weight(
+              userWeight: style.fontWeight,
+              emphasized: true,
+            ),
           ),
           textAlign: pw.TextAlign.center,
         ),
@@ -109,17 +111,23 @@ abstract final class PdfStatementBuilder {
   // Content
   // ---------------------------------------------------------------------------
 
-  static List<pw.Widget> _buildContent(CustomerStatement statement) {
+  static List<pw.Widget> _buildContent(
+    CustomerStatement statement,
+    PrintStyleSettings style,
+  ) {
     return <pw.Widget>[
-      _buildInfoBlock(statement),
+      _buildInfoBlock(statement, style),
       pw.SizedBox(height: 12),
-      _buildTable(statement),
+      _buildTable(statement, style),
       pw.SizedBox(height: 12),
-      _buildSummaryBlock(statement),
+      _buildSummaryBlock(statement, style),
     ];
   }
 
-  static pw.Widget _buildInfoBlock(CustomerStatement statement) {
+  static pw.Widget _buildInfoBlock(
+    CustomerStatement statement,
+    PrintStyleSettings style,
+  ) {
     return pw.Container(
       padding: const pw.EdgeInsets.all(8),
       decoration: pw.BoxDecoration(
@@ -129,33 +137,50 @@ abstract final class PdfStatementBuilder {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: <pw.Widget>[
-          _infoRow('العميل', statement.customer.name),
+          _infoRow('العميل', statement.customer.name, style),
           if (statement.customer.hasPhone)
-            _infoRow('الهاتف', statement.customer.phone!),
+            _infoRow('الهاتف', statement.customer.phone!, style),
           if (statement.customer.hasCode)
-            _infoRow('الكود', statement.customer.code!),
-          _infoRow('الفترة', _formatPeriod(statement)),
+            _infoRow('الكود', statement.customer.code!, style),
+          _infoRow('الفترة', _formatPeriod(statement), style),
           _infoRow(
             'تاريخ الإصدار',
             _formatDate(statement.generatedAt),
+            style,
           ),
         ],
       ),
     );
   }
 
-  static pw.Widget _infoRow(String label, String value) {
+  static pw.Widget _infoRow(
+    String label,
+    String value,
+    PrintStyleSettings style,
+  ) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 1),
       child: pw.Row(
         mainAxisAlignment: pw.MainAxisAlignment.spaceBetween,
         children: <pw.Widget>[
-          pw.Text(label, style: const pw.TextStyle(fontSize: 9)),
+          pw.Text(
+            label,
+            style: pw.TextStyle(
+              fontSize: style.scale(9),
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: false,
+              ),
+            ),
+          ),
           pw.Text(
             value,
             style: pw.TextStyle(
-              fontSize: 9,
-              fontWeight: pw.FontWeight.bold,
+              fontSize: style.scale(9),
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: true,
+              ),
             ),
           ),
         ],
@@ -167,9 +192,11 @@ abstract final class PdfStatementBuilder {
   // Table
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildTable(CustomerStatement statement) {
-    const double fontSize = 9;
-    const double headerFontSize = 9;
+  static pw.Widget _buildTable(
+    CustomerStatement statement,
+    PrintStyleSettings style,
+  ) {
+    final double fontSize = style.scale(9);
 
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.4),
@@ -181,23 +208,46 @@ abstract final class PdfStatementBuilder {
         4: pw.FlexColumnWidth(1.6), // balance
       },
       children: <pw.TableRow>[
-        _headerRow(fontSize: headerFontSize),
-        _openingBalanceRow(statement, fontSize),
+        _headerRow(fontSize: fontSize, style: style),
+        _openingBalanceRow(statement, fontSize, style),
         for (final CustomerStatementEntry entry in statement.entries)
-          _entryRow(entry, fontSize),
+          _entryRow(entry, fontSize, style),
       ],
     );
   }
 
-  static pw.TableRow _headerRow({required double fontSize}) {
+  static pw.TableRow _headerRow({
+    required double fontSize,
+    required PrintStyleSettings style,
+  }) {
     return pw.TableRow(
       decoration: const pw.BoxDecoration(color: PdfColors.grey200),
       children: <pw.Widget>[
-        _cell('التاريخ', fontSize: fontSize, bold: true, center: true),
-        _cell('البيان', fontSize: fontSize, bold: true, center: true),
-        _cell('مدين', fontSize: fontSize, bold: true, center: true),
-        _cell('دائن', fontSize: fontSize, bold: true, center: true),
-        _cell('الرصيد', fontSize: fontSize, bold: true, center: true),
+        _cell('التاريخ',
+            fontSize: fontSize,
+            style: style,
+            emphasized: true,
+            center: true),
+        _cell('البيان',
+            fontSize: fontSize,
+            style: style,
+            emphasized: true,
+            center: true),
+        _cell('مدين',
+            fontSize: fontSize,
+            style: style,
+            emphasized: true,
+            center: true),
+        _cell('دائن',
+            fontSize: fontSize,
+            style: style,
+            emphasized: true,
+            center: true),
+        _cell('الرصيد',
+            fontSize: fontSize,
+            style: style,
+            emphasized: true,
+            center: true),
       ],
     );
   }
@@ -205,22 +255,21 @@ abstract final class PdfStatementBuilder {
   static pw.TableRow _openingBalanceRow(
     CustomerStatement statement,
     double fontSize,
+    PrintStyleSettings style,
   ) {
     return pw.TableRow(
       decoration: const pw.BoxDecoration(color: PdfColors.grey100),
       children: <pw.Widget>[
-        _cell('—', fontSize: fontSize, center: true),
-        _cell(
-          'رصيد افتتاحي',
-          fontSize: fontSize,
-          bold: true,
-        ),
-        _cell('', fontSize: fontSize),
-        _cell('', fontSize: fontSize),
+        _cell('—', fontSize: fontSize, style: style, center: true),
+        _cell('رصيد افتتاحي',
+            fontSize: fontSize, style: style, emphasized: true),
+        _cell('', fontSize: fontSize, style: style),
+        _cell('', fontSize: fontSize, style: style),
         _cell(
           _formatMoney(statement.openingBalance),
           fontSize: fontSize,
-          bold: true,
+          style: style,
+          emphasized: true,
           center: true,
         ),
       ],
@@ -230,6 +279,7 @@ abstract final class PdfStatementBuilder {
   static pw.TableRow _entryRow(
     CustomerStatementEntry entry,
     double fontSize,
+    PrintStyleSettings style,
   ) {
     final String description = entry.hasDescription
         ? entry.description!
@@ -240,23 +290,27 @@ abstract final class PdfStatementBuilder {
         _cell(
           _formatDate(entry.date),
           fontSize: fontSize,
+          style: style,
           center: true,
         ),
-        _cell(description, fontSize: fontSize),
+        _cell(description, fontSize: fontSize, style: style),
         _cell(
           entry.isDebit ? _formatMoney(entry.debit) : '—',
           fontSize: fontSize,
+          style: style,
           center: true,
         ),
         _cell(
           entry.isCredit ? _formatMoney(entry.credit) : '—',
           fontSize: fontSize,
+          style: style,
           center: true,
         ),
         _cell(
           _formatMoney(entry.balanceAfter ?? 0),
           fontSize: fontSize,
-          bold: true,
+          style: style,
+          emphasized: true,
           center: true,
         ),
       ],
@@ -266,7 +320,8 @@ abstract final class PdfStatementBuilder {
   static pw.Widget _cell(
     String text, {
     required double fontSize,
-    bool bold = false,
+    required PrintStyleSettings style,
+    bool emphasized = false,
     bool center = false,
   }) {
     return pw.Padding(
@@ -275,7 +330,10 @@ abstract final class PdfStatementBuilder {
         text,
         style: pw.TextStyle(
           fontSize: fontSize,
-          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          fontWeight: _weight(
+            userWeight: style.fontWeight,
+            emphasized: emphasized,
+          ),
         ),
         textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
       ),
@@ -286,7 +344,10 @@ abstract final class PdfStatementBuilder {
   // Summary
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildSummaryBlock(CustomerStatement statement) {
+  static pw.Widget _buildSummaryBlock(
+    CustomerStatement statement,
+    PrintStyleSettings style,
+  ) {
     return pw.Container(
       padding: const pw.EdgeInsets.all(10),
       decoration: pw.BoxDecoration(
@@ -297,13 +358,17 @@ abstract final class PdfStatementBuilder {
       child: pw.Column(
         crossAxisAlignment: pw.CrossAxisAlignment.stretch,
         children: <pw.Widget>[
-          _summaryRow('عدد الحركات', statement.entryCount.toString()),
-          _summaryRow('إجمالي المدين', _formatMoney(statement.totalDebit)),
-          _summaryRow('إجمالي الدائن', _formatMoney(statement.totalCredit)),
+          _summaryRow('عدد الحركات',
+              statement.entryCount.toString(), style),
+          _summaryRow('إجمالي المدين',
+              _formatMoney(statement.totalDebit), style),
+          _summaryRow('إجمالي الدائن',
+              _formatMoney(statement.totalCredit), style),
           pw.Divider(height: 8, thickness: 0.4),
           _summaryRow(
             'الرصيد النهائي',
             _formatMoney(statement.closingBalance),
+            style,
             emphasized: true,
           ),
         ],
@@ -313,7 +378,8 @@ abstract final class PdfStatementBuilder {
 
   static pw.Widget _summaryRow(
     String label,
-    String value, {
+    String value,
+    PrintStyleSettings style, {
     bool emphasized = false,
   }) {
     return pw.Padding(
@@ -324,17 +390,21 @@ abstract final class PdfStatementBuilder {
           pw.Text(
             label,
             style: pw.TextStyle(
-              fontSize: emphasized ? 11 : 9,
-              fontWeight:
-                  emphasized ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontSize: style.scale(emphasized ? 11 : 9),
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: emphasized,
+              ),
             ),
           ),
           pw.Text(
             value,
             style: pw.TextStyle(
-              fontSize: emphasized ? 11 : 9,
-              fontWeight:
-                  emphasized ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontSize: style.scale(emphasized ? 11 : 9),
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: emphasized,
+              ),
             ),
           ),
         ],
@@ -346,13 +416,23 @@ abstract final class PdfStatementBuilder {
   // Page footer
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildPageFooter(pw.Context context) {
+  static pw.Widget _buildPageFooter(
+    pw.Context context,
+    PrintStyleSettings style,
+  ) {
     return pw.Container(
       alignment: pw.Alignment.center,
       margin: const pw.EdgeInsets.only(top: 8),
       child: pw.Text(
         'صفحة ${context.pageNumber} من ${context.pagesCount}',
-        style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+        style: pw.TextStyle(
+          fontSize: style.scale(8),
+          color: PdfColors.grey600,
+          fontWeight: _weight(
+            userWeight: style.fontWeight,
+            emphasized: false,
+          ),
+        ),
       ),
     );
   }
