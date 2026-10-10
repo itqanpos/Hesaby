@@ -7,27 +7,27 @@ import 'package:printing/printing.dart' show Printing;
 
 import '../../../pos/data/services/pdf_receipt_builder.dart'
     show ReceiptPaperSize;
+import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/purchase_receipt.dart';
 import 'pdf_purchase_receipt_builder.dart';
 
 /// Contract for printing or sharing a purchase receipt.
 ///
-/// Mirrors `ReceiptPrinter` (POS) — the same three operations, the same
-/// failure semantics (return `false` on any error rather than throwing).
+/// **Phase P-1b:** every method accepts an optional [style] so the PDF is
+/// rendered with the user's font size + weight preferences.
 abstract interface class PurchaseReceiptPrinter {
-  /// Whether the current platform supports at least one output method.
   bool get isSupported;
 
-  /// Opens the system print dialog for [receipt].
   Future<bool> printReceipt({
     required PurchaseReceipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   });
 
-  /// Shares the receipt as a PDF (system share sheet).
   Future<bool> shareReceipt({
     required PurchaseReceipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   });
 }
 
@@ -42,11 +42,13 @@ class PurchaseReceiptPrinterImpl implements PurchaseReceiptPrinter {
   Future<bool> printReceipt({
     required PurchaseReceipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   }) async {
     try {
       final Uint8List bytes = await PdfPurchaseReceiptBuilder.build(
         receipt: receipt,
         size: size,
+        style: style,
       );
 
       await Printing.layoutPdf(
@@ -64,11 +66,13 @@ class PurchaseReceiptPrinterImpl implements PurchaseReceiptPrinter {
   Future<bool> shareReceipt({
     required PurchaseReceipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   }) async {
     try {
       final Uint8List bytes = await PdfPurchaseReceiptBuilder.build(
         receipt: receipt,
         size: size,
+        style: style,
       );
 
       await Printing.sharePdf(
