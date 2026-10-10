@@ -74,6 +74,7 @@ class EmployeesNotifier extends AsyncNotifier<List<Employee>> {
     String? position,
     DateTime? hireDate,
     String? notes,
+    String? companyMemberId,
   }) async {
     final String companyId = _requireCompanyId();
     final Employee created =
@@ -87,6 +88,7 @@ class EmployeesNotifier extends AsyncNotifier<List<Employee>> {
               position: position,
               hireDate: hireDate,
               notes: notes,
+              companyMemberId: companyMemberId,
             );
     await refresh();
     return created;
@@ -109,6 +111,8 @@ class EmployeesNotifier extends AsyncNotifier<List<Employee>> {
     String? notes,
     bool clearNotes = false,
     bool? isActive,
+    String? companyMemberId,
+    bool clearCompanyMember = false,
   }) async {
     final Employee updated =
         await ref.read(employeeRepositoryProvider).updateEmployee(
@@ -128,6 +132,8 @@ class EmployeesNotifier extends AsyncNotifier<List<Employee>> {
               notes: notes,
               clearNotes: clearNotes,
               isActive: isActive,
+              companyMemberId: companyMemberId,
+              clearCompanyMember: clearCompanyMember,
             );
     await refresh();
     return updated;
