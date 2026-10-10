@@ -3,17 +3,16 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 
 import '../../../../shared/widgets/app_button.dart';
+import '../../../companies/domain/entities/company_member.dart';
+import '../../../companies/presentation/providers/members_providers.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
 import '../providers/employee_providers.dart';
 
 /// Opens the employee add/edit sheet.
-///
-/// Pass [existing] to edit; omit it to create.
-/// Returns `true` when a save succeeded.
 Future<bool?> showEmployeeFormSheet({
   required BuildContext context,
   Employee? existing,
@@ -49,6 +48,7 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
   late final TextEditingController _notesController;
 
   DateTime? _hireDate;
+  String? _companyMemberId;
   bool _isActive = true;
   bool _isSubmitting = false;
   EmployeeFailureType? _failure;
@@ -71,6 +71,7 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
     );
     _notesController = TextEditingController(text: e?.notes ?? '');
     _hireDate = e?.hireDate;
+    _companyMemberId = e?.companyMemberId;
     _isActive = e?.isActive ?? true;
   }
 
@@ -141,6 +142,8 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
               notes: _emptyToNull(_notesController.text),
               clearNotes: _emptyToNull(_notesController.text) == null,
               isActive: _isActive,
+              companyMemberId: _companyMemberId,
+              clearCompanyMember: _companyMemberId == null,
             );
       } else {
         await ref.read(employeesProvider.notifier).create(
@@ -152,6 +155,7 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
               position: _emptyToNull(_positionController.text),
               hireDate: _hireDate,
               notes: _emptyToNull(_notesController.text),
+              companyMemberId: _companyMemberId,
             );
       }
 
@@ -177,6 +181,32 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    // Load members for the link dropdown.
+    final List<CompanyMember> allMembers =
+        ref.watch(membersProvider).valueOrNull ?? const <CompanyMember>[];
+
+    // Exclude members already linked to another employee (unique index).
+    final List<Employee> allEmployees =
+        ref.watch(employeesProvider).valueOrNull ?? const <Employee>[];
+    final Set<String> alreadyLinked = <String>{
+      for (final Employee e in allEmployees)
+        if (e.companyMemberId != null && e.id != widget.existing?.id)
+          e.companyMemberId!,
+    };
+    final List<CompanyMember> availableMembers = <CompanyMember>[
+      for (final CompanyMember m in allMembers)
+        if (m.isActive && !alreadyLinked.contains(m.id)) m,
+    ];
+
+    // Guard against a stale link: if the currently selected member is no
+    // longer in the available list AND it is not the value we loaded, fall
+    // back to null so the dropdown renders consistently.
+    if (_companyMemberId != null &&
+        !availableMembers.any((CompanyMember m) => m.id == _companyMemberId) &&
+        _companyMemberId != widget.existing?.companyMemberId) {
+      _companyMemberId = null;
+    }
 
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
@@ -220,6 +250,40 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
                     if (t.length > 200) return 'الاسم طويل جدًا';
                     return null;
                   },
+                ),
+                const SizedBox(height: 12),
+
+                // ---- Linked member ----
+                DropdownButtonFormField<String>(
+                  key: ValueKey<String>(
+                    'linked-member-${_companyMemberId ?? ''}',
+                  ),
+                  initialValue: _companyMemberId,
+                  isExpanded: true,
+                  decoration: const InputDecoration(
+                    labelText: 'الحساب المرتبط (اختياري)',
+                    helperText:
+                        'اربط الموظف بحساب دخول من صفحة الأعضاء',
+                    border: OutlineInputBorder(),
+                  ),
+                  items: <DropdownMenuItem<String>>[
+                    const DropdownMenuItem<String>(
+                      value: null,
+                      child: Text('بدون حساب'),
+                    ),
+                    for (final CompanyMember m in availableMembers)
+                      DropdownMenuItem<String>(
+                        value: m.id,
+                        child: Text(
+                          '${_memberLabel(m)} — ${MemberRole.label(m.role)}',
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                  ],
+                  onChanged: _isSubmitting
+                      ? null
+                      : (String? v) =>
+                          setState(() => _companyMemberId = v),
                 ),
                 const SizedBox(height: 12),
 
@@ -395,6 +459,16 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
       ),
     );
   }
+
+  static String _memberLabel(CompanyMember m) {
+    final String? name = m.displayName;
+    if (name != null && name.trim().isNotEmpty) return name.trim();
+    final String? email = m.email;
+    if (email != null && email.isNotEmpty) {
+      return email.split('@').first;
+    }
+    return 'عضو';
+  }
 }
 
 class _FailureBanner extends StatelessWidget {
@@ -435,7 +509,8 @@ String _failureMessage(EmployeeFailureType type) => switch (type) {
       EmployeeFailureType.unauthorized =>
         'لا تملك صلاحية إدارة الموظفين.',
       EmployeeFailureType.notFound => 'الموظف غير موجود.',
-      EmployeeFailureType.invalidInput => 'تحقق من البيانات المُدخلة.',
+      EmployeeFailureType.invalidInput =>
+        'تحقق من البيانات المُدخلة (قد يكون الحساب مرتبطًا بموظف آخر).',
       EmployeeFailureType.invalidResponse =>
         'تعذّر قراءة البيانات من الخادم.',
       EmployeeFailureType.unknown => 'حدث خطأ غير متوقع. حاول مرة أخرى.',
