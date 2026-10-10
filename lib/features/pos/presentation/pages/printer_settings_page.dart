@@ -6,14 +6,22 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../settings/presentation/widgets/print_font_settings_section.dart';
 import '../../data/services/esc_pos_test_ticket.dart';
 import '../../data/services/printer_service.dart';
 import '../../domain/entities/printer_device.dart';
 import '../providers/printer_providers.dart';
 import '../widgets/printer_scan_sheet.dart';
 
-/// Printer settings page — pick a default thermal printer, test it, and
-/// forget it when needed.
+/// Printer settings page.
+///
+/// Sections (top → bottom):
+/// 1. **الطابعة** — pick a default thermal printer, test it, or forget it.
+/// 2. **حجم وثقل الخط** — font size + weight for both thermal and A4.
+///
+/// The font settings section is always shown, even when no printer is
+/// configured, because it also affects A4 / PDF documents (reports,
+/// statements, etc.).
 class PrinterSettingsPage extends ConsumerStatefulWidget {
   const PrinterSettingsPage({super.key});
 
@@ -167,51 +175,123 @@ class _PrinterSettingsPageState
   }
 
   Widget _buildBody(SavedPrinter? saved) {
+    return ListView(
+      padding: const EdgeInsets.only(top: 12, bottom: 24),
+      children: <Widget>[
+        // ---- Printer section ----
+        if (saved == null)
+          _NoPrinterBody(onPick: _pickPrinter)
+        else
+          _SavedPrinterBody(
+            saved: saved,
+            isConnecting: _isConnecting,
+            isConnected: _isConnected,
+            isTesting: _isTesting,
+            onConnect: () => _connect(saved),
+            onTest: _testPrint,
+            onPick: _pickPrinter,
+            onForget: _forgetPrinter,
+          ),
+
+        const SizedBox(height: 24),
+
+        // ---- Print font settings (always visible) ----
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4),
+          child: PrintFontSettingsSection(),
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// No printer configured
+// ============================================================================
+
+class _NoPrinterBody extends StatelessWidget {
+  const _NoPrinterBody({required this.onPick});
+
+  final VoidCallback onPick;
+
+  @override
+  Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    if (saved == null) {
-      return ListView(
-        padding: const EdgeInsets.only(top: 24, bottom: 24),
-        children: <Widget>[
-          Icon(
-            Icons.print_disabled_outlined,
-            size: 56,
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        const SizedBox(height: 24),
+        Icon(
+          Icons.print_disabled_outlined,
+          size: 56,
+          color: scheme.onSurfaceVariant,
+        ),
+        const SizedBox(height: 16),
+        Text(
+          'لم تختر طابعة بعد',
+          style: theme.textTheme.titleLarge?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'اختر طابعة حرارية لطباعة إيصالات نقطة البيع مباشرة.',
+          style: theme.textTheme.bodyMedium?.copyWith(
             color: scheme.onSurfaceVariant,
           ),
-          const SizedBox(height: 16),
-          Text(
-            'لم تختر طابعة بعد',
-            style: theme.textTheme.titleLarge?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-            textAlign: TextAlign.center,
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 24),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: AppButton(
+            label: 'اختيار طابعة',
+            icon: Icons.search,
+            expanded: true,
+            size: AppButtonSize.large,
+            onPressed: onPick,
           ),
-          const SizedBox(height: 8),
-          Text(
-            'اختر طابعة حرارية لطباعة إيصالات نقطة البيع مباشرة.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: scheme.onSurfaceVariant,
-            ),
-            textAlign: TextAlign.center,
-          ),
-          const SizedBox(height: 24),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24),
-            child: AppButton(
-              label: 'اختيار طابعة',
-              icon: Icons.search,
-              expanded: true,
-              size: AppButtonSize.large,
-              onPressed: _pickPrinter,
-            ),
-          ),
-        ],
-      );
-    }
+        ),
+      ],
+    );
+  }
+}
 
-    return ListView(
-      padding: const EdgeInsets.only(top: 12, bottom: 24),
+// ============================================================================
+// Saved printer
+// ============================================================================
+
+class _SavedPrinterBody extends StatelessWidget {
+  const _SavedPrinterBody({
+    required this.saved,
+    required this.isConnecting,
+    required this.isConnected,
+    required this.isTesting,
+    required this.onConnect,
+    required this.onTest,
+    required this.onPick,
+    required this.onForget,
+  });
+
+  final SavedPrinter saved;
+  final bool isConnecting;
+  final bool isConnected;
+  final bool isTesting;
+  final VoidCallback onConnect;
+  final VoidCallback onTest;
+  final VoidCallback onPick;
+  final VoidCallback onForget;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
         // ---- Current printer card ----
         Padding(
@@ -253,8 +333,8 @@ class _PrinterSettingsPageState
                         ),
                       ),
                       _StatusChip(
-                        isConnecting: _isConnecting,
-                        isConnected: _isConnected,
+                        isConnecting: isConnecting,
+                        isConnected: isConnected,
                       ),
                     ],
                   ),
@@ -279,22 +359,22 @@ class _PrinterSettingsPageState
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              if (!_isConnected && !_isConnecting)
+              if (!isConnected && !isConnecting)
                 AppButton(
                   label: 'الاتصال بالطابعة',
                   icon: Icons.link,
                   expanded: true,
                   size: AppButtonSize.large,
-                  onPressed: () => _connect(saved),
+                  onPressed: onConnect,
                 ),
-              if (_isConnected)
+              if (isConnected)
                 AppButton(
                   label: 'طباعة تجريبية',
                   icon: Icons.print_outlined,
                   expanded: true,
                   size: AppButtonSize.large,
-                  isLoading: _isTesting,
-                  onPressed: _isTesting ? null : _testPrint,
+                  isLoading: isTesting,
+                  onPressed: isTesting ? null : onTest,
                 ),
               const SizedBox(height: 8),
               AppButton(
@@ -302,7 +382,7 @@ class _PrinterSettingsPageState
                 icon: Icons.swap_horiz,
                 variant: AppButtonVariant.secondary,
                 expanded: true,
-                onPressed: _isConnecting ? null : _pickPrinter,
+                onPressed: isConnecting ? null : onPick,
               ),
               const SizedBox(height: 8),
               AppButton(
@@ -310,7 +390,7 @@ class _PrinterSettingsPageState
                 icon: Icons.delete_outline,
                 variant: AppButtonVariant.danger,
                 expanded: true,
-                onPressed: _isConnecting ? null : _forgetPrinter,
+                onPressed: isConnecting ? null : onForget,
               ),
             ],
           ),
