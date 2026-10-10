@@ -3,17 +3,24 @@
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
 import '../../../../shared/widgets/app_button.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart';
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../data/services/pdf_return_builder.dart';
 import '../../domain/entities/return_receipt.dart';
 
 /// Opens the print dialog for a return receipt.
 ///
 /// Two paper sizes only: **80 mm** (thermal roll, default) and **A4**.
+///
+/// **Phase P-1b:** reads the user's print-font preferences and applies
+/// them to the rendered PDF.
 Future<void> showReturnPrintDialog({
   required BuildContext context,
   required ReturnReceipt receipt,
@@ -30,21 +37,38 @@ Future<void> showReturnPrintDialog({
 // Dialog
 // ============================================================================
 
-class _ReturnPrintDialog extends StatefulWidget {
+class _ReturnPrintDialog extends ConsumerStatefulWidget {
   const _ReturnPrintDialog({required this.receipt});
 
   final ReturnReceipt receipt;
 
   @override
-  State<_ReturnPrintDialog> createState() => _ReturnPrintDialogState();
+  ConsumerState<_ReturnPrintDialog> createState() =>
+      _ReturnPrintDialogState();
 }
 
-class _ReturnPrintDialogState extends State<_ReturnPrintDialog> {
+class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
   ReceiptPaperSize _selectedSize = ReceiptPaperSize.mm80;
   bool _isPrinting = false;
   bool _isSharing = false;
 
   bool get _isBusy => _isPrinting || _isSharing;
+
+  /// Reads the current user's style preferences from company settings.
+  PrintStyleSettings _readStyle() {
+    final CompanySettings? settings =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (settings == null) return const PrintStyleSettings.defaults();
+    // Returns are usually printed on thermal (58/80mm) or A4. We use the
+    // A4 scale for A4 and the thermal scale otherwise.
+    if (_selectedSize == ReceiptPaperSize.a4) {
+      return PrintStyleSettings(
+        fontScale: settings.printFontScaleA4,
+        fontWeight: settings.printFontWeight,
+      );
+    }
+    return PrintStyleSettings.fromCompanySettings(settings);
+  }
 
   Future<void> _print() async {
     setState(() => _isPrinting = true);
@@ -53,6 +77,7 @@ class _ReturnPrintDialogState extends State<_ReturnPrintDialog> {
       final Uint8List bytes = await PdfReturnBuilder.build(
         receipt: widget.receipt,
         size: _selectedSize,
+        style: _readStyle(),
       );
 
       await Printing.layoutPdf(
@@ -79,6 +104,7 @@ class _ReturnPrintDialogState extends State<_ReturnPrintDialog> {
       final Uint8List bytes = await PdfReturnBuilder.build(
         receipt: widget.receipt,
         size: _selectedSize,
+        style: _readStyle(),
       );
 
       await Printing.sharePdf(
@@ -105,9 +131,10 @@ class _ReturnPrintDialogState extends State<_ReturnPrintDialog> {
   }
 
   String _fileName() {
-    final String suffix = widget.receipt.returnNumber?.trim().isNotEmpty == true
-        ? widget.receipt.returnNumber!.trim()
-        : widget.receipt.returnId;
+    final String suffix =
+        widget.receipt.returnNumber?.trim().isNotEmpty == true
+            ? widget.receipt.returnNumber!.trim()
+            : widget.receipt.returnId;
     return 'return-$suffix.pdf';
   }
 
@@ -152,27 +179,19 @@ class _ReturnPrintDialogState extends State<_ReturnPrintDialog> {
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    _row(
-                      theme,
-                      label: 'رقم المرتجع',
-                      value: receipt.returnNumber ?? '—',
-                    ),
-                    _row(
-                      theme,
-                      label: 'عدد البنود',
-                      value: receipt.lineCount.toString(),
-                    ),
-                    _row(
-                      theme,
-                      label: 'طريقة الاسترداد',
-                      value: receipt.refundMethodLabel,
-                    ),
-                    _row(
-                      theme,
-                      label: 'إجمالي المرتجع',
-                      value: _formatMoney(receipt.total),
-                      emphasized: true,
-                    ),
+                    _row(theme,
+                        label: 'رقم المرتجع',
+                        value: receipt.returnNumber ?? '—'),
+                    _row(theme,
+                        label: 'عدد البنود',
+                        value: receipt.lineCount.toString()),
+                    _row(theme,
+                        label: 'طريقة الاسترداد',
+                        value: receipt.refundMethodLabel),
+                    _row(theme,
+                        label: 'إجمالي المرتجع',
+                        value: _formatMoney(receipt.total),
+                        emphasized: true),
                   ],
                 ),
               ),
