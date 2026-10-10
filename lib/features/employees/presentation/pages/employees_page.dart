@@ -3,20 +3,26 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../app/router.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/presentation/providers/members_providers.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
 import '../providers/employee_providers.dart';
 import '../widgets/employee_form_sheet.dart';
 
-/// Employees (Team) list page.
+/// Employees / Team page.
+///
+/// The AppBar "shield" action opens the permissions page — visible only
+/// when the current user is a manager (owner / admin / manager).
 class EmployeesPage extends ConsumerStatefulWidget {
   const EmployeesPage({super.key});
 
@@ -150,11 +156,19 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final AsyncValue<List<Employee>> async = ref.watch(employeesProvider);
     final bool includeInactive =
         ref.watch(employeesIncludeInactiveProvider);
+    final bool canManage = ref.watch(isManagerProvider);
 
     return AppShell(
       appBar: AppBar(
         title: const Text('الفريق'),
         actions: <Widget>[
+          if (canManage)
+            IconButton(
+              tooltip: 'الصلاحيات',
+              icon: const Icon(Icons.admin_panel_settings_outlined),
+              onPressed: () =>
+                  context.pushNamed(AppRouter.membersName),
+            ),
           IconButton(
             tooltip: includeInactive
                 ? 'إخفاء غير النشطين'
@@ -198,7 +212,6 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
           final int total = all.length;
           final int active =
               all.where((Employee e) => e.isActive).length;
-          final int inactive = total - active;
           final int withAccount =
               all.where((Employee e) => e.hasAccount).length;
 
@@ -210,7 +223,6 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                 child: _KpiRow(
                   total: total,
                   active: active,
-                  inactive: inactive,
                   withAccount: withAccount,
                   money: _money,
                   employees: all,
@@ -285,7 +297,6 @@ class _KpiRow extends StatelessWidget {
   const _KpiRow({
     required this.total,
     required this.active,
-    required this.inactive,
     required this.withAccount,
     required this.money,
     required this.employees,
@@ -293,7 +304,6 @@ class _KpiRow extends StatelessWidget {
 
   final int total;
   final int active;
-  final int inactive;
   final int withAccount;
   final NumberFormat money;
   final List<Employee> employees;
@@ -540,8 +550,7 @@ class _EmployeeCard extends StatelessWidget {
                     const SizedBox(height: 6),
                     if (employee.hasAccount)
                       _Badge(
-                        label:
-                            'حساب نشط: ${employee.loginCode ?? "—"}',
+                        label: 'حساب نشط: ${employee.loginCode ?? "—"}',
                         background: scheme.tertiaryContainer,
                         foreground: scheme.onTertiaryContainer,
                         icon: Icons.vpn_key_outlined,
@@ -706,7 +715,6 @@ class _CreateLoginDialogState extends ConsumerState<_CreateLoginDialog> {
   @override
   void initState() {
     super.initState();
-    // Suggested code: first name, lowercased, letters only.
     final String suggested = widget.employee.fullName
         .trim()
         .split(RegExp(r'\s+'))
