@@ -6,6 +6,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/repositories/company_settings_repository.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../../settings/presentation/widgets/print_font_settings_section.dart';
 import '../../data/services/esc_pos_test_ticket.dart';
 import '../../data/services/printer_service.dart';
@@ -17,11 +20,8 @@ import '../widgets/printer_scan_sheet.dart';
 ///
 /// Sections (top → bottom):
 /// 1. **الطابعة** — pick a default thermal printer, test it, or forget it.
-/// 2. **حجم وثقل الخط** — font size + weight for both thermal and A4.
-///
-/// The font settings section is always shown, even when no printer is
-/// configured, because it also affects A4 / PDF documents (reports,
-/// statements, etc.).
+/// 2. **الطباعة المباشرة** — toggle to skip the preview dialog.
+/// 3. **حجم وثقل الخط** — font size + weight for both thermal and A4.
 class PrinterSettingsPage extends ConsumerStatefulWidget {
   const PrinterSettingsPage({super.key});
 
@@ -32,15 +32,14 @@ class PrinterSettingsPage extends ConsumerStatefulWidget {
 
 class _PrinterSettingsPageState
     extends ConsumerState<PrinterSettingsPage> {
-  /// Local connection state, owned by this page (not the app session).
   bool _isConnecting = false;
   bool _isConnected = false;
   bool _isTesting = false;
+  bool _isSavingToggle = false;
 
   @override
   void initState() {
     super.initState();
-    // Try to reconnect to the saved printer as soon as the page opens.
     WidgetsBinding.instance.addPostFrameCallback((_) => _autoConnect());
   }
 
@@ -131,6 +130,25 @@ class _PrinterSettingsPageState
     }
   }
 
+  Future<void> _toggleDirectPrint(bool value) async {
+    if (_isSavingToggle) return;
+    setState(() => _isSavingToggle = true);
+
+    try {
+      await ref.read(companySettingsProvider.notifier).updateSettings(
+            printDirectEnabled: value,
+          );
+    } on CompanySettingsException catch (e) {
+      if (!mounted) return;
+      _snack(_settingsMessage(e.type));
+    } on Object {
+      if (!mounted) return;
+      _snack('تعذّر حفظ الإعداد. حاول مرة أخرى.');
+    } finally {
+      if (mounted) setState(() => _isSavingToggle = false);
+    }
+  }
+
   void _snack(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -151,6 +169,21 @@ class _PrinterSettingsPageState
         return 'حدث خطأ غير متوقع.';
     }
   }
+
+  static String _settingsMessage(CompanySettingsFailureType t) => switch (t) {
+        CompanySettingsFailureType.network =>
+          'تعذّر الاتصال بالخادم. تحقق من اتصالك.',
+        CompanySettingsFailureType.unauthorized =>
+          'لا تملك صلاحية تعديل الإعدادات.',
+        CompanySettingsFailureType.notFound => 'لم يتم العثور على الإعدادات.',
+        CompanySettingsFailureType.invalidTaxRate => 'قيمة غير صحيحة.',
+        CompanySettingsFailureType.invalidDiscountLimit => 'قيمة غير صحيحة.',
+        CompanySettingsFailureType.invalidFooter => 'قيمة غير صحيحة.',
+        CompanySettingsFailureType.invalidResponse =>
+          'تعذّر قراءة البيانات.',
+        CompanySettingsFailureType.unknown =>
+          'حدث خطأ غير متوقع. حاول مرة أخرى.',
+      };
 
   // ---------------------------------------------------------------------------
   // Build
@@ -178,7 +211,7 @@ class _PrinterSettingsPageState
     return ListView(
       padding: const EdgeInsets.only(top: 12, bottom: 24),
       children: <Widget>[
-        // ---- Printer section ----
+        // ---- Printer ----
         if (saved == null)
           _NoPrinterBody(onPick: _pickPrinter)
         else
@@ -195,7 +228,18 @@ class _PrinterSettingsPageState
 
         const SizedBox(height: 24),
 
-        // ---- Print font settings (always visible) ----
+        // ---- Direct print toggle ----
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: _DirectPrintToggle(
+            isSaving: _isSavingToggle,
+            onChanged: _toggleDirectPrint,
+          ),
+        ),
+
+        const SizedBox(height: 24),
+
+        // ---- Font settings ----
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 4),
           child: PrintFontSettingsSection(),
@@ -206,7 +250,52 @@ class _PrinterSettingsPageState
 }
 
 // ============================================================================
-// No printer configured
+// Direct print toggle
+// ============================================================================
+
+class _DirectPrintToggle extends ConsumerWidget {
+  const _DirectPrintToggle({
+    required this.isSaving,
+    required this.onChanged,
+  });
+
+  final bool isSaving;
+  final ValueChanged<bool> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool enabled =
+        ref.watch(companySettingsProvider).valueOrNull?.printDirectEnabled ??
+            false;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: SwitchListTile(
+        contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+        title: const Text('الطباعة المباشرة'),
+        subtitle: const Text(
+          'تجاوز حوار المعاينة واطبع فورًا. '
+          'يعمل على Android مع طابعة Bluetooth محفوظة أو طابعة نظام افتراضية.',
+        ),
+        value: enabled,
+        onChanged: isSaving ? null : onChanged,
+        secondary: Icon(
+          enabled ? Icons.flash_on : Icons.flash_off,
+          color: enabled ? scheme.primary : scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// No printer
 // ============================================================================
 
 class _NoPrinterBody extends StatelessWidget {
@@ -293,7 +382,6 @@ class _SavedPrinterBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        // ---- Current printer card ----
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: DecoratedBox(
@@ -353,7 +441,6 @@ class _SavedPrinterBody extends StatelessWidget {
 
         const SizedBox(height: 16),
 
-        // ---- Actions ----
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: Column(
