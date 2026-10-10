@@ -56,10 +56,8 @@ class CompanyLogoLoader {
           NetworkAssetBundle(Uri.parse(url));
       final ByteData data = await bundle.load(url);
       return data.buffer.asUint8List();
-    } on Object catch (e, s) {
+    } on Object catch (e) {
       AppLogger.warning('Logo download failed: $e');
-      // stack trace intentionally not logged (avoid noisy output on the
-      // POS hot path).
       return null;
     }
   }
