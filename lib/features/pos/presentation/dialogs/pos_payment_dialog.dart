@@ -15,6 +15,7 @@ import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/domain/repositories/sales_repository.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
+import '../../data/services/direct_print_service.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/entities/receipt.dart';
@@ -92,10 +93,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return value.toStringAsFixed(2);
   }
 
-  // ---------------------------------------------------------------------------
-  // Computed
-  // ---------------------------------------------------------------------------
-
   double get _inputAmount =>
       double.tryParse(_amountController.text.trim()) ?? 0;
 
@@ -139,14 +136,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   double _resultingBalance() =>
       _cart.customerBalance + _addedToBalance() - _appliedToBalance();
 
-  // ---------------------------------------------------------------------------
-  // Validation
-  // ---------------------------------------------------------------------------
-
   String? _validationError() {
-    if (_cart.isEmpty) {
-      return 'السلة فارغة. أضف منتجاً قبل الدفع.';
-    }
+    if (_cart.isEmpty) return 'السلة فارغة. أضف منتجاً قبل الدفع.';
     if (_method == PosPaymentMethod.credit) {
       if (!_cart.hasCustomer) {
         return 'البيع الآجل يتطلب اختيار عميل مسجل.';
@@ -170,13 +161,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return null;
   }
 
-  // ---------------------------------------------------------------------------
-  // Submit
-  // ---------------------------------------------------------------------------
-
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
-
     if (_validationError() != null) return;
 
     final CompanyContextState contextState =
@@ -218,10 +204,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
       final Sale confirmed = await notifier.confirmSale(sale.id);
 
-      // ── Phase T-5: record the sale payment leg so the DB trigger can
-      // post the matching cash movement. Only the portion actually applied
-      // to the sale (not the excess applied to customer balance) is
-      // recorded here; balance payments are recorded separately below.
       if (appliedToSale > 0) {
         final String method = _method == PosPaymentMethod.card
             ? 'card'
@@ -245,7 +227,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
             );
       }
 
-      // ── Phase T-4: refresh every screen affected by this sale ──
       DataInvalidation.afterSale(ref);
 
       if (!mounted) return;
@@ -333,10 +314,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       }
     });
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -904,7 +881,7 @@ class _ErrorBanner extends StatelessWidget {
 // Receipt dialog
 // ============================================================================
 
-class _PosReceiptDialog extends StatelessWidget {
+class _PosReceiptDialog extends ConsumerWidget {
   const _PosReceiptDialog({required this.receipt});
 
   final Receipt receipt;
@@ -916,8 +893,38 @@ class _PosReceiptDialog extends StatelessWidget {
   );
   static final DateFormat _dateTime = DateFormat.yMd('ar_EG').add_Hm();
 
+  /// Phase P-2: tries direct thermal printing first when enabled, then
+  /// falls back to the preview dialog on any failure or when disabled.
+  Future<void> _handlePrint(BuildContext context, WidgetRef ref) async {
+    final bool direct =
+        ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
+            false;
+
+    if (direct) {
+      final bool ok = await DirectPrintService.tryThermalReceipt(
+        ref: ref,
+        receipt: receipt,
+      );
+      if (ok && context.mounted) {
+        Navigator.of(context).pop();
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('تم إرسال الإيصال للطابعة.')),
+          );
+        return;
+      }
+    }
+
+    if (!context.mounted) return;
+    await showPosPrintPreviewDialog(
+      context: context,
+      receipt: receipt,
+    );
+  }
+
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
@@ -1038,10 +1045,7 @@ class _PosReceiptDialog extends StatelessWidget {
                       child: AppButton(
                         label: 'طباعة',
                         icon: Icons.print_outlined,
-                        onPressed: () => showPosPrintPreviewDialog(
-                          context: context,
-                          receipt: receipt,
-                        ),
+                        onPressed: () => _handlePrint(context, ref),
                       ),
                     ),
                     const SizedBox(width: 8),
