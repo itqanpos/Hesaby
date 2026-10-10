@@ -16,8 +16,9 @@ import '../../domain/entities/receipt.dart';
 /// bytes prints garbage. Rasterising the receipt guarantees the output
 /// matches what the user sees, at the cost of a slightly slower transfer.
 ///
-/// The layout mirrors `PdfReceiptBuilder` visually: same sections, same
-/// column order, same formatting — just drawn in raw pixels.
+/// **Phase P-1a:** an optional [logoBytes] image is drawn centered at the
+/// top of the receipt. Callers load it from the local [LogoCacheService]
+/// (or from the network on cache miss) and pass it here.
 abstract final class EscPosReceiptBuilder {
   // ---- ESC/POS control sequences ----
   static const List<int> _init = <int>[0x1B, 0x40]; // ESC @ (initialize)
@@ -40,9 +41,15 @@ abstract final class EscPosReceiptBuilder {
   /// Builds the full ESC/POS byte stream for [receipt].
   ///
   /// [paperWidthDots] must be [widthMm80] or [widthMm58].
+  ///
+  /// [logoBytes] is an optional PNG / JPG / WEBP image that will be drawn
+  /// at the top of the receipt, centered. Pass `null` when no logo is
+  /// configured. Decoding failures are silently ignored so a corrupt logo
+  /// never prevents a sale receipt from printing.
   static Future<List<int>> build({
     required Receipt receipt,
     int paperWidthDots = widthMm80,
+    Uint8List? logoBytes,
   }) async {
     await _ensureFonts();
 
@@ -55,7 +62,7 @@ abstract final class EscPosReceiptBuilder {
       regularFamily: _regularFamily!,
       boldFamily: _boldFamily!,
     );
-    painter.paint(receipt);
+    await painter.paint(receipt, logoBytes);
 
     final ui.Picture picture = recorder.endRecording();
     final ui.Image image = await picture.toImage(
@@ -98,9 +105,6 @@ abstract final class EscPosReceiptBuilder {
   // ---------------------------------------------------------------------------
 
   /// Converts a rendered [ui.Image] into a `GS v 0` raster command.
-  ///
-  /// Each byte encodes 8 horizontal pixels, MSB leftmost. A pixel is
-  /// considered black when its luminance is below [threshold].
   static Future<List<int>> _encodeRaster(ui.Image image) async {
     final ByteData? byteData = await image.toByteData(
       format: ui.ImageByteFormat.rawRgba,
@@ -156,11 +160,6 @@ abstract final class EscPosReceiptBuilder {
 // Painter
 // ============================================================================
 
-/// Draws a [Receipt] on a canvas at `paperWidthDots × variable height`.
-///
-/// Everything scales with `paperWidthDots / 576` so the same code works
-/// for 80 mm and 58 mm rolls. The painter tracks the vertical cursor and
-/// exposes [totalHeight] once painting is done.
 class _Painter {
   _Painter({
     required this.canvas,
@@ -191,8 +190,19 @@ class _Painter {
   // Entry
   // ---------------------------------------------------------------------------
 
-  void paint(Receipt r) {
+  Future<void> paint(Receipt r, Uint8List? logoBytes) async {
     _y = _paddingTop;
+
+    // ---- Logo (optional) ----
+    if (logoBytes != null && logoBytes.isNotEmpty) {
+      final ui.Image? logo = await _decodeImage(logoBytes);
+      if (logo != null) {
+        _drawLogo(logo);
+        logo.dispose();
+        _gap(_sectionGap);
+      }
+      // If decoding failed, we silently continue without a logo.
+    }
 
     _header(r);
     _gap(_sectionGap);
@@ -215,6 +225,51 @@ class _Painter {
     _divider();
     _gap(_sectionGap);
     _footer(r);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Logo
+  // ---------------------------------------------------------------------------
+
+  Future<ui.Image?> _decodeImage(Uint8List bytes) async {
+    try {
+      final ui.Codec codec = await ui.instantiateImageCodec(bytes);
+      final ui.FrameInfo info = await codec.getNextFrame();
+      return info.image;
+    } on Object {
+      return null;
+    }
+  }
+
+  /// Draws the logo centered, preserving aspect ratio.
+  ///
+  /// Width is capped at 55% of the printable content width (≈ 300 dots on
+  /// 80 mm paper). Height is capped at 140 scaled dots so a very tall logo
+  /// does not eat half the receipt.
+  void _drawLogo(ui.Image logo) {
+    final double targetW = _contentWidth * 0.55;
+    final double ratio = logo.height / logo.width;
+    final double naturalH = targetW * ratio;
+
+    final double maxH = 140 * _scale;
+    final double targetH = naturalH > maxH ? maxH : naturalH;
+    final double finalW = targetH / ratio;
+
+    final double x = _paddingH + (_contentWidth - finalW) / 2;
+
+    canvas.drawImageRect(
+      logo,
+      Rect.fromLTWH(
+        0,
+        0,
+        logo.width.toDouble(),
+        logo.height.toDouble(),
+      ),
+      Rect.fromLTWH(x, _y, finalW, targetH),
+      Paint()..filterQuality = FilterQuality.high,
+    );
+
+    _y += targetH;
   }
 
   // ---------------------------------------------------------------------------
@@ -258,7 +313,6 @@ class _Painter {
     final double colTotalW = w * 0.24;
     final double colNameW = w - colNumW - colQtyW - colPriceW - colTotalW;
 
-    // Header row
     _row(
       cells: <_Cell>[
         _Cell('الإجمالي',
@@ -278,7 +332,6 @@ class _Painter {
       backgroundColor: const Color(0xFFDDDDDD),
     );
 
-    // Item rows
     for (int i = 0; i < r.lines.length; i++) {
       final ReceiptLine line = r.lines[i];
       final Color? bg = i.isOdd ? const Color(0xFFF2F2F2) : null;
@@ -302,7 +355,6 @@ class _Painter {
       );
     }
 
-    // Subtotal row
     _row(
       cells: <_Cell>[
         _Cell(_money(r.subtotal),
@@ -528,7 +580,6 @@ class _Painter {
       );
     }
 
-    // RTL column order: first cell on the right.
     double x = _paddingH + _contentWidth;
     for (int i = 0; i < cells.length; i++) {
       final _Cell cell = cells[i];
@@ -538,7 +589,6 @@ class _Painter {
       painter.paint(canvas, Offset(x + 2 * _scale, contentY));
     }
 
-    // Bottom border of the row
     canvas.drawRect(
       Rect.fromLTWH(
         _paddingH,
