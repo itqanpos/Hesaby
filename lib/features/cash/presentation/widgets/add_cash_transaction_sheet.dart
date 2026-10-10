@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../shared/widgets/app_button.dart';
 import '../../domain/entities/cash_entities.dart';
@@ -14,7 +13,7 @@ import '../providers/cash_providers.dart';
 ///
 /// The user picks the account, the direction (in / out), the category, and
 /// the amount. Everything else is optional. On success the sheet closes and
-/// returns the created [CashTransaction], or `null` when dismissed.
+/// the caller refreshes through the invalidated providers.
 Future<CashTransaction?> showAddCashTransactionSheet({
   required BuildContext context,
   String? initialAccountId,
@@ -58,12 +57,6 @@ class _AddCashTransactionSheetState
   String? _categoryId;
   bool _isSubmitting = false;
   CashFailureType? _failure;
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
 
   @override
   void initState() {
@@ -114,7 +107,7 @@ class _AddCashTransactionSheetState
           );
 
       if (!mounted) return;
-      Navigator.of(context).pop(null); // caller refreshes via providers
+      Navigator.of(context).pop(null);
     } on CashException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -149,7 +142,6 @@ class _AddCashTransactionSheetState
     final List<CashAccount> accounts =
         accountsAsync.valueOrNull ?? const <CashAccount>[];
 
-    // Auto-select the first account if none chosen.
     if (_accountId == null && accounts.isNotEmpty) {
       _accountId = accounts.first.id;
     }
@@ -221,7 +213,8 @@ class _AddCashTransactionSheetState
                   )
                 else
                   DropdownButtonFormField<String>(
-                    value: _accountId,
+                    key: ValueKey<String>('account-${_accountId ?? ''}'),
+                    initialValue: _accountId,
                     decoration: const InputDecoration(
                       labelText: 'الحساب',
                       border: OutlineInputBorder(),
@@ -270,7 +263,8 @@ class _AddCashTransactionSheetState
 
                 // ---- Category ----
                 DropdownButtonFormField<String>(
-                  value: _categoryId,
+                  key: ValueKey<String>('category-${_categoryId ?? ''}'),
+                  initialValue: _categoryId,
                   isExpanded: true,
                   decoration: const InputDecoration(
                     labelText: 'التصنيف (اختياري)',
