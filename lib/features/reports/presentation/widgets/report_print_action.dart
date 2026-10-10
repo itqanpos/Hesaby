@@ -9,19 +9,21 @@ import 'package:printing/printing.dart' show Printing;
 
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../data/services/pdf_report_builder.dart';
 import '../../domain/entities/report_document.dart';
 
 /// A button that opens a print / share dialog for a [ReportDocument].
 ///
-/// Company and branch names are injected from the current company context
-/// just before printing, so individual report pages do not need to read
-/// the context themselves.
+/// **Phase P-1b:** reads the user's print-font preferences (A4 scale) and
+/// passes them to the PDF builder.
 class ReportPrintAction extends ConsumerWidget {
   const ReportPrintAction({super.key, required this.documentBuilder});
 
   /// Called every time the user taps the button. Returning `null` disables
-  /// the action silently — use it when the report has no printable data.
+  /// the action silently.
   final ReportDocument? Function() documentBuilder;
 
   @override
@@ -42,8 +44,6 @@ class ReportPrintAction extends ConsumerWidget {
           return;
         }
 
-        // Inject the current company / branch names, falling back to
-        // whatever the report page provided if the context is empty.
         final CompanyContextState ctx =
             ref.read(companyContextProvider);
         final ReportDocument doc = raw.copyWith(
@@ -51,11 +51,21 @@ class ReportPrintAction extends ConsumerWidget {
           branchName: ctx.currentBranch?.name ?? raw.branchName,
         );
 
+        // Reports are always A4, so we use the A4 font scale.
+        final CompanySettings? settings =
+            ref.read(companySettingsProvider).valueOrNull;
+        final PrintStyleSettings style = settings == null
+            ? const PrintStyleSettings.defaults()
+            : PrintStyleSettings(
+                fontScale: settings.printFontScaleA4,
+                fontWeight: settings.printFontWeight,
+              );
+
         showDialog<void>(
           context: context,
           barrierDismissible: true,
           builder: (BuildContext dialogContext) =>
-              _PrintDialog(document: doc),
+              _PrintDialog(document: doc, style: style),
         );
       },
     );
@@ -67,9 +77,13 @@ class ReportPrintAction extends ConsumerWidget {
 // ============================================================================
 
 class _PrintDialog extends StatefulWidget {
-  const _PrintDialog({required this.document});
+  const _PrintDialog({
+    required this.document,
+    required this.style,
+  });
 
   final ReportDocument document;
+  final PrintStyleSettings style;
 
   @override
   State<_PrintDialog> createState() => _PrintDialogState();
@@ -92,8 +106,10 @@ class _PrintDialogState extends State<_PrintDialog> {
   Future<void> _print() async {
     setState(() => _isPrinting = true);
     try {
-      final Uint8List bytes =
-          await PdfReportBuilder.build(document: widget.document);
+      final Uint8List bytes = await PdfReportBuilder.build(
+        document: widget.document,
+        style: widget.style,
+      );
       await Printing.layoutPdf(
         name: _fileName,
         onLayout: (PdfPageFormat _) => bytes,
@@ -111,8 +127,10 @@ class _PrintDialogState extends State<_PrintDialog> {
   Future<void> _share() async {
     setState(() => _isSharing = true);
     try {
-      final Uint8List bytes =
-          await PdfReportBuilder.build(document: widget.document);
+      final Uint8List bytes = await PdfReportBuilder.build(
+        document: widget.document,
+        style: widget.style,
+      );
       await Printing.sharePdf(bytes: bytes, filename: _fileName);
       if (!mounted) return;
       Navigator.of(context).pop();
