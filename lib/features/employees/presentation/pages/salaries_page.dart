@@ -22,8 +22,8 @@ import '../widgets/salary_form_sheet.dart';
 /// 1. Month selector.
 /// 2. KPI row (count / total / paid / unpaid).
 /// 3. List of salaries for the selected month.
-/// 4. FAB: "Generate drafts" (creates rows for active employees that
-///    do not yet have one for this month) OR "Add manually".
+/// 4. FAB: "Generate drafts" — creates rows for active employees that do
+///    not yet have one for this month.
 class SalariesPage extends ConsumerWidget {
   const SalariesPage({super.key});
 
@@ -97,7 +97,7 @@ class SalariesPage extends ConsumerWidget {
         actions: <Widget>[
           AppButton(
             label: 'إلغاء',
-            variant: AppButtonButtonVariant.text,
+            variant: AppButtonVariant.text,
             onPressed: () => Navigator.of(ctx).pop(false),
           ),
           AppButton(
@@ -176,7 +176,8 @@ class SalariesPage extends ConsumerWidget {
         ref.watch(employeesProvider);
     final DateTime month = ref.watch(salaryMonthProvider);
 
-    final bool anyLoading = salariesAsync.isLoading || employeesAsync.isLoading;
+    final bool anyLoading =
+        salariesAsync.isLoading || employeesAsync.isLoading;
     final Object? firstError = salariesAsync.error ?? employeesAsync.error;
 
     return AppShell(
@@ -334,7 +335,8 @@ class _MonthSelector extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final DateTime now = DateTime.now();
-    final bool isCurrentMonth = month.year == now.year && month.month == now.month;
+    final bool isCurrentMonth =
+        month.year == now.year && month.month == now.month;
     final bool canGoNext = !isCurrentMonth;
 
     return DecoratedBox(
