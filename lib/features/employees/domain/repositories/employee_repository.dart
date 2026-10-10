@@ -34,7 +34,6 @@ class EmployeeException extends Equatable implements Exception {
 }
 
 abstract interface class EmployeeRepository {
-  /// Returns every employee of [companyId], newest first.
   Future<List<Employee>> listEmployees(
     String companyId, {
     bool includeInactive = false,
@@ -50,6 +49,7 @@ abstract interface class EmployeeRepository {
     String? position,
     DateTime? hireDate,
     String? notes,
+    String? companyMemberId,
   });
 
   Future<Employee> updateEmployee({
@@ -69,6 +69,8 @@ abstract interface class EmployeeRepository {
     String? notes,
     bool clearNotes = false,
     bool? isActive,
+    String? companyMemberId,
+    bool clearCompanyMember = false,
   });
 
   Future<void> deleteEmployee(String employeeId);
