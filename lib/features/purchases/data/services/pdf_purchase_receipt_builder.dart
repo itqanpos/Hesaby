@@ -8,24 +8,15 @@ import 'package:printing/printing.dart';
 
 import '../../../pos/data/services/pdf_receipt_builder.dart'
     show ReceiptPaperSize;
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/purchase_receipt.dart';
 
 /// Builds a PDF document from a [PurchaseReceipt].
 ///
-/// Layout mirrors `PdfReceiptBuilder` (POS sale receipt) visually so the two
-/// documents are consistent when printed side by side:
-/// * Centred company name + branch.
-/// * Boxed title "فاتورة مشتريات".
-/// * Info block (invoice #, date, supplier, status).
-/// * Bordered 5-column items table (الإجمالي / التكلفة / الكمية / الصنف / م).
-/// * Grand-total band, then subtotal / discount / tax breakdown.
-/// * Optional supplier contact and notes.
-/// * Custom footer from `company_settings.receipt_footer`.
+/// **Phase P-1b:** accepts an optional [PrintStyleSettings] that scales
+/// every font size and selects a base weight.
 abstract final class PdfPurchaseReceiptBuilder {
-  // ---------------------------------------------------------------------------
-  // Font cache
-  // ---------------------------------------------------------------------------
-
   static Future<pw.Font>? _regularFontFuture;
   static Future<pw.Font>? _boldFontFuture;
 
@@ -34,10 +25,6 @@ abstract final class PdfPurchaseReceiptBuilder {
 
   static Future<pw.Font> _boldFont() =>
       _boldFontFuture ??= PdfGoogleFonts.cairoBold();
-
-  // ---------------------------------------------------------------------------
-  // Constants
-  // ---------------------------------------------------------------------------
 
   static const List<String> _arabicDays = <String>[
     'الإثنين',
@@ -51,10 +38,6 @@ abstract final class PdfPurchaseReceiptBuilder {
 
   static const String _defaultFooter = 'شكرًا لتعاملكم معنا';
   static const String _currency = 'ج.م';
-
-  // ---------------------------------------------------------------------------
-  // Thermal sizing
-  // ---------------------------------------------------------------------------
 
   static const double _thermalFixedMm = 130;
   static const double _thermalPerLineMm = 14;
@@ -73,6 +56,7 @@ abstract final class PdfPurchaseReceiptBuilder {
   static Future<Uint8List> build({
     required PurchaseReceipt receipt,
     required ReceiptPaperSize size,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   }) async {
     final pw.ThemeData theme = await _loadTheme();
 
@@ -113,6 +97,7 @@ abstract final class PdfPurchaseReceiptBuilder {
         build: (pw.Context context) => _buildContent(
           receipt: receipt,
           paperSize: size,
+          style: style,
         ),
       ),
     );
@@ -120,14 +105,21 @@ abstract final class PdfPurchaseReceiptBuilder {
     return document.save();
   }
 
-  // ---------------------------------------------------------------------------
-  // Fonts
-  // ---------------------------------------------------------------------------
-
   static Future<pw.ThemeData> _loadTheme() async {
     final pw.Font regular = await _regularFont();
     final pw.Font bold = await _boldFont();
     return pw.ThemeData.withFont(base: regular, bold: bold);
+  }
+
+  /// Maps a semantic [PrintFontWeight] + emphasis flag to a `pdf` weight.
+  static pw.FontWeight _weight({
+    required PrintFontWeight userWeight,
+    required bool emphasized,
+  }) {
+    if (emphasized || userWeight == PrintFontWeight.bold) {
+      return pw.FontWeight.bold;
+    }
+    return pw.FontWeight.normal;
   }
 
   // ---------------------------------------------------------------------------
@@ -137,37 +129,38 @@ abstract final class PdfPurchaseReceiptBuilder {
   static List<pw.Widget> _buildContent({
     required PurchaseReceipt receipt,
     required ReceiptPaperSize paperSize,
+    required PrintStyleSettings style,
   }) {
-    final _Sizes s = _Sizes.forSize(paperSize);
+    final _Sizes s = _Sizes.forSize(paperSize, scale: style.fontScale);
 
     return <pw.Widget>[
-      _header(receipt, s),
+      _header(receipt, s, style),
       pw.SizedBox(height: s.sectionGap),
-      _metaBlock(receipt, s),
+      _metaBlock(receipt, s, style),
       pw.SizedBox(height: s.sectionGap),
       _divider(double: true),
       pw.SizedBox(height: s.sectionGap),
-      _itemsTable(receipt, s),
+      _itemsTable(receipt, s, style),
       pw.SizedBox(height: s.sectionGap),
-      _grandTotal(receipt, s),
+      _grandTotal(receipt, s, style),
       pw.SizedBox(height: s.sectionGap),
-      _totalsBreakdown(receipt, s),
+      _totalsBreakdown(receipt, s, style),
       if (receipt.hasSupplierContact) ...<pw.Widget>[
         pw.SizedBox(height: s.sectionGap),
         _divider(),
         pw.SizedBox(height: s.sectionGap),
-        _supplierContact(receipt, s),
+        _supplierContact(receipt, s, style),
       ],
       if (receipt.hasNotes) ...<pw.Widget>[
         pw.SizedBox(height: s.sectionGap),
         _divider(),
         pw.SizedBox(height: s.sectionGap),
-        _notesBlock(receipt, s),
+        _notesBlock(receipt, s, style),
       ],
       pw.SizedBox(height: s.sectionGap * 1.5),
       _divider(),
       pw.SizedBox(height: s.sectionGap),
-      _footer(receipt, s),
+      _footer(receipt, s, style),
     ];
   }
 
@@ -175,7 +168,11 @@ abstract final class PdfPurchaseReceiptBuilder {
   // Header
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _header(PurchaseReceipt receipt, _Sizes s) {
+  static pw.Widget _header(
+    PurchaseReceipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
@@ -184,7 +181,10 @@ abstract final class PdfPurchaseReceiptBuilder {
             receipt.companyName,
             style: pw.TextStyle(
               fontSize: s.companyName,
-              fontWeight: pw.FontWeight.bold,
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: true,
+              ),
               letterSpacing: 0.3,
             ),
             textAlign: pw.TextAlign.center,
@@ -197,6 +197,10 @@ abstract final class PdfPurchaseReceiptBuilder {
             style: pw.TextStyle(
               fontSize: s.branchName,
               color: PdfColors.grey700,
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: false,
+              ),
             ),
             textAlign: pw.TextAlign.center,
           ),
@@ -209,10 +213,7 @@ abstract final class PdfPurchaseReceiptBuilder {
               vertical: 5,
             ),
             decoration: pw.BoxDecoration(
-              border: pw.Border.all(
-                color: PdfColors.black,
-                width: 1,
-              ),
+              border: pw.Border.all(color: PdfColors.black, width: 1),
               borderRadius: const pw.BorderRadius.all(
                 pw.Radius.circular(3),
               ),
@@ -221,7 +222,10 @@ abstract final class PdfPurchaseReceiptBuilder {
               'فاتورة مشتريات',
               style: pw.TextStyle(
                 fontSize: s.title,
-                fontWeight: pw.FontWeight.bold,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: true,
+                ),
                 letterSpacing: 0.5,
               ),
             ),
@@ -235,7 +239,11 @@ abstract final class PdfPurchaseReceiptBuilder {
   // Meta
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _metaBlock(PurchaseReceipt receipt, _Sizes s) {
+  static pw.Widget _metaBlock(
+    PurchaseReceipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
@@ -243,15 +251,17 @@ abstract final class PdfPurchaseReceiptBuilder {
           'رقم الفاتورة',
           receipt.invoiceNumber ?? '—',
           s,
-          boldValue: true,
+          style,
+          emphasized: true,
         ),
         _metaRow(
           'التاريخ',
           _formatDayAndDate(receipt.purchaseDate),
           s,
+          style,
         ),
-        _metaRow('المورد', receipt.supplierName, s),
-        _metaRow('الحالة', _statusLabel(receipt.status), s),
+        _metaRow('المورد', receipt.supplierName, s, style),
+        _metaRow('الحالة', _statusLabel(receipt.status), s, style),
       ],
     );
   }
@@ -259,8 +269,9 @@ abstract final class PdfPurchaseReceiptBuilder {
   static pw.Widget _metaRow(
     String label,
     String value,
-    _Sizes s, {
-    bool boldValue = false,
+    _Sizes s,
+    PrintStyleSettings style, {
+    bool emphasized = false,
   }) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
@@ -273,7 +284,10 @@ abstract final class PdfPurchaseReceiptBuilder {
               '$label:',
               style: pw.TextStyle(
                 fontSize: s.meta,
-                fontWeight: pw.FontWeight.bold,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: true,
+                ),
               ),
             ),
           ),
@@ -282,9 +296,10 @@ abstract final class PdfPurchaseReceiptBuilder {
               value,
               style: pw.TextStyle(
                 fontSize: s.meta,
-                fontWeight: boldValue
-                    ? pw.FontWeight.bold
-                    : pw.FontWeight.normal,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: emphasized,
+                ),
               ),
               textAlign: pw.TextAlign.left,
               softWrap: true,
@@ -299,14 +314,18 @@ abstract final class PdfPurchaseReceiptBuilder {
   // Items table
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _itemsTable(PurchaseReceipt receipt, _Sizes s) {
+  static pw.Widget _itemsTable(
+    PurchaseReceipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     final Map<int, pw.TableColumnWidth> columnWidths =
         <int, pw.TableColumnWidth>{
-      0: pw.FlexColumnWidth(1.4), // الإجمالي
-      1: pw.FlexColumnWidth(1.2), // التكلفة
-      2: pw.FlexColumnWidth(1.3), // الكمية
-      3: pw.FlexColumnWidth(3.0), // الصنف
-      4: pw.FixedColumnWidth(s.rowNumWidth), // م
+      0: pw.FlexColumnWidth(1.4),
+      1: pw.FlexColumnWidth(1.2),
+      2: pw.FlexColumnWidth(1.3),
+      3: pw.FlexColumnWidth(3.0),
+      4: pw.FixedColumnWidth(s.rowNumWidth),
     };
 
     final List<pw.TableRow> rows = <pw.TableRow>[
@@ -314,15 +333,34 @@ abstract final class PdfPurchaseReceiptBuilder {
         decoration: const pw.BoxDecoration(color: PdfColors.grey300),
         children: <pw.Widget>[
           _cell('الإجمالي',
-              fontSize: s.tableHeader, bold: true, center: true, s: s),
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
           _cell('التكلفة',
-              fontSize: s.tableHeader, bold: true, center: true, s: s),
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
           _cell('الكمية',
-              fontSize: s.tableHeader, bold: true, center: true, s: s),
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
           _cell('الصنف',
-              fontSize: s.tableHeader, bold: true, s: s),
+              fontSize: s.tableHeader,
+              emphasized: true,
+              s: s,
+              style: style),
           _cell('م',
-              fontSize: s.tableHeader, bold: true, center: true, s: s),
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
         ],
       ),
     ];
@@ -337,14 +375,28 @@ abstract final class PdfPurchaseReceiptBuilder {
               : null,
           children: <pw.Widget>[
             _cell(_money(line.lineTotal),
-                fontSize: s.tableRow, bold: true, center: true, s: s),
+                fontSize: s.tableRow,
+                emphasized: true,
+                center: true,
+                s: s,
+                style: style),
             _cell(_money(line.unitCost),
-                fontSize: s.tableRow, center: true, s: s),
+                fontSize: s.tableRow,
+                center: true,
+                s: s,
+                style: style),
             _cell('${_qty(line.quantity)} ${line.unitName}',
-                fontSize: s.tableRow, center: true, s: s),
-            _cell(line.productName, fontSize: s.tableRow, s: s),
+                fontSize: s.tableRow,
+                center: true,
+                s: s,
+                style: style),
+            _cell(line.productName,
+                fontSize: s.tableRow, s: s, style: style),
             _cell('${i + 1}',
-                fontSize: s.tableRow, center: true, s: s),
+                fontSize: s.tableRow,
+                center: true,
+                s: s,
+                style: style),
           ],
         ),
       );
@@ -355,13 +407,23 @@ abstract final class PdfPurchaseReceiptBuilder {
         decoration: const pw.BoxDecoration(color: PdfColors.grey200),
         children: <pw.Widget>[
           _cell(_money(receipt.subtotal),
-              fontSize: s.tableRow, bold: true, center: true, s: s),
-          _cell('', fontSize: s.tableRow, s: s),
+              fontSize: s.tableRow,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell('', fontSize: s.tableRow, s: s, style: style),
           _cell('${receipt.lines.length}',
-              fontSize: s.tableRow, center: true, s: s),
+              fontSize: s.tableRow,
+              center: true,
+              s: s,
+              style: style),
           _cell('المجموع الفرعي',
-              fontSize: s.tableRow, bold: true, s: s),
-          _cell('', fontSize: s.tableRow, s: s),
+              fontSize: s.tableRow,
+              emphasized: true,
+              s: s,
+              style: style),
+          _cell('', fontSize: s.tableRow, s: s, style: style),
         ],
       ),
     );
@@ -381,7 +443,8 @@ abstract final class PdfPurchaseReceiptBuilder {
     String text, {
     required double fontSize,
     required _Sizes s,
-    bool bold = false,
+    required PrintStyleSettings style,
+    bool emphasized = false,
     bool center = false,
   }) {
     return pw.Padding(
@@ -393,7 +456,10 @@ abstract final class PdfPurchaseReceiptBuilder {
         text,
         style: pw.TextStyle(
           fontSize: fontSize,
-          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          fontWeight: _weight(
+            userWeight: style.fontWeight,
+            emphasized: emphasized,
+          ),
         ),
         textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
         softWrap: true,
@@ -405,7 +471,11 @@ abstract final class PdfPurchaseReceiptBuilder {
   // Grand total
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _grandTotal(PurchaseReceipt receipt, _Sizes s) {
+  static pw.Widget _grandTotal(
+    PurchaseReceipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     return pw.Container(
       padding: pw.EdgeInsets.symmetric(
         horizontal: s.cellPadH * 2,
@@ -422,7 +492,10 @@ abstract final class PdfPurchaseReceiptBuilder {
               'إجمالي الفاتورة',
               style: pw.TextStyle(
                 fontSize: s.grandTotal,
-                fontWeight: pw.FontWeight.bold,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: true,
+                ),
               ),
             ),
           ),
@@ -430,7 +503,10 @@ abstract final class PdfPurchaseReceiptBuilder {
             _money(receipt.total),
             style: pw.TextStyle(
               fontSize: s.grandTotal,
-              fontWeight: pw.FontWeight.bold,
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: true,
+              ),
             ),
           ),
         ],
@@ -442,15 +518,19 @@ abstract final class PdfPurchaseReceiptBuilder {
   // Totals breakdown
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _totalsBreakdown(PurchaseReceipt receipt, _Sizes s) {
+  static pw.Widget _totalsBreakdown(
+    PurchaseReceipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
-        _kvRow('المجموع الفرعي', _money(receipt.subtotal), s),
+        _kvRow('المجموع الفرعي', _money(receipt.subtotal), s, style),
         if (receipt.hasDiscount)
-          _kvRow('الخصم', _money(receipt.discount), s),
+          _kvRow('الخصم', _money(receipt.discount), s, style),
         if (receipt.hasTax)
-          _kvRow('الضريبة', _money(receipt.taxAmount), s),
+          _kvRow('الضريبة', _money(receipt.taxAmount), s, style),
       ],
     );
   }
@@ -459,7 +539,11 @@ abstract final class PdfPurchaseReceiptBuilder {
   // Supplier contact
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _supplierContact(PurchaseReceipt receipt, _Sizes s) {
+  static pw.Widget _supplierContact(
+    PurchaseReceipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
@@ -467,18 +551,21 @@ abstract final class PdfPurchaseReceiptBuilder {
           'بيانات المورد',
           style: pw.TextStyle(
             fontSize: s.kvLabel,
-            fontWeight: pw.FontWeight.bold,
+            fontWeight: _weight(
+              userWeight: style.fontWeight,
+              emphasized: true,
+            ),
           ),
         ),
         pw.SizedBox(height: 4),
         if (receipt.supplierPhone != null &&
             receipt.supplierPhone!.trim().isNotEmpty)
-          _kvRow('الهاتف', receipt.supplierPhone!, s),
+          _kvRow('الهاتف', receipt.supplierPhone!, s, style),
         if (receipt.supplierEmail != null &&
             receipt.supplierEmail!.trim().isNotEmpty)
-          _kvRow('البريد', receipt.supplierEmail!, s),
+          _kvRow('البريد', receipt.supplierEmail!, s, style),
         if (receipt.hasSupplierAddress)
-          _kvRow('العنوان', receipt.supplierAddress!, s),
+          _kvRow('العنوان', receipt.supplierAddress!, s, style),
       ],
     );
   }
@@ -487,7 +574,11 @@ abstract final class PdfPurchaseReceiptBuilder {
   // Notes
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _notesBlock(PurchaseReceipt receipt, _Sizes s) {
+  static pw.Widget _notesBlock(
+    PurchaseReceipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
@@ -495,13 +586,22 @@ abstract final class PdfPurchaseReceiptBuilder {
           'ملاحظات',
           style: pw.TextStyle(
             fontSize: s.kvLabel,
-            fontWeight: pw.FontWeight.bold,
+            fontWeight: _weight(
+              userWeight: style.fontWeight,
+              emphasized: true,
+            ),
           ),
         ),
         pw.SizedBox(height: 3),
         pw.Text(
           receipt.notes!,
-          style: pw.TextStyle(fontSize: s.kvValue),
+          style: pw.TextStyle(
+            fontSize: s.kvValue,
+            fontWeight: _weight(
+              userWeight: style.fontWeight,
+              emphasized: false,
+            ),
+          ),
           softWrap: true,
         ),
       ],
@@ -515,7 +615,8 @@ abstract final class PdfPurchaseReceiptBuilder {
   static pw.Widget _kvRow(
     String label,
     String value,
-    _Sizes s, {
+    _Sizes s,
+    PrintStyleSettings style, {
     bool emphasized = false,
   }) {
     return pw.Padding(
@@ -527,7 +628,10 @@ abstract final class PdfPurchaseReceiptBuilder {
               label,
               style: pw.TextStyle(
                 fontSize: s.kvLabel,
-                fontWeight: pw.FontWeight.bold,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: true,
+                ),
               ),
             ),
           ),
@@ -535,8 +639,10 @@ abstract final class PdfPurchaseReceiptBuilder {
             value,
             style: pw.TextStyle(
               fontSize: emphasized ? s.kvValueLarge : s.kvValue,
-              fontWeight:
-                  emphasized ? pw.FontWeight.bold : pw.FontWeight.normal,
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: emphasized,
+              ),
             ),
             textAlign: pw.TextAlign.left,
           ),
@@ -549,7 +655,11 @@ abstract final class PdfPurchaseReceiptBuilder {
   // Footer
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _footer(PurchaseReceipt receipt, _Sizes s) {
+  static pw.Widget _footer(
+    PurchaseReceipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     return pw.Center(
       child: pw.Text(
         _footerText(receipt),
@@ -557,6 +667,10 @@ abstract final class PdfPurchaseReceiptBuilder {
           fontSize: s.footer,
           color: PdfColors.grey700,
           fontStyle: pw.FontStyle.italic,
+          fontWeight: _weight(
+            userWeight: style.fontWeight,
+            emphasized: false,
+          ),
         ),
         textAlign: pw.TextAlign.center,
       ),
@@ -627,7 +741,6 @@ abstract final class PdfPurchaseReceiptBuilder {
     return buf.toString();
   }
 
-  /// Returns `"الأحد  2026/10/09  02:55 م"`.
   static String _formatDayAndDate(DateTime value) {
     final DateTime local = value.toLocal();
     final int wd = local.weekday;
@@ -681,64 +794,68 @@ class _Sizes {
     required this.sectionGap,
   });
 
-  factory _Sizes.forSize(ReceiptPaperSize size) {
+  factory _Sizes.forSize(
+    ReceiptPaperSize size, {
+    double scale = 1.0,
+  }) {
+    final double s = scale.clamp(0.8, 1.6);
     switch (size) {
       case ReceiptPaperSize.mm58:
-        return const _Sizes(
-          companyName: 12,
-          branchName: 8,
-          title: 9,
-          meta: 7.5,
-          metaLabelWidth: 62,
-          tableHeader: 7,
-          tableRow: 7,
-          rowNumWidth: 14,
-          cellPadH: 2.5,
-          cellPadV: 3,
-          grandTotal: 11,
-          kvLabel: 8,
-          kvValue: 8.5,
-          kvValueLarge: 10,
-          footer: 7,
-          sectionGap: 5,
+        return _Sizes(
+          companyName: 12 * s,
+          branchName: 8 * s,
+          title: 9 * s,
+          meta: 7.5 * s,
+          metaLabelWidth: 62 * s,
+          tableHeader: 7 * s,
+          tableRow: 7 * s,
+          rowNumWidth: 14 * s,
+          cellPadH: 2.5 * s,
+          cellPadV: 3 * s,
+          grandTotal: 11 * s,
+          kvLabel: 8 * s,
+          kvValue: 8.5 * s,
+          kvValueLarge: 10 * s,
+          footer: 7 * s,
+          sectionGap: 5 * s,
         );
       case ReceiptPaperSize.mm80:
-        return const _Sizes(
-          companyName: 14,
-          branchName: 9,
-          title: 10,
-          meta: 8,
-          metaLabelWidth: 78,
-          tableHeader: 7.5,
-          tableRow: 7.5,
-          rowNumWidth: 16,
-          cellPadH: 3,
-          cellPadV: 3.5,
-          grandTotal: 12,
-          kvLabel: 8.5,
-          kvValue: 9.5,
-          kvValueLarge: 11,
-          footer: 8,
-          sectionGap: 6,
+        return _Sizes(
+          companyName: 14 * s,
+          branchName: 9 * s,
+          title: 10 * s,
+          meta: 8 * s,
+          metaLabelWidth: 78 * s,
+          tableHeader: 7.5 * s,
+          tableRow: 7.5 * s,
+          rowNumWidth: 16 * s,
+          cellPadH: 3 * s,
+          cellPadV: 3.5 * s,
+          grandTotal: 12 * s,
+          kvLabel: 8.5 * s,
+          kvValue: 9.5 * s,
+          kvValueLarge: 11 * s,
+          footer: 8 * s,
+          sectionGap: 6 * s,
         );
       case ReceiptPaperSize.a4:
-        return const _Sizes(
-          companyName: 20,
-          branchName: 11,
-          title: 14,
-          meta: 10,
-          metaLabelWidth: 110,
-          tableHeader: 10,
-          tableRow: 10,
-          rowNumWidth: 24,
-          cellPadH: 6,
-          cellPadV: 6,
-          grandTotal: 16,
-          kvLabel: 11,
-          kvValue: 12,
-          kvValueLarge: 14,
-          footer: 10,
-          sectionGap: 10,
+        return _Sizes(
+          companyName: 20 * s,
+          branchName: 11 * s,
+          title: 14 * s,
+          meta: 10 * s,
+          metaLabelWidth: 110 * s,
+          tableHeader: 10 * s,
+          tableRow: 10 * s,
+          rowNumWidth: 24 * s,
+          cellPadH: 6 * s,
+          cellPadV: 6 * s,
+          grandTotal: 16 * s,
+          kvLabel: 11 * s,
+          kvValue: 12 * s,
+          kvValueLarge: 14 * s,
+          footer: 10 * s,
+          sectionGap: 10 * s,
         );
     }
   }
