@@ -6,6 +6,7 @@ import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../app/router.dart';
+import '../../../../core/invalidation/data_invalidation.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -21,12 +22,6 @@ import '../providers/sales_providers.dart';
 import '../widgets/sales_kpi_row.dart';
 
 /// Sales list page.
-///
-/// Layout, top to bottom:
-/// * KPI overview cards (always visible, not affected by filters).
-/// * Search field + filter button (with an active-filter badge).
-/// * Compact chip row showing only the active filters (when any).
-/// * The filtered list of sales.
 class SalesPage extends ConsumerStatefulWidget {
   const SalesPage({super.key});
 
@@ -65,6 +60,16 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       _searchQuery = '';
       _filter = const SalesFilter();
     });
+  }
+
+  /// Pull-to-refresh: reuse the same invalidation surface as post-write so
+  /// the manual and automatic paths converge on identical state.
+  Future<void> _refresh() async {
+    DataInvalidation.afterSale(ref);
+    await Future.wait(<Future<void>>[
+      ref.refresh(salesProvider.future),
+      ref.refresh(customersProvider.future),
+    ]);
   }
 
   bool _matches(Sale sale, Map<String, String> customerNames) {
@@ -125,6 +130,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         title: const Text('فواتير البيع'),
         actions: <Widget>[
           IconButton(
+            tooltip: 'تحديث',
+            onPressed: anyLoading ? null : _refresh,
+            icon: const Icon(Icons.refresh),
+          ),
+          IconButton(
             tooltip: 'إضافة فاتورة',
             onPressed: anyLoading || firstError != null || branchId == null
                 ? null
@@ -144,10 +154,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
               title: 'تعذّر تحميل فواتير البيع',
               message: _errorMessage(firstError),
               retryLabel: 'إعادة المحاولة',
-              onRetry: () {
-                ref.invalidate(salesProvider);
-                ref.invalidate(customersProvider);
-              },
+              onRetry: _refresh,
             );
           }
 
@@ -173,13 +180,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- KPI overview ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: SalesKpiRow(sales: allSales),
               ),
 
-              // ---- Search + Filter button ----
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -212,7 +217,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 ),
               ),
 
-              // ---- Active filter chips (compact) ----
               if (_filter.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -222,26 +226,35 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   ),
                 ),
 
-              // ---- List ----
+              // ---- List (pull-to-refresh enabled) ----
               Expanded(
-                child: allSales.isEmpty
-                    ? AppEmptyView(
-                        icon: Icons.point_of_sale_outlined,
-                        title: 'لا توجد فواتير بيع',
-                        message:
-                            'ابدأ بتسجيل أول فاتورة بيع لأحد العملاء.',
-                        action: AppButton(
-                          label: 'إضافة فاتورة',
-                          icon: Icons.add,
-                          onPressed: () =>
-                              context.pushNamed(AppRouter.saleNewName),
-                        ),
-                      )
-                    : filtered.isEmpty
-                        ? AppEmptyView(
+                child: RefreshIndicator(
+                  onRefresh: _refresh,
+                  child: Builder(
+                    builder: (BuildContext _) {
+                      if (allSales.isEmpty) {
+                        return _RefreshableMessage(
+                          child: AppEmptyView(
+                            icon: Icons.point_of_sale_outlined,
+                            title: 'لا توجد فواتير بيع',
+                            message:
+                                'ابدأ بتسجيل أول فاتورة بيع لأحد العملاء.',
+                            action: AppButton(
+                              label: 'إضافة فاتورة',
+                              icon: Icons.add,
+                              onPressed: () =>
+                                  context.pushNamed(AppRouter.saleNewName),
+                            ),
+                          ),
+                        );
+                      }
+                      if (filtered.isEmpty) {
+                        return _RefreshableMessage(
+                          child: AppEmptyView(
                             icon: Icons.search_off_outlined,
                             title: 'لا نتائج',
-                            message: 'لم تُطابق أي فاتورة الفلاتر المحددة.',
+                            message:
+                                'لم تُطابق أي فاتورة الفلاتر المحددة.',
                             action: _hasActiveFilters
                                 ? AppButton(
                                     label: 'مسح الفلاتر',
@@ -250,25 +263,30 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                                     onPressed: _clearAllFilters,
                                   )
                                 : null,
-                          )
-                        : ListView.separated(
-                            padding: const EdgeInsets.only(bottom: 24),
-                            itemCount: filtered.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 8),
-                            itemBuilder:
-                                (BuildContext context, int index) {
-                              final Sale sale = filtered[index];
-                              return _SaleCard(
-                                sale: sale,
-                                customerName: _resolveCardCustomerName(
-                                  customerNames,
-                                  sale.customerId,
-                                ),
-                                onTap: () => _openDetail(context, sale),
-                              );
-                            },
                           ),
+                        );
+                      }
+                      return ListView.separated(
+                        physics: const AlwaysScrollableScrollPhysics(),
+                        padding: const EdgeInsets.only(bottom: 24),
+                        itemCount: filtered.length,
+                        separatorBuilder: (_, __) =>
+                            const SizedBox(height: 8),
+                        itemBuilder: (BuildContext context, int index) {
+                          final Sale sale = filtered[index];
+                          return _SaleCard(
+                            sale: sale,
+                            customerName: _resolveCardCustomerName(
+                              customerNames,
+                              sale.customerId,
+                            ),
+                            onTap: () => _openDetail(context, sale),
+                          );
+                        },
+                      );
+                    },
+                  ),
+                ),
               ),
             ],
           );
@@ -292,6 +310,34 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       return 'عميل نقدي';
     }
     return customerNames[customerId] ?? 'عميل محذوف';
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Refreshable wrapper for empty / error states.
+//
+// Wraps a non-scrollable widget in a scroll view sized to fill its parent
+// so RefreshIndicator can trigger even when the content is just a message.
+// -----------------------------------------------------------------------------
+
+class _RefreshableMessage extends StatelessWidget {
+  const _RefreshableMessage({required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        return SingleChildScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          child: ConstrainedBox(
+            constraints: BoxConstraints(minHeight: constraints.maxHeight),
+            child: child,
+          ),
+        );
+      },
+    );
   }
 }
 
@@ -362,7 +408,7 @@ class _FilterButton extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// Active filter chips (compact summary)
+// Active filter chips
 // -----------------------------------------------------------------------------
 
 class _ActiveFilterChips extends StatelessWidget {
