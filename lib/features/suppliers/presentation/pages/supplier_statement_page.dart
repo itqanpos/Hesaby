@@ -12,6 +12,7 @@ import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
+import '../../../pos/data/services/direct_print_service.dart';
 import '../../../purchases/presentation/dialogs/supplier_payment_dialog.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
@@ -149,8 +150,33 @@ class _SupplierStatementPageState
         style: _readA4Style(),
       );
 
+      final String fileName =
+          'supplier-statement-${statement.supplier.name}.pdf';
+
+      // ---- Direct print path when enabled ----
+      final bool direct =
+          ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
+              false;
+
+      if (direct) {
+        final bool ok = await DirectPrintService.tryPdfBytes(
+          bytes: bytes,
+          name: fileName,
+        );
+        if (ok) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(content: Text('تم إرسال الكشف للطابعة.')),
+            );
+          return;
+        }
+      }
+
+      // ---- Fallback: system dialog ----
       await Printing.layoutPdf(
-        name: 'supplier-statement-${statement.supplier.name}.pdf',
+        name: fileName,
         onLayout: (PdfPageFormat _) async => bytes,
       );
     } on Object {
