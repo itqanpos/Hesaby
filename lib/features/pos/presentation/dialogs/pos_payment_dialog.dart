@@ -7,6 +7,8 @@ import 'package:intl/intl.dart';
 
 import '../../../../core/invalidation/data_invalidation.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../cash/domain/entities/cash_entities.dart';
+import '../../../cash/presentation/providers/cash_providers.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
@@ -216,6 +218,23 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
       final Sale confirmed = await notifier.confirmSale(sale.id);
 
+      // ── Phase T-5: record the sale payment leg so the DB trigger can
+      // post the matching cash movement. Only the portion actually applied
+      // to the sale (not the excess applied to customer balance) is
+      // recorded here; balance payments are recorded separately below.
+      if (appliedToSale > 0) {
+        final String method = _method == PosPaymentMethod.card
+            ? 'card'
+            : 'cash';
+        await ref.read(cashRepositoryProvider).recordSalePayments(
+              companyId: contextState.currentCompany?.id ?? '',
+              saleId: confirmed.id,
+              payments: <SalePaymentDraft>[
+                SalePaymentDraft(amount: appliedToSale, method: method),
+              ],
+            );
+      }
+
       if (appliedToBalance > 0 && _cart.customerId != null) {
         await ref.read(customersProvider.notifier).recordPayment(
               customerId: _cart.customerId!,
@@ -227,9 +246,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       }
 
       // ── Phase T-4: refresh every screen affected by this sale ──
-      // Must run after every write so the refetch reads committed rows,
-      // and before the receipt dialog so any listener that rebuilds in
-      // that window sees fresh data.
       DataInvalidation.afterSale(ref);
 
       if (!mounted) return;
