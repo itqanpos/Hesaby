@@ -38,10 +38,6 @@ final NotifierProvider<EmployeesIncludeInactiveNotifier, bool>
 );
 
 /// The list of employees for the current company.
-///
-/// Note on naming: the method to modify an employee is called
-/// [updateEmployee] — never [update] — because `AsyncNotifier` already
-/// defines an `update` method with a different signature.
 class EmployeesNotifier extends AsyncNotifier<List<Employee>> {
   @override
   Future<List<Employee>> build() async {
@@ -142,6 +138,24 @@ class EmployeesNotifier extends AsyncNotifier<List<Employee>> {
   Future<void> delete(String employeeId) async {
     await ref.read(employeeRepositoryProvider).deleteEmployee(employeeId);
     await refresh();
+  }
+
+  /// Provisions a login account for [employeeId] using the given code.
+  Future<Employee> createLogin({
+    required String employeeId,
+    required String loginCode,
+    required String password,
+    String role = 'cashier',
+  }) async {
+    final Employee updated =
+        await ref.read(employeeRepositoryProvider).createLogin(
+              employeeId: employeeId,
+              loginCode: loginCode,
+              password: password,
+              role: role,
+            );
+    await refresh();
+    return updated;
   }
 
   String _requireCompanyId() {
