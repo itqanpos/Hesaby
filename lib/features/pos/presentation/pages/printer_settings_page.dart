@@ -6,7 +6,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
-import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/repositories/company_settings_repository.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../../settings/presentation/widgets/print_font_settings_section.dart';
