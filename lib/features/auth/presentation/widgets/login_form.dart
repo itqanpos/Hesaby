@@ -10,9 +10,13 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../domain/repositories/auth_repository.dart';
 import '../providers/auth_provider.dart';
-import 'google_sign_in_button.dart';
 
 /// Arabic RTL sign-in form.
+///
+/// The identity field accepts **either** an email address **or** an
+/// employee login code (e.g. `ahmed01`). When a bare code is entered, the
+/// form appends `@hesaby.local` before calling the auth notifier — that
+/// reserved domain is what `create_employee_user` uses under the hood.
 class LoginForm extends ConsumerStatefulWidget {
   const LoginForm({super.key});
 
@@ -22,7 +26,7 @@ class LoginForm extends ConsumerStatefulWidget {
 
 class _LoginFormState extends ConsumerState<LoginForm> {
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
-  final TextEditingController _emailController = TextEditingController();
+  final TextEditingController _identityController = TextEditingController();
   final TextEditingController _passwordController = TextEditingController();
 
   bool _obscurePassword = true;
@@ -31,7 +35,7 @@ class _LoginFormState extends ConsumerState<LoginForm> {
 
   @override
   void dispose() {
-    _emailController.dispose();
+    _identityController.dispose();
     _passwordController.dispose();
     super.dispose();
   }
@@ -50,9 +54,16 @@ class _LoginFormState extends ConsumerState<LoginForm> {
 
     setState(() => _isSubmitting = true);
 
+    // Normalize: bare code → code@hesaby.local. Anything containing "@"
+    // is treated as an email.
+    final String raw = _identityController.text.trim();
+    final String email = raw.contains('@')
+        ? raw
+        : '${raw.toLowerCase()}@hesaby.local';
+
     final AuthFailureType? failure =
         await ref.read(authProvider.notifier).login(
-              email: _emailController.text,
+              email: email,
               password: _passwordController.text,
             );
 
@@ -90,20 +101,19 @@ class _LoginFormState extends ConsumerState<LoginForm> {
             ),
             const SizedBox(height: 8),
             Text(
-              'أدخل بياناتك للوصول إلى حسابك',
+              'أدخل بريدك الإلكتروني أو كود الدخول',
               style: theme.textTheme.bodyMedium,
             ),
             const SizedBox(height: 24),
             AppTextField(
-              controller: _emailController,
-              label: 'البريد الإلكتروني',
-              hint: 'example@domain.com',
-              keyboardType: TextInputType.emailAddress,
+              controller: _identityController,
+              label: 'البريد أو كود الدخول',
+              hint: 'example@domain.com · ahmed01',
               textInputAction: TextInputAction.next,
               prefixIcon: Icons.alternate_email,
               enabled: !_isSubmitting,
               autofocus: true,
-              validator: _validateEmail,
+              validator: _validateIdentity,
             ),
             const SizedBox(height: 16),
             AppTextField(
@@ -142,22 +152,6 @@ class _LoginFormState extends ConsumerState<LoginForm> {
               isLoading: _isSubmitting,
               onPressed: _isSubmitting ? null : _submit,
             ),
-            const SizedBox(height: 16),
-            Row(
-              children: <Widget>[
-                const Expanded(child: Divider()),
-                Padding(
-                  padding: const EdgeInsets.symmetric(horizontal: 12),
-                  child: Text(
-                    'أو',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                ),
-                const Expanded(child: Divider()),
-              ],
-            ),
-            const SizedBox(height: 12),
-            const GoogleSignInButton(),
             const SizedBox(height: 12),
             TextButton(
               onPressed: _isSubmitting
@@ -171,9 +165,25 @@ class _LoginFormState extends ConsumerState<LoginForm> {
     );
   }
 
-  String? _validateEmail(String? value) {
-    final ValidationError? error = Validators.email(value);
-    return error == null ? null : _validationMessage(error);
+  /// Validates the identity field — accepts an email or a login code.
+  String? _validateIdentity(String? value) {
+    final String v = value?.trim() ?? '';
+    if (v.isEmpty) {
+      return 'هذا الحقل مطلوب';
+    }
+
+    // Contains "@"? Treat as email — reuse the shared validator.
+    if (v.contains('@')) {
+      final ValidationError? error = Validators.email(v);
+      return error == null ? null : _validationMessage(error);
+    }
+
+    // Bare code — same format as create_employee_user expects.
+    final RegExp codePattern = RegExp(r'^[a-zA-Z0-9_-]{3,30}$');
+    if (!codePattern.hasMatch(v)) {
+      return 'كود الدخول: 3-30 حرف (a-z، 0-9، _، -)';
+    }
+    return null;
   }
 
   String? _validatePassword(String? value) {
@@ -194,11 +204,11 @@ String _validationMessage(ValidationError error) => switch (error) {
 
 String _failureMessage(AuthFailureType type) => switch (type) {
       AuthFailureType.invalidCredentials =>
-        'البريد الإلكتروني أو كلمة المرور غير صحيحة',
+        'البيانات غير صحيحة. تحقق من الكود أو البريد وكلمة السر.',
       AuthFailureType.emailNotConfirmed =>
-        'لم يتم تأكيد البريد الإلكتروني بعد. يرجى مراجعة بريدك.',
+        'الحساب غير مؤكد. تواصل مع مدير الشركة.',
       AuthFailureType.userNotFound =>
-        'لا يوجد حساب مرتبط بهذا البريد الإلكتروني.',
+        'لا يوجد حساب مرتبط بهذا الكود أو البريد.',
       AuthFailureType.tooManyRequests =>
         'تمت محاولات كثيرة. يرجى المحاولة بعد قليل.',
       AuthFailureType.weakPassword =>
