@@ -6,6 +6,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/painting.dart';
 import 'package:google_fonts/google_fonts.dart';
 
+import '../../../settings/domain/entities/company_settings.dart';
 import '../../domain/entities/receipt.dart';
 
 /// Builds an ESC/POS byte stream from a [Receipt] by rendering the whole
@@ -17,8 +18,11 @@ import '../../domain/entities/receipt.dart';
 /// matches what the user sees, at the cost of a slightly slower transfer.
 ///
 /// **Phase P-1a:** an optional [logoBytes] image is drawn centered at the
-/// top of the receipt. Callers load it from the local [LogoCacheService]
-/// (or from the network on cache miss) and pass it here.
+/// top of the receipt.
+///
+/// **Phase P-1b:** [fontScale] (0.8 – 1.6) and [fontWeight] are applied to
+/// every text element. The scale multiplies the base font size; the weight
+/// selects between the regular and bold font families.
 abstract final class EscPosReceiptBuilder {
   // ---- ESC/POS control sequences ----
   static const List<int> _init = <int>[0x1B, 0x40]; // ESC @ (initialize)
@@ -37,21 +41,27 @@ abstract final class EscPosReceiptBuilder {
   // ---- Font family names, resolved once from google_fonts ----
   static String? _regularFamily;
   static String? _boldFamily;
+  static String? _mediumFamily;
 
   /// Builds the full ESC/POS byte stream for [receipt].
   ///
   /// [paperWidthDots] must be [widthMm80] or [widthMm58].
   ///
-  /// [logoBytes] is an optional PNG / JPG / WEBP image that will be drawn
-  /// at the top of the receipt, centered. Pass `null` when no logo is
-  /// configured. Decoding failures are silently ignored so a corrupt logo
-  /// never prevents a sale receipt from printing.
+  /// [logoBytes] is an optional PNG / JPG / WEBP image drawn at the top,
+  /// centered. Pass `null` when no logo is configured.
+  ///
+  /// [fontScale] multiplies every font size (default 1.0). [fontWeight]
+  /// selects the base weight (default: normal).
   static Future<List<int>> build({
     required Receipt receipt,
     int paperWidthDots = widthMm80,
     Uint8List? logoBytes,
+    double fontScale = 1.0,
+    PrintFontWeight fontWeight = PrintFontWeight.normal,
   }) async {
     await _ensureFonts();
+
+    final double clampedScale = fontScale.clamp(0.8, 1.6);
 
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final ui.Canvas canvas = ui.Canvas(recorder);
@@ -61,6 +71,9 @@ abstract final class EscPosReceiptBuilder {
       paperWidthDots: paperWidthDots,
       regularFamily: _regularFamily!,
       boldFamily: _boldFamily!,
+      mediumFamily: _mediumFamily ?? _regularFamily!,
+      fontScale: clampedScale,
+      baseWeight: fontWeight,
     );
     await painter.paint(receipt, logoBytes);
 
@@ -85,18 +98,21 @@ abstract final class EscPosReceiptBuilder {
   // Fonts
   // ---------------------------------------------------------------------------
 
-  /// Loads Cairo (Regular + Bold) into the engine so the canvas can
+  /// Loads Cairo (Regular + Medium + Bold) into the engine so the canvas can
   /// render Arabic glyphs. Idempotent.
   static Future<void> _ensureFonts() async {
     if (_regularFamily != null && _boldFamily != null) return;
 
     final TextStyle regular = GoogleFonts.cairo();
+    final TextStyle medium =
+        GoogleFonts.cairo(fontWeight: FontWeight.w600);
     final TextStyle bold =
         GoogleFonts.cairo(fontWeight: FontWeight.w700);
 
-    await GoogleFonts.pendingFonts(<TextStyle>[regular, bold]);
+    await GoogleFonts.pendingFonts(<TextStyle>[regular, medium, bold]);
 
     _regularFamily = regular.fontFamily ?? 'Cairo';
+    _mediumFamily = medium.fontFamily ?? 'Cairo';
     _boldFamily = bold.fontFamily ?? 'Cairo';
   }
 
@@ -104,7 +120,6 @@ abstract final class EscPosReceiptBuilder {
   // Raster encoding
   // ---------------------------------------------------------------------------
 
-  /// Converts a rendered [ui.Image] into a `GS v 0` raster command.
   static Future<List<int>> _encodeRaster(ui.Image image) async {
     final ByteData? byteData = await image.toByteData(
       format: ui.ImageByteFormat.rawRgba,
@@ -131,7 +146,7 @@ abstract final class EscPosReceiptBuilder {
           if (x >= width) break;
           final int idx = rowStart + x * 4;
           final int a = pixels[idx + 3];
-          if (a < 128) continue; // transparent = white
+          if (a < 128) continue;
           final int r = pixels[idx];
           final int g = pixels[idx + 1];
           final int b = pixels[idx + 2];
@@ -144,7 +159,6 @@ abstract final class EscPosReceiptBuilder {
       }
     }
 
-    // GS v 0 m xL xH yL yH d1...dk
     return <int>[
       0x1D, 0x76, 0x30, 0x00,
       widthBytes & 0xFF,
@@ -166,18 +180,47 @@ class _Painter {
     required this.paperWidthDots,
     required this.regularFamily,
     required this.boldFamily,
+    required this.mediumFamily,
+    required this.fontScale,
+    required this.baseWeight,
   }) : _scale = paperWidthDots / 576.0;
 
   final ui.Canvas canvas;
   final int paperWidthDots;
   final String regularFamily;
   final String boldFamily;
+  final String mediumFamily;
+
+  /// Multiplier applied to every font size (0.8 – 1.6).
+  final double fontScale;
+
+  /// Base weight selected by the user. Bold items get an extra boost.
+  final PrintFontWeight baseWeight;
+
   final double _scale;
 
   double _y = 0;
 
   static const Color _black = Color(0xFF000000);
   static const Color _grey = Color(0xFF444444);
+
+  // Font size × scale factor helpers.
+  double _font(double base) => base * fontScale;
+
+  // Resolves the (family, weight) pair for a given emphasis level.
+  ({String family, FontWeight weight}) _fontFor({bool emphasized = false}) {
+    if (emphasized) {
+      return (family: boldFamily, weight: FontWeight.w700);
+    }
+    switch (baseWeight) {
+      case PrintFontWeight.normal:
+        return (family: regularFamily, weight: FontWeight.w400);
+      case PrintFontWeight.medium:
+        return (family: mediumFamily, weight: FontWeight.w600);
+      case PrintFontWeight.bold:
+        return (family: boldFamily, weight: FontWeight.w700);
+    }
+  }
 
   double get _paddingTop => 12 * _scale;
   double get _paddingBottom => 16 * _scale;
@@ -193,7 +236,6 @@ class _Painter {
   Future<void> paint(Receipt r, Uint8List? logoBytes) async {
     _y = _paddingTop;
 
-    // ---- Logo (optional) ----
     if (logoBytes != null && logoBytes.isNotEmpty) {
       final ui.Image? logo = await _decodeImage(logoBytes);
       if (logo != null) {
@@ -201,7 +243,6 @@ class _Painter {
         logo.dispose();
         _gap(_sectionGap);
       }
-      // If decoding failed, we silently continue without a logo.
     }
 
     _header(r);
@@ -241,11 +282,6 @@ class _Painter {
     }
   }
 
-  /// Draws the logo centered, preserving aspect ratio.
-  ///
-  /// Width is capped at 55% of the printable content width (≈ 300 dots on
-  /// 80 mm paper). Height is capped at 140 scaled dots so a very tall logo
-  /// does not eat half the receipt.
   void _drawLogo(ui.Image logo) {
     final double targetW = _contentWidth * 0.55;
     final double ratio = logo.height / logo.width;
@@ -279,19 +315,19 @@ class _Painter {
   void _header(Receipt r) {
     _text(
       r.companyName,
-      fontSize: 24,
-      bold: true,
+      fontSize: _font(24),
+      emphasized: true,
       align: TextAlign.center,
     );
     _gap(2 * _scale);
     _text(
       r.branchName,
-      fontSize: 15,
+      fontSize: _font(15),
       color: _grey,
       align: TextAlign.center,
     );
     _gap(_sectionGap);
-    _chip('فاتورة مبيعات', fontSize: 17);
+    _chip('فاتورة مبيعات', fontSize: _font(17));
   }
 
   void _meta(Receipt r) {
@@ -326,7 +362,7 @@ class _Painter {
         _Cell('م',
             width: colNumW, bold: true, align: TextAlign.center),
       ],
-      fontSize: 13,
+      fontSize: _font(13),
       topPad: 6 * _scale,
       bottomPad: 6 * _scale,
       backgroundColor: const Color(0xFFDDDDDD),
@@ -348,7 +384,7 @@ class _Painter {
           _Cell('${i + 1}',
               width: colNumW, align: TextAlign.center),
         ],
-        fontSize: 13,
+        fontSize: _font(13),
         topPad: 5 * _scale,
         bottomPad: 5 * _scale,
         backgroundColor: bg,
@@ -366,7 +402,7 @@ class _Painter {
             width: colNameW, bold: true, align: TextAlign.right),
         _Cell('', width: colNumW, align: TextAlign.center),
       ],
-      fontSize: 13,
+      fontSize: _font(13),
       topPad: 6 * _scale,
       bottomPad: 6 * _scale,
       backgroundColor: const Color(0xFFE8E8E8),
@@ -374,18 +410,18 @@ class _Painter {
   }
 
   void _grandTotal(Receipt r) {
-    const double fontSize = 20;
+    final double fontSize = _font(20);
     final double boxPad = 8 * _scale;
 
     final TextPainter label = _measure(
       'إجمالي الفاتورة',
       fontSize: fontSize,
-      bold: true,
+      emphasized: true,
     );
     final TextPainter value = _measure(
       _money(r.total),
       fontSize: fontSize,
-      bold: true,
+      emphasized: true,
     );
     final double lineH =
         label.height > value.height ? label.height : value.height;
@@ -438,7 +474,7 @@ class _Painter {
   void _footer(Receipt r) {
     _text(
       _footerText(r),
-      fontSize: 14,
+      fontSize: _font(14),
       color: _grey,
       align: TextAlign.center,
     );
@@ -450,7 +486,7 @@ class _Painter {
 
   void _metaRow(String label, String value, {bool bold = false}) {
     final double labelW = 92 * _scale;
-    const double fontSize = 14;
+    final double fontSize = _font(14);
 
     final TextPainter labelPainter = _measure(
       '$label:',
@@ -476,8 +512,8 @@ class _Painter {
   }
 
   void _kvRow(String label, String value, {bool emphasized = false}) {
-    const double labelFont = 14;
-    final double valueFont = emphasized ? 17 : 14;
+    final double labelFont = _font(14);
+    final double valueFont = emphasized ? _font(17) : _font(14);
 
     final TextPainter labelPainter = _measure(
       label,
@@ -506,6 +542,7 @@ class _Painter {
     String text, {
     required double fontSize,
     bool bold = false,
+    bool emphasized = false,
     Color color = _black,
     TextAlign align = TextAlign.right,
   }) {
@@ -513,6 +550,7 @@ class _Painter {
       text,
       fontSize: fontSize,
       bold: bold,
+      emphasized: emphasized,
       color: color,
       align: align,
     );
@@ -524,7 +562,7 @@ class _Painter {
     final TextPainter painter = _measure(
       text,
       fontSize: fontSize,
-      bold: true,
+      emphasized: true,
       align: TextAlign.center,
     );
 
@@ -632,18 +670,25 @@ class _Painter {
     String text, {
     required double fontSize,
     bool bold = false,
+    bool emphasized = false,
     Color color = _black,
     TextAlign align = TextAlign.right,
     double? maxWidth,
   }) {
+    // `bold` is retained for backward compatibility within this file; the
+    // actual weight is resolved through [_fontFor].
+    final bool useBold = bold || emphasized;
+    final ({String family, FontWeight weight}) style =
+        _fontFor(emphasized: useBold);
+
     final TextPainter painter = TextPainter(
       text: TextSpan(
         text: text,
         style: TextStyle(
           fontSize: fontSize * _scale,
           color: color,
-          fontFamily: bold ? boldFamily : regularFamily,
-          fontWeight: bold ? FontWeight.w700 : FontWeight.w400,
+          fontFamily: style.family,
+          fontWeight: style.weight,
           height: 1.15,
         ),
       ),
