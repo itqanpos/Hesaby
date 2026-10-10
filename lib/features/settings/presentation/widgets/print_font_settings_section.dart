@@ -84,7 +84,6 @@ class _PrintFontSettingsSectionState
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
     final CompanySettings settings =
         ref.watch(companySettingsProvider).valueOrNull ??
             CompanySettings.defaults('');
@@ -92,7 +91,7 @@ class _PrintFontSettingsSectionState
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _SectionHeader(
+        const _SectionHeader(
           icon: Icons.tune,
           title: 'حجم وثقل الخط',
         ),
@@ -107,7 +106,6 @@ class _PrintFontSettingsSectionState
               label: 'حجم الخط',
               value: settings.printFontScale,
               onChanged: (double v) {
-                // Optimistic local update — actual save on release.
                 ref
                     .read(companySettingsProvider.notifier)
                     .updateSettings(printFontScale: v);
@@ -244,7 +242,7 @@ class _WeightSelector extends StatelessWidget {
       children: <Widget>[
         Text(
           'ثقل الخط',
-          style: theme.textTheme widgets.bodyMedium?.copyWith(
+          style: theme.textTheme.bodyMedium?.copyWith(
             fontWeight: FontWeight.w600,
           ),
         ),
@@ -275,7 +273,7 @@ class _WeightSelector extends StatelessWidget {
 }
 
 // ============================================================================
-// Preview
+// Preview widgets
 // ============================================================================
 
 class _ThermalPreview extends StatelessWidget {
@@ -286,8 +284,7 @@ class _ThermalPreview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
+    final ColorScheme scheme = Theme.of(context).colorScheme;
 
     final double base = 11.0 * scale;
     final FontWeight w = _weightOf(weight);
@@ -303,7 +300,7 @@ class _ThermalPreview extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            _PreviewLabel(),
+            const _PreviewLabel(),
             const SizedBox(height: 8),
             Text(
               'مؤسسة النور',
@@ -369,8 +366,7 @@ class _A4Preview extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
+    final ColorScheme scheme = Theme.of(context).colorScheme;
 
     final double base = 11.0 * scale;
     final FontWeight w = _weightOf(weight);
@@ -386,7 +382,7 @@ class _A4Preview extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            _PreviewLabel(),
+            const _PreviewLabel(),
             const SizedBox(height: 8),
             Text(
               'تقرير المبيعات',
@@ -408,24 +404,24 @@ class _A4Preview extends StatelessWidget {
             ),
             const Divider(height: 16),
             _A4Row(
-              cells: <String>['التاريخ', 'العميل', 'الإجمالي'],
+              cells: const <String>['التاريخ', 'العميل', 'الإجمالي'],
               fontSize: base,
               weight: w,
               bold: true,
             ),
             const SizedBox(height: 4),
             _A4Row(
-              cells: <String>['01/10', 'أحمد محمد', '1,200 ج.م'],
+              cells: const <String>['01/10', 'أحمد محمد', '1,200 ج.م'],
               fontSize: base,
               weight: FontWeight.w400,
             ),
             _A4Row(
-              cells: <String>['02/10', 'سارة علي', '850 ج.م'],
+              cells: const <String>['02/10', 'سارة علي', '850 ج.م'],
               fontSize: base,
               weight: FontWeight.w400,
             ),
             _A4Row(
-              cells: <String>['03/10', 'خالد حسن', '2,400 ج.م'],
+              cells: const <String>['03/10', 'خالد حسن', '2,400 ج.م'],
               fontSize: base,
               weight: FontWeight.w400,
             ),
@@ -498,6 +494,8 @@ class _A4Row extends StatelessWidget {
 }
 
 class _PreviewLabel extends StatelessWidget {
+  const _PreviewLabel();
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
