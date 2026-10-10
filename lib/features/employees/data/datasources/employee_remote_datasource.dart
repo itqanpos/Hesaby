@@ -58,6 +58,43 @@ class EmployeeRemoteDataSource {
     await client.from('employees').delete().eq('id', employeeId);
   }
 
+  /// Calls the RPC that provisions a login account for an employee.
+  Future<Map<String, dynamic>> createEmployeeUser({
+    required String employeeId,
+    required String loginCode,
+    required String password,
+    required String role,
+  }) async {
+    final SupabaseClient client = _requireClient();
+    final dynamic result = await client.rpc(
+      'create_employee_user',
+      params: <String, dynamic>{
+        'p_employee_id': employeeId,
+        'p_login_code': loginCode,
+        'p_password': password,
+        'p_role': role,
+      },
+    );
+    if (result is Map<String, dynamic>) return result;
+    if (result is Map) {
+      return result.cast<String, dynamic>();
+    }
+    throw const EmployeeException(
+      type: EmployeeFailureType.invalidResponse,
+      cause: 'create_employee_user returned an unexpected payload.',
+    );
+  }
+
+  /// Re-fetches a single employee by id.
+  Future<Map<String, dynamic>?> fetchEmployeeById(String employeeId) async {
+    final SupabaseClient client = _requireClient();
+    return await client
+        .from('employees')
+        .select()
+        .eq('id', employeeId)
+        .maybeSingle();
+  }
+
   SupabaseClient _requireClient() {
     final SupabaseClient? client = _client;
     if (client == null) {
