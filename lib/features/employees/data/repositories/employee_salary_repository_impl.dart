@@ -180,18 +180,29 @@ class EmployeeSalaryRepositoryImpl implements EmployeeSalaryRepository {
   @override
   Future<EmployeeSalary> updateSalary({
     required String salaryId,
-    double? baseAmount,
-    double? bonuses,
-    double? deductions,
+    required double baseAmount,
+    required double bonuses,
+    required double deductions,
+    required double advancesDeducted,
     String? paymentMethod,
     String? notes,
     bool clearNotes = false,
   }) async {
     try {
-      final Map<String, dynamic> payload = <String, dynamic>{};
-      if (baseAmount != null) payload['base_amount'] = baseAmount;
-      if (bonuses != null) payload['bonuses'] = bonuses;
-      if (deductions != null) payload['deductions'] = deductions;
+      final double net = EmployeeSalary.computeNet(
+        base: baseAmount,
+        bonuses: bonuses,
+        deductions: deductions,
+        advancesDeducted: advancesDeducted,
+      );
+
+      final Map<String, dynamic> payload = <String, dynamic>{
+        'base_amount': baseAmount,
+        'bonuses': bonuses,
+        'deductions': deductions,
+        'advances_deducted': advancesDeducted,
+        'net_amount': net,
+      };
       if (paymentMethod != null) {
         payload['payment_method'] = paymentMethod;
       }
@@ -199,13 +210,6 @@ class EmployeeSalaryRepositoryImpl implements EmployeeSalaryRepository {
         payload['notes'] = null;
       } else if (notes != null) {
         payload['notes'] = notes;
-      }
-
-      if (payload.isEmpty) {
-        throw const SalaryException(
-          type: SalaryFailureType.invalidInput,
-          cause: 'Empty update payload.',
-        );
       }
 
       final Map<String, dynamic>? row =
