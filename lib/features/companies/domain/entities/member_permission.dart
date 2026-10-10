@@ -82,6 +82,12 @@ abstract final class MemberPermission {
   static const String cashManageCategories = 'cash.manage_categories';
 
   // ---------------------------------------------------------------------------
+  // Employees
+  // ---------------------------------------------------------------------------
+  static const String employeesView = 'employees.view';
+  static const String employeesManage = 'employees.manage';
+
+  // ---------------------------------------------------------------------------
   // Reports
   // ---------------------------------------------------------------------------
   static const String reportsView = 'reports.view';
@@ -147,6 +153,9 @@ abstract final class MemberPermission {
     cashWrite,
     cashManageAccounts,
     cashManageCategories,
+    // Employees
+    employeesView,
+    employeesManage,
     // Reports
     reportsView,
     reportsSales,
@@ -247,6 +256,12 @@ abstract final class MemberPermission {
       case cashManageCategories:
         return 'إدارة تصنيفات الخزنة';
 
+      // Employees
+      case employeesView:
+        return 'عرض الموظفين';
+      case employeesManage:
+        return 'إضافة وتعديل الموظفين';
+
       // Reports
       case reportsView:
         return 'فتح قائمة التقارير';
@@ -296,7 +311,7 @@ class PermissionGroup extends Equatable {
   List<Object?> get props => <Object?>[key, label, permissions];
 }
 
-/// The 10 groups displayed in the permissions editor.
+/// The 11 groups displayed in the permissions editor.
 const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
   PermissionGroup(
     key: 'pos',
@@ -374,6 +389,14 @@ const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
       MemberPermission.cashWrite,
       MemberPermission.cashManageAccounts,
       MemberPermission.cashManageCategories,
+    ],
+  ),
+  PermissionGroup(
+    key: 'employees',
+    label: 'الموظفون',
+    permissions: <String>[
+      MemberPermission.employeesView,
+      MemberPermission.employeesManage,
     ],
   ),
   PermissionGroup(
