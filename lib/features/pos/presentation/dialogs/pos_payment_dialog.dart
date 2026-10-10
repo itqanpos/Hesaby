@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/invalidation/data_invalidation.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
@@ -224,6 +225,12 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   '${confirmed.invoiceNumber ?? confirmed.id}',
             );
       }
+
+      // ── Phase T-4: refresh every screen affected by this sale ──
+      // Must run after every write so the refetch reads committed rows,
+      // and before the receipt dialog so any listener that rebuilds in
+      // that window sees fresh data.
+      DataInvalidation.afterSale(ref);
 
       if (!mounted) return;
 
