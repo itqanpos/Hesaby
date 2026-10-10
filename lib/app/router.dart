@@ -18,6 +18,7 @@ import '../features/companies/presentation/pages/members_page.dart';
 import '../features/companies/presentation/pages/subscription_page.dart';
 import '../features/employees/presentation/pages/advances_page.dart';
 import '../features/employees/presentation/pages/employees_page.dart';
+import '../features/employees/presentation/pages/salaries_page.dart';
 import '../features/expenses/presentation/pages/expenses_page.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
@@ -173,6 +174,9 @@ abstract final class AppRouter {
   static const String advancesPath = '/advances';
   static const String advancesName = 'advances';
 
+  static const String salariesPath = '/salaries';
+  static const String salariesName = 'salaries';
+
   // ---- Phase T-5: Expenses ----
   static const String expensesPath = '/expenses';
   static const String expensesName = 'expenses';
@@ -309,6 +313,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.advancesName,
         builder: (BuildContext context, GoRouterState state) =>
             const AdvancesPage(),
+      ),
+      GoRoute(
+        path: AppRouter.salariesPath,
+        name: AppRouter.salariesName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const SalariesPage(),
       ),
       GoRoute(
         path: AppRouter.expensesPath,
