@@ -88,6 +88,7 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
       notes: _optionalString(m, 'notes'),
       isActive: _bool(m, 'is_active'),
       companyMemberId: _optionalString(m, 'company_member_id'),
+      loginCode: _optionalString(m, 'login_code'),
       createdAt: _requireTimestamp(m, 'created_at'),
       updatedAt: _requireTimestamp(m, 'updated_at'),
     );
@@ -269,6 +270,42 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
     }
   }
 
+  @override
+  Future<Employee> createLogin({
+    required String employeeId,
+    required String loginCode,
+    required String password,
+    String role = 'cashier',
+  }) async {
+    try {
+      await _remote.createEmployeeUser(
+        employeeId: employeeId,
+        loginCode: loginCode,
+        password: password,
+        role: role,
+      );
+
+      // Re-fetch the employee row to pick up login_code + company_member_id.
+      final Map<String, dynamic>? fresh =
+          await _remote.fetchEmployeeById(employeeId);
+      if (fresh == null) {
+        throw const EmployeeException(
+          type: EmployeeFailureType.notFound,
+          cause: 'Employee not found after createEmployeeUser.',
+        );
+      }
+      return _map(fresh);
+    } on FormatException catch (e, s) {
+      throw _invalidResponse(e, s, 'createLogin');
+    } on supabase.PostgrestException catch (e, s) {
+      throw _postgrest(e, s, 'createLogin');
+    } on EmployeeException {
+      rethrow;
+    } on Object catch (e, s) {
+      throw _unknown(e, s, 'createLogin');
+    }
+  }
+
   // ---------------------------------------------------------------------------
   // Error mapping
   // ---------------------------------------------------------------------------
@@ -292,9 +329,13 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
     String op,
   ) {
     final String code = (e.code ?? '').toUpperCase();
+    final String message = e.message.toLowerCase();
+
     final EmployeeFailureType type;
     if (code.startsWith('42501') || code.startsWith('28')) {
       type = EmployeeFailureType.unauthorized;
+    } else if (code == '23505' || message.contains('مستخدم بالفعل')) {
+      type = EmployeeFailureType.codeConflict;
     } else if (code.startsWith('23')) {
       type = EmployeeFailureType.invalidInput;
     } else if (code == 'PGRST116') {
