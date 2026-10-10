@@ -83,6 +83,12 @@ abstract final class MemberPermission {
   static const String employeesManage = 'employees.manage';
 
   // ---------------------------------------------------------------------------
+  // Payroll
+  // ---------------------------------------------------------------------------
+  static const String payrollView = 'payroll.view';
+  static const String payrollManage = 'payroll.manage';
+
+  // ---------------------------------------------------------------------------
   // Expenses
   // ---------------------------------------------------------------------------
   static const String expensesView = 'expenses.view';
@@ -109,7 +115,9 @@ abstract final class MemberPermission {
 
   /// Every permission the app recognises.
   static const List<String> all = <String>[
+    // POS
     posUse,
+    // Sales
     salesView,
     salesCreate,
     salesEdit,
@@ -117,40 +125,54 @@ abstract final class MemberPermission {
     salesCancel,
     salesDelete,
     salesPrint,
+    // Returns
     returnsView,
     returnsCreate,
     returnsCancel,
+    // Products
     productsView,
     productsCreate,
     productsEdit,
     productsDelete,
     productsManageUnits,
+    // Inventory
     inventoryView,
     inventoryAdjust,
+    // Purchases
     purchasesView,
     purchasesCreate,
     purchasesConfirm,
     purchasesCancel,
     paymentsRecord,
+    // Suppliers
     suppliersView,
     suppliersManage,
+    // Customers
     customersView,
     customersManage,
     customersRecordPayment,
+    // Cash register
     cashView,
     cashWrite,
     cashManageAccounts,
     cashManageCategories,
+    // Employees
     employeesView,
     employeesManage,
+    // Payroll
+    payrollView,
+    payrollManage,
+    // Expenses
     expensesView,
     expensesManage,
+    // Reports
     reportsView,
     reportsSales,
     reportsInventory,
     reportsFinancial,
     reportsCash,
     reportsExport,
+    // Settings & members
     settingsCompany,
     settingsBranches,
     settingsPrinter,
@@ -229,6 +251,10 @@ abstract final class MemberPermission {
         return 'عرض الموظفين';
       case employeesManage:
         return 'إضافة وتعديل الموظفين';
+      case payrollView:
+        return 'عرض الرواتب والسلف';
+      case payrollManage:
+        return 'إدارة الرواتب والسلف';
       case expensesView:
         return 'عرض المصروفات';
       case expensesManage:
@@ -277,7 +303,7 @@ class PermissionGroup extends Equatable {
   List<Object?> get props => <Object?>[key, label, permissions];
 }
 
-/// The 12 groups displayed in the permissions editor.
+/// The 13 groups displayed in the permissions editor.
 const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
   PermissionGroup(
     key: 'pos',
@@ -363,6 +389,14 @@ const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
     permissions: <String>[
       MemberPermission.employeesView,
       MemberPermission.employeesManage,
+    ],
+  ),
+  PermissionGroup(
+    key: 'payroll',
+    label: 'الرواتب والسلف',
+    permissions: <String>[
+      MemberPermission.payrollView,
+      MemberPermission.payrollManage,
     ],
   ),
   PermissionGroup(
