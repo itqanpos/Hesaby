@@ -6,12 +6,7 @@ import 'package:flutter/foundation.dart';
 /// Every permission the app understands, grouped by domain.
 ///
 /// The model is a **deny-list**: a member starts with all permissions, and
-/// the manager revokes the ones they want to withhold. Hence we only ever
-/// store *denied* codes — no "granted" column is needed.
-///
-/// Codes are `domain.action` strings. Adding a new permission later does
-/// not require any database migration: it becomes automatically granted
-/// to every existing member until a manager explicitly denies it.
+/// the manager revokes the ones they want to withhold.
 abstract final class MemberPermission {
   // ---------------------------------------------------------------------------
   // POS
@@ -88,6 +83,12 @@ abstract final class MemberPermission {
   static const String employeesManage = 'employees.manage';
 
   // ---------------------------------------------------------------------------
+  // Expenses
+  // ---------------------------------------------------------------------------
+  static const String expensesView = 'expenses.view';
+  static const String expensesManage = 'expenses.manage';
+
+  // ---------------------------------------------------------------------------
   // Reports
   // ---------------------------------------------------------------------------
   static const String reportsView = 'reports.view';
@@ -106,15 +107,9 @@ abstract final class MemberPermission {
   static const String membersView = 'members.view';
   static const String membersManage = 'members.manage';
 
-  // ---------------------------------------------------------------------------
-  // Complete list
-  // ---------------------------------------------------------------------------
-
-  /// Every permission the app recognises. Used for validation only.
+  /// Every permission the app recognises.
   static const List<String> all = <String>[
-    // POS
     posUse,
-    // Sales
     salesView,
     salesCreate,
     salesEdit,
@@ -122,48 +117,40 @@ abstract final class MemberPermission {
     salesCancel,
     salesDelete,
     salesPrint,
-    // Returns
     returnsView,
     returnsCreate,
     returnsCancel,
-    // Products
     productsView,
     productsCreate,
     productsEdit,
     productsDelete,
     productsManageUnits,
-    // Inventory
     inventoryView,
     inventoryAdjust,
-    // Purchases
     purchasesView,
     purchasesCreate,
     purchasesConfirm,
     purchasesCancel,
     paymentsRecord,
-    // Suppliers
     suppliersView,
     suppliersManage,
-    // Customers
     customersView,
     customersManage,
     customersRecordPayment,
-    // Cash register
     cashView,
     cashWrite,
     cashManageAccounts,
     cashManageCategories,
-    // Employees
     employeesView,
     employeesManage,
-    // Reports
+    expensesView,
+    expensesManage,
     reportsView,
     reportsSales,
     reportsInventory,
     reportsFinancial,
     reportsCash,
     reportsExport,
-    // Settings & members
     settingsCompany,
     settingsBranches,
     settingsPrinter,
@@ -174,11 +161,8 @@ abstract final class MemberPermission {
   /// Arabic label for a single permission code.
   static String label(String code) {
     switch (code) {
-      // POS
       case posUse:
         return 'فتح نقطة البيع';
-
-      // Sales
       case salesView:
         return 'عرض قائمة الفواتير';
       case salesCreate:
@@ -193,16 +177,12 @@ abstract final class MemberPermission {
         return 'حذف مسودة فاتورة';
       case salesPrint:
         return 'طباعة الإيصال';
-
-      // Returns
       case returnsView:
         return 'عرض المرتجعات';
       case returnsCreate:
         return 'إنشاء مرتجع';
       case returnsCancel:
         return 'إلغاء مرتجع';
-
-      // Products
       case productsView:
         return 'عرض المنتجات';
       case productsCreate:
@@ -213,14 +193,10 @@ abstract final class MemberPermission {
         return 'حذف منتج';
       case productsManageUnits:
         return 'إدارة وحدات المنتج';
-
-      // Inventory
       case inventoryView:
         return 'عرض المخزون';
       case inventoryAdjust:
         return 'تسوية المخزون يدويًا';
-
-      // Purchases
       case purchasesView:
         return 'عرض فواتير الشراء';
       case purchasesCreate:
@@ -231,22 +207,16 @@ abstract final class MemberPermission {
         return 'إلغاء فاتورة شراء';
       case paymentsRecord:
         return 'تسجيل دفعة للمورد';
-
-      // Suppliers
       case suppliersView:
         return 'عرض الموردين';
       case suppliersManage:
         return 'إضافة وتعديل الموردين';
-
-      // Customers
       case customersView:
         return 'عرض العملاء';
       case customersManage:
         return 'إضافة وتعديل العملاء';
       case customersRecordPayment:
         return 'تحصيل دفعة من العميل';
-
-      // Cash register
       case cashView:
         return 'عرض الخزنة';
       case cashWrite:
@@ -255,14 +225,14 @@ abstract final class MemberPermission {
         return 'إدارة حسابات الخزنة';
       case cashManageCategories:
         return 'إدارة تصنيفات الخزنة';
-
-      // Employees
       case employeesView:
         return 'عرض الموظفين';
       case employeesManage:
         return 'إضافة وتعديل الموظفين';
-
-      // Reports
+      case expensesView:
+        return 'عرض المصروفات';
+      case expensesManage:
+        return 'إضافة وتعديل المصروفات';
       case reportsView:
         return 'فتح قائمة التقارير';
       case reportsSales:
@@ -275,8 +245,6 @@ abstract final class MemberPermission {
         return 'تقارير الخزنة والتدفق النقدي';
       case reportsExport:
         return 'تصدير التقارير PDF';
-
-      // Settings & members
       case settingsCompany:
         return 'إعدادات الشركة';
       case settingsBranches:
@@ -287,14 +255,12 @@ abstract final class MemberPermission {
         return 'عرض الأعضاء';
       case membersManage:
         return 'تعديل صلاحيات الأعضاء';
-
       default:
         return code;
     }
   }
 }
 
-/// A group of permissions shown together in the management UI.
 @immutable
 class PermissionGroup extends Equatable {
   const PermissionGroup({
@@ -311,7 +277,7 @@ class PermissionGroup extends Equatable {
   List<Object?> get props => <Object?>[key, label, permissions];
 }
 
-/// The 11 groups displayed in the permissions editor.
+/// The 12 groups displayed in the permissions editor.
 const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
   PermissionGroup(
     key: 'pos',
@@ -397,6 +363,14 @@ const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
     permissions: <String>[
       MemberPermission.employeesView,
       MemberPermission.employeesManage,
+    ],
+  ),
+  PermissionGroup(
+    key: 'expenses',
+    label: 'المصروفات',
+    permissions: <String>[
+      MemberPermission.expensesView,
+      MemberPermission.expensesManage,
     ],
   ),
   PermissionGroup(
