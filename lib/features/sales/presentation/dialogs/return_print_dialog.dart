@@ -8,6 +8,7 @@ import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
 import '../../../../shared/widgets/app_button.dart';
+import '../../../pos/data/services/direct_print_service.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
@@ -16,11 +17,6 @@ import '../../data/services/pdf_return_builder.dart';
 import '../../domain/entities/return_receipt.dart';
 
 /// Opens the print dialog for a return receipt.
-///
-/// Two paper sizes only: **80 mm** (thermal roll, default) and **A4**.
-///
-/// **Phase P-1b:** reads the user's print-font preferences and applies
-/// them to the rendered PDF.
 Future<void> showReturnPrintDialog({
   required BuildContext context,
   required ReturnReceipt receipt,
@@ -32,10 +28,6 @@ Future<void> showReturnPrintDialog({
         _ReturnPrintDialog(receipt: receipt),
   );
 }
-
-// ============================================================================
-// Dialog
-// ============================================================================
 
 class _ReturnPrintDialog extends ConsumerStatefulWidget {
   const _ReturnPrintDialog({required this.receipt});
@@ -54,13 +46,10 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
 
   bool get _isBusy => _isPrinting || _isSharing;
 
-  /// Reads the current user's style preferences from company settings.
   PrintStyleSettings _readStyle() {
     final CompanySettings? settings =
         ref.read(companySettingsProvider).valueOrNull;
     if (settings == null) return const PrintStyleSettings.defaults();
-    // Returns are usually printed on thermal (58/80mm) or A4. We use the
-    // A4 scale for A4 and the thermal scale otherwise.
     if (_selectedSize == ReceiptPaperSize.a4) {
       return PrintStyleSettings(
         fontScale: settings.printFontScaleA4,
@@ -72,13 +61,29 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
 
   Future<void> _print() async {
     setState(() => _isPrinting = true);
-
     try {
       final Uint8List bytes = await PdfReturnBuilder.build(
         receipt: widget.receipt,
         size: _selectedSize,
         style: _readStyle(),
       );
+
+      // Direct-print path when enabled and not A4.
+      final bool direct =
+          ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
+              false;
+
+      if (direct && _selectedSize != ReceiptPaperSize.a4) {
+        final bool ok = await DirectPrintService.tryPdfBytes(
+          bytes: bytes,
+          name: _fileName(),
+        );
+        if (ok) {
+          if (!mounted) return;
+          Navigator.of(context).pop();
+          return;
+        }
+      }
 
       await Printing.layoutPdf(
         name: _fileName(),
@@ -91,15 +96,12 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
       if (!mounted) return;
       _showFailure('تعذّرت الطباعة. يرجى المحاولة مرة أخرى.');
     } finally {
-      if (mounted) {
-        setState(() => _isPrinting = false);
-      }
+      if (mounted) setState(() => _isPrinting = false);
     }
   }
 
   Future<void> _share() async {
     setState(() => _isSharing = true);
-
     try {
       final Uint8List bytes = await PdfReturnBuilder.build(
         receipt: widget.receipt,
@@ -107,10 +109,7 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
         style: _readStyle(),
       );
 
-      await Printing.sharePdf(
-        bytes: bytes,
-        filename: _fileName(),
-      );
+      await Printing.sharePdf(bytes: bytes, filename: _fileName());
 
       if (!mounted) return;
       Navigator.of(context).pop();
@@ -118,9 +117,7 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
       if (!mounted) return;
       _showFailure('تعذّرت مشاركة الإيصال.');
     } finally {
-      if (mounted) {
-        setState(() => _isSharing = false);
-      }
+      if (mounted) setState(() => _isSharing = false);
     }
   }
 
@@ -139,9 +136,7 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
   }
 
   void _onSizeSelected(Set<ReceiptPaperSize> selection) {
-    if (selection.isEmpty || _isBusy) {
-      return;
-    }
+    if (selection.isEmpty || _isBusy) return;
     setState(() => _selectedSize = selection.first);
   }
 
@@ -263,9 +258,7 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
       padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: <Widget>[
-          Expanded(
-            child: Text(label, style: theme.textTheme.bodyMedium),
-          ),
+          Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
           Text(
             value,
             style: (emphasized
