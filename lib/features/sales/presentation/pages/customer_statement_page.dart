@@ -12,6 +12,7 @@ import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
+import '../../../pos/data/services/direct_print_service.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
@@ -58,7 +59,7 @@ class _CustomerStatementPageState
   static final DateFormat _dateShort = DateFormat('yyyy-MM-dd');
 
   // ---------------------------------------------------------------------------
-  // Period
+  // Period computation
   // ---------------------------------------------------------------------------
 
   DateTime? get _fromDate {
@@ -171,8 +172,32 @@ class _CustomerStatementPageState
         style: _readA4Style(),
       );
 
+      final String fileName = 'statement-${statement.customer.name}.pdf';
+
+      // ---- Direct print path when enabled ----
+      final bool direct =
+          ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
+              false;
+
+      if (direct) {
+        final bool ok = await DirectPrintService.tryPdfBytes(
+          bytes: bytes,
+          name: fileName,
+        );
+        if (ok) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context)
+            ..hideCurrentSnackBar()
+            ..showSnackBar(
+              const SnackBar(content: Text('تم إرسال الكشف للطابعة.')),
+            );
+          return;
+        }
+      }
+
+      // ---- Fallback: system dialog ----
       await Printing.layoutPdf(
-        name: 'statement-${statement.customer.name}.pdf',
+        name: fileName,
         onLayout: (PdfPageFormat _) async => bytes,
       );
     } on Object {
@@ -304,8 +329,12 @@ class _CustomerInfoCard extends StatelessWidget {
     final Customer customer = statement.customer;
 
     final List<String> meta = <String>[];
-    if (customer.hasCode) meta.add('كود: ${customer.code}');
-    if (customer.hasPhone) meta.add(customer.phone!);
+    if (customer.hasCode) {
+      meta.add('كود: ${customer.code}');
+    }
+    if (customer.hasPhone) {
+      meta.add(customer.phone!);
+    }
 
     return DecoratedBox(
       decoration: BoxDecoration(
