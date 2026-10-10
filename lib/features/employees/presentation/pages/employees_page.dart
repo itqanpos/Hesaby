@@ -1,6 +1,7 @@
 // lib/features/employees/presentation/pages/employees_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
@@ -10,20 +11,12 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
-import '../../../companies/domain/entities/company_member.dart';
-import '../../../companies/presentation/providers/members_providers.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
 import '../providers/employee_providers.dart';
 import '../widgets/employee_form_sheet.dart';
 
-/// Employees list page.
-///
-/// Layout:
-/// * KPI row (total / active / inactive).
-/// * Search field.
-/// * List of employees.
-/// * FAB to add a new employee.
+/// Employees (Team) list page.
 class EmployeesPage extends ConsumerStatefulWidget {
   const EmployeesPage({super.key});
 
@@ -54,7 +47,8 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
       return e.fullName.toLowerCase().contains(q) ||
           (e.position ?? '').toLowerCase().contains(q) ||
           (e.phone ?? '').contains(q) ||
-          (e.nationalId ?? '').contains(q);
+          (e.nationalId ?? '').contains(q) ||
+          (e.loginCode ?? '').toLowerCase().contains(q);
     }).toList(growable: false);
   }
 
@@ -72,6 +66,20 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                 ? 'تم إضافة الموظف'
                 : 'تم تحديث بيانات الموظف'),
           ),
+        );
+    }
+  }
+
+  Future<void> _createLogin(Employee employee) async {
+    final bool? saved = await showCreateLoginDialog(
+      context: context,
+      employee: employee,
+    );
+    if (saved == true && mounted) {
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('تم إنشاء حساب الدخول.')),
         );
     }
   }
@@ -145,7 +153,7 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
 
     return AppShell(
       appBar: AppBar(
-        title: const Text('الموظفون'),
+        title: const Text('الفريق'),
         actions: <Widget>[
           IconButton(
             tooltip: includeInactive
@@ -191,6 +199,8 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
           final int active =
               all.where((Employee e) => e.isActive).length;
           final int inactive = total - active;
+          final int withAccount =
+              all.where((Employee e) => e.hasAccount).length;
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -201,13 +211,14 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                   total: total,
                   active: active,
                   inactive: inactive,
+                  withAccount: withAccount,
                   money: _money,
                   employees: all,
                 ),
               ),
               AppTextField(
                 controller: _searchController,
-                hint: 'ابحث بالاسم أو المسمى أو الهاتف',
+                hint: 'ابحث بالاسم أو المسمى أو الهاتف أو الكود',
                 prefixIcon: Icons.search,
                 suffixIcon: _query.isEmpty
                     ? null
@@ -253,6 +264,7 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                             onEdit: () => _openForm(existing: e),
                             onDelete: () => _confirmDelete(e),
                             onToggleActive: () => _toggleActive(e),
+                            onCreateLogin: () => _createLogin(e),
                           );
                         },
                       ),
@@ -274,6 +286,7 @@ class _KpiRow extends StatelessWidget {
     required this.total,
     required this.active,
     required this.inactive,
+    required this.withAccount,
     required this.money,
     required this.employees,
   });
@@ -281,6 +294,7 @@ class _KpiRow extends StatelessWidget {
   final int total;
   final int active;
   final int inactive;
+  final int withAccount;
   final NumberFormat money;
   final List<Employee> employees;
 
@@ -314,10 +328,10 @@ class _KpiRow extends StatelessWidget {
             const SizedBox(width: 8),
             Expanded(
               child: _KpiCard(
-                icon: Icons.pause_circle_outline,
-                label: 'معطّل',
-                value: '$inactive',
-                color: const Color(0xFF7B5E3A),
+                icon: Icons.vpn_key_outlined,
+                label: 'لديه حساب',
+                value: '$withAccount',
+                color: const Color(0xFF6A1B9A),
               ),
             ),
           ],
@@ -327,7 +341,7 @@ class _KpiRow extends StatelessWidget {
           icon: Icons.payments_outlined,
           label: 'إجمالي الرواتب الشهرية (النشطون)',
           value: money.format(totalSalaries),
-          color: const Color(0xFF6A1B9A),
+          color: const Color(0xFF0F7B6C),
         ),
       ],
     );
@@ -406,13 +420,14 @@ class _KpiCard extends StatelessWidget {
 // Employee card
 // ============================================================================
 
-class _EmployeeCard extends ConsumerWidget {
+class _EmployeeCard extends StatelessWidget {
   const _EmployeeCard({
     required this.employee,
     required this.money,
     required this.onEdit,
     required this.onDelete,
     required this.onToggleActive,
+    required this.onCreateLogin,
   });
 
   final Employee employee;
@@ -420,9 +435,10 @@ class _EmployeeCard extends ConsumerWidget {
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onToggleActive;
+  final VoidCallback onCreateLogin;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final bool isActive = employee.isActive;
@@ -521,12 +537,22 @@ class _EmployeeCard extends ConsumerWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
-                    if (employee.companyMemberId != null) ...<Widget>[
-                      const SizedBox(height: 6),
-                      _LinkedBadge(
-                        memberId: employee.companyMemberId!,
+                    const SizedBox(height: 6),
+                    if (employee.hasAccount)
+                      _Badge(
+                        label:
+                            'حساب نشط: ${employee.loginCode ?? "—"}',
+                        background: scheme.tertiaryContainer,
+                        foreground: scheme.onTertiaryContainer,
+                        icon: Icons.vpn_key_outlined,
+                      )
+                    else
+                      _Badge(
+                        label: 'لا يوجد حساب دخول',
+                        background: scheme.surfaceContainerHighest,
+                        foreground: scheme.onSurfaceVariant,
+                        icon: Icons.lock_outline,
                       ),
-                    ],
                   ],
                 ),
               ),
@@ -536,6 +562,8 @@ class _EmployeeCard extends ConsumerWidget {
                   switch (a) {
                     case _EmployeeAction.edit:
                       onEdit();
+                    case _EmployeeAction.createLogin:
+                      onCreateLogin();
                     case _EmployeeAction.toggle:
                       onToggleActive();
                     case _EmployeeAction.delete:
@@ -552,6 +580,15 @@ class _EmployeeCard extends ConsumerWidget {
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
+                  if (!employee.hasAccount)
+                    const PopupMenuItem<_EmployeeAction>(
+                      value: _EmployeeAction.createLogin,
+                      child: ListTile(
+                        leading: Icon(Icons.vpn_key_outlined),
+                        title: Text('إنشاء حساب دخول'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
                   PopupMenuItem<_EmployeeAction>(
                     value: _EmployeeAction.toggle,
                     child: ListTile(
@@ -584,90 +621,20 @@ class _EmployeeCard extends ConsumerWidget {
   }
 }
 
-enum _EmployeeAction { edit, toggle, delete }
-
-// ============================================================================
-// Linked-to-account badge
-// ============================================================================
-
-class _LinkedBadge extends ConsumerWidget {
-  const _LinkedBadge({required this.memberId});
-
-  final String memberId;
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final List<CompanyMember> members =
-        ref.watch(membersProvider).valueOrNull ?? const <CompanyMember>[];
-
-    CompanyMember? member;
-    for (final CompanyMember m in members) {
-      if (m.id == memberId) {
-        member = m;
-        break;
-      }
-    }
-
-    final String label = member == null
-        ? 'مرتبط بحساب'
-        : 'مرتبط بحساب: ${_label(member)}';
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.tertiaryContainer,
-        borderRadius: BorderRadius.circular(999),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Icon(
-              Icons.link,
-              size: 12,
-              color: scheme.onTertiaryContainer,
-            ),
-            const SizedBox(width: 4),
-            Flexible(
-              child: Text(
-                label,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onTertiaryContainer,
-                  fontWeight: FontWeight.w700,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  static String _label(CompanyMember m) {
-    final String? name = m.displayName;
-    if (name != null && name.trim().isNotEmpty) return name.trim();
-    final String? email = m.email;
-    if (email != null && email.isNotEmpty) {
-      return email.split('@').first;
-    }
-    return 'عضو';
-  }
-}
+enum _EmployeeAction { edit, createLogin, toggle, delete }
 
 class _Badge extends StatelessWidget {
   const _Badge({
     required this.label,
     required this.background,
     required this.foreground,
+    this.icon,
   });
 
   final String label;
   final Color background;
   final Color foreground;
+  final IconData? icon;
 
   @override
   Widget build(BuildContext context) {
@@ -678,14 +645,276 @@ class _Badge extends StatelessWidget {
       ),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
-        child: Text(
-          label,
-          style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                color: foreground,
-                fontWeight: FontWeight.w700,
-              ),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            if (icon != null) ...<Widget>[
+              Icon(icon, size: 12, color: foreground),
+              const SizedBox(width: 4),
+            ],
+            Text(
+              label,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: foreground,
+                    fontWeight: FontWeight.w700,
+                  ),
+            ),
+          ],
         ),
       ),
+    );
+  }
+}
+
+// ============================================================================
+// Create login dialog
+// ============================================================================
+
+/// Opens the "create login" dialog for [employee]. Returns `true` on
+/// success.
+Future<bool?> showCreateLoginDialog({
+  required BuildContext context,
+  required Employee employee,
+}) {
+  return showDialog<bool>(
+    context: context,
+    barrierDismissible: false,
+    builder: (BuildContext _) => _CreateLoginDialog(employee: employee),
+  );
+}
+
+class _CreateLoginDialog extends ConsumerStatefulWidget {
+  const _CreateLoginDialog({required this.employee});
+
+  final Employee employee;
+
+  @override
+  ConsumerState<_CreateLoginDialog> createState() =>
+      _CreateLoginDialogState();
+}
+
+class _CreateLoginDialogState extends ConsumerState<_CreateLoginDialog> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _codeController = TextEditingController();
+  final TextEditingController _passwordController = TextEditingController();
+
+  String _role = 'cashier';
+  bool _obscurePassword = true;
+  bool _isSubmitting = false;
+  EmployeeFailureType? _failure;
+
+  @override
+  void initState() {
+    super.initState();
+    // Suggested code: first name, lowercased, letters only.
+    final String suggested = widget.employee.fullName
+        .trim()
+        .split(RegExp(r'\s+'))
+        .first
+        .toLowerCase()
+        .replaceAll(RegExp(r'[^a-z0-9]'), '');
+    if (suggested.length >= 3) {
+      _codeController.text = suggested;
+    }
+  }
+
+  @override
+  void dispose() {
+    _codeController.dispose();
+    _passwordController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
+    if (_failure != null) setState(() => _failure = null);
+    if (!(_formKey.currentState?.validate() ?? false)) return;
+
+    setState(() => _isSubmitting = true);
+
+    try {
+      await ref.read(employeesProvider.notifier).createLogin(
+            employeeId: widget.employee.id,
+            loginCode: _codeController.text.trim(),
+            password: _passwordController.text,
+            role: _role,
+          );
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } on EmployeeException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _failure = e.type;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _failure = EmployeeFailureType.unknown;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return AlertDialog(
+      title: Row(
+        children: <Widget>[
+          Icon(Icons.vpn_key_outlined, color: scheme.primary),
+          const SizedBox(width: 8),
+          const Expanded(child: Text('إنشاء حساب دخول')),
+        ],
+      ),
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Text(
+                widget.employee.fullName,
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w800,
+                ),
+              ),
+              const SizedBox(height: 16),
+              TextFormField(
+                controller: _codeController,
+                enabled: !_isSubmitting,
+                textInputAction: TextInputAction.next,
+                textDirection: TextDirection.ltr,
+                decoration: const InputDecoration(
+                  labelText: 'كود الدخول',
+                  hintText: 'ahmed01',
+                  helperText:
+                      '3-30 حرف (a-z، 0-9، _، -). سيُخزَّن بحروف صغيرة.',
+                  border: OutlineInputBorder(),
+                ),
+                inputFormatters: <TextInputFormatter>[
+                  FilteringTextInputFormatter.allow(
+                    RegExp(r'[a-zA-Z0-9_-]'),
+                  ),
+                ],
+                validator: (String? v) {
+                  final String t = (v ?? '').trim();
+                  if (t.isEmpty) return 'الرجاء إدخال كود';
+                  if (t.length < 3 || t.length > 30) {
+                    return '3-30 حرف';
+                  }
+                  final RegExp pattern = RegExp(r'^[a-zA-Z0-9_-]+$');
+                  if (!pattern.hasMatch(t)) return 'حروف وأرقام فقط';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 12),
+              TextFormField(
+                controller: _passwordController,
+                enabled: !_isSubmitting,
+                obscureText: _obscurePassword,
+                textInputAction: TextInputAction.done,
+                decoration: InputDecoration(
+                  labelText: 'كلمة السر',
+                  hintText: '6 أحرف على الأقل',
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    onPressed: _isSubmitting
+                        ? null
+                        : () => setState(
+                              () => _obscurePassword = !_obscurePassword,
+                            ),
+                    icon: Icon(
+                      _obscurePassword
+                          ? Icons.visibility_outlined
+                          : Icons.visibility_off_outlined,
+                    ),
+                  ),
+                ),
+                validator: (String? v) {
+                  final String t = v ?? '';
+                  if (t.length < 6) return '6 أحرف على الأقل';
+                  return null;
+                },
+              ),
+              const SizedBox(height: 16),
+              Text(
+                'الدور',
+                style: theme.textTheme.labelLarge?.copyWith(
+                  fontWeight: FontWeight.w700,
+                ),
+              ),
+              const SizedBox(height: 8),
+              SegmentedButton<String>(
+                segments: const <ButtonSegment<String>>[
+                  ButtonSegment<String>(
+                    value: 'cashier',
+                    label: Text('كاشير'),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'inventory_clerk',
+                    label: Text('أمين مخزن'),
+                  ),
+                  ButtonSegment<String>(
+                    value: 'manager',
+                    label: Text('مدير'),
+                  ),
+                ],
+                selected: <String>{_role},
+                onSelectionChanged: _isSubmitting
+                    ? null
+                    : (Set<String> s) => setState(() => _role = s.first),
+              ),
+              if (_failure != null) ...<Widget>[
+                const SizedBox(height: 12),
+                DecoratedBox(
+                  decoration: BoxDecoration(
+                    color: scheme.errorContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Padding(
+                    padding: const EdgeInsets.all(12),
+                    child: Row(
+                      children: <Widget>[
+                        Icon(
+                          Icons.error_outline,
+                          color: scheme.onErrorContainer,
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            _failureMessage(_failure!),
+                            style: TextStyle(
+                              color: scheme.onErrorContainer,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        AppButton(
+          label: 'إلغاء',
+          variant: AppButtonVariant.text,
+          onPressed:
+              _isSubmitting ? null : () => Navigator.of(context).pop(),
+        ),
+        AppButton(
+          label: 'إنشاء',
+          icon: Icons.check_circle_outline,
+          isLoading: _isSubmitting,
+          onPressed: _isSubmitting ? null : _submit,
+        ),
+      ],
     );
   }
 }
@@ -701,6 +930,10 @@ String _failureMessage(EmployeeFailureType type) => switch (type) {
         'لا تملك صلاحية إدارة الموظفين.',
       EmployeeFailureType.notFound => 'الموظف غير موجود.',
       EmployeeFailureType.invalidInput => 'تحقق من البيانات المُدخلة.',
+      EmployeeFailureType.codeConflict =>
+        'كود الدخول مستخدم بالفعل. اختر كودًا آخر.',
+      EmployeeFailureType.alreadyHasAccount =>
+        'هذا الموظف لديه حساب دخول بالفعل.',
       EmployeeFailureType.invalidResponse =>
         'تعذّر قراءة البيانات من الخادم.',
       EmployeeFailureType.unknown => 'حدث خطأ غير متوقع. حاول مرة أخرى.',
