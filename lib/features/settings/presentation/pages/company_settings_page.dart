@@ -580,7 +580,7 @@ class _LogoSectionState extends ConsumerState<_LogoSection> {
                         errorBuilder: (
                           BuildContext _,
                           Object error,
-                          StackTrace? _,
+                          StackTrace? __,
                         ) {
                           return Center(
                             child: Icon(
