@@ -6,8 +6,8 @@ import 'package:flutter/foundation.dart';
 /// A single employee of a company.
 ///
 /// Optionally linked to a [CompanyMember] row via [companyMemberId] — used
-/// when the employee also uses the app (cashier, manager). Employees who
-/// do not use the app (driver, cleaner, ...) leave it null.
+/// when the employee also uses the app. When [loginCode] is set, the
+/// employee can sign in using the code instead of an email.
 @immutable
 class Employee extends Equatable {
   const Employee({
@@ -25,6 +25,7 @@ class Employee extends Equatable {
     this.hireDate,
     this.notes,
     this.companyMemberId,
+    this.loginCode,
   });
 
   final String id;
@@ -39,12 +40,17 @@ class Employee extends Equatable {
   final String? notes;
   final bool isActive;
 
-  /// Optional link to `company_members.id` — the app-account this employee
-  /// uses. Null for staff without an app login.
+  /// Optional link to `company_members.id` — the app account.
   final String? companyMemberId;
+
+  /// Optional login code (lowercase). Null when the employee has no
+  /// account yet.
+  final String? loginCode;
 
   final DateTime createdAt;
   final DateTime updatedAt;
+
+  bool get hasAccount => companyMemberId != null;
 
   @override
   List<Object?> get props => <Object?>[
@@ -60,6 +66,7 @@ class Employee extends Equatable {
         notes,
         isActive,
         companyMemberId,
+        loginCode,
         createdAt,
         updatedAt,
       ];
