@@ -1,26 +1,30 @@
 // lib/features/settings/presentation/pages/company_settings_page.dart
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
+import '../../../../core/utils/logger.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../data/services/logo_cache_service.dart';
+import '../../data/services/logo_storage_service.dart';
 import '../../domain/entities/company_settings.dart';
 import '../../domain/repositories/company_settings_repository.dart';
 import '../providers/company_settings_providers.dart';
 
-/// Company settings page — business defaults per company.
+/// Company settings page — business defaults + print preferences.
 ///
-/// Loads the current row and shows it in a form. On save, a partial update
-/// is sent (only the fields that were changed are considered, though the
-/// repository tolerates a full payload).
-///
-/// Access is restricted by RLS to owner / admin / manager; a cashier who
-/// somehow reaches this page will see an "unauthorized" error instead of a
-/// broken form.
+/// Sections (top → bottom):
+/// 1. **الشعار** — upload / preview / delete the company logo.
+/// 2. **البيع والضرائب** — tax rate, max discount.
+/// 3. **قواعد البيع** — allow-sale-without-stock, allow-credit-sale.
+/// 4. **تذييل الإيصال** — receipt footer text.
 class CompanySettingsPage extends ConsumerStatefulWidget {
   const CompanySettingsPage({super.key});
 
@@ -60,7 +64,7 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Hydration from loaded settings
+  // Hydration
   // ---------------------------------------------------------------------------
 
   void _hydrate(CompanySettings settings) {
@@ -159,6 +163,21 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
             child: ListView(
               padding: const EdgeInsets.only(top: 12, bottom: 24),
               children: <Widget>[
+                // ---- Logo ----
+                const _SectionHeader(
+                  title: 'شعار الشركة',
+                  icon: Icons.image_outlined,
+                ),
+                const SizedBox(height: 10),
+                const _LogoSection(),
+                const SizedBox(height: 6),
+                const _HelperText(
+                  'يظهر الشعار أعلى كل الإيصالات الحرارية والتقارير A4. '
+                  'الحجم الأقصى 500 كيلوبايت (PNG أو JPG).',
+                ),
+
+                const SizedBox(height: 16),
+
                 // ---- Sales rules ----
                 const _SectionHeader(
                   title: 'البيع والضرائب',
@@ -172,8 +191,9 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
                       label: 'نسبة الضريبة الافتراضية %',
                       hint: 'مثال: 14',
                       enabled: !_isSaving,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       validator: _validatePercent,
                     ),
                     const SizedBox(height: 6),
@@ -186,8 +206,9 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
                       label: 'الحد الأقصى للخصم %',
                       hint: 'مثال: 20',
                       enabled: !_isSaving,
-                      keyboardType:
-                          const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                       validator: _validatePercent,
                     ),
                     const SizedBox(height: 6),
@@ -347,6 +368,280 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
       case CompanySettingsFailureType.unknown:
         return 'تعذّر حفظ الإعدادات. حاول مرة أخرى.';
     }
+  }
+}
+
+// ============================================================================
+// Logo section
+// ============================================================================
+
+class _LogoSection extends ConsumerStatefulWidget {
+  const _LogoSection();
+
+  @override
+  ConsumerState<_LogoSection> createState() => _LogoSectionState();
+}
+
+class _LogoSectionState extends ConsumerState<_LogoSection> {
+  static const int _maxBytes = 500 * 1024; // 500 KB
+
+  bool _isUploading = false;
+  bool _isDeleting = false;
+  String? _errorMessage;
+
+  // ---------------------------------------------------------------------------
+  // Upload
+  // ---------------------------------------------------------------------------
+
+  Future<void> _pickAndUpload() async {
+    if (_isUploading || _isDeleting) return;
+
+    setState(() {
+      _errorMessage = null;
+    });
+
+    final ImagePicker picker = ImagePicker();
+    XFile? file;
+    try {
+      file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 90,
+      );
+    } on Object catch (e, s) {
+      AppLogger.error('Image picker failed', e, s);
+      if (mounted) {
+        setState(() => _errorMessage = 'تعذّر فتح الصور. تحقق من الصلاحيات.');
+      }
+      return;
+    }
+
+    if (file == null) return; // User cancelled.
+
+    // Read bytes and enforce size limit.
+    final Uint8List bytes = await file.readAsBytes();
+    if (bytes.length > _maxBytes) {
+      if (mounted) {
+        setState(() => _errorMessage =
+            'حجم الصورة يتجاوز 500 كيلوبايت. اختر صورة أصغر.');
+      }
+      return;
+    }
+
+    final String? companyId = _currentCompanyId();
+    if (companyId == null) {
+      if (mounted) {
+        setState(() => _errorMessage = 'لم يتم اختيار شركة.');
+      }
+      return;
+    }
+
+    setState(() => _isUploading = true);
+
+    try {
+      // 1) Upload bytes to Supabase Storage.
+      final String extension = _extensionOf(file.name);
+      final String url = await logoStorageServiceFromSupabase.upload(
+        companyId: companyId,
+        bytes: bytes,
+        fileExtension: extension,
+      );
+
+      // 2) Persist the URL in company_settings.
+      await ref
+          .read(companySettingsProvider.notifier)
+          .updateSettings(logoUrl: url);
+
+      // 3) Cache the bytes locally for fast printing.
+      await const LogoCacheService().save(companyId, bytes);
+
+      if (!mounted) return;
+      setState(() => _isUploading = false);
+      _snack('تم رفع الشعار.');
+    } on LogoStorageException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isUploading = false;
+        _errorMessage = e.message;
+      });
+    } on Object catch (e, s) {
+      AppLogger.error('Logo upload flow failed', e, s);
+      if (!mounted) return;
+      setState(() {
+        _isUploading = false;
+        _errorMessage = 'تعذّر رفع الشعار. حاول مرة أخرى.';
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Delete
+  // ---------------------------------------------------------------------------
+
+  Future<void> _delete() async {
+    if (_isUploading || _isDeleting) return;
+
+    final String? companyId = _currentCompanyId();
+    if (companyId == null) return;
+
+    setState(() {
+      _isDeleting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await logoStorageServiceFromSupabase.delete(companyId);
+      await ref
+          .read(companySettingsProvider.notifier)
+          .updateSettings(clearLogo: true);
+      await const LogoCacheService().clear(companyId);
+
+      if (!mounted) return;
+      setState(() => _isDeleting = false);
+      _snack('تم حذف الشعار.');
+    } on Object catch (e, s) {
+      AppLogger.error('Logo delete flow failed', e, s);
+      if (!mounted) return;
+      setState(() {
+        _isDeleting = false;
+        _errorMessage = 'تعذّر حذف الشعار.';
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  String? _currentCompanyId() {
+    final CompanySettings? s =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (s == null || s.companyId.isEmpty) return null;
+    return s.companyId;
+  }
+
+  static String _extensionOf(String fileName) {
+    final int dot = fileName.lastIndexOf('.');
+    if (dot < 0 || dot == fileName.length - 1) return 'png';
+    return fileName.substring(dot + 1).toLowerCase();
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final AsyncValue<CompanySettings> async =
+        ref.watch(companySettingsProvider);
+    final CompanySettings? settings = async.valueOrNull;
+    final String? logoUrl = settings?.logoUrl;
+    final bool hasLogo = logoUrl != null && logoUrl.isNotEmpty;
+    final bool busy = _isUploading || _isDeleting;
+
+    return _Card(
+      children: <Widget>[
+        // ---- Preview ----
+        Center(
+          child: SizedBox(
+            width: 140,
+            height: 140,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: hasLogo
+                    ? Image.network(
+                        logoUrl,
+                        fit: BoxFit.contain,
+                        loadingBuilder: (
+                          BuildContext _,
+                          Widget child,
+                          ImageChunkEvent? progress,
+                        ) {
+                          if (progress == null) return child;
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        },
+                        errorBuilder: (
+                          BuildContext _,
+                          Object error,
+                          StackTrace? _,
+                        ) {
+                          return Center(
+                            child: Icon(
+                              Icons.broken_image_outlined,
+                              size: 36,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          );
+                        },
+                      )
+                    : Center(
+                        child: Icon(
+                          Icons.image_outlined,
+                          size: 40,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ),
+
+        if (busy) ...<Widget>[
+          const SizedBox(height: 12),
+          const Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ],
+
+        if (_errorMessage != null) ...<Widget>[
+          const SizedBox(height: 12),
+          _ErrorBanner(message: _errorMessage!),
+        ],
+
+        const SizedBox(height: 16),
+
+        // ---- Actions ----
+        AppButton(
+          label: hasLogo ? 'تغيير الشعار' : 'رفع الشعار',
+          icon: hasLogo ? Icons.swap_horiz : Icons.upload_outlined,
+          expanded: true,
+          isLoading: _isUploading,
+          onPressed: busy ? null : _pickAndUpload,
+        ),
+        if (hasLogo) ...<Widget>[
+          const SizedBox(height: 8),
+          AppButton(
+            label: 'حذف الشعار',
+            icon: Icons.delete_outline,
+            variant: AppButtonVariant.danger,
+            expanded: true,
+            isLoading: _isDeleting,
+            onPressed: busy ? null : _delete,
+          ),
+        ],
+      ],
+    );
   }
 }
 
