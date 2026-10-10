@@ -22,6 +22,17 @@ import '../providers/sales_providers.dart';
 import '../widgets/sales_kpi_row.dart';
 
 /// Sales list page.
+///
+/// The `+` action and the empty-state action both open the POS screen
+/// (`/pos`) instead of the manual sale form. POS is the primary sale
+/// entry point — faster, barcode-aware, and printer-integrated — so the
+/// list page funnels every new sale through it.
+///
+/// Layout, top to bottom:
+/// * KPI overview cards (always visible, not affected by filters).
+/// * Search field + filter button (with an active-filter badge).
+/// * Compact chip row showing only the active filters (when any).
+/// * The filtered list of sales (pull-to-refresh enabled).
 class SalesPage extends ConsumerStatefulWidget {
   const SalesPage({super.key});
 
@@ -70,6 +81,12 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       ref.refresh(salesProvider.future),
       ref.refresh(customersProvider.future),
     ]);
+  }
+
+  /// Opens POS. The sales list intentionally routes new sales through the
+  /// POS screen — the manual sale form is no longer reachable from here.
+  Future<void> _openPos() async {
+    await context.pushNamed(AppRouter.posName);
   }
 
   bool _matches(Sale sale, Map<String, String> customerNames) {
@@ -135,10 +152,10 @@ class _SalesPageState extends ConsumerState<SalesPage> {
             icon: const Icon(Icons.refresh),
           ),
           IconButton(
-            tooltip: 'إضافة فاتورة',
+            tooltip: 'بيع جديد (نقطة البيع)',
             onPressed: anyLoading || firstError != null || branchId == null
                 ? null
-                : () => context.pushNamed(AppRouter.saleNewName),
+                : _openPos,
             icon: const Icon(Icons.add),
           ),
         ],
@@ -180,11 +197,13 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              // ---- KPI overview ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: SalesKpiRow(sales: allSales),
               ),
 
+              // ---- Search + Filter button ----
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -217,6 +236,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 ),
               ),
 
+              // ---- Active filter chips (compact) ----
               if (_filter.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -238,12 +258,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                             icon: Icons.point_of_sale_outlined,
                             title: 'لا توجد فواتير بيع',
                             message:
-                                'ابدأ بتسجيل أول فاتورة بيع لأحد العملاء.',
+                                'ابدأ بتسجيل أول فاتورة بيع من نقطة البيع.',
                             action: AppButton(
-                              label: 'إضافة فاتورة',
-                              icon: Icons.add,
-                              onPressed: () =>
-                                  context.pushNamed(AppRouter.saleNewName),
+                              label: 'فتح نقطة البيع',
+                              icon: Icons.point_of_sale_outlined,
+                              onPressed: _openPos,
                             ),
                           ),
                         );
@@ -408,7 +427,7 @@ class _FilterButton extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// Active filter chips
+// Active filter chips (compact summary)
 // -----------------------------------------------------------------------------
 
 class _ActiveFilterChips extends StatelessWidget {
