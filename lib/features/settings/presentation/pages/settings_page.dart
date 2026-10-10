@@ -59,6 +59,12 @@ class SettingsPage extends ConsumerWidget {
             onTap: () => context.pushNamed(AppRouter.branchesName),
           ),
           _SettingsTile(
+            icon: Icons.account_balance_wallet_outlined,
+            title: 'الخزنة',
+            subtitle: 'الأرصدة النقدية والبطاقة، الحركات المالية',
+            onTap: () => context.pushNamed(AppRouter.cashRegisterName),
+          ),
+          _SettingsTile(
             icon: Icons.tune_outlined,
             title: 'إعدادات الشركة',
             subtitle: 'الضريبة والخصم وقواعد البيع وتذييل الإيصال',
@@ -159,38 +165,19 @@ class SettingsPage extends ConsumerWidget {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Subscription subtitle
-  // ---------------------------------------------------------------------------
-
   static String _subscriptionSubtitle(CompanySubscription? sub) {
-    if (sub == null) {
-      return 'حالة الاشتراك والباقة';
-    }
-
-    if (sub.isCancelled) {
-      return 'ملغى — جدّد للعودة';
-    }
-    if (sub.isExpired) {
-      return 'انتهى — جدّد الآن';
-    }
-
+    if (sub == null) return 'حالة الاشتراك والباقة';
+    if (sub.isCancelled) return 'ملغى — جدّد للعودة';
+    if (sub.isExpired) return 'انتهى — جدّد الآن';
     final int? days = sub.daysRemaining;
-
     if (sub.isTrial) {
       if (days == null) return 'تجربة مجانية';
       return 'تجربة مجانية — $days ${days == 1 ? "يوم" : "أيام"} متبقية';
     }
-
-    // Active
     final String planLabel = sub.plan?.label ?? 'برو';
     if (days == null) return 'باقة $planLabel';
     return 'باقة $planLabel · متبقي $days ${days == 1 ? "يوم" : "أيام"}';
   }
-
-  // ---------------------------------------------------------------------------
-  // Theme mode
-  // ---------------------------------------------------------------------------
 
   Future<void> _pickThemeMode(
     BuildContext context,
@@ -241,10 +228,6 @@ class SettingsPage extends ConsumerWidget {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Locale
-  // ---------------------------------------------------------------------------
-
   Future<void> _pickLocale(
     BuildContext context,
     WidgetRef ref,
@@ -281,7 +264,6 @@ class SettingsPage extends ConsumerWidget {
       ),
     );
     if (picked == null) return;
-
     final Locale? newLocale = switch (picked) {
       _LocaleChoice.system => null,
       _LocaleChoice.ar => const Locale('ar'),
@@ -302,18 +284,12 @@ class SettingsPage extends ConsumerWidget {
     return 'العربية';
   }
 
-  // ---------------------------------------------------------------------------
-  // Logout
-  // ---------------------------------------------------------------------------
-
   Future<void> _confirmLogout(BuildContext context, WidgetRef ref) async {
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
         title: const Text('تسجيل الخروج'),
-        content: const Text(
-          'هل تريد تسجيل الخروج من هذا الجهاز؟',
-        ),
+        content: const Text('هل تريد تسجيل الخروج من هذا الجهاز؟'),
         actions: <Widget>[
           AppButton(
             label: 'إلغاء',
@@ -328,9 +304,7 @@ class SettingsPage extends ConsumerWidget {
         ],
       ),
     );
-
     if (confirmed != true || !context.mounted) return;
-
     await ref.read(authProvider.notifier).logout();
   }
 }
