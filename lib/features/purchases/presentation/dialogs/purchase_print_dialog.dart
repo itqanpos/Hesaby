@@ -1,22 +1,26 @@
 // lib/features/purchases/presentation/dialogs/purchase_print_dialog.dart
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
+import 'package:pdf/pdf.dart' show PdfPageFormat;
+import 'package:printing/printing.dart' show Printing;
 
 import '../../../../shared/widgets/app_button.dart';
+import '../../../pos/data/services/direct_print_service.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart'
     show ReceiptPaperSize;
+import '../../../pos/data/services/pdf_receipt_builder.dart' as pdf_rb;
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
+import '../../data/services/pdf_purchase_receipt_builder.dart';
 import '../../data/services/purchase_receipt_printer.dart';
 import '../../domain/entities/purchase_receipt.dart';
 
 /// Opens the print dialog for a purchase receipt.
-///
-/// **Phase P-1b:** reads the user's print-font preferences from
-/// `companySettingsProvider` and applies them to the rendered PDF.
 Future<void> showPurchasePrintDialog({
   required BuildContext context,
   required PurchaseReceipt receipt,
@@ -28,10 +32,6 @@ Future<void> showPurchasePrintDialog({
         _PurchasePrintDialog(receipt: receipt),
   );
 }
-
-// ============================================================================
-// Dialog
-// ============================================================================
 
 class _PurchasePrintDialog extends ConsumerStatefulWidget {
   const _PurchasePrintDialog({required this.receipt});
@@ -54,12 +54,6 @@ class _PurchasePrintDialogState
 
   bool get _isBusy => _isPrinting || _isSharing;
 
-  // ---------------------------------------------------------------------------
-  // Style
-  // ---------------------------------------------------------------------------
-
-  /// Picks the correct font scale for the current paper size:
-  /// A4 uses `printFontScaleA4`; thermal sizes use `printFontScale`.
   PrintStyleSettings _readStyle() {
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
@@ -73,24 +67,50 @@ class _PurchasePrintDialogState
     return PrintStyleSettings.fromCompanySettings(s);
   }
 
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
-
   Future<void> _print() async {
     setState(() => _isPrinting = true);
-    final bool ok = await _printer.printReceipt(
-      receipt: widget.receipt,
-      size: _size,
-      style: _readStyle(),
-    );
-    if (!mounted) return;
-    setState(() => _isPrinting = false);
-    if (ok) {
-      Navigator.of(context).pop();
-      return;
+    try {
+      // Direct-print path — only for thermal sizes (A4 goes through the
+      // system dialog anyway, and directPrintPdf is available separately).
+      final bool direct =
+          ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
+              false;
+
+      if (direct && _size != ReceiptPaperSize.a4) {
+        final Uint8List bytes = await PdfPurchaseReceiptBuilder.build(
+          receipt: widget.receipt,
+          size: _size,
+          style: _readStyle(),
+        );
+        final bool ok = await DirectPrintService.tryPdfBytes(
+          bytes: bytes,
+          name: _fileNameFor(widget.receipt),
+        );
+        if (ok) {
+          if (!mounted) return;
+          Navigator.of(context).pop();
+          return;
+        }
+      }
+
+      // Fallback: system dialog.
+      final bool ok = await _printer.printReceipt(
+        receipt: widget.receipt,
+        size: _size,
+        style: _readStyle(),
+      );
+      if (!mounted) return;
+      if (ok) {
+        Navigator.of(context).pop();
+        return;
+      }
+      _showFailure('تعذّرت الطباعة. يرجى المحاولة مرة أخرى.');
+    } on Object {
+      if (!mounted) return;
+      _showFailure('تعذّرت الطباعة. حاول مرة أخرى.');
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
     }
-    _showFailure('تعذّرت الطباعة. يرجى المحاولة مرة أخرى.');
   }
 
   Future<void> _share() async {
@@ -120,9 +140,12 @@ class _PurchasePrintDialogState
     setState(() => _size = selection.first);
   }
 
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
+  static String _fileNameFor(PurchaseReceipt r) {
+    final String suffix = r.invoiceNumber?.trim().isNotEmpty == true
+        ? r.invoiceNumber!.trim()
+        : r.purchaseId;
+    return 'purchase-$suffix.pdf';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -163,50 +186,33 @@ class _PurchasePrintDialogState
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
-                    _summaryRow(
-                      theme,
-                      label: 'رقم الفاتورة',
-                      value: receipt.invoiceNumber ?? '—',
-                    ),
-                    _summaryRow(
-                      theme,
-                      label: 'المورد',
-                      value: receipt.supplierName,
-                    ),
-                    _summaryRow(
-                      theme,
-                      label: 'عدد البنود',
-                      value: receipt.lineCount.toString(),
-                    ),
-                    _summaryRow(
-                      theme,
-                      label: 'الإجمالي',
-                      value: money.format(receipt.total),
-                      emphasized: true,
-                    ),
+                    _summaryRow(theme,
+                        label: 'رقم الفاتورة',
+                        value: receipt.invoiceNumber ?? '—'),
+                    _summaryRow(theme,
+                        label: 'المورد', value: receipt.supplierName),
+                    _summaryRow(theme,
+                        label: 'عدد البنود',
+                        value: receipt.lineCount.toString()),
+                    _summaryRow(theme,
+                        label: 'الإجمالي',
+                        value: money.format(receipt.total),
+                        emphasized: true),
                   ],
                 ),
               ),
             ),
-
             const SizedBox(height: 16),
-
             Text('مقاس الورق', style: theme.textTheme.labelLarge),
             const SizedBox(height: 8),
             SegmentedButton<ReceiptPaperSize>(
               segments: const <ButtonSegment<ReceiptPaperSize>>[
                 ButtonSegment<ReceiptPaperSize>(
-                  value: ReceiptPaperSize.mm58,
-                  label: Text('58 مم'),
-                ),
+                    value: ReceiptPaperSize.mm58, label: Text('58 مم')),
                 ButtonSegment<ReceiptPaperSize>(
-                  value: ReceiptPaperSize.mm80,
-                  label: Text('80 مم'),
-                ),
+                    value: ReceiptPaperSize.mm80, label: Text('80 مم')),
                 ButtonSegment<ReceiptPaperSize>(
-                  value: ReceiptPaperSize.a4,
-                  label: Text('A4'),
-                ),
+                    value: ReceiptPaperSize.a4, label: Text('A4')),
               ],
               selected: <ReceiptPaperSize>{_size},
               onSelectionChanged: _isBusy ? null : _onSizeSelected,
