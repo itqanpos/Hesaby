@@ -1,19 +1,22 @@
 // lib/features/purchases/presentation/dialogs/purchase_print_dialog.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../shared/widgets/app_button.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart'
     show ReceiptPaperSize;
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../data/services/purchase_receipt_printer.dart';
 import '../../domain/entities/purchase_receipt.dart';
 
 /// Opens the print dialog for a purchase receipt.
 ///
-/// Two actions: print (system dialog) or share as PDF. The paper size is
-/// selectable inside the dialog (58 / 80 / A4) and remembered for the
-/// current session only (the persisted default lives in POS settings).
+/// **Phase P-1b:** reads the user's print-font preferences from
+/// `companySettingsProvider` and applies them to the rendered PDF.
 Future<void> showPurchasePrintDialog({
   required BuildContext context,
   required PurchaseReceipt receipt,
@@ -30,17 +33,18 @@ Future<void> showPurchasePrintDialog({
 // Dialog
 // ============================================================================
 
-class _PurchasePrintDialog extends StatefulWidget {
+class _PurchasePrintDialog extends ConsumerStatefulWidget {
   const _PurchasePrintDialog({required this.receipt});
 
   final PurchaseReceipt receipt;
 
   @override
-  State<_PurchasePrintDialog> createState() =>
+  ConsumerState<_PurchasePrintDialog> createState() =>
       _PurchasePrintDialogState();
 }
 
-class _PurchasePrintDialogState extends State<_PurchasePrintDialog> {
+class _PurchasePrintDialogState
+    extends ConsumerState<_PurchasePrintDialog> {
   static const PurchaseReceiptPrinter _printer =
       PurchaseReceiptPrinterImpl();
 
@@ -51,6 +55,25 @@ class _PurchasePrintDialogState extends State<_PurchasePrintDialog> {
   bool get _isBusy => _isPrinting || _isSharing;
 
   // ---------------------------------------------------------------------------
+  // Style
+  // ---------------------------------------------------------------------------
+
+  /// Picks the correct font scale for the current paper size:
+  /// A4 uses `printFontScaleA4`; thermal sizes use `printFontScale`.
+  PrintStyleSettings _readStyle() {
+    final CompanySettings? s =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (s == null) return const PrintStyleSettings.defaults();
+    if (_size == ReceiptPaperSize.a4) {
+      return PrintStyleSettings(
+        fontScale: s.printFontScaleA4,
+        fontWeight: s.printFontWeight,
+      );
+    }
+    return PrintStyleSettings.fromCompanySettings(s);
+  }
+
+  // ---------------------------------------------------------------------------
   // Actions
   // ---------------------------------------------------------------------------
 
@@ -59,6 +82,7 @@ class _PurchasePrintDialogState extends State<_PurchasePrintDialog> {
     final bool ok = await _printer.printReceipt(
       receipt: widget.receipt,
       size: _size,
+      style: _readStyle(),
     );
     if (!mounted) return;
     setState(() => _isPrinting = false);
@@ -74,6 +98,7 @@ class _PurchasePrintDialogState extends State<_PurchasePrintDialog> {
     final bool ok = await _printer.shareReceipt(
       receipt: widget.receipt,
       size: _size,
+      style: _readStyle(),
     );
     if (!mounted) return;
     setState(() => _isSharing = false);
@@ -127,7 +152,6 @@ class _PurchasePrintDialogState extends State<_PurchasePrintDialog> {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            // ---- Summary ----
             DecoratedBox(
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
@@ -167,7 +191,6 @@ class _PurchasePrintDialogState extends State<_PurchasePrintDialog> {
 
             const SizedBox(height: 16),
 
-            // ---- Paper size ----
             Text('مقاس الورق', style: theme.textTheme.labelLarge),
             const SizedBox(height: 8),
             SegmentedButton<ReceiptPaperSize>(
