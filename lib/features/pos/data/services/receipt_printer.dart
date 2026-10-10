@@ -5,72 +5,41 @@ import 'dart:typed_data';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
+import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/receipt.dart';
 import 'pdf_receipt_builder.dart';
 
-/// Contract for printing or sharing a POS receipt.
+/// Contract for printing or sharing a POS receipt via PDF.
 ///
 /// The concrete implementation is platform-aware: it opens the native
 /// print dialog on supported platforms and falls back to a system share
 /// sheet where printing is unavailable (for example on the web).
 ///
-/// All methods return a `bool` rather than throwing, because printing can
-/// fail for many benign reasons — user cancelled the dialog, no printer
-/// installed, browser blocked the print window — none of which should
-/// interrupt the cashier's flow.
+/// **Phase P-1b:** every method accepts an optional [style] so the PDF is
+/// rendered with the user's font size + weight preferences.
 abstract interface class ReceiptPrinter {
-  /// Whether the current platform supports at least one output method.
-  ///
-  /// Callers may use this flag to decide whether to show a print button.
   bool get isSupported;
 
-  /// Opens the system print dialog for [receipt].
-  ///
-  /// The receipt is rendered to PDF using [ReceiptPaperSize] and handed to
-  /// the platform. Returns `true` when a print job was dispatched,
-  /// `false` otherwise.
   Future<bool> printReceipt({
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   });
 
-  /// Opens the built-in PDF preview so the cashier can inspect or print
-  /// from within the app.
-  ///
-  /// Returns `true` when the preview was shown.
   Future<bool> previewReceipt({
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   });
 
-  /// Shares the receipt as a PDF file (system share sheet).
-  ///
-  /// Useful on the web and mobile when printing directly is not available
-  /// or not desired. Returns `true` when a share sheet was opened.
   Future<bool> shareReceipt({
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   });
 }
 
 /// Default [ReceiptPrinter] backed by the `printing` package.
-///
-/// The implementation keeps the following boundaries:
-///
-/// * It never touches the file system directly — `printing` handles the
-///   platform-specific plumbing.
-/// * It never inspects or logs the receipt contents beyond what is needed
-///   to render the PDF.
-/// * It is stateless: each method builds a fresh PDF from the given
-///   receipt, so reprinting an older sale is safe at any time.
-///
-/// Failure handling:
-///   `printing` throws for many benign reasons (user cancelled the
-///   dialog, no printer installed, browser blocked the print window).
-///   All such exceptions are swallowed and reported to the caller as
-///   `false`; surfacing them as errors would interrupt the cashier's
-///   flow for no benefit. The logger is deliberately not used here to
-///   avoid writing receipt metadata into device logs.
 class ReceiptPrinterImpl implements ReceiptPrinter {
   const ReceiptPrinterImpl();
 
@@ -81,11 +50,13 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
   Future<bool> printReceipt({
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   }) async {
     try {
       final Uint8List bytes = await PdfReceiptBuilder.build(
         receipt: receipt,
         size: size,
+        style: style,
       );
 
       await Printing.layoutPdf(
@@ -103,21 +74,22 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
   Future<bool> previewReceipt({
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   }) async {
-    // The `printing` package uses the same entry point for preview and
-    // print: it renders an in-app preview with a print button.
-    return printReceipt(receipt: receipt, size: size);
+    return printReceipt(receipt: receipt, size: size, style: style);
   }
 
   @override
   Future<bool> shareReceipt({
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   }) async {
     try {
       final Uint8List bytes = await PdfReceiptBuilder.build(
         receipt: receipt,
         size: size,
+        style: style,
       );
 
       await Printing.sharePdf(
@@ -130,10 +102,6 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
       return false;
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Internal
-  // ---------------------------------------------------------------------------
 
   static String _fileNameFor(Receipt receipt) {
     final String suffix = receipt.invoiceNumber?.trim().isNotEmpty == true
