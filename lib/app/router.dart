@@ -10,6 +10,7 @@ import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/signup_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/cash/presentation/pages/cash_register_page.dart';
+import '../features/cash/presentation/pages/cash_reports_page.dart';
 import '../features/companies/presentation/pages/branch_form_page.dart';
 import '../features/companies/presentation/pages/branches_page.dart';
 import '../features/companies/presentation/pages/company_profile_page.dart';
@@ -166,6 +167,9 @@ abstract final class AppRouter {
   static const String cashRegisterPath = '/cash';
   static const String cashRegisterName = 'cash-register';
 
+  static const String cashReportsPath = '/cash/reports';
+  static const String cashReportsName = 'cash-reports';
+
   // ---- Phase T-5: Employees ----
   static const String employeesPath = '/employees';
   static const String employeesName = 'employees';
@@ -301,6 +305,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.cashRegisterName,
         builder: (BuildContext context, GoRouterState state) =>
             const CashRegisterPage(),
+      ),
+      GoRoute(
+        path: AppRouter.cashReportsPath,
+        name: AppRouter.cashReportsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const CashReportsPage(),
       ),
       GoRoute(
         path: AppRouter.employeesPath,
