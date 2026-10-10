@@ -13,6 +13,9 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../purchases/presentation/dialogs/supplier_payment_dialog.dart';
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../data/services/pdf_supplier_statement_builder.dart';
 import '../../domain/entities/supplier.dart';
 import '../../domain/entities/supplier_statement.dart';
@@ -123,17 +126,28 @@ class _SupplierStatementPageState
     }
   }
 
+  PrintStyleSettings _readA4Style() {
+    final CompanySettings? s =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (s == null) return const PrintStyleSettings.defaults();
+    return PrintStyleSettings(
+      fontScale: s.printFontScaleA4,
+      fontWeight: s.printFontWeight,
+    );
+  }
+
   Future<void> _print() async {
     final SupplierStatement? statement =
         ref.read(supplierStatementProvider(_args)).valueOrNull;
-    if (statement == null || statement.isEmpty) {
-      return;
-    }
+    if (statement == null || statement.isEmpty) return;
 
     setState(() => _isPrinting = true);
     try {
       final Uint8List bytes =
-          await PdfSupplierStatementBuilder.build(statement: statement);
+          await PdfSupplierStatementBuilder.build(
+        statement: statement,
+        style: _readA4Style(),
+      );
 
       await Printing.layoutPdf(
         name: 'supplier-statement-${statement.supplier.name}.pdf',
