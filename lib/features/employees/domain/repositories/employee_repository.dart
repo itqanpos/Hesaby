@@ -10,6 +10,8 @@ enum EmployeeFailureType {
   unauthorized,
   notFound,
   invalidInput,
+  codeConflict,
+  alreadyHasAccount,
   invalidResponse,
   unknown,
 }
@@ -74,4 +76,18 @@ abstract interface class EmployeeRepository {
   });
 
   Future<void> deleteEmployee(String employeeId);
+
+  /// Provisions a login account for [employeeId].
+  ///
+  /// Creates an auth user with email `{code}@hesaby.local` and a
+  /// `company_members` row with the given [role].
+  ///
+  /// Returns the updated employee (with `companyMemberId` and `loginCode`
+  /// set).
+  Future<Employee> createLogin({
+    required String employeeId,
+    required String loginCode,
+    required String password,
+    String role = 'cashier',
+  });
 }
