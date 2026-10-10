@@ -36,33 +36,17 @@ dependencies:
   uuid: ^4.5.1
 
   # Phase T-1 — external links (WhatsApp, phone dialer, web URLs).
-  # Used by the subscription page to reach the support channel without
-  # leaving the user staring at a phone number they have to retype.
   url_launcher: ^6.3.1
 
-  # POS — Phase 7 additions
-  # `mobile_scanner` powers the in-app camera barcode scanner.
-  # `printing` provides the system print dialog on all supported platforms
-  # (Android, iOS, Web, desktop) and pulls in `pdf` for document building.
-  # `pdf` is declared explicitly because `printing` does not re-export it.
+  # Media & imaging
   mobile_scanner: ^5.2.3
+  image_picker: ^1.1.2
+
+  # POS — Phase 7 additions
   printing: ^5.13.4
   pdf: ^3.11.1
 
   # POS — Phase D additions (thermal printer via Bluetooth / USB / Network)
-  #
-  # `flutter_pos_printer_platform_image_3` is a maintained fork of the
-  # original `flutter_pos_printer_platform` package. It exposes a single
-  # `PrinterManager` that supports Bluetooth Classic (SPP), BLE, USB, and
-  # network printers. This lets the app work with any thermal printer the
-  # user owns, without requiring them to know the exact protocol.
-  #
-  # `esc_pos_utils_plus` builds ESC/POS tickets, including raster images
-  # so Arabic text prints correctly on printers that lack an Arabic code
-  # page (which is most low-cost thermal printers sold in the region).
-  #
-  # `image` is needed to convert the rendered receipt into a bitmap before
-  # it is encoded as an ESC/POS raster command.
   flutter_pos_printer_platform_image_3: ^1.2.0
   esc_pos_utils_plus: ^2.0.4
   image: ^4.2.0
@@ -73,16 +57,6 @@ dev_dependencies:
   flutter_lints: ^5.0.0
 
   # App icon + splash generators.
-  #
-  # Both tools read their own YAML config at the repository root and write
-  # native assets into android/, ios/ and web/. They are only needed when
-  # the icons or splash change, so they live as dev_dependencies and are
-  # not pulled into production builds.
-  #
-  # Regenerate with:
-  #   flutter pub get
-  #   dart run flutter_launcher_icons
-  #   dart run flutter_native_splash:create
   flutter_launcher_icons: ^0.14.1
   flutter_native_splash: ^2.4.3
 
