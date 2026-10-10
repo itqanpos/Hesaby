@@ -5,8 +5,9 @@ import 'package:flutter/foundation.dart';
 
 /// A single employee of a company.
 ///
-/// Deliberately separate from `company_members`: an employee may not have
-/// an app login. Only the payroll-relevant information is captured here.
+/// Optionally linked to a [CompanyMember] row via [companyMemberId] — used
+/// when the employee also uses the app (cashier, manager). Employees who
+/// do not use the app (driver, cleaner, ...) leave it null.
 @immutable
 class Employee extends Equatable {
   const Employee({
@@ -23,6 +24,7 @@ class Employee extends Equatable {
     this.position,
     this.hireDate,
     this.notes,
+    this.companyMemberId,
   });
 
   final String id;
@@ -36,6 +38,11 @@ class Employee extends Equatable {
   final double baseSalary;
   final String? notes;
   final bool isActive;
+
+  /// Optional link to `company_members.id` — the app-account this employee
+  /// uses. Null for staff without an app login.
+  final String? companyMemberId;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -52,6 +59,7 @@ class Employee extends Equatable {
         baseSalary,
         notes,
         isActive,
+        companyMemberId,
         createdAt,
         updatedAt,
       ];
