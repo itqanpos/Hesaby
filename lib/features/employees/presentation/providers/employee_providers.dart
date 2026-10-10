@@ -38,6 +38,10 @@ final NotifierProvider<EmployeesIncludeInactiveNotifier, bool>
 );
 
 /// The list of employees for the current company.
+///
+/// Note on naming: the method to modify an employee is called
+/// [updateEmployee] — never [update] — because `AsyncNotifier` already
+/// defines an `update` method with a different signature.
 class EmployeesNotifier extends AsyncNotifier<List<Employee>> {
   @override
   Future<List<Employee>> build() async {
@@ -72,22 +76,23 @@ class EmployeesNotifier extends AsyncNotifier<List<Employee>> {
     String? notes,
   }) async {
     final String companyId = _requireCompanyId();
-    final Employee created = await ref.read(employeeRepositoryProvider).createEmployee(
-          companyId: companyId,
-          fullName: fullName,
-          baseSalary: baseSalary,
-          phone: phone,
-          email: email,
-          nationalId: nationalId,
-          position: position,
-          hireDate: hireDate,
-          notes: notes,
-        );
+    final Employee created =
+        await ref.read(employeeRepositoryProvider).createEmployee(
+              companyId: companyId,
+              fullName: fullName,
+              baseSalary: baseSalary,
+              phone: phone,
+              email: email,
+              nationalId: nationalId,
+              position: position,
+              hireDate: hireDate,
+              notes: notes,
+            );
     await refresh();
     return created;
   }
 
-  Future<Employee> update({
+  Future<Employee> updateEmployee({
     required String employeeId,
     String? fullName,
     String? phone,
