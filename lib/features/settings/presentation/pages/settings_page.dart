@@ -11,6 +11,7 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../admin/presentation/providers/platform_admin_provider.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../../companies/domain/entities/company_subscription.dart';
+import '../../../companies/presentation/providers/members_providers.dart';
 import '../../../companies/presentation/providers/subscription_providers.dart';
 
 /// Application settings page.
