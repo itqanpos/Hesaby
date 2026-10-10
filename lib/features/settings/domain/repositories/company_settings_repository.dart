@@ -5,11 +5,8 @@ import 'package:flutter/foundation.dart';
 
 import '../entities/company_settings.dart';
 
-// ============================================================================
-// Failure types
-// ============================================================================
-
-/// Categories of failures raised by [CompanySettingsRepository] operations.
+/// Categories of company-settings failures that the presentation layer can
+/// safely translate into localized user messages.
 enum CompanySettingsFailureType {
   network,
   unauthorized,
@@ -21,7 +18,6 @@ enum CompanySettingsFailureType {
   unknown,
 }
 
-/// Domain-level exception raised by [CompanySettingsRepository] operations.
 @immutable
 class CompanySettingsException extends Equatable implements Exception {
   const CompanySettingsException({
@@ -38,37 +34,17 @@ class CompanySettingsException extends Equatable implements Exception {
   List<Object?> get props => <Object?>[type];
 
   @override
-  String toString() =>
-      'CompanySettingsException(type: ${type.name})';
+  String toString() => 'CompanySettingsException(type: ${type.name})';
 }
 
-// ============================================================================
-// Repository contract
-// ============================================================================
-
-/// Contract for reading and updating a company's business defaults.
-///
-/// A row is guaranteed to exist for every company (created automatically by
-/// a DB trigger when the company is inserted; existing companies were
-/// backfilled by the migration). The repository never creates rows — it
-/// only reads and updates.
+/// Contract for reading and updating per-company business settings.
 abstract interface class CompanySettingsRepository {
-  /// Fetches the settings row for [companyId].
-  ///
-  /// Throws [CompanySettingsException] with
-  /// [CompanySettingsFailureType.notFound] when no row exists. In normal
-  /// operation this should never happen: the trigger guarantees a row.
+  /// Reads the settings row of [companyId].
   Future<CompanySettings> getSettings(String companyId);
 
-  /// Applies a partial update to the settings row of [companyId].
-  ///
-  /// Only the supplied fields are written; `null` means "leave unchanged".
-  /// Returns the freshly-updated row.
-  ///
-  /// Validation is performed by the caller *and* by the database:
-  /// * `defaultTaxRate` must be in `[0, 100]`.
-  /// * `maxDiscountPercent` must be in `[0, 100]`.
-  /// * `receiptFooter` must be non-empty and at most 200 characters.
+  /// Applies a partial update. `null` means "leave unchanged". For the
+  /// logo, pass [logoUrl] to set a new value or [clearLogo] = `true` to
+  /// remove it.
   Future<CompanySettings> updateSettings({
     required String companyId,
     double? defaultTaxRate,
@@ -76,5 +52,11 @@ abstract interface class CompanySettingsRepository {
     bool? allowSaleWithoutStock,
     bool? allowCreditSale,
     String? receiptFooter,
+    String? logoUrl,
+    bool clearLogo = false,
+    double? printFontScale,
+    PrintFontWeight? printFontWeight,
+    double? printFontScaleA4,
+    bool? printDirectEnabled,
   });
 }
