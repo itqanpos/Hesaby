@@ -5,14 +5,11 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
-import 'package:pdf/pdf.dart' show PdfPageFormat;
-import 'package:printing/printing.dart' show Printing;
 
 import '../../../../shared/widgets/app_button.dart';
 import '../../../pos/data/services/direct_print_service.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart'
     show ReceiptPaperSize;
-import '../../../pos/data/services/pdf_receipt_builder.dart' as pdf_rb;
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
@@ -70,12 +67,11 @@ class _PurchasePrintDialogState
   Future<void> _print() async {
     setState(() => _isPrinting = true);
     try {
-      // Direct-print path — only for thermal sizes (A4 goes through the
-      // system dialog anyway, and directPrintPdf is available separately).
       final bool direct =
           ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
               false;
 
+      // Direct-print path for non-A4 sizes.
       if (direct && _size != ReceiptPaperSize.a4) {
         final Uint8List bytes = await PdfPurchaseReceiptBuilder.build(
           receipt: widget.receipt,
