@@ -74,12 +74,21 @@ abstract final class MemberPermission {
   static const String customersRecordPayment = 'customers.record_payment';
 
   // ---------------------------------------------------------------------------
+  // Cash register
+  // ---------------------------------------------------------------------------
+  static const String cashView = 'cash.view';
+  static const String cashWrite = 'cash.write';
+  static const String cashManageAccounts = 'cash.manage_accounts';
+  static const String cashManageCategories = 'cash.manage_categories';
+
+  // ---------------------------------------------------------------------------
   // Reports
   // ---------------------------------------------------------------------------
   static const String reportsView = 'reports.view';
   static const String reportsSales = 'reports.sales';
   static const String reportsInventory = 'reports.inventory';
   static const String reportsFinancial = 'reports.financial';
+  static const String reportsCash = 'reports.cash';
   static const String reportsExport = 'reports.export';
 
   // ---------------------------------------------------------------------------
@@ -95,9 +104,7 @@ abstract final class MemberPermission {
   // Complete list
   // ---------------------------------------------------------------------------
 
-  /// Every permission the app recognises. Used for validation only — the
-  /// app never needs to iterate over this list to decide access, because
-  /// access is computed from the deny-list.
+  /// Every permission the app recognises. Used for validation only.
   static const List<String> all = <String>[
     // POS
     posUse,
@@ -135,11 +142,17 @@ abstract final class MemberPermission {
     customersView,
     customersManage,
     customersRecordPayment,
+    // Cash register
+    cashView,
+    cashWrite,
+    cashManageAccounts,
+    cashManageCategories,
     // Reports
     reportsView,
     reportsSales,
     reportsInventory,
     reportsFinancial,
+    reportsCash,
     reportsExport,
     // Settings & members
     settingsCompany,
@@ -149,8 +162,7 @@ abstract final class MemberPermission {
     membersManage,
   ];
 
-  /// Arabic label for a single permission code. Falls back to the raw code
-  /// when unknown, so an older client never crashes on a newer permission.
+  /// Arabic label for a single permission code.
   static String label(String code) {
     switch (code) {
       // POS
@@ -225,6 +237,16 @@ abstract final class MemberPermission {
       case customersRecordPayment:
         return 'تحصيل دفعة من العميل';
 
+      // Cash register
+      case cashView:
+        return 'عرض الخزنة';
+      case cashWrite:
+        return 'إضافة حركة يدوية';
+      case cashManageAccounts:
+        return 'إدارة حسابات الخزنة';
+      case cashManageCategories:
+        return 'إدارة تصنيفات الخزنة';
+
       // Reports
       case reportsView:
         return 'فتح قائمة التقارير';
@@ -234,6 +256,8 @@ abstract final class MemberPermission {
         return 'تقارير المخزون';
       case reportsFinancial:
         return 'التقارير المالية';
+      case reportsCash:
+        return 'تقارير الخزنة والتدفق النقدي';
       case reportsExport:
         return 'تصدير التقارير PDF';
 
@@ -264,21 +288,15 @@ class PermissionGroup extends Equatable {
     required this.permissions,
   });
 
-  /// Stable key (used for keys in the UI).
   final String key;
-
-  /// Arabic display label.
   final String label;
-
-  /// Permission codes belonging to this group, in display order.
   final List<String> permissions;
 
   @override
   List<Object?> get props => <Object?>[key, label, permissions];
 }
 
-/// The 9 groups displayed in the permissions editor. Order here is the
-/// order rendered in the UI.
+/// The 10 groups displayed in the permissions editor.
 const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
   PermissionGroup(
     key: 'pos',
@@ -349,6 +367,16 @@ const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
     ],
   ),
   PermissionGroup(
+    key: 'cash',
+    label: 'الخزنة',
+    permissions: <String>[
+      MemberPermission.cashView,
+      MemberPermission.cashWrite,
+      MemberPermission.cashManageAccounts,
+      MemberPermission.cashManageCategories,
+    ],
+  ),
+  PermissionGroup(
     key: 'reports',
     label: 'التقارير',
     permissions: <String>[
@@ -356,6 +384,7 @@ const List<PermissionGroup> kPermissionGroups = <PermissionGroup>[
       MemberPermission.reportsSales,
       MemberPermission.reportsInventory,
       MemberPermission.reportsFinancial,
+      MemberPermission.reportsCash,
       MemberPermission.reportsExport,
     ],
   ),
