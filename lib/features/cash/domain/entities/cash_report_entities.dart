@@ -3,7 +3,6 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
-import 'cash_entities.dart';
 
 /// Preset periods for cash reports.
 enum CashReportPeriodType {
