@@ -20,18 +20,6 @@ import '../../domain/entities/receipt.dart';
 import '../providers/printer_providers.dart';
 
 /// Opens the print preview dialog for [receipt].
-///
-/// Offers three actions:
-///   * **Print via PDF** — opens the system print dialog (works everywhere).
-///   * **Print via Bluetooth** — renders the receipt as a raster image and
-///     sends it to the saved thermal printer. Only shown when the user has
-///     a printer configured. Works around the lack of an Arabic code page
-///     on most budget printers.
-///   * **Share as PDF** — opens the system share sheet.
-///
-/// **Phase P-1a:** the Bluetooth path now loads the company logo (from the
-/// local cache, falling back to a network download) and passes it to the
-/// ESC/POS builder so it appears at the top of the printed receipt.
 Future<void> showPosPrintPreviewDialog({
   required BuildContext context,
   required Receipt receipt,
@@ -118,7 +106,6 @@ class _PosPrintPreviewDialogState
     final PrinterService service = ref.read(printerServiceProvider);
 
     try {
-      // 1) Ensure connected — reconnect if the session dropped it.
       if (!service.isConnected) {
         final bool connected = await service.connect(saved.toDevice());
         if (!connected) {
@@ -128,10 +115,8 @@ class _PosPrintPreviewDialogState
         }
       }
 
-      // 2) Load the company logo bytes (cache → network → null).
       final Uint8List? logoBytes = await _loadLogoBytes();
 
-      // 3) Render the receipt to ESC/POS raster bytes.
       final int widthDots = _bluetoothWidthDots(saved);
       final List<int> bytes = await EscPosReceiptBuilder.build(
         receipt: widget.receipt,
@@ -139,7 +124,6 @@ class _PosPrintPreviewDialogState
         logoBytes: logoBytes,
       );
 
-      // 4) Send.
       await service.sendBytes(bytes);
 
       if (!mounted) return;
@@ -184,10 +168,6 @@ class _PosPrintPreviewDialogState
     }
   }
 
-  /// Maps the saved paper size to the raster width.
-  ///
-  /// `ReceiptPaperSize.mm58` → 384 dots; everything else → 576 dots (80 mm).
-  /// A4 is not meaningful for a thermal printer, so it defaults to 80 mm.
   int _bluetoothWidthDots(SavedPrinter _) {
     final ReceiptPaperSize size = _currentPaperSize();
     switch (size) {
@@ -214,10 +194,6 @@ class _PosPrintPreviewDialogState
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
   void _showFailure(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -239,10 +215,6 @@ class _PosPrintPreviewDialogState
         return 'A4';
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -275,7 +247,6 @@ class _PosPrintPreviewDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            // ---- Receipt summary ----
             DecoratedBox(
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
@@ -310,7 +281,6 @@ class _PosPrintPreviewDialogState
 
             const SizedBox(height: 12),
 
-            // ---- Bluetooth printer status ----
             if (savedPrinter != null)
               _BluetoothPrinterRow(printer: savedPrinter)
             else
@@ -322,7 +292,6 @@ class _PosPrintPreviewDialogState
 
             const SizedBox(height: 12),
 
-            // ---- Current paper size (read-only) ----
             DecoratedBox(
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
@@ -421,9 +390,9 @@ class _PosPrintPreviewDialogState
     required String value,
     bool emphasized = false,
   }) {
-    final ColorScheme scheme = theme.colorلىScheme;
+    final ColorScheme scheme = theme.colorScheme;
     return Padding(
-      الإ padding: const EdgeInsets.symmetric(vertical: 3),
+      padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: <Widget>[
           Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
@@ -458,7 +427,7 @@ class _BluetoothPrinterRow extends StatelessWidget {
   final SavedPrinter printer;
 
   @override
-  Widget build(BuildContext contextيص) {
+  Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
