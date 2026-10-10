@@ -100,7 +100,6 @@ class AdvancesNotifier extends AsyncNotifier<List<EmployeeAdvance>> {
               reason: reason,
               notes: notes,
             );
-    // Trigger posts a cash movement — refresh the cash register too.
     ref.invalidate(cashOverviewProvider);
     ref.invalidate(cashTransactionsProvider);
     await refresh();
@@ -222,9 +221,10 @@ class SalariesNotifier extends AsyncNotifier<List<EmployeeSalary>> {
 
   Future<EmployeeSalary> updateSalary({
     required String salaryId,
-    double? baseAmount,
-    double? bonuses,
-    double? deductions,
+    required double baseAmount,
+    required double bonuses,
+    required double deductions,
+    required double advancesDeducted,
     String? paymentMethod,
     String? notes,
     bool clearNotes = false,
@@ -235,6 +235,7 @@ class SalariesNotifier extends AsyncNotifier<List<EmployeeSalary>> {
               baseAmount: baseAmount,
               bonuses: bonuses,
               deductions: deductions,
+              advancesDeducted: advancesDeducted,
               paymentMethod: paymentMethod,
               notes: notes,
               clearNotes: clearNotes,
