@@ -6,20 +6,18 @@ import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
 
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/report_document.dart';
 
 /// Builds an A4 PDF from a [ReportDocument].
 ///
-/// A note on digit normalization:
-///   `NumberFormat.currency(locale: 'ar_EG')` produces Eastern Arabic-Indic
-///   digits (٠–٩) plus invisible BIDI marks (LRM/RLM). Cairo font lacks
-///   glyphs for those marks, so PDF viewers render them as tofu boxes.
-///   We normalize every string before drawing it: Arabic-Indic digits
-///   become Western digits, and BIDI marks are stripped.
+/// **Phase P-1b:** accepts a [PrintStyleSettings] that scales every font
+/// size and selects a base weight for the body text.
 abstract final class PdfReportBuilder {
-  /// Builds the PDF and returns its bytes.
   static Future<Uint8List> build({
     required ReportDocument document,
+    PrintStyleSettings style = const PrintStyleSettings.defaults(),
   }) async {
     final pw.ThemeData theme = await _loadTheme();
 
@@ -35,9 +33,11 @@ abstract final class PdfReportBuilder {
         pageFormat: PdfPageFormat.a4,
         margin: const pw.EdgeInsets.all(28),
         textDirection: pw.TextDirection.rtl,
-        header: (pw.Context context) => _buildPageHeader(document),
-        footer: _buildPageFooter,
-        build: (pw.Context context) => _buildContent(document),
+        header: (pw.Context context) =>
+            _buildPageHeader(document, style),
+        footer: (pw.Context context) =>
+            _buildPageFooter(context, style),
+        build: (pw.Context context) => _buildContent(document, style),
       ),
     );
 
@@ -45,15 +45,24 @@ abstract final class PdfReportBuilder {
   }
 
   // ---------------------------------------------------------------------------
+  // Weight resolution
+  // ---------------------------------------------------------------------------
+
+  /// Maps the user's base weight + an emphasis flag to a `pdf` weight.
+  static pw.FontWeight _weight({
+    required PrintFontWeight userWeight,
+    required bool emphasized,
+  }) {
+    if (emphasized || userWeight == PrintFontWeight.bold) {
+      return pw.FontWeight.bold;
+    }
+    return pw.FontWeight.normal;
+  }
+
+  // ---------------------------------------------------------------------------
   // Digit normalization
   // ---------------------------------------------------------------------------
 
-  /// Normalizes a string so Cairo can render it.
-  ///
-  /// * Eastern Arabic-Indic digits ٠–٩ → 0–9.
-  /// * Arabic decimal separator ٫ (U+066B) → `.`.
-  /// * Arabic thousands separator ٬ (U+066C) → `,`.
-  /// * BIDI control marks (U+200E, U+200F, U+202A–U+202E) are dropped.
   static String _norm(String input) {
     final StringBuffer out = StringBuffer();
     for (int i = 0; i < input.length; i++) {
@@ -96,17 +105,11 @@ abstract final class PdfReportBuilder {
           out.write(',');
           break;
         case 0x200E:
-          break;
         case 0x200F:
-          break;
         case 0x202A:
-          break;
         case 0x202B:
-          break;
         case 0x202C:
-          break;
         case 0x202D:
-          break;
         case 0x202E:
           break;
         default:
@@ -127,18 +130,24 @@ abstract final class PdfReportBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Page header (repeated on every page)
+  // Page header / footer
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildPageHeader(ReportDocument document) {
+  static pw.Widget _buildPageHeader(
+    ReportDocument document,
+    PrintStyleSettings style,
+  ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
         pw.Text(
           _norm(document.companyName),
           style: pw.TextStyle(
-            fontSize: 13,
-            fontWeight: pw.FontWeight.bold,
+            fontSize: style.scale(13),
+            fontWeight: _weight(
+              userWeight: style.fontWeight,
+              emphasized: true,
+            ),
           ),
           textAlign: pw.TextAlign.center,
         ),
@@ -147,9 +156,13 @@ abstract final class PdfReportBuilder {
           pw.SizedBox(height: 1),
           pw.Text(
             _norm(document.branchName!),
-            style: const pw.TextStyle(
-              fontSize: 9,
+            style: pw.TextStyle(
+              fontSize: style.scale(9),
               color: PdfColors.grey700,
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: false,
+              ),
             ),
             textAlign: pw.TextAlign.center,
           ),
@@ -161,13 +174,23 @@ abstract final class PdfReportBuilder {
     );
   }
 
-  static pw.Widget _buildPageFooter(pw.Context context) {
+  static pw.Widget _buildPageFooter(
+    pw.Context context,
+    PrintStyleSettings style,
+  ) {
     return pw.Container(
       alignment: pw.Alignment.center,
       margin: const pw.EdgeInsets.only(top: 8),
       child: pw.Text(
         'صفحة ${context.pageNumber} من ${context.pagesCount}',
-        style: const pw.TextStyle(fontSize: 8, color: PdfColors.grey600),
+        style: pw.TextStyle(
+          fontSize: style.scale(8),
+          color: PdfColors.grey600,
+          fontWeight: _weight(
+            userWeight: style.fontWeight,
+            emphasized: false,
+          ),
+        ),
       ),
     );
   }
@@ -176,18 +199,24 @@ abstract final class PdfReportBuilder {
   // Content
   // ---------------------------------------------------------------------------
 
-  static List<pw.Widget> _buildContent(ReportDocument document) {
+  static List<pw.Widget> _buildContent(
+    ReportDocument document,
+    PrintStyleSettings style,
+  ) {
     return <pw.Widget>[
-      _buildTitleBlock(document),
+      _buildTitleBlock(document, style),
       pw.SizedBox(height: 12),
       for (int i = 0; i < document.sections.length; i++) ...<pw.Widget>[
-        _buildSection(document.sections[i]),
+        _buildSection(document.sections[i], style),
         if (i < document.sections.length - 1) pw.SizedBox(height: 14),
       ],
     ];
   }
 
-  static pw.Widget _buildTitleBlock(ReportDocument document) {
+  static pw.Widget _buildTitleBlock(
+    ReportDocument document,
+    PrintStyleSettings style,
+  ) {
     return pw.Container(
       padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 10),
       decoration: pw.BoxDecoration(
@@ -201,8 +230,11 @@ abstract final class PdfReportBuilder {
           pw.Text(
             _norm(document.title),
             style: pw.TextStyle(
-              fontSize: 16,
-              fontWeight: pw.FontWeight.bold,
+              fontSize: style.scale(16),
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: true,
+              ),
             ),
             textAlign: pw.TextAlign.center,
           ),
@@ -214,13 +246,25 @@ abstract final class PdfReportBuilder {
                 document.periodLabel != null
                     ? _norm('الفترة: ${document.periodLabel}')
                     : 'الفترة: الكل',
-                style: const pw.TextStyle(fontSize: 9),
+                style: pw.TextStyle(
+                  fontSize: style.scale(9),
+                  fontWeight: _weight(
+                    userWeight: style.fontWeight,
+                    emphasized: false,
+                  ),
+                ),
               ),
               pw.Text(
                 _norm(
                   'تاريخ الإصدار: ${_formatDateTime(document.generatedAt)}',
                 ),
-                style: const pw.TextStyle(fontSize: 9),
+                style: pw.TextStyle(
+                  fontSize: style.scale(9),
+                  fontWeight: _weight(
+                    userWeight: style.fontWeight,
+                    emphasized: false,
+                  ),
+                ),
               ),
             ],
           ),
@@ -233,7 +277,10 @@ abstract final class PdfReportBuilder {
   // Section
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildSection(ReportSection section) {
+  static pw.Widget _buildSection(
+    ReportSection section,
+    PrintStyleSettings style,
+  ) {
     final List<pw.Widget> children = <pw.Widget>[];
 
     if (section.title != null) {
@@ -252,8 +299,11 @@ abstract final class PdfReportBuilder {
           child: pw.Text(
             _norm(section.title!),
             style: pw.TextStyle(
-              fontSize: 12,
-              fontWeight: pw.FontWeight.bold,
+              fontSize: style.scale(12),
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: true,
+              ),
             ),
           ),
         ),
@@ -262,19 +312,19 @@ abstract final class PdfReportBuilder {
     }
 
     if (section.kpis != null && section.kpis!.isNotEmpty) {
-      children.add(_buildKpiGrid(section.kpis!));
+      children.add(_buildKpiGrid(section.kpis!, style));
       children.add(pw.SizedBox(height: 8));
     }
 
     if (section.lines != null && section.lines!.isNotEmpty) {
       for (final ReportLine line in section.lines!) {
-        children.add(_buildLine(line));
+        children.add(_buildLine(line, style));
       }
       children.add(pw.SizedBox(height: 4));
     }
 
     if (section.table != null && section.table!.rows.isNotEmpty) {
-      children.add(_buildTable(section.table!));
+      children.add(_buildTable(section.table!, style));
     }
 
     return pw.Column(
@@ -284,10 +334,13 @@ abstract final class PdfReportBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // KPI grid (2 columns)
+  // KPI grid
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildKpiGrid(List<ReportKpi> kpis) {
+  static pw.Widget _buildKpiGrid(
+    List<ReportKpi> kpis,
+    PrintStyleSettings style,
+  ) {
     const int columns = 2;
     final List<pw.Widget> rows = <pw.Widget>[];
 
@@ -296,7 +349,7 @@ abstract final class PdfReportBuilder {
       for (int j = 0; j < columns; j++) {
         final int index = i + j;
         if (index < kpis.length) {
-          cells.add(pw.Expanded(child: _buildKpiCard(kpis[index])));
+          cells.add(pw.Expanded(child: _buildKpiCard(kpis[index], style)));
         } else {
           cells.add(pw.Expanded(child: pw.SizedBox()));
         }
@@ -312,7 +365,10 @@ abstract final class PdfReportBuilder {
     );
   }
 
-  static pw.Widget _buildKpiCard(ReportKpi kpi) {
+  static pw.Widget _buildKpiCard(
+    ReportKpi kpi,
+    PrintStyleSettings style,
+  ) {
     return pw.Container(
       padding: const pw.EdgeInsets.symmetric(horizontal: 10, vertical: 8),
       decoration: pw.BoxDecoration(
@@ -330,17 +386,24 @@ abstract final class PdfReportBuilder {
         children: <pw.Widget>[
           pw.Text(
             _norm(kpi.label),
-            style: const pw.TextStyle(
-              fontSize: 9,
+            style: pw.TextStyle(
+              fontSize: style.scale(9),
               color: PdfColors.grey700,
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: false,
+              ),
             ),
           ),
           pw.SizedBox(height: 3),
           pw.Text(
             _norm(kpi.value),
             style: pw.TextStyle(
-              fontSize: kpi.emphasized ? 12 : 11,
-              fontWeight: pw.FontWeight.bold,
+              fontSize: style.scale(kpi.emphasized ? 12 : 11),
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: true,
+              ),
             ),
           ),
         ],
@@ -349,10 +412,13 @@ abstract final class PdfReportBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Label / value line
+  // Line
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildLine(ReportLine line) {
+  static pw.Widget _buildLine(
+    ReportLine line,
+    PrintStyleSettings style,
+  ) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 2),
       child: pw.Row(
@@ -361,7 +427,13 @@ abstract final class PdfReportBuilder {
           pw.Expanded(
             child: pw.Text(
               _norm(line.label),
-              style: const pw.TextStyle(fontSize: 10),
+              style: pw.TextStyle(
+                fontSize: style.scale(10),
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: false,
+                ),
+              ),
               softWrap: true,
             ),
           ),
@@ -369,10 +441,11 @@ abstract final class PdfReportBuilder {
           pw.Text(
             _norm(line.value),
             style: pw.TextStyle(
-              fontSize: line.emphasized ? 11 : 10,
-              fontWeight: line.emphasized
-                  ? pw.FontWeight.bold
-                  : pw.FontWeight.normal,
+              fontSize: style.scale(line.emphasized ? 11 : 10),
+              fontWeight: _weight(
+                userWeight: style.fontWeight,
+                emphasized: line.emphasized,
+              ),
             ),
             textAlign: pw.TextAlign.right,
           ),
@@ -385,8 +458,11 @@ abstract final class PdfReportBuilder {
   // Table
   // ---------------------------------------------------------------------------
 
-  static pw.Widget _buildTable(ReportTable table) {
-    const double fontSize = 9;
+  static pw.Widget _buildTable(
+    ReportTable table,
+    PrintStyleSettings style,
+  ) {
+    final double fontSize = style.scale(9);
 
     final Map<int, pw.TableColumnWidth> columnWidths =
         <int, pw.TableColumnWidth>{};
@@ -401,15 +477,17 @@ abstract final class PdfReportBuilder {
       border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.4),
       columnWidths: columnWidths,
       children: <pw.TableRow>[
-        // Header
         pw.TableRow(
           decoration: const pw.BoxDecoration(color: PdfColors.grey200),
           children: <pw.Widget>[
             for (final String h in table.headers)
-              _cell(h, fontSize: fontSize, bold: true, center: true),
+              _cell(h,
+                  fontSize: fontSize,
+                  style: style,
+                  emphasized: true,
+                  center: true),
           ],
         ),
-        // Rows
         for (final List<String> row in table.rows)
           pw.TableRow(
             children: <pw.Widget>[
@@ -417,6 +495,7 @@ abstract final class PdfReportBuilder {
                 _cell(
                   i < row.length ? row[i] : '',
                   fontSize: fontSize,
+                  style: style,
                   center: i > 0,
                 ),
             ],
@@ -428,7 +507,8 @@ abstract final class PdfReportBuilder {
   static pw.Widget _cell(
     String text, {
     required double fontSize,
-    bool bold = false,
+    required PrintStyleSettings style,
+    bool emphasized = false,
     bool center = false,
   }) {
     return pw.Padding(
@@ -437,7 +517,10 @@ abstract final class PdfReportBuilder {
         _norm(text),
         style: pw.TextStyle(
           fontSize: fontSize,
-          fontWeight: bold ? pw.FontWeight.bold : pw.FontWeight.normal,
+          fontWeight: _weight(
+            userWeight: style.fontWeight,
+            emphasized: emphasized,
+          ),
         ),
         textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
         softWrap: true,
