@@ -65,6 +65,12 @@ class SettingsPage extends ConsumerWidget {
             onTap: () => context.pushNamed(AppRouter.cashRegisterName),
           ),
           _SettingsTile(
+            icon: Icons.badge_outlined,
+            title: 'الموظفون',
+            subtitle: 'إدارة فريق العمل والرواتب الأساسية',
+            onTap: () => context.pushNamed(AppRouter.employeesName),
+          ),
+          _SettingsTile(
             icon: Icons.tune_outlined,
             title: 'إعدادات الشركة',
             subtitle: 'الضريبة والخصم وقواعد البيع وتذييل الإيصال',
