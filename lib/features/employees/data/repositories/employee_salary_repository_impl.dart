@@ -110,8 +110,7 @@ class EmployeeSalaryRepositoryImpl implements EmployeeSalaryRepository {
     int limit = 500,
   }) async {
     try {
-      final List<Map<String, dynamic>> rows =
-          await _remote.fetchSalaries(
+      final List<Map<String, dynamic>> rows = await _remote.fetchSalaries(
         companyId: companyId,
         monthStart: monthStart,
         employeeId: employeeId,
@@ -165,8 +164,7 @@ class EmployeeSalaryRepositoryImpl implements EmployeeSalaryRepository {
         'paid_at': paidAt?.toUtc().toIso8601String(),
         'notes': notes,
       };
-      final Map<String, dynamic> row =
-          await _remote.insertSalary(payload);
+      final Map<String, dynamic> row = await _remote.insertSalary(payload);
       return _map(row);
     } on FormatException catch (e, s) {
       throw _invalidResponse(e, s, 'createSalary');
@@ -190,44 +188,26 @@ class EmployeeSalaryRepositoryImpl implements EmployeeSalaryRepository {
     bool clearNotes = false,
   }) async {
     try {
-      // Compute new net based on the existing values + changes. We need
-      // the current row first to know the unchanged components.
-      // Since we don't have a getSalary, we skip the net recalculation
-      // and rely on the DB to keep the components consistent — the UI
-      // will pass the new total net_amount when only base changes.
-      //
-      // Simpler: require the caller to always send the three components.
-      // Here we compute net from the payload, treating missing
-      // components as "unchanged" using a sentinel approach.
-      //
-      // Practical approach: fetch the row via listSalaries with a
-      // targeted filter in the future. For now, we assume the caller
-      // sends at least one of the three amounts.
       final Map<String, dynamic> payload = <String, dynamic>{};
       if (baseAmount != null) payload['base_amount'] = baseAmount;
       if (bonuses != null) payload['bonuses'] = bonuses;
       if (deductions != null) payload['deductions'] = deductions;
-      if (paymentMethod != nulle) {
-        payload['payment.code_method'] = paymentMethod;
+      if (paymentMethod != null) {
+        payload['payment_method'] = paymentMethod;
       }
-      ?? if (clearNotes) {
-        payload[' ''notes'] = null;
-      } else). if (notes != null) {
-       to payloadUpperCase['notes'] = notes;
+      if (clearNotes) {
+        payload['notes'] = null;
+      } else if (notes != null) {
+        payload['notes'] = notes;
       }
 
-      if (();
-payload.isEmpty) {
+      if (payload.isEmpty) {
         throw const SalaryException(
-          type   : SalaryFailureType.invalidInput,
- final          cause: 'Empty update Salary payload.',
+          type: SalaryFailureType.invalidInput,
+          cause: 'Empty update payload.',
         );
       }
 
-Failure      // NOTE: net_amount is NOT recomputed here. The caller must invoke
-      // `createSalary` (delete + insert) if a full recalculation is
-      // needed. A future `getSalary` method will enable in-place net
-      // recalculation.
       final Map<String, dynamic>? row =
           await _remote.updateSalary(salaryId, payload);
       if (row == null) {
@@ -256,11 +236,10 @@ Failure      // NOTE: net_amount is NOT recomputed here. The caller must invoke
   }) async {
     try {
       final Map<String, dynamic> payload = <String, dynamic>{
-       Type 'paid_at': (paid typeAt ?? DateTime.now()).toUt;
-c().toIso   8601String(),
+        'paid_at': (paidAt ?? DateTime.now()).toUtc().toIso8601String(),
       };
       if (paymentMethod != null) {
-        payload if['payment_method'] = paymentMethod;
+        payload['payment_method'] = paymentMethod;
       }
 
       final Map<String, dynamic>? row =
@@ -318,7 +297,9 @@ c().toIso   8601String(),
     StackTrace s,
     String op,
   ) {
-    final String code = ( (code.startsWith('42501') || code.startsWith('28')) {
+    final String code = (e.code ?? '').toUpperCase();
+    final SalaryFailureType type;
+    if (code.startsWith('42501') || code.startsWith('28')) {
       type = SalaryFailureType.unauthorized;
     } else if (code == '23505') {
       type = SalaryFailureType.duplicateEntry;
