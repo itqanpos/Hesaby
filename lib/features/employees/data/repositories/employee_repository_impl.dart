@@ -13,7 +13,7 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
   final EmployeeRemoteDataSource _remote;
 
   // ---------------------------------------------------------------------------
-  // Mapping helpers
+  // Mapping
   // ---------------------------------------------------------------------------
 
   static String _requireString(Map<String, dynamic> m, String k) {
@@ -87,14 +87,13 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
       baseSalary: _double(m, 'base_salary'),
       notes: _optionalString(m, 'notes'),
       isActive: _bool(m, 'is_active'),
+      companyMemberId: _optionalString(m, 'company_member_id'),
       createdAt: _requireTimestamp(m, 'created_at'),
       updatedAt: _requireTimestamp(m, 'updated_at'),
     );
   }
 
   static Map<String, dynamic> _compact(Map<String, dynamic> map) {
-    // Remove entries whose value is `_unset` (sentinel) — we never use that
-    // here, but the pattern keeps this helper future-proof.
     final Map<String, dynamic> result = <String, dynamic>{};
     for (final MapEntry<String, dynamic> e in map.entries) {
       if (e.value != null) result[e.key] = e.value;
@@ -139,6 +138,7 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
     String? position,
     DateTime? hireDate,
     String? notes,
+    String? companyMemberId,
   }) async {
     try {
       final Map<String, dynamic> payload = <String, dynamic>{
@@ -151,6 +151,7 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
         'position': position,
         'hire_date': hireDate?.toIso8601String().split('T').first,
         'notes': notes,
+        'company_member_id': companyMemberId,
       };
       final Map<String, dynamic> row =
           await _remote.insertEmployee(_compact(payload));
@@ -184,6 +185,8 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
     String? notes,
     bool clearNotes = false,
     bool? isActive,
+    String? companyMemberId,
+    bool clearCompanyMember = false,
   }) async {
     try {
       final Map<String, dynamic> payload = <String, dynamic>{};
@@ -220,6 +223,11 @@ class EmployeeRepositoryImpl implements EmployeeRepository {
         payload['notes'] = notes;
       }
       if (isActive != null) payload['is_active'] = isActive;
+      if (clearCompanyMember) {
+        payload['company_member_id'] = null;
+      } else if (companyMemberId != null) {
+        payload['company_member_id'] = companyMemberId;
+      }
 
       if (payload.isEmpty) {
         throw const EmployeeException(
