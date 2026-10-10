@@ -3,7 +3,6 @@
 import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
 
 import '../../domain/repositories/employee_advance_repository.dart';
-import '../../domain/repositories/employee_salary_repository.dart';
 
 /// Supabase access for payroll (advances + salaries).
 ///
