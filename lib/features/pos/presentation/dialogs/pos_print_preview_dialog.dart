@@ -1,10 +1,15 @@
 // lib/features/pos/presentation/dialogs/pos_print_preview_dialog.dart
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../settings/data/services/company_logo_loader.dart';
+import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../data/services/esc_pos_receipt_builder.dart';
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
@@ -23,6 +28,10 @@ import '../providers/printer_providers.dart';
 ///     a printer configured. Works around the lack of an Arabic code page
 ///     on most budget printers.
 ///   * **Share as PDF** — opens the system share sheet.
+///
+/// **Phase P-1a:** the Bluetooth path now loads the company logo (from the
+/// local cache, falling back to a network download) and passes it to the
+/// ESC/POS builder so it appears at the top of the printed receipt.
 Future<void> showPosPrintPreviewDialog({
   required BuildContext context,
   required Receipt receipt,
@@ -119,14 +128,18 @@ class _PosPrintPreviewDialogState
         }
       }
 
-      // 2) Render the receipt to ESC/POS raster bytes.
+      // 2) Load the company logo bytes (cache → network → null).
+      final Uint8List? logoBytes = await _loadLogoBytes();
+
+      // 3) Render the receipt to ESC/POS raster bytes.
       final int widthDots = _bluetoothWidthDots(saved);
       final List<int> bytes = await EscPosReceiptBuilder.build(
         receipt: widget.receipt,
         paperWidthDots: widthDots,
+        logoBytes: logoBytes,
       );
 
-      // 3) Send.
+      // 4) Send.
       await service.sendBytes(bytes);
 
       if (!mounted) return;
@@ -148,6 +161,26 @@ class _PosPrintPreviewDialogState
       if (mounted) {
         setState(() => _isBluetoothPrinting = false);
       }
+    }
+  }
+
+  /// Loads the current company's logo bytes.
+  ///
+  /// Returns `null` — never throws — so a missing or corrupt logo simply
+  /// prints the receipt without one.
+  Future<Uint8List?> _loadLogoBytes() async {
+    final CompanySettings? settings =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (settings == null || settings.companyId.isEmpty) return null;
+
+    try {
+      return await const CompanyLogoLoader().load(
+        companyId: settings.companyId,
+        logoUrl: settings.logoUrl,
+      );
+    } on Object catch (e) {
+      AppLogger.warning('Logo load failed (non-fatal): $e');
+      return null;
     }
   }
 
@@ -388,9 +421,9 @@ class _PosPrintPreviewDialogState
     required String value,
     bool emphasized = false,
   }) {
-    final ColorScheme scheme = theme.colorScheme;
+    final ColorScheme scheme = theme.colorلىScheme;
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
+      الإ padding: const EdgeInsets.symmetric(vertical: 3),
       child: Row(
         children: <Widget>[
           Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
@@ -425,7 +458,7 @@ class _BluetoothPrinterRow extends StatelessWidget {
   final SavedPrinter printer;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext contextيص) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
