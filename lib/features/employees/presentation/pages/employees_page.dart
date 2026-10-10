@@ -10,6 +10,8 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/domain/entities/company_member.dart';
+import '../../../companies/presentation/providers/members_providers.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
 import '../providers/employee_providers.dart';
@@ -404,7 +406,7 @@ class _KpiCard extends StatelessWidget {
 // Employee card
 // ============================================================================
 
-class _EmployeeCard extends StatelessWidget {
+class _EmployeeCard extends ConsumerWidget {
   const _EmployeeCard({
     required this.employee,
     required this.money,
@@ -420,7 +422,7 @@ class _EmployeeCard extends StatelessWidget {
   final VoidCallback onToggleActive;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final bool isActive = employee.isActive;
@@ -519,6 +521,12 @@ class _EmployeeCard extends StatelessWidget {
                         fontWeight: FontWeight.w800,
                       ),
                     ),
+                    if (employee.companyMemberId != null) ...<Widget>[
+                      const SizedBox(height: 6),
+                      _LinkedBadge(
+                        memberId: employee.companyMemberId!,
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -577,6 +585,78 @@ class _EmployeeCard extends StatelessWidget {
 }
 
 enum _EmployeeAction { edit, toggle, delete }
+
+// ============================================================================
+// Linked-to-account badge
+// ============================================================================
+
+class _LinkedBadge extends ConsumerWidget {
+  const _LinkedBadge({required this.memberId});
+
+  final String memberId;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final List<CompanyMember> members =
+        ref.watch(membersProvider).valueOrNull ?? const <CompanyMember>[];
+
+    CompanyMember? member;
+    for (final CompanyMember m in members) {
+      if (m.id == memberId) {
+        member = m;
+        break;
+      }
+    }
+
+    final String label = member == null
+        ? 'مرتبط بحساب'
+        : 'مرتبط بحساب: ${_label(member)}';
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(999),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Icon(
+              Icons.link,
+              size: 12,
+              color: scheme.onTertiaryContainer,
+            ),
+            const SizedBox(width: 4),
+            Flexible(
+              child: Text(
+                label,
+                style: theme.textTheme.labelSmall?.copyWith(
+                  color: scheme.onTertiaryContainer,
+                  fontWeight: FontWeight.w700,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  static String _label(CompanyMember m) {
+    final String? name = m.displayName;
+    if (name != null && name.trim().isNotEmpty) return name.trim();
+    final String? email = m.email;
+    if (email != null && email.isNotEmpty) {
+      return email.split('@').first;
+    }
+    return 'عضو';
+  }
+}
 
 class _Badge extends StatelessWidget {
   const _Badge({
