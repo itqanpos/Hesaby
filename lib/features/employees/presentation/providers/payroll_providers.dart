@@ -212,8 +212,11 @@ class SalariesNotifier extends AsyncNotifier<List<EmployeeSalary>> {
               notes: notes,
             );
     if (paidAt != null) {
+      // Trigger posted a cash movement AND reduced the employee's open
+      // advances (by `advancesDeducted`).
       ref.invalidate(cashOverviewProvider);
       ref.invalidate(cashTransactionsProvider);
+      ref.invalidate(advancesProvider);
     }
     await refresh();
     return created;
@@ -255,8 +258,10 @@ class SalariesNotifier extends AsyncNotifier<List<EmployeeSalary>> {
               paymentMethod: paymentMethod,
               paidAt: paidAt,
             );
+    // Trigger posted a cash movement AND reduced advances.
     ref.invalidate(cashOverviewProvider);
     ref.invalidate(cashTransactionsProvider);
+    ref.invalidate(advancesProvider);
     await refresh();
     return updated;
   }
