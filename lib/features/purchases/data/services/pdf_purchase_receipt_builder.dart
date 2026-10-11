@@ -14,8 +14,8 @@ import '../../domain/entities/purchase_receipt.dart';
 
 /// Builds a PDF document from a [PurchaseReceipt].
 ///
-/// **Phase P-1b:** accepts an optional [PrintStyleSettings] that scales
-/// every font size and selects a base weight.
+/// **Phase P-1b:** accepts an optional [PrintStyleSettings].
+/// **Phase U-5:** accepts optional [logoBytes] drawn centered at the top.
 abstract final class PdfPurchaseReceiptBuilder {
   static Future<pw.Font>? _regularFontFuture;
   static Future<pw.Font>? _boldFontFuture;
@@ -57,6 +57,7 @@ abstract final class PdfPurchaseReceiptBuilder {
     required PurchaseReceipt receipt,
     required ReceiptPaperSize size,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     final pw.ThemeData theme = await _loadTheme();
 
@@ -98,6 +99,7 @@ abstract final class PdfPurchaseReceiptBuilder {
           receipt: receipt,
           paperSize: size,
           style: style,
+          logoBytes: logoBytes,
         ),
       ),
     );
@@ -111,7 +113,6 @@ abstract final class PdfPurchaseReceiptBuilder {
     return pw.ThemeData.withFont(base: regular, bold: bold);
   }
 
-  /// Maps a semantic [PrintFontWeight] + emphasis flag to a `pdf` weight.
   static pw.FontWeight _weight({
     required PrintFontWeight userWeight,
     required bool emphasized,
@@ -130,10 +131,15 @@ abstract final class PdfPurchaseReceiptBuilder {
     required PurchaseReceipt receipt,
     required ReceiptPaperSize paperSize,
     required PrintStyleSettings style,
+    Uint8List? logoBytes,
   }) {
     final _Sizes s = _Sizes.forSize(paperSize, scale: style.fontScale);
 
     return <pw.Widget>[
+      if (logoBytes != null && logoBytes.isNotEmpty) ...<pw.Widget>[
+        _buildLogo(logoBytes, s),
+        pw.SizedBox(height: s.sectionGap),
+      ],
       _header(receipt, s, style),
       pw.SizedBox(height: s.sectionGap),
       _metaBlock(receipt, s, style),
@@ -162,6 +168,16 @@ abstract final class PdfPurchaseReceiptBuilder {
       pw.SizedBox(height: s.sectionGap),
       _footer(receipt, s, style),
     ];
+  }
+
+  static pw.Widget _buildLogo(Uint8List bytes, _Sizes s) {
+    return pw.Center(
+      child: pw.Image(
+        pw.MemoryImage(bytes),
+        width: s.logoWidth,
+        fit: pw.BoxFit.contain,
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -792,6 +808,7 @@ class _Sizes {
     required this.kvValueLarge,
     required this.footer,
     required this.sectionGap,
+    required this.logoWidth,
   });
 
   factory _Sizes.forSize(
@@ -818,6 +835,7 @@ class _Sizes {
           kvValueLarge: 10 * s,
           footer: 7 * s,
           sectionGap: 5 * s,
+          logoWidth: 70,
         );
       case ReceiptPaperSize.mm80:
         return _Sizes(
@@ -837,6 +855,7 @@ class _Sizes {
           kvValueLarge: 11 * s,
           footer: 8 * s,
           sectionGap: 6 * s,
+          logoWidth: 100,
         );
       case ReceiptPaperSize.a4:
         return _Sizes(
@@ -856,6 +875,7 @@ class _Sizes {
           kvValueLarge: 14 * s,
           footer: 10 * s,
           sectionGap: 10 * s,
+          logoWidth: 130,
         );
     }
   }
@@ -876,4 +896,5 @@ class _Sizes {
   final double kvValueLarge;
   final double footer;
   final double sectionGap;
+  final double logoWidth;
 }
