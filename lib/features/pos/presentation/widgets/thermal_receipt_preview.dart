@@ -14,11 +14,7 @@ import '../../../settings/presentation/providers/company_settings_providers.dart
 import '../../data/services/esc_pos_receipt_builder.dart';
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
-import '../../data/services/printer_service.dart';
-import '../../data/services/receipt_printer.dart';
-import '../../domain/entities/printer_device.dart';
 import '../../domain/entities/receipt.dart';
-import '../providers/printer_providers.dart';
 
 /// Live WYSIWYG preview of the thermal receipt.
 ///
