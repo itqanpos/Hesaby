@@ -10,13 +10,6 @@ import '../../domain/entities/receipt.dart';
 import 'pdf_receipt_builder.dart';
 
 /// Contract for printing or sharing a POS receipt via PDF.
-///
-/// The concrete implementation is platform-aware: it opens the native
-/// print dialog on supported platforms and falls back to a system share
-/// sheet where printing is unavailable (for example on the web).
-///
-/// **Phase P-1b:** every method accepts an optional [style] so the PDF is
-/// rendered with the user's font size + weight preferences.
 abstract interface class ReceiptPrinter {
   bool get isSupported;
 
@@ -24,18 +17,21 @@ abstract interface class ReceiptPrinter {
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   });
 
   Future<bool> previewReceipt({
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   });
 
   Future<bool> shareReceipt({
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   });
 }
 
@@ -51,12 +47,14 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     try {
       final Uint8List bytes = await PdfReceiptBuilder.build(
         receipt: receipt,
         size: size,
         style: style,
+        logoBytes: logoBytes,
       );
 
       await Printing.layoutPdf(
@@ -75,8 +73,14 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
-    return printReceipt(receipt: receipt, size: size, style: style);
+    return printReceipt(
+      receipt: receipt,
+      size: size,
+      style: style,
+      logoBytes: logoBytes,
+    );
   }
 
   @override
@@ -84,12 +88,14 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
     required Receipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     try {
       final Uint8List bytes = await PdfReceiptBuilder.build(
         receipt: receipt,
         size: size,
         style: style,
+        logoBytes: logoBytes,
       );
 
       await Printing.sharePdf(
