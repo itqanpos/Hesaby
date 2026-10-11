@@ -12,9 +12,6 @@ import '../../domain/entities/purchase_receipt.dart';
 import 'pdf_purchase_receipt_builder.dart';
 
 /// Contract for printing or sharing a purchase receipt.
-///
-/// **Phase P-1b:** every method accepts an optional [style] so the PDF is
-/// rendered with the user's font size + weight preferences.
 abstract interface class PurchaseReceiptPrinter {
   bool get isSupported;
 
@@ -22,12 +19,14 @@ abstract interface class PurchaseReceiptPrinter {
     required PurchaseReceipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   });
 
   Future<bool> shareReceipt({
     required PurchaseReceipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   });
 }
 
@@ -43,12 +42,14 @@ class PurchaseReceiptPrinterImpl implements PurchaseReceiptPrinter {
     required PurchaseReceipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     try {
       final Uint8List bytes = await PdfPurchaseReceiptBuilder.build(
         receipt: receipt,
         size: size,
         style: style,
+        logoBytes: logoBytes,
       );
 
       await Printing.layoutPdf(
@@ -67,12 +68,14 @@ class PurchaseReceiptPrinterImpl implements PurchaseReceiptPrinter {
     required PurchaseReceipt receipt,
     ReceiptPaperSize size = ReceiptPaperSize.mm80,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     try {
       final Uint8List bytes = await PdfPurchaseReceiptBuilder.build(
         receipt: receipt,
         size: size,
         style: style,
+        logoBytes: logoBytes,
       );
 
       await Printing.sharePdf(
