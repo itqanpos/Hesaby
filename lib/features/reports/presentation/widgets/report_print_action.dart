@@ -7,9 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
+import '../../../../core/utils/logger.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../pos/data/services/direct_print_service.dart';
+import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
@@ -21,6 +23,10 @@ import '../../domain/entities/report_document.dart';
 /// **Phase P-2:** if "direct print" is enabled, the report is sent straight
 /// to the OS default printer without opening the preview dialog. On any
 /// failure, the standard dialog opens as a fallback.
+///
+/// **Phase U-5+:** the company logo is loaded once per invocation and
+/// embedded into every page header (both in the direct-print path and in
+/// the print / share dialog paths).
 class ReportPrintAction extends ConsumerWidget {
   const ReportPrintAction({super.key, required this.documentBuilder});
 
@@ -64,6 +70,9 @@ class ReportPrintAction extends ConsumerWidget {
             fontWeight: settings.printFontWeight,
           );
 
+    // ---- Load logo once (non-fatal) ----
+    final Uint8List? logoBytes = await _loadLogoBytes(ref);
+
     // ---- Direct print path ----
     final bool direct = settings?.printDirectEnabled ?? false;
     if (direct) {
@@ -71,6 +80,7 @@ class ReportPrintAction extends ConsumerWidget {
         final Uint8List bytes = await PdfReportBuilder.build(
           document: doc,
           style: style,
+          logoBytes: logoBytes,
         );
         final String name = _fileNameFor();
         final bool ok = await DirectPrintService.tryPdfBytes(
@@ -96,9 +106,31 @@ class ReportPrintAction extends ConsumerWidget {
     await showDialog<void>(
       context: context,
       barrierDismissible: true,
-      builder: (BuildContext dialogContext) =>
-          _PrintDialog(document: doc, style: style),
+      builder: (BuildContext dialogContext) => _PrintDialog(
+        document: doc,
+        style: style,
+        logoBytes: logoBytes,
+      ),
     );
+  }
+
+  /// Loads the company logo bytes for PDF embedding.
+  ///
+  /// Returns `null` on any failure — the report is still printable
+  /// without a logo.
+  static Future<Uint8List?> _loadLogoBytes(WidgetRef ref) async {
+    final CompanySettings? s =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (s == null || s.companyId.isEmpty) return null;
+    try {
+      return await const CompanyLogoLoader().load(
+        companyId: s.companyId,
+        logoUrl: s.logoUrl,
+      );
+    } on Object catch (e) {
+      AppLogger.warning('Logo load failed (non-fatal): $e');
+      return null;
+    }
   }
 
   static String _fileNameFor() {
@@ -118,10 +150,14 @@ class _PrintDialog extends StatefulWidget {
   const _PrintDialog({
     required this.document,
     required this.style,
+    required this.logoBytes,
   });
 
   final ReportDocument document;
   final PrintStyleSettings style;
+
+  /// Optional company logo, embedded into every page header.
+  final Uint8List? logoBytes;
 
   @override
   State<_PrintDialog> createState() => _PrintDialogState();
@@ -147,6 +183,7 @@ class _PrintDialogState extends State<_PrintDialog> {
       final Uint8List bytes = await PdfReportBuilder.build(
         document: widget.document,
         style: widget.style,
+        logoBytes: widget.logoBytes,
       );
       await Printing.layoutPdf(
         name: _fileName,
@@ -168,6 +205,7 @@ class _PrintDialogState extends State<_PrintDialog> {
       final Uint8List bytes = await PdfReportBuilder.build(
         document: widget.document,
         style: widget.style,
+        logoBytes: widget.logoBytes,
       );
       await Printing.sharePdf(bytes: bytes, filename: _fileName);
       if (!mounted) return;
