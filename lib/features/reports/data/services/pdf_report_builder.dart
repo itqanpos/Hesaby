@@ -14,10 +14,14 @@ import '../../domain/entities/report_document.dart';
 ///
 /// **Phase P-1b:** accepts a [PrintStyleSettings] that scales every font
 /// size and selects a base weight for the body text.
+///
+/// **Phase U-5+:** accepts an optional [logoBytes] image that is drawn
+/// centered at the top of every page (above the company name).
 abstract final class PdfReportBuilder {
   static Future<Uint8List> build({
     required ReportDocument document,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     final pw.ThemeData theme = await _loadTheme();
 
@@ -34,7 +38,7 @@ abstract final class PdfReportBuilder {
         margin: const pw.EdgeInsets.all(28),
         textDirection: pw.TextDirection.rtl,
         header: (pw.Context context) =>
-            _buildPageHeader(document, style),
+            _buildPageHeader(document, style, logoBytes),
         footer: (pw.Context context) =>
             _buildPageFooter(context, style),
         build: (pw.Context context) => _buildContent(document, style),
@@ -136,10 +140,21 @@ abstract final class PdfReportBuilder {
   static pw.Widget _buildPageHeader(
     ReportDocument document,
     PrintStyleSettings style,
+    Uint8List? logoBytes,
   ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
+        if (logoBytes != null && logoBytes.isNotEmpty) ...<pw.Widget>[
+          pw.Center(
+            child: pw.Image(
+              pw.MemoryImage(logoBytes),
+              width: 70,
+              fit: pw.BoxFit.contain,
+            ),
+          ),
+          pw.SizedBox(height: 4),
+        ],
         pw.Text(
           _norm(document.companyName),
           style: pw.TextStyle(
