@@ -25,10 +25,13 @@ import '../../domain/entities/receipt.dart';
 /// selects between the regular and bold font families.
 ///
 /// **Phase O-2 (RTL fix + preview support):**
-/// * Columns of the items table are now laid out in natural RTL reading
+/// * Columns of the items table are laid out in natural RTL reading
 ///   order (م → الصنف → الكمية → السعر → الإجمالي from right to left).
 /// * [renderToImage] exposes the raw canvas bitmap used by the in-app
 ///   thermal preview dialog, so the preview matches the print 1:1.
+/// * A solid white background is painted across the entire canvas so the
+///   exported PNG never contains transparent regions (which render as
+///   black in some preview surfaces).
 abstract final class EscPosReceiptBuilder {
   // ---- ESC/POS control sequences ----
   static const List<int> _init = <int>[0x1B, 0x40]; // ESC @ (initialize)
@@ -263,6 +266,25 @@ class _Painter {
   // ---------------------------------------------------------------------------
 
   Future<void> paint(Receipt r, Uint8List? logoBytes) async {
+    // Paint a solid white background across the entire canvas. The final
+    // image is clipped by `picture.toImage(width, height)` to the exact
+    // height computed by [totalHeight], so a very tall rect here is safe.
+    //
+    // Rationale: PNG-encoded pictures on some platforms are exported with
+    // a fully transparent background. In the in-app preview this shows as
+    // the underlying surface color — often a solid black — which hides
+    // any transparent areas of a logo. Painting white guarantees the
+    // receipt looks like paper regardless of theme.
+    canvas.drawRect(
+      Rect.fromLTWH(
+        0,
+        0,
+        paperWidthDots.toDouble(),
+        100000,
+      ),
+      Paint()..color = const Color(0xFFFFFFFF),
+    );
+
     _y = _paddingTop;
 
     // Logo first — company name follows immediately below it.
