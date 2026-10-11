@@ -9,7 +9,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart'
     show ReceiptPaperSize;
-import '../../../pos/data/services/pos_preferences.dart';
 import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
