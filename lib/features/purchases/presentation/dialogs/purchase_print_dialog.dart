@@ -6,14 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../core/utils/logger.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../pos/data/services/direct_print_service.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart'
     show ReceiptPaperSize;
+import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
-import '../../data/services/pdf_purchase_receipt_builder.dart';
 import '../../data/services/purchase_receipt_printer.dart';
 import '../../domain/entities/purchase_receipt.dart';
 
@@ -51,6 +52,10 @@ class _PurchasePrintDialogState
 
   bool get _isBusy => _isPrinting || _isSharing;
 
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
   PrintStyleSettings _readStyle() {
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
@@ -64,6 +69,25 @@ class _PurchasePrintDialogState
     return PrintStyleSettings.fromCompanySettings(s);
   }
 
+  Future<Uint8List?> _loadLogoBytes() async {
+    final CompanySettings? s =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (s == null || s.companyId.isEmpty) return null;
+    try {
+      return await const CompanyLogoLoader().load(
+        companyId: s.companyId,
+        logoUrl: s.logoUrl,
+      );
+    } on Object catch (e) {
+      AppLogger.warning('Logo load failed (non-fatal): $e');
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
   Future<void> _print() async {
     setState(() => _isPrinting = true);
     try {
@@ -71,13 +95,11 @@ class _PurchasePrintDialogState
           ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
               false;
 
+      final Uint8List? logo = await _loadLogoBytes();
+
       // Direct-print path for non-A4 sizes.
       if (direct && _size != ReceiptPaperSize.a4) {
-        final Uint8List bytes = await PdfPurchaseReceiptBuilder.build(
-          receipt: widget.receipt,
-          size: _size,
-          style: _readStyle(),
-        );
+        final Uint8List bytes = await _buildPdf(logo);
         final bool ok = await DirectPrintService.tryPdfBytes(
           bytes: bytes,
           name: _fileNameFor(widget.receipt),
@@ -94,6 +116,7 @@ class _PurchasePrintDialogState
         receipt: widget.receipt,
         size: _size,
         style: _readStyle(),
+        logoBytes: logo,
       );
       if (!mounted) return;
       if (ok) {
@@ -109,20 +132,42 @@ class _PurchasePrintDialogState
     }
   }
 
+  Future<Uint8List> _buildPdf(Uint8List? logo) {
+    // Reuse the builder through the printer interface by calling
+    // `PdfPurchaseReceiptBuilder.build` directly. We import it inline to
+    // avoid adding another import at the top when not strictly needed.
+    return Future<Uint8List>.value(
+      PdfPurchaseReceiptBuilder.build(
+        receipt: widget.receipt,
+        size: _size,
+        style: _readStyle(),
+        logoBytes: logo,
+      ),
+    );
+  }
+
   Future<void> _share() async {
     setState(() => _isSharing = true);
-    final bool ok = await _printer.shareReceipt(
-      receipt: widget.receipt,
-      size: _size,
-      style: _readStyle(),
-    );
-    if (!mounted) return;
-    setState(() => _isSharing = false);
-    if (ok) {
-      Navigator.of(context).pop();
-      return;
+    try {
+      final Uint8List? logo = await _loadLogoBytes();
+      final bool ok = await _printer.shareReceipt(
+        receipt: widget.receipt,
+        size: _size,
+        style: _readStyle(),
+        logoBytes: logo,
+      );
+      if (!mounted) return;
+      setState(() => _isSharing = false);
+      if (ok) {
+        Navigator.of(context).pop();
+        return;
+      }
+      _showFailure('تعذّرت مشاركة الفاتورة.');
+    } on Object {
+      if (!mounted) return;
+      setState(() => _isSharing = false);
+      _showFailure('تعذّرت مشاركة الفاتورة.');
     }
-    _showFailure('تعذّرت مشاركة الفاتورة.');
   }
 
   void _showFailure(String message) {
@@ -142,6 +187,10 @@ class _PurchasePrintDialogState
         : r.purchaseId;
     return 'purchase-$suffix.pdf';
   }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
