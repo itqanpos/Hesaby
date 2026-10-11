@@ -8,11 +8,13 @@ import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
+import '../../../../core/utils/logger.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../pos/data/services/direct_print_service.dart';
+import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
@@ -159,6 +161,25 @@ class _CustomerStatementPageState
     );
   }
 
+  /// Loads the company logo bytes for PDF printing.
+  ///
+  /// Returns `null` on any failure — the statement is still printable
+  /// without a logo.
+  Future<Uint8List?> _loadLogoBytes() async {
+    final CompanySettings? s =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (s == null || s.companyId.isEmpty) return null;
+    try {
+      return await const CompanyLogoLoader().load(
+        companyId: s.companyId,
+        logoUrl: s.logoUrl,
+      );
+    } on Object catch (e) {
+      AppLogger.warning('Logo load failed (non-fatal): $e');
+      return null;
+    }
+  }
+
   Future<void> _print() async {
     final CustomerStatement? statement =
         ref.read(customerStatementProvider(_args)).valueOrNull;
@@ -167,9 +188,11 @@ class _CustomerStatementPageState
     setState(() => _isPrinting = true);
 
     try {
+      final Uint8List? logo = await _loadLogoBytes();
       final Uint8List bytes = await PdfStatementBuilder.build(
         statement: statement,
         style: _readA4Style(),
+        logoBytes: logo,
       );
 
       final String fileName = 'statement-${statement.customer.name}.pdf';
@@ -329,12 +352,8 @@ class _CustomerInfoCard extends StatelessWidget {
     final Customer customer = statement.customer;
 
     final List<String> meta = <String>[];
-    if (customer.hasCode) {
-      meta.add('كود: ${customer.code}');
-    }
-    if (customer.hasPhone) {
-      meta.add(customer.phone!);
-    }
+    if (customer.hasCode) meta.add('كود: ${customer.code}');
+    if (customer.hasPhone) meta.add(customer.phone!);
 
     return DecoratedBox(
       decoration: BoxDecoration(
