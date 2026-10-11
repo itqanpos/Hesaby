@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/widgets/app_button.dart';
@@ -18,8 +17,17 @@ import '../../../settings/presentation/providers/company_settings_providers.dart
 import '../../data/services/pdf_purchase_receipt_builder.dart';
 import '../../data/services/purchase_receipt_printer.dart';
 import '../../domain/entities/purchase_receipt.dart';
+import '../widgets/thermal_purchase_preview.dart';
 
 /// Opens the print dialog for a purchase receipt.
+///
+/// The dialog shows:
+/// * A compact paper-size selector (58 مم / 80 مم / A4).
+/// * A live **thermal preview** — the exact bitmap that will be sent to a
+///   thermal printer (WYSIWYG). For A4 the preview still uses the 80 mm
+///   shape; the printed PDF respects the selected size.
+/// * Two actions: **طباعة** (system dialog or direct print) and
+///   **مشاركة** (share the PDF).
 Future<void> showPurchasePrintDialog({
   required BuildContext context,
   required PurchaseReceipt receipt,
@@ -133,7 +141,6 @@ class _PurchasePrintDialogState
     }
   }
 
-  /// Builds the PDF directly for the direct-print path.
   Future<Uint8List> _buildPdf(Uint8List? logo) {
     return PdfPurchaseReceiptBuilder.build(
       receipt: widget.receipt,
@@ -193,76 +200,66 @@ class _PurchasePrintDialogState
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final PurchaseReceipt receipt = widget.receipt;
-    final NumberFormat money = NumberFormat.currency(
-      locale: 'en_US',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     return AlertDialog(
       title: Row(
         children: <Widget>[
           Icon(Icons.print_outlined, color: scheme.primary),
           const SizedBox(width: 8),
-          const Expanded(child: Text('طباعة الفاتورة')),
+          const Expanded(child: Text('معاينة الفاتورة')),
           IconButton(
             onPressed: _isBusy ? null : () => Navigator.of(context).pop(),
             icon: const Icon(Icons.close),
           ),
         ],
       ),
+      contentPadding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    _summaryRow(theme,
-                        label: 'رقم الفاتورة',
-                        value: receipt.invoiceNumber ?? '—'),
-                    _summaryRow(theme,
-                        label: 'المورد', value: receipt.supplierName),
-                    _summaryRow(theme,
-                        label: 'عدد البنود',
-                        value: receipt.lineCount.toString()),
-                    _summaryRow(theme,
-                        label: 'الإجمالي',
-                        value: money.format(receipt.total),
-                        emphasized: true),
-                  ],
+            Center(
+              child: SegmentedButton<ReceiptPaperSize>(
+                segments: const <ButtonSegment<ReceiptPaperSize>>[
+                  ButtonSegment<ReceiptPaperSize>(
+                    value: ReceiptPaperSize.mm58,
+                    label: Text('58 مم'),
+                  ),
+                  ButtonSegment<ReceiptPaperSize>(
+                    value: ReceiptPaperSize.mm80,
+                    label: Text('80 مم'),
+                  ),
+                  ButtonSegment<ReceiptPaperSize>(
+                    value: ReceiptPaperSize.a4,
+                    label: Text('A4'),
+                  ),
+                ],
+                selected: <ReceiptPaperSize>{_size},
+                onSelectionChanged: _isBusy ? null : _onSizeSelected,
+                showSelectedIcon: false,
+                style: SegmentedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
                 ),
               ),
             ),
-            const SizedBox(height: 16),
-            Text('مقاس الورق', style: theme.textTheme.labelLarge),
-            const SizedBox(height: 8),
-            SegmentedButton<ReceiptPaperSize>(
-              segments: const <ButtonSegment<ReceiptPaperSize>>[
-                ButtonSegment<ReceiptPaperSize>(
-                    value: ReceiptPaperSize.mm58, label: Text('58 مم')),
-                ButtonSegment<ReceiptPaperSize>(
-                    value: ReceiptPaperSize.mm80, label: Text('80 مم')),
-                ButtonSegment<ReceiptPaperSize>(
-                    value: ReceiptPaperSize.a4, label: Text('A4')),
-              ],
-              selected: <ReceiptPaperSize>{_size},
-              onSelectionChanged: _isBusy ? null : _onSizeSelected,
-              showSelectedIcon: false,
-              style: SegmentedButton.styleFrom(
-                visualDensity: VisualDensity.compact,
-              ),
+            const SizedBox(height: 12),
+            ThermalPurchasePreview(
+              receipt: widget.receipt,
+              paperSize: _size,
+              maxHeight: 520,
             ),
+            if (_size == ReceiptPaperSize.a4) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                'المعاينة تظهر بشكل إيصال حراري. '
+                'سيتم إنشاء PDF بمقاس A4 عند الطباعة.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
           ],
         ),
       ),
@@ -281,7 +278,7 @@ class _PurchasePrintDialogState
             ),
             const SizedBox(height: 8),
             AppButton(
-              label: 'مشاركة PDF',
+              label: 'مشاركة',
               icon: Icons.ios_share,
               variant: AppButtonVariant.outline,
               expanded: true,
@@ -293,33 +290,6 @@ class _PurchasePrintDialogState
       ],
       backgroundColor: scheme.surface,
       scrollable: false,
-    );
-  }
-
-  Widget _summaryRow(
-    ThemeData theme, {
-    required String label,
-    required String value,
-    bool emphasized = false,
-  }) {
-    final ColorScheme scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: <Widget>[
-          Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
-          Text(
-            value,
-            style: (emphasized
-                    ? theme.textTheme.titleMedium
-                    : theme.textTheme.bodyLarge)
-                ?.copyWith(
-              color: emphasized ? scheme.primary : scheme.onSurface,
-              fontWeight: emphasized ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
