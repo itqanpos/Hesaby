@@ -19,22 +19,9 @@ enum ReceiptPaperSize {
 
 /// Builds a PDF document from a [Receipt].
 ///
-/// Layout is optimised for thermal receipt printers:
-/// * B/W/grey only — no colours (thermal printers cannot render them).
-/// * Generous vertical rhythm so the cashier can scan the total at a
-///   glance.
-/// * Tables use alternating row backgrounds (zebra) to make multi-line
-///   orders easy to read.
-/// * Currency is shown explicitly on money values; quantities stay bare.
-///
-/// **Phase P-1b:** an optional [style] applies the user's font scale +
-/// weight preferences to every text element. The default (1.0, normal)
-/// matches the pre-P-1b output byte-for-byte.
+/// **Phase P-1b:** accepts a [PrintStyleSettings] that scales every font.
+/// **Phase U-5:** accepts optional [logoBytes] drawn centered at the top.
 abstract final class PdfReceiptBuilder {
-  // ---------------------------------------------------------------------------
-  // Font cache
-  // ---------------------------------------------------------------------------
-
   static Future<pw.Font>? _regularFontFuture;
   static Future<pw.Font>? _boldFontFuture;
 
@@ -43,10 +30,6 @@ abstract final class PdfReceiptBuilder {
 
   static Future<pw.Font> _boldFont() =>
       _boldFontFuture ??= PdfGoogleFonts.cairoBold();
-
-  // ---------------------------------------------------------------------------
-  // Constants
-  // ---------------------------------------------------------------------------
 
   static const List<String> _arabicDays = <String>[
     'الإثنين',
@@ -60,10 +43,6 @@ abstract final class PdfReceiptBuilder {
 
   static const String _defaultFooter = 'شكرًا لتعاملكم معنا';
   static const String _currency = 'ج.م';
-
-  // ---------------------------------------------------------------------------
-  // Thermal sizing
-  // ---------------------------------------------------------------------------
 
   static const double _thermalFixedMm = 120;
   static const double _thermalPerLineMm = 14;
@@ -83,6 +62,7 @@ abstract final class PdfReceiptBuilder {
     required Receipt receipt,
     required ReceiptPaperSize size,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     final pw.ThemeData theme = await _loadTheme();
 
@@ -124,6 +104,7 @@ abstract final class PdfReceiptBuilder {
           receipt: receipt,
           paperSize: size,
           style: style,
+          logoBytes: logoBytes,
         ),
       ),
     );
@@ -131,25 +112,12 @@ abstract final class PdfReceiptBuilder {
     return document.save();
   }
 
-  // ---------------------------------------------------------------------------
-  // Fonts
-  // ---------------------------------------------------------------------------
-
   static Future<pw.ThemeData> _loadTheme() async {
     final pw.Font regular = await _regularFont();
     final pw.Font bold = await _boldFont();
     return pw.ThemeData.withFont(base: regular, bold: bold);
   }
 
-  // ---------------------------------------------------------------------------
-  // Weight resolution
-  // ---------------------------------------------------------------------------
-
-  /// Maps a semantic [PrintFontWeight] + emphasis flag to a `pdf` weight.
-  ///
-  /// The `pdf` package only exposes `normal` and `bold`. `medium` is
-  /// therefore treated the same as `normal` for non-emphasised text;
-  /// emphasised text is bold regardless.
   static pw.FontWeight _weight({
     required PrintFontWeight userWeight,
     required bool emphasized,
@@ -168,10 +136,15 @@ abstract final class PdfReceiptBuilder {
     required Receipt receipt,
     required ReceiptPaperSize paperSize,
     required PrintStyleSettings style,
+    Uint8List? logoBytes,
   }) {
     final _Sizes s = _Sizes.forSize(paperSize, scale: style.fontScale);
 
     return <pw.Widget>[
+      if (logoBytes != null && logoBytes.isNotEmpty) ...<pw.Widget>[
+        _buildLogo(logoBytes, s),
+        pw.SizedBox(height: s.sectionGap),
+      ],
       _header(receipt, s, style),
       pw.SizedBox(height: s.sectionGap),
       _metaBlock(receipt, s, style),
@@ -194,6 +167,16 @@ abstract final class PdfReceiptBuilder {
       pw.SizedBox(height: s.sectionGap),
       _footer(receipt, s, style),
     ];
+  }
+
+  static pw.Widget _buildLogo(Uint8List bytes, _Sizes s) {
+    return pw.Center(
+      child: pw.Image(
+        pw.MemoryImage(bytes),
+        width: s.logoWidth,
+        fit: pw.BoxFit.contain,
+      ),
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -268,7 +251,7 @@ abstract final class PdfReceiptBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Meta block
+  // Meta
   // ---------------------------------------------------------------------------
 
   static pw.Widget _metaBlock(
@@ -764,10 +747,6 @@ abstract final class PdfReceiptBuilder {
 // Size profile
 // ============================================================================
 
-/// Bundle of font sizes and paddings for one paper format.
-///
-/// The `forSize` factory accepts an optional `scale` (from
-/// [PrintStyleSettings]) that multiplies every size and padding field.
 class _Sizes {
   const _Sizes({
     required this.companyName,
@@ -786,6 +765,7 @@ class _Sizes {
     required this.kvValueLarge,
     required this.footer,
     required this.sectionGap,
+    required this.logoWidth,
   });
 
   factory _Sizes.forSize(
@@ -812,6 +792,7 @@ class _Sizes {
           kvValueLarge: 10 * s,
           footer: 7 * s,
           sectionGap: 5 * s,
+          logoWidth: 70,
         );
       case ReceiptPaperSize.mm80:
         return _Sizes(
@@ -831,6 +812,7 @@ class _Sizes {
           kvValueLarge: 11 * s,
           footer: 8 * s,
           sectionGap: 6 * s,
+          logoWidth: 100,
         );
       case ReceiptPaperSize.a4:
         return _Sizes(
@@ -850,6 +832,7 @@ class _Sizes {
           kvValueLarge: 14 * s,
           footer: 10 * s,
           sectionGap: 10 * s,
+          logoWidth: 130,
         );
     }
   }
@@ -870,4 +853,7 @@ class _Sizes {
   final double kvValueLarge;
   final double footer;
   final double sectionGap;
+
+  /// Logo width in PDF points.
+  final double logoWidth;
 }
