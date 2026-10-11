@@ -33,10 +33,6 @@ Future<void> showPosPrintPreviewDialog({
   );
 }
 
-// ============================================================================
-// Dialog
-// ============================================================================
-
 class _PosPrintPreviewDialog extends ConsumerStatefulWidget {
   const _PosPrintPreviewDialog({required this.receipt});
 
@@ -58,14 +54,35 @@ class _PosPrintPreviewDialogState
   bool get _isBusy => _isPrinting || _isSharing || _isBluetoothPrinting;
 
   // ---------------------------------------------------------------------------
-  // Helpers — read user preferences once per action
+  // Helpers
   // ---------------------------------------------------------------------------
 
-  PrintStyleSettings _readStyle() {
+  PrintStyleSettings _readStyle({bool forA4 = false}) {
     final CompanySettings? settings =
         ref.read(companySettingsProvider).valueOrNull;
     if (settings == null) return const PrintStyleSettings.defaults();
+    if (forA4) {
+      return PrintStyleSettings(
+        fontScale: settings.printFontScaleA4,
+        fontWeight: settings.printFontWeight,
+      );
+    }
     return PrintStyleSettings.fromCompanySettings(settings);
+  }
+
+  Future<Uint8List?> _loadLogoBytes() async {
+    final CompanySettings? settings =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (settings == null || settings.companyId.isEmpty) return null;
+    try {
+      return await const CompanyLogoLoader().load(
+        companyId: settings.companyId,
+        logoUrl: settings.logoUrl,
+      );
+    } on Object catch (e) {
+      AppLogger.warning('Logo load failed (non-fatal): $e');
+      return null;
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -74,40 +91,58 @@ class _PosPrintPreviewDialogState
 
   Future<void> _print() async {
     setState(() => _isPrinting = true);
+    try {
+      final ReceiptPaperSize size = _currentPaperSize();
+      final Uint8List? logo = await _loadLogoBytes();
 
-    final bool ok = await _pdfPrinter.printReceipt(
-      receipt: widget.receipt,
-      size: _currentPaperSize(),
-      style: _readStyle(),
-    );
+      final bool ok = await _pdfPrinter.printReceipt(
+        receipt: widget.receipt,
+        size: size,
+        style: _readStyle(forA4: size == ReceiptPaperSize.a4),
+        logoBytes: logo,
+      );
 
-    if (!mounted) return;
-    setState(() => _isPrinting = false);
+      if (!mounted) return;
+      setState(() => _isPrinting = false);
 
-    if (ok) {
-      Navigator.of(context).pop();
-      return;
+      if (ok) {
+        Navigator.of(context).pop();
+        return;
+      }
+      _showFailure('تعذّرت الطباعة. يرجى المحاولة مرة أخرى.');
+    } on Object {
+      if (!mounted) return;
+      setState(() => _isPrinting = false);
+      _showFailure('تعذّرت الطباعة. حاول مرة أخرى.');
     }
-    _showFailure('تعذّرت الطباعة. يرجى المحاولة مرة أخرى.');
   }
 
   Future<void> _share() async {
     setState(() => _isSharing = true);
+    try {
+      final ReceiptPaperSize size = _currentPaperSize();
+      final Uint8List? logo = await _loadLogoBytes();
 
-    final bool ok = await _pdfPrinter.shareReceipt(
-      receipt: widget.receipt,
-      size: _currentPaperSize(),
-      style: _readStyle(),
-    );
+      final bool ok = await _pdfPrinter.shareReceipt(
+        receipt: widget.receipt,
+        size: size,
+        style: _readStyle(forA4: size == ReceiptPaperSize.a4),
+        logoBytes: logo,
+      );
 
-    if (!mounted) return;
-    setState(() => _isSharing = false);
+      if (!mounted) return;
+      setState(() => _isSharing = false);
 
-    if (ok) {
-      Navigator.of(context).pop();
-      return;
+      if (ok) {
+        Navigator.of(context).pop();
+        return;
+      }
+      _showFailure('تعذّرت مشاركة الإيصال.');
+    } on Object {
+      if (!mounted) return;
+      setState(() => _isSharing = false);
+      _showFailure('تعذّرت مشاركة الإيصال.');
     }
-    _showFailure('تعذّرت مشاركة الإيصال.');
   }
 
   // ---------------------------------------------------------------------------
@@ -162,22 +197,6 @@ class _PosPrintPreviewDialogState
       if (mounted) {
         setState(() => _isBluetoothPrinting = false);
       }
-    }
-  }
-
-  Future<Uint8List?> _loadLogoBytes() async {
-    final CompanySettings? settings =
-        ref.read(companySettingsProvider).valueOrNull;
-    if (settings == null || settings.companyId.isEmpty) return null;
-
-    try {
-      return await const CompanyLogoLoader().load(
-        companyId: settings.companyId,
-        logoUrl: settings.logoUrl,
-      );
-    } on Object catch (e) {
-      AppLogger.warning('Logo load failed (non-fatal): $e');
-      return null;
     }
   }
 
@@ -289,9 +308,7 @@ class _PosPrintPreviewDialogState
                 ),
               ),
             ),
-
             const SizedBox(height: 12),
-
             if (savedPrinter != null)
               _BluetoothPrinterRow(printer: savedPrinter)
             else
@@ -300,9 +317,7 @@ class _PosPrintPreviewDialogState
                   Navigator.of(context).pop();
                 },
               ),
-
             const SizedBox(height: 12),
-
             DecoratedBox(
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
@@ -338,9 +353,7 @@ class _PosPrintPreviewDialogState
                 ),
               ),
             ),
-
             const SizedBox(height: 8),
-
             Text(
               'لتغيير المقاس أو حجم الخط: قائمة الخيارات (⋮) ← إعدادات الطباعة',
               style: theme.textTheme.bodySmall?.copyWith(
