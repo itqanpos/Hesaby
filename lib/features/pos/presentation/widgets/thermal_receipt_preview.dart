@@ -13,6 +13,7 @@ import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../data/services/esc_pos_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
+import '../../domain/entities/printer_device.dart';
 import '../../domain/entities/receipt.dart';
 import '../providers/printer_providers.dart';
 
@@ -22,9 +23,8 @@ import '../providers/printer_providers.dart';
 /// the printer, so what the user sees in this widget matches the printed
 /// output 1:1 (same fonts, same column layout, same logo placement).
 ///
-/// The bitmap is re-rendered whenever:
-/// * the [receipt] changes, or
-/// * the widget is rebuilt from scratch (new dialog instance).
+/// The bitmap is re-rendered whenever the [receipt] changes, or when a
+/// new dialog instance mounts.
 ///
 /// The image is displayed inside a white "paper" frame with a subtle
 /// shadow, and is scaled to fit the parent width while preserving aspect
@@ -98,15 +98,15 @@ class _ThermalReceiptPreviewState
   }
 
   int _resolveWidthDots() {
-    final ReceiptPaperSize size = ref.read(posPaperSizeProvider).valueOrNull ??
-        PosPreferences.defaultPaperSize;
-    switch (size) {
-      case ReceiptPaperSize.mm58:
-        return EscPosReceiptBuilder.widthMm58;
-      case ReceiptPaperSize.mm80:
-      case ReceiptPaperSize.a4:
-        return EscPosReceiptBuilder.widthMm80;
-    }
+    final ReceiptPaperSize size =
+        ref.read(posPaperSizeProvider).valueOrNull ??
+            PosPreferences.defaultPaperSize;
+    return switch (size) {
+      ReceiptPaperSize.mm58 => EscPosReceiptBuilder.widthMm58,
+      ReceiptPaperSize.mm80 ||
+      ReceiptPaperSize.a4 =>
+        EscPosReceiptBuilder.widthMm80,
+    };
   }
 
   PrintStyleSettings _readStyle() {
