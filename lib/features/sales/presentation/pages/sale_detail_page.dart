@@ -537,6 +537,8 @@ class _ActionsCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
     final bool showEdit = sale.canEdit;
     final bool showConfirm = sale.isDraft;
     final bool showCancel = sale.canTransition;
@@ -545,7 +547,11 @@ class _ActionsCard extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
+    // Edit and Confirm remain equally-wide primary actions. Cancel is a
+    // compact, icon-only danger action pinned to the end of the row so it
+    // never competes with the primary buttons for attention.
     final List<Widget> buttons = <Widget>[];
+
     if (showEdit) {
       buttons.add(
         Expanded(
@@ -570,18 +576,6 @@ class _ActionsCard extends StatelessWidget {
         ),
       );
     }
-    if (showCancel) {
-      buttons.add(
-        Expanded(
-          child: AppButton(
-            label: 'إلغاء الفاتورة',
-            icon: Icons.cancel_outlined,
-            variant: AppButtonVariant.danger,
-            onPressed: isActing ? null : onCancel,
-          ),
-        ),
-      );
-    }
 
     final List<Widget> spaced = <Widget>[];
     for (int i = 0; i < buttons.length; i++) {
@@ -589,6 +583,34 @@ class _ActionsCard extends StatelessWidget {
         spaced.add(const SizedBox(width: 8));
       }
       spaced.add(buttons[i]);
+    }
+
+    if (showCancel) {
+      if (spaced.isNotEmpty) {
+        spaced.add(const SizedBox(width: 8));
+      }
+      spaced.add(
+        Tooltip(
+          message: 'إلغاء الفاتورة',
+          child: IconButton(
+            onPressed: isActing ? null : onCancel,
+            icon: isActing
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.cancel_outlined),
+            color: scheme.error,
+            style: IconButton.styleFrom(
+              visualDensity: VisualDensity.compact,
+              side: BorderSide(
+                color: scheme.error.withValues(alpha: 0.4),
+              ),
+            ),
+          ),
+        ),
+      );
     }
 
     return Row(children: spaced);
