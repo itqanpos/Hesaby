@@ -45,11 +45,14 @@ dependencies:
   # POS — Phase 7 additions
   printing: ^5.13.4
   pdf: ^3.11.1
+  image: ^4.2.0
 
   # POS — Phase D additions (thermal printer via Bluetooth / USB / Network)
   flutter_pos_printer_platform_image_3: ^1.2.0
   esc_pos_utils_plus: ^2.0.4
-  image: ^4.2.0
+
+  # Offline support — Phase O-1 (network status detection)
+  connectivity_plus: ^6.1.0
 
 dev_dependencies:
   flutter_test:
@@ -66,9 +69,8 @@ flutter:
   # Assets
   #
   # `assets/images/logo.png` is the master 1024×1024 image used by both
-  # `flutter_launcher_icons` (launcher icon) and `flutter_native_splash`
-  # (native splash screen). It is also kept in the bundle so future
-  # in-app usages (login header, receipt header) can reference it with
-  # `Image.asset('assets/images/logo.png')`.
+  # `flutter_launcher_icons` (launcher icon) and `flutter_native_splash`.
+  # It is also kept in the bundle so future in-app usages (login header,
+  # receipt header) can reference it with `Image.asset('assets/images/logo.png')`.
   assets:
     - assets/images/
