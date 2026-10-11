@@ -13,8 +13,8 @@ import '../../domain/entities/return_receipt.dart';
 
 /// Builds a PDF document from a [ReturnReceipt].
 ///
-/// **Phase P-1b:** accepts an optional [PrintStyleSettings] that scales
-/// every font size and selects a base weight.
+/// **Phase P-1b:** accepts an optional [PrintStyleSettings].
+/// **Phase U-5:** accepts optional [logoBytes] drawn centered at the top.
 abstract final class PdfReturnBuilder {
   static const double _thermalFixedMm = 120;
   static const double _thermalPerLineMm = 12;
@@ -27,10 +27,23 @@ abstract final class PdfReturnBuilder {
     return clampedMm * PdfPageFormat.mm;
   }
 
+  /// Logo width in PDF points, chosen from the paper size.
+  static double _logoWidthFor(ReceiptPaperSize size) {
+    switch (size) {
+      case ReceiptPaperSize.mm58:
+        return 70;
+      case ReceiptPaperSize.mm80:
+        return 100;
+      case ReceiptPaperSize.a4:
+        return 130;
+    }
+  }
+
   static Future<Uint8List> build({
     required ReturnReceipt receipt,
     required ReceiptPaperSize size,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     final pw.ThemeData theme = await _loadTheme();
 
@@ -72,6 +85,7 @@ abstract final class PdfReturnBuilder {
           receipt: receipt,
           paperSize: size,
           style: style,
+          logoBytes: logoBytes,
         ),
       ),
     );
@@ -85,7 +99,6 @@ abstract final class PdfReturnBuilder {
     return pw.ThemeData.withFont(base: regular, bold: bold);
   }
 
-  /// Maps a semantic [PrintFontWeight] + emphasis flag to a `pdf` weight.
   static pw.FontWeight _weight({
     required PrintFontWeight userWeight,
     required bool emphasized,
@@ -104,6 +117,7 @@ abstract final class PdfReturnBuilder {
     required ReturnReceipt receipt,
     required ReceiptPaperSize paperSize,
     required PrintStyleSettings style,
+    Uint8List? logoBytes,
   }) {
     final bool isThermal = paperSize != ReceiptPaperSize.a4;
     final double scale = style.fontScale.clamp(0.8, 1.6);
@@ -114,6 +128,18 @@ abstract final class PdfReturnBuilder {
     final double smallFont = (isThermal ? 7 : 9) * scale;
 
     return <pw.Widget>[
+      // ---- Logo (optional) ----
+      if (logoBytes != null && logoBytes.isNotEmpty) ...<pw.Widget>[
+        pw.Center(
+          child: pw.Image(
+            pw.MemoryImage(logoBytes),
+            width: _logoWidthFor(paperSize),
+            fit: pw.BoxFit.contain,
+          ),
+        ),
+        pw.SizedBox(height: isThermal ? 4 : 8),
+      ],
+
       // ---- Header ----
       pw.Center(
         child: pw.Text(
