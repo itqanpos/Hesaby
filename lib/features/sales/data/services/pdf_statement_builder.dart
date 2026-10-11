@@ -12,12 +12,16 @@ import '../../domain/entities/customer_statement.dart';
 
 /// Builds an A4 PDF statement from a [CustomerStatement].
 ///
-/// **Phase P-1b:** accepts an optional [PrintStyleSettings] that scales
-/// every font size and selects a base weight.
+/// **Phase U-5:** accepts optional [logoBytes] drawn centered at the top of
+/// the statement.
 abstract final class PdfStatementBuilder {
+  /// Logo width in PDF points (A4).
+  static const double _logoWidth = 130;
+
   static Future<Uint8List> build({
     required CustomerStatement statement,
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
+    Uint8List? logoBytes,
   }) async {
     final pw.ThemeData theme = await _loadTheme();
 
@@ -34,7 +38,7 @@ abstract final class PdfStatementBuilder {
         margin: const pw.EdgeInsets.all(24),
         textDirection: pw.TextDirection.rtl,
         header: (pw.Context context) =>
-            _buildPageHeader(context, statement, style),
+            _buildPageHeader(context, statement, style, logoBytes),
         footer: (pw.Context context) => _buildPageFooter(context, style),
         build: (pw.Context context) => _buildContent(statement, style),
       ),
@@ -75,10 +79,21 @@ abstract final class PdfStatementBuilder {
     pw.Context context,
     CustomerStatement statement,
     PrintStyleSettings style,
+    Uint8List? logoBytes,
   ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
+        if (logoBytes != null && logoBytes.isNotEmpty) ...<pw.Widget>[
+          pw.Center(
+            child: pw.Image(
+              pw.MemoryImage(logoBytes),
+              width: _logoWidth,
+              fit: pw.BoxFit.contain,
+            ),
+          ),
+          pw.SizedBox(height: 6),
+        ],
         pw.Text(
           'كشف حساب عميل',
           style: pw.TextStyle(
@@ -201,11 +216,11 @@ abstract final class PdfStatementBuilder {
     return pw.Table(
       border: pw.TableBorder.all(color: PdfColors.grey400, width: 0.4),
       columnWidths: const <int, pw.TableColumnWidth>{
-        0: pw.FlexColumnWidth(1.6), // date
-        1: pw.FlexColumnWidth(3.4), // description
-        2: pw.FlexColumnWidth(1.4), // debit
-        3: pw.FlexColumnWidth(1.4), // credit
-        4: pw.FlexColumnWidth(1.6), // balance
+        0: pw.FlexColumnWidth(1.6),
+        1: pw.FlexColumnWidth(3.4),
+        2: pw.FlexColumnWidth(1.4),
+        3: pw.FlexColumnWidth(1.4),
+        4: pw.FlexColumnWidth(1.6),
       },
       children: <pw.TableRow>[
         _headerRow(fontSize: fontSize, style: style),
