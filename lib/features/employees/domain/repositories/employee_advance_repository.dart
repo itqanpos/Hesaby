@@ -51,14 +51,9 @@ abstract interface class EmployeeAdvanceRepository {
     String? notes,
   });
 
-  /// Applies a deduction of [amount] to the advance's remaining balance.
-  ///
-  /// Returns the updated advance. Throws when [amount] exceeds the
-  /// remaining balance.
-  Future<EmployeeAdvance> applyDeduction({
-    required String advanceId,
-    required double amount,
-  });
-
   Future<void> deleteAdvance(String advanceId);
+
+  // Note: applying a deduction is handled automatically by the
+  // `apply_advance_deduction` DB trigger whenever a salary is marked as
+  // paid. There is no manual "apply deduction" method on purpose.
 }
