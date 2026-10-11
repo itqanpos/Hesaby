@@ -15,7 +15,6 @@ import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/domain/repositories/sales_repository.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
-import '../../data/services/direct_print_service.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/entities/receipt.dart';
@@ -893,29 +892,12 @@ class _PosReceiptDialog extends ConsumerWidget {
   );
   static final DateFormat _dateTime = DateFormat.yMd('ar_EG').add_Hm();
 
-  /// Phase P-2: tries direct thermal printing first when enabled, then
-  /// falls back to the preview dialog on any failure or when disabled.
+  /// Always shows the print preview dialog first — the user needs to see
+  /// the actual thermal shape (WYSIWYG) before choosing a print method.
+  ///
+  /// The dialog itself exposes the direct thermal print action, so no
+  /// automatic direct print happens here anymore.
   Future<void> _handlePrint(BuildContext context, WidgetRef ref) async {
-    final bool direct =
-        ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
-            false;
-
-    if (direct) {
-      final bool ok = await DirectPrintService.tryThermalReceipt(
-        ref: ref,
-        receipt: receipt,
-      );
-      if (ok && context.mounted) {
-        Navigator.of(context).pop();
-        ScaffoldMessenger.of(context)
-          ..hideCurrentSnackBar()
-          ..showSnackBar(
-            const SnackBar(content: Text('تم إرسال الإيصال للطابعة.')),
-          );
-        return;
-      }
-    }
-
     if (!context.mounted) return;
     await showPosPrintPreviewDialog(
       context: context,
