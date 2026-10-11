@@ -19,8 +19,16 @@ import '../../data/services/receipt_printer.dart';
 import '../../domain/entities/printer_device.dart';
 import '../../domain/entities/receipt.dart';
 import '../providers/printer_providers.dart';
+import '../widgets/thermal_receipt_preview.dart';
 
 /// Opens the print preview dialog for [receipt].
+///
+/// The dialog shows:
+/// * A live **thermal preview** — the exact bitmap that will be sent to
+///   the printer (WYSIWYG).
+/// * The saved Bluetooth printer (if any) with a direct print action.
+/// * A PDF print / share fallback for desktop or when thermal is not
+///   available.
 Future<void> showPosPrintPreviewDialog({
   required BuildContext context,
   required Receipt receipt,
@@ -271,7 +279,7 @@ class _PosPrintPreviewDialogState
         children: <Widget>[
           Icon(Icons.print_outlined, color: scheme.primary),
           const SizedBox(width: 8),
-          const Expanded(child: Text('طباعة الإيصال')),
+          const Expanded(child: Text('معاينة الإيصال')),
           IconButton(
             onPressed: _isBusy ? null : () => Navigator.of(context).pop(),
             icon: const Icon(Icons.close),
@@ -283,6 +291,14 @@ class _PosPrintPreviewDialogState
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
+            // ---- WYSIWYG thermal preview ----
+            ThermalReceiptPreview(
+              receipt: receipt,
+              maxHeight: 520,
+            ),
+            const SizedBox(height: 12),
+
+            // ---- Compact invoice info ----
             DecoratedBox(
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
@@ -309,6 +325,8 @@ class _PosPrintPreviewDialogState
               ),
             ),
             const SizedBox(height: 12),
+
+            // ---- Bluetooth printer ----
             if (savedPrinter != null)
               _BluetoothPrinterRow(printer: savedPrinter)
             else
@@ -318,6 +336,8 @@ class _PosPrintPreviewDialogState
                 },
               ),
             const SizedBox(height: 12),
+
+            // ---- Paper size ----
             DecoratedBox(
               decoration: BoxDecoration(
                 color: scheme.surfaceContainerHighest,
@@ -371,7 +391,7 @@ class _PosPrintPreviewDialogState
           children: <Widget>[
             if (savedPrinter != null)
               AppButton(
-                label: 'طباعة عبر Bluetooth',
+                label: 'طباعة حرارية عبر Bluetooth',
                 icon: Icons.bluetooth,
                 expanded: true,
                 size: AppButtonSize.large,
