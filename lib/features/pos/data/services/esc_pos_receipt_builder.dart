@@ -23,6 +23,12 @@ import '../../domain/entities/receipt.dart';
 /// **Phase P-1b:** [fontScale] (0.8 – 1.6) and [fontWeight] are applied to
 /// every text element. The scale multiplies the base font size; the weight
 /// selects between the regular and bold font families.
+///
+/// **Phase O-2 (RTL fix + preview support):**
+/// * Columns of the items table are now laid out in natural RTL reading
+///   order (م → الصنف → الكمية → السعر → الإجمالي from right to left).
+/// * [renderToImage] exposes the raw canvas bitmap used by the in-app
+///   thermal preview dialog, so the preview matches the print 1:1.
 abstract final class EscPosReceiptBuilder {
   // ---- ESC/POS control sequences ----
   static const List<int> _init = <int>[0x1B, 0x40]; // ESC @ (initialize)
@@ -59,6 +65,37 @@ abstract final class EscPosReceiptBuilder {
     double fontScale = 1.0,
     PrintFontWeight fontWeight = PrintFontWeight.normal,
   }) async {
+    final ui.Image image = await renderToImage(
+      receipt: receipt,
+      paperWidthDots: paperWidthDots,
+      logoBytes: logoBytes,
+      fontScale: fontScale,
+      fontWeight: fontWeight,
+    );
+
+    final List<int> raster = await _encodeRaster(image);
+    image.dispose();
+
+    return <int>[
+      ..._init,
+      ...raster,
+      ..._feedAndCut,
+    ];
+  }
+
+  /// Renders the receipt to a [ui.Image] identical to what [build] sends
+  /// to the printer.
+  ///
+  /// Used by the in-app thermal preview dialog so the preview matches the
+  /// printed output pixel-for-pixel. The caller is responsible for
+  /// disposing the returned image.
+  static Future<ui.Image> renderToImage({
+    required Receipt receipt,
+    int paperWidthDots = widthMm80,
+    Uint8List? logoBytes,
+    double fontScale = 1.0,
+    PrintFontWeight fontWeight = PrintFontWeight.normal,
+  }) async {
     await _ensureFonts();
 
     final double clampedScale = fontScale.clamp(0.8, 1.6);
@@ -83,15 +120,7 @@ abstract final class EscPosReceiptBuilder {
       painter.totalHeight.ceil(),
     );
     picture.dispose();
-
-    final List<int> raster = await _encodeRaster(image);
-    image.dispose();
-
-    return <int>[
-      ..._init,
-      ...raster,
-      ..._feedAndCut,
-    ];
+    return image;
   }
 
   // ---------------------------------------------------------------------------
@@ -236,12 +265,13 @@ class _Painter {
   Future<void> paint(Receipt r, Uint8List? logoBytes) async {
     _y = _paddingTop;
 
+    // Logo first — company name follows immediately below it.
     if (logoBytes != null && logoBytes.isNotEmpty) {
       final ui.Image? logo = await _decodeImage(logoBytes);
       if (logo != null) {
         _drawLogo(logo);
         logo.dispose();
-        _gap(_sectionGap);
+        _gap(_sectionGap * 0.5);
       }
     }
 
@@ -349,18 +379,26 @@ class _Painter {
     final double colTotalW = w * 0.24;
     final double colNameW = w - colNumW - colQtyW - colPriceW - colTotalW;
 
+    // -----------------------------------------------------------------------
+    // RTL layout: cells are painted right-to-left by [_row], starting from
+    // the right edge. To get the natural Arabic reading order
+    //   م  →  الصنف  →  الكمية  →  السعر  →  الإجمالي
+    // we list them in that exact order.
+    // -----------------------------------------------------------------------
+
+    // Header row.
     _row(
       cells: <_Cell>[
-        _Cell('الإجمالي',
-            width: colTotalW, bold: true, align: TextAlign.center),
-        _Cell('السعر',
-            width: colPriceW, bold: true, align: TextAlign.center),
-        _Cell('الكمية',
-            width: colQtyW, bold: true, align: TextAlign.center),
-        _Cell('الصنف',
-            width: colNameW, bold: true, align: TextAlign.right),
         _Cell('م',
             width: colNumW, bold: true, align: TextAlign.center),
+        _Cell('الصنف',
+            width: colNameW, bold: true, align: TextAlign.right),
+        _Cell('الكمية',
+            width: colQtyW, bold: true, align: TextAlign.center),
+        _Cell('السعر',
+            width: colPriceW, bold: true, align: TextAlign.center),
+        _Cell('الإجمالي',
+            width: colTotalW, bold: true, align: TextAlign.center),
       ],
       fontSize: _font(13),
       topPad: 6 * _scale,
@@ -368,21 +406,22 @@ class _Painter {
       backgroundColor: const Color(0xFFDDDDDD),
     );
 
+    // Data rows.
     for (int i = 0; i < r.lines.length; i++) {
       final ReceiptLine line = r.lines[i];
       final Color? bg = i.isOdd ? const Color(0xFFF2F2F2) : null;
       _row(
         cells: <_Cell>[
-          _Cell(_money(line.lineTotal),
-              width: colTotalW, bold: true, align: TextAlign.center),
-          _Cell(_money(line.unitPrice),
-              width: colPriceW, align: TextAlign.center),
-          _Cell('${_qty(line.quantity)} ${line.unitName}',
-              width: colQtyW, align: TextAlign.center),
-          _Cell(line.productName,
-              width: colNameW, align: TextAlign.right),
           _Cell('${i + 1}',
               width: colNumW, align: TextAlign.center),
+          _Cell(line.productName,
+              width: colNameW, align: TextAlign.right),
+          _Cell('${_qty(line.quantity)} ${line.unitName}',
+              width: colQtyW, align: TextAlign.center),
+          _Cell(_money(line.unitPrice),
+              width: colPriceW, align: TextAlign.center),
+          _Cell(_money(line.lineTotal),
+              width: colTotalW, bold: true, align: TextAlign.center),
         ],
         fontSize: _font(13),
         topPad: 5 * _scale,
@@ -391,16 +430,17 @@ class _Painter {
       );
     }
 
+    // Subtotal row.
     _row(
       cells: <_Cell>[
-        _Cell(_money(r.subtotal),
-            width: colTotalW, bold: true, align: TextAlign.center),
-        _Cell('', width: colPriceW, align: TextAlign.center),
-        _Cell('${r.lines.length}',
-            width: colQtyW, align: TextAlign.center),
+        _Cell('', width: colNumW, align: TextAlign.center),
         _Cell('المجموع الفرعي',
             width: colNameW, bold: true, align: TextAlign.right),
-        _Cell('', width: colNumW, align: TextAlign.center),
+        _Cell('${r.lines.length}',
+            width: colQtyW, align: TextAlign.center),
+        _Cell('', width: colPriceW, align: TextAlign.center),
+        _Cell(_money(r.subtotal),
+            width: colTotalW, bold: true, align: TextAlign.center),
       ],
       fontSize: _font(13),
       topPad: 6 * _scale,
@@ -435,14 +475,12 @@ class _Painter {
         ..color = _black,
     );
 
-    label.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
-    value.paint(
+    // Label on the right (RTL reading start), value on the left.
+    label.paint(
       canvas,
-      Offset(
-        _paddingH + _contentWidth - boxPad - value.width,
-        _y + boxPad,
-      ),
+      Offset(_paddingH + _contentWidth - boxPad - label.width, _y + boxPad),
     );
+    value.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
 
     _y += boxH;
   }
@@ -502,6 +540,7 @@ class _Painter {
         ? labelPainter.height
         : valuePainter.height;
 
+    // RTL: label on the right, value on the left.
     labelPainter.paint(
       canvas,
       Offset(_paddingH + _contentWidth - labelW, _y),
@@ -529,11 +568,12 @@ class _Painter {
         ? labelPainter.height
         : valuePainter.height;
 
-    labelPainter.paint(canvas, Offset(_paddingH, _y));
-    valuePainter.paint(
+    // RTL: label on the right, value on the left.
+    labelPainter.paint(
       canvas,
-      Offset(_paddingH + _contentWidth - valuePainter.width, _y),
+      Offset(_paddingH + _contentWidth - labelPainter.width, _y),
     );
+    valuePainter.paint(canvas, Offset(_paddingH, _y));
 
     _y += rowH + 3 * _scale;
   }
@@ -588,6 +628,11 @@ class _Painter {
     _y += chipH;
   }
 
+  /// Paints a single row of cells **right-to-left**, starting from the
+  /// right edge of the content area.
+  ///
+  /// `cells[0]` lands on the **rightmost** position; `cells[last]` lands on
+  /// the **leftmost**. This is the natural order for RTL tables.
   void _row({
     required List<_Cell> cells,
     required double fontSize,
