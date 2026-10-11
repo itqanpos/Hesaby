@@ -7,9 +7,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
+import '../../../../core/utils/logger.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../pos/data/services/direct_print_service.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart';
+import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
@@ -46,6 +48,10 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
 
   bool get _isBusy => _isPrinting || _isSharing;
 
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
   PrintStyleSettings _readStyle() {
     final CompanySettings? settings =
         ref.read(companySettingsProvider).valueOrNull;
@@ -59,13 +65,35 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
     return PrintStyleSettings.fromCompanySettings(settings);
   }
 
+  Future<Uint8List?> _loadLogoBytes() async {
+    final CompanySettings? settings =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (settings == null || settings.companyId.isEmpty) return null;
+    try {
+      return await const CompanyLogoLoader().load(
+        companyId: settings.companyId,
+        logoUrl: settings.logoUrl,
+      );
+    } on Object catch (e) {
+      AppLogger.warning('Logo load failed (non-fatal): $e');
+      return null;
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
+
   Future<void> _print() async {
     setState(() => _isPrinting = true);
     try {
+      final Uint8List? logo = await _loadLogoBytes();
+
       final Uint8List bytes = await PdfReturnBuilder.build(
         receipt: widget.receipt,
         size: _selectedSize,
         style: _readStyle(),
+        logoBytes: logo,
       );
 
       // Direct-print path when enabled and not A4.
@@ -103,10 +131,13 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
   Future<void> _share() async {
     setState(() => _isSharing = true);
     try {
+      final Uint8List? logo = await _loadLogoBytes();
+
       final Uint8List bytes = await PdfReturnBuilder.build(
         receipt: widget.receipt,
         size: _selectedSize,
         style: _readStyle(),
+        logoBytes: logo,
       );
 
       await Printing.sharePdf(bytes: bytes, filename: _fileName());
@@ -139,6 +170,10 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
     if (selection.isEmpty || _isBusy) return;
     setState(() => _selectedSize = selection.first);
   }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
