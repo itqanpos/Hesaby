@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/responsive/responsive_helper.dart';
+import '../widgets/offline_banner.dart';
 import 'app_navigation.dart';
 
 /// Standard page scaffold used across HESABI.
@@ -20,6 +21,11 @@ import 'app_navigation.dart';
 ///
 /// It also applies safe-area handling, responsive horizontal padding and the
 /// project's maximum content width.
+///
+/// **Offline handling (Phase O-1):** an [OfflineBanner] is automatically
+/// rendered at the top of the content area. It takes zero height while the
+/// device is online, so it is safe on every screen (including login and
+/// loading screens).
 class AppShell extends StatelessWidget {
   const AppShell({
     super.key,
@@ -70,19 +76,29 @@ class AppShell extends StatelessWidget {
     final bool showSidebar = includeNavigation && hasAppBar && isWide;
     final bool showDrawer = includeNavigation && hasAppBar && !isWide;
 
+    // Offline banner sits at the top of the content area. It collapses to
+    // zero height while online, so it never disturbs existing layouts.
     final Widget content = SafeArea(
-      child: Center(
-        child: ConstrainedBox(
-          constraints: BoxConstraints(
-            maxWidth: constrainContentWidth
-                ? ResponsiveHelper.contentMaxWidth
-                : double.infinity,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          const OfflineBanner(),
+          Expanded(
+            child: Center(
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  maxWidth: constrainContentWidth
+                      ? ResponsiveHelper.contentMaxWidth
+                      : double.infinity,
+                ),
+                child: Padding(
+                  padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
+                  child: body,
+                ),
+              ),
+            ),
           ),
-          child: Padding(
-            padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
-            child: body,
-          ),
-        ),
+        ],
       ),
     );
 
