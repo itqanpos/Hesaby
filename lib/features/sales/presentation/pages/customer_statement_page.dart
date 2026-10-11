@@ -1,4 +1,4 @@
-// lib/features/sales/presentation/pages/customer_statement_page.dart
+// lib/features/suppliers/presentation/pages/supplier_statement_page.dart
 
 import 'dart:typed_data';
 
@@ -14,41 +14,35 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../pos/data/services/direct_print_service.dart';
+import '../../../purchases/presentation/dialogs/supplier_payment_dialog.dart';
 import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
-import '../../data/services/pdf_statement_builder.dart';
-import '../../domain/entities/customer_statement.dart';
-import '../../domain/entities/sale_entities.dart';
-import '../../domain/repositories/sales_repository.dart';
-import '../dialogs/customer_adjustment_dialog.dart';
-import '../providers/sales_providers.dart';
+import '../../data/services/pdf_supplier_statement_builder.dart';
+import '../../domain/entities/supplier.dart';
+import '../../domain/entities/supplier_statement.dart';
+import '../../domain/repositories/supplier_statement_repository.dart';
+import '../providers/supplier_statement_providers.dart';
 
-enum _PeriodPreset {
-  all,
-  thisMonth,
-  last30Days,
-  thisYear,
-  custom,
-}
+enum _PeriodPreset { all, thisMonth, last30Days, thisYear, custom }
 
-/// Full account statement page for a single customer.
-class CustomerStatementPage extends ConsumerStatefulWidget {
-  const CustomerStatementPage({
+/// Full account statement page for a single supplier.
+class SupplierStatementPage extends ConsumerStatefulWidget {
+  const SupplierStatementPage({
     super.key,
-    required this.customer,
+    required this.supplier,
   });
 
-  final Customer customer;
+  final Supplier supplier;
 
   @override
-  ConsumerState<CustomerStatementPage> createState() =>
-      _CustomerStatementPageState();
+  ConsumerState<SupplierStatementPage> createState() =>
+      _SupplierStatementPageState();
 }
 
-class _CustomerStatementPageState
-    extends ConsumerState<CustomerStatementPage> {
+class _SupplierStatementPageState
+    extends ConsumerState<SupplierStatementPage> {
   _PeriodPreset _preset = _PeriodPreset.all;
   DateTimeRange? _customRange;
   bool _isPrinting = false;
@@ -59,10 +53,6 @@ class _CustomerStatementPageState
     decimalDigits: 2,
   );
   static final DateFormat _dateShort = DateFormat('yyyy-MM-dd');
-
-  // ---------------------------------------------------------------------------
-  // Period computation
-  // ---------------------------------------------------------------------------
 
   DateTime? get _fromDate {
     final DateTime now = DateTime.now();
@@ -97,8 +87,8 @@ class _CustomerStatementPageState
     }
   }
 
-  CustomerStatementArgs get _args => CustomerStatementArgs(
-        customerId: widget.customer.id,
+  SupplierStatementArgs get _args => SupplierStatementArgs(
+        supplierId: widget.supplier.id,
         fromDate: _fromDate,
         toDate: _toDate,
       );
@@ -128,29 +118,17 @@ class _CustomerStatementPageState
     setState(() => _preset = preset);
   }
 
-  Future<void> _openAdjustment() async {
-    final CustomerStatement? statement =
-        ref.read(customerStatementProvider(_args)).valueOrNull;
-    final double balance =
-        statement?.customer.balance ?? widget.customer.balance;
-
-    final Customer? updated = await showCustomerAdjustmentDialog(
+  Future<void> _recordPayment() async {
+    final bool? saved = await showSupplierPaymentDialog(
       context: context,
-      customerId: widget.customer.id,
-      customerName: widget.customer.name,
-      currentBalance: balance,
+      supplierId: widget.supplier.id,
+      supplierName: widget.supplier.name,
     );
-
-    if (updated == null || !mounted) return;
-
-    ScaffoldMessenger.of(context)
-      ..hideCurrentSnackBar()
-      ..showSnackBar(
-        const SnackBar(content: Text('تم تسجيل التعديل بنجاح.')),
-      );
+    if (saved == true && mounted) {
+      ref.invalidate(supplierStatementProvider(_args));
+    }
   }
 
-  /// Reads the A4 print style from company settings.
   PrintStyleSettings _readA4Style() {
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
@@ -162,9 +140,6 @@ class _CustomerStatementPageState
   }
 
   /// Loads the company logo bytes for PDF printing.
-  ///
-  /// Returns `null` on any failure — the statement is still printable
-  /// without a logo.
   Future<Uint8List?> _loadLogoBytes() async {
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
@@ -181,21 +156,22 @@ class _CustomerStatementPageState
   }
 
   Future<void> _print() async {
-    final CustomerStatement? statement =
-        ref.read(customerStatementProvider(_args)).valueOrNull;
+    final SupplierStatement? statement =
+        ref.read(supplierStatementProvider(_args)).valueOrNull;
     if (statement == null || statement.isEmpty) return;
 
     setState(() => _isPrinting = true);
-
     try {
       final Uint8List? logo = await _loadLogoBytes();
-      final Uint8List bytes = await PdfStatementBuilder.build(
+      final Uint8List bytes =
+          await PdfSupplierStatementBuilder.build(
         statement: statement,
         style: _readA4Style(),
         logoBytes: logo,
       );
 
-      final String fileName = 'statement-${statement.customer.name}.pdf';
+      final String fileName =
+          'supplier-statement-${statement.supplier.name}.pdf';
 
       // ---- Direct print path when enabled ----
       final bool direct =
@@ -228,14 +204,10 @@ class _CustomerStatementPageState
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('تعذّرت الطباعة. حاول مرة أخرى.'),
-          ),
+          const SnackBar(content: Text('تعذّرت الطباعة. حاول مرة أخرى.')),
         );
     } finally {
-      if (mounted) {
-        setState(() => _isPrinting = false);
-      }
+      if (mounted) setState(() => _isPrinting = false);
     }
   }
 
@@ -247,12 +219,12 @@ class _CustomerStatementPageState
   Widget build(BuildContext context) {
     return AppShell(
       appBar: AppBar(
-        title: const Text('كشف حساب'),
+        title: const Text('كشف حساب مورد'),
         actions: <Widget>[
           IconButton(
-            tooltip: 'تعديل الرصيد',
-            icon: const Icon(Icons.tune),
-            onPressed: _openAdjustment,
+            tooltip: 'تسجيل دفعة',
+            icon: const Icon(Icons.payments_outlined),
+            onPressed: _recordPayment,
           ),
           IconButton(
             tooltip: 'طباعة',
@@ -261,16 +233,16 @@ class _CustomerStatementPageState
           ),
         ],
       ),
-      body: ref.watch(customerStatementProvider(_args)).when(
+      body: ref.watch(supplierStatementProvider(_args)).when(
             loading: () => const AppLoader(),
             error: (Object error, StackTrace _) => AppErrorView(
               title: 'تعذّر تحميل كشف الحساب',
               message: _errorMessage(error),
               retryLabel: 'إعادة المحاولة',
               onRetry: () =>
-                  ref.invalidate(customerStatementProvider(_args)),
+                  ref.invalidate(supplierStatementProvider(_args)),
             ),
-            data: (CustomerStatement statement) => _StatementBody(
+            data: (SupplierStatement statement) => _StatementBody(
               statement: statement,
               preset: _preset,
               customRange: _customRange,
@@ -297,7 +269,7 @@ class _StatementBody extends StatelessWidget {
     required this.dateShort,
   });
 
-  final CustomerStatement statement;
+  final SupplierStatement statement;
   final _PeriodPreset preset;
   final DateTimeRange? customRange;
   final Future<void> Function(_PeriodPreset) onSelectPreset;
@@ -309,10 +281,7 @@ class _StatementBody extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _CustomerInfoCard(
-          statement: statement,
-          money: money,
-        ),
+        _SupplierInfoCard(statement: statement, money: money),
         const SizedBox(height: 8),
         _PeriodChips(
           preset: preset,
@@ -336,24 +305,27 @@ class _StatementBody extends StatelessWidget {
 // Info card
 // ============================================================================
 
-class _CustomerInfoCard extends StatelessWidget {
-  const _CustomerInfoCard({
+class _SupplierInfoCard extends StatelessWidget {
+  const _SupplierInfoCard({
     required this.statement,
     required this.money,
   });
 
-  final CustomerStatement statement;
+  final SupplierStatement statement;
   final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final Customer customer = statement.customer;
+    final Supplier supplier = statement.supplier;
 
     final List<String> meta = <String>[];
-    if (customer.hasCode) meta.add('كود: ${customer.code}');
-    if (customer.hasPhone) meta.add(customer.phone!);
+    if (supplier.hasCode) meta.add('كود: ${supplier.code}');
+    if (supplier.hasPhone) meta.add(supplier.phone!);
+
+    final double balance = statement.closingBalance;
+    final bool isOwed = balance > 0;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -370,7 +342,7 @@ class _CustomerInfoCard extends StatelessWidget {
                 CircleAvatar(
                   backgroundColor: scheme.primaryContainer,
                   foregroundColor: scheme.onPrimaryContainer,
-                  child: const Icon(Icons.person_outline),
+                  child: const Icon(Icons.local_shipping_outlined),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -379,7 +351,7 @@ class _CustomerInfoCard extends StatelessWidget {
                     mainAxisSize: MainAxisSize.min,
                     children: <Widget>[
                       Text(
-                        customer.name,
+                        supplier.name,
                         style: theme.textTheme.titleMedium,
                         overflow: TextOverflow.ellipsis,
                       ),
@@ -402,16 +374,14 @@ class _CustomerInfoCard extends StatelessWidget {
             Row(
               children: <Widget>[
                 Text(
-                  'الرصيد الحالي',
+                  isOwed ? 'مستحق للمورد' : 'الرصيد',
                   style: theme.textTheme.bodyMedium,
                 ),
                 const Spacer(),
                 Text(
-                  money.format(customer.balance),
+                  money.format(balance.abs()),
                   style: theme.textTheme.titleLarge?.copyWith(
-                    color: customer.balance > 0
-                        ? scheme.error
-                        : scheme.primary,
+                    color: isOwed ? scheme.error : scheme.primary,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -456,12 +426,11 @@ class _PeriodChips extends StatelessWidget {
   }
 
   Widget _chip(BuildContext context, _PeriodPreset value, String label) {
-    final bool selected = preset == value;
     return Padding(
       padding: const EdgeInsetsDirectional.only(end: 6),
       child: ChoiceChip(
         label: Text(label),
-        selected: selected,
+        selected: preset == value,
         onSelected: (_) => onSelect(value),
         showCheckmark: false,
       ),
@@ -489,7 +458,7 @@ class _EntriesList extends StatelessWidget {
     required this.dateShort,
   });
 
-  final CustomerStatement statement;
+  final SupplierStatement statement;
   final NumberFormat money;
   final DateFormat dateShort;
 
@@ -499,7 +468,7 @@ class _EntriesList extends StatelessWidget {
       return AppEmptyView(
         icon: Icons.receipt_long_outlined,
         title: 'لا توجد حركات',
-        message: 'لم تُسجَّل أي حركة على هذا العميل في الفترة المحددة.',
+        message: 'لم تُسجَّل أي حركة على هذا المورد في الفترة المحددة.',
         action: _OpeningBalanceTile(
           openingBalance: statement.openingBalance,
           money: money,
@@ -602,7 +571,7 @@ class _EntryCard extends StatelessWidget {
     required this.dateShort,
   });
 
-  final CustomerStatementEntry entry;
+  final SupplierStatementEntry entry;
   final NumberFormat money;
   final DateFormat dateShort;
 
@@ -612,10 +581,12 @@ class _EntryCard extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     final Color accent = entry.isDebit ? scheme.error : scheme.primary;
-    final IconData icon = _iconFor(entry.type);
+    final IconData icon = entry.isPurchase
+        ? Icons.receipt_long_outlined
+        : Icons.payments_outlined;
     final String description = entry.hasDescription
         ? entry.description!
-        : _typeLabel(entry.type);
+        : (entry.isPurchase ? 'فاتورة مشتريات' : 'دفعة');
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -714,36 +685,6 @@ class _EntryCard extends StatelessWidget {
     }
     return date;
   }
-
-  static IconData _iconFor(String type) {
-    switch (type) {
-      case StatementEntryType.sale:
-        return Icons.receipt_long_outlined;
-      case StatementEntryType.saleReversal:
-        return Icons.assignment_return_outlined;
-      case StatementEntryType.payment:
-        return Icons.payments_outlined;
-      case StatementEntryType.adjustment:
-        return Icons.tune;
-      default:
-        return Icons.circle_outlined;
-    }
-  }
-
-  static String _typeLabel(String type) {
-    switch (type) {
-      case StatementEntryType.sale:
-        return 'فاتورة بيع';
-      case StatementEntryType.saleReversal:
-        return 'إلغاء فاتورة';
-      case StatementEntryType.payment:
-        return 'دفعة';
-      case StatementEntryType.adjustment:
-        return 'تعديل رصيد';
-      default:
-        return 'حركة';
-    }
-  }
 }
 
 // ============================================================================
@@ -756,18 +697,18 @@ class _ClosingBalanceCard extends StatelessWidget {
     required this.money,
   });
 
-  final CustomerStatement statement;
+  final SupplierStatement statement;
   final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final bool inDebt = statement.isInDebt;
+    final bool owed = statement.isOwedToSupplier;
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: inDebt ? scheme.errorContainer : scheme.primaryContainer,
+        color: owed ? scheme.errorContainer : scheme.primaryContainer,
         borderRadius: BorderRadius.circular(14),
       ),
       child: Padding(
@@ -778,19 +719,19 @@ class _ClosingBalanceCard extends StatelessWidget {
             Row(
               children: <Widget>[
                 Icon(
-                  inDebt
+                  owed
                       ? Icons.warning_amber_outlined
                       : Icons.check_circle_outline,
-                  color: inDebt
+                  color: owed
                       ? scheme.onErrorContainer
                       : scheme.onPrimaryContainer,
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  inDebt ? 'الرصيد النهائي (مدين)' : 'الرصيد النهائي',
+                  owed ? 'الرصيد النهائي (مستحق للمورد)' : 'الرصيد النهائي',
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w700,
-                    color: inDebt
+                    color: owed
                         ? scheme.onErrorContainer
                         : scheme.onPrimaryContainer,
                   ),
@@ -799,10 +740,10 @@ class _ClosingBalanceCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              money.format(statement.closingBalance),
+              money.format(statement.closingBalance.abs()),
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w900,
-                color: inDebt
+                color: owed
                     ? scheme.onErrorContainer
                     : scheme.onPrimaryContainer,
               ),
@@ -811,7 +752,7 @@ class _ClosingBalanceCard extends StatelessWidget {
             Text(
               'عدد الحركات: ${statement.entryCount}',
               style: theme.textTheme.bodySmall?.copyWith(
-                color: inDebt
+                color: owed
                     ? scheme.onErrorContainer
                     : scheme.onPrimaryContainer,
               ),
@@ -828,35 +769,23 @@ class _ClosingBalanceCard extends StatelessWidget {
 // ============================================================================
 
 String _errorMessage(Object error) {
-  if (error is CustomerException) {
+  if (error is SupplierStatementException) {
     return _failureMessage(error.type);
   }
   return 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.';
 }
 
-String _failureMessage(CustomerFailureType type) {
+String _failureMessage(SupplierStatementFailureType type) {
   switch (type) {
-    case CustomerFailureType.network:
+    case SupplierStatementFailureType.network:
       return 'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.';
-    case CustomerFailureType.unauthorized:
+    case SupplierStatementFailureType.unauthorized:
       return 'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجددًا.';
-    case CustomerFailureType.notFound:
-      return 'العميل المطلوب غير موجود أو تم حذفه.';
-    case CustomerFailureType.nameConflict:
-      return 'يوجد عميل آخر بنفس الاسم.';
-    case CustomerFailureType.codeConflict:
-      return 'يوجد عميل آخر بنفس الكود.';
-    case CustomerFailureType.phoneConflict:
-      return 'يوجد عميل آخر بنفس رقم الهاتف.';
-    case CustomerFailureType.inUse:
-      return 'العميل مرتبط بفواتير.';
-    case CustomerFailureType.invalidAmount:
-      return 'المبلغ غير صالح.';
-    case CustomerFailureType.insufficientBalance:
-      return 'الرصيد غير كافٍ لإتمام العملية.';
-    case CustomerFailureType.invalidResponse:
+    case SupplierStatementFailureType.notFound:
+      return 'المورد المطلوب غير موجود.';
+    case SupplierStatementFailureType.invalidResponse:
       return 'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.';
-    case CustomerFailureType.unknown:
+    case SupplierStatementFailureType.unknown:
       return 'تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.';
   }
 }
