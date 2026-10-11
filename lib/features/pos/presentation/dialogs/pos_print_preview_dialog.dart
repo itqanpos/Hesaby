@@ -26,9 +26,10 @@ import '../widgets/thermal_receipt_preview.dart';
 /// The dialog shows:
 /// * A live **thermal preview** — the exact bitmap that will be sent to
 ///   the printer (WYSIWYG).
-/// * The saved Bluetooth printer (if any) with a direct print action.
-/// * A PDF print / share fallback for desktop or when thermal is not
-///   available.
+/// * Up to three actions (in order):
+///     1. **طباعة حرارية** (Bluetooth) — only when a saved printer exists.
+///     2. **طباعة** — prints a PDF via the system dialog.
+///     3. **مشاركة** — shares a PDF via the platform sheet.
 Future<void> showPosPrintPreviewDialog({
   required BuildContext context,
   required Receipt receipt,
@@ -175,7 +176,7 @@ class _PosPrintPreviewDialogState
       final Uint8List? logoBytes = await _loadLogoBytes();
       final PrintStyleSettings style = _readStyle();
 
-      final int widthDots = _bluetoothWidthDots(saved);
+      final int widthDots = _bluetoothWidthDots();
       final List<int> bytes = await EscPosReceiptBuilder.build(
         receipt: widget.receipt,
         paperWidthDots: widthDots,
@@ -208,7 +209,7 @@ class _PosPrintPreviewDialogState
     }
   }
 
-  int _bluetoothWidthDots(SavedPrinter _) {
+  int _bluetoothWidthDots() {
     final ReceiptPaperSize size = _currentPaperSize();
     switch (size) {
       case ReceiptPaperSize.mm58:
@@ -245,17 +246,6 @@ class _PosPrintPreviewDialogState
         PosPreferences.defaultPaperSize;
   }
 
-  static String _labelOf(ReceiptPaperSize size) {
-    switch (size) {
-      case ReceiptPaperSize.mm58:
-        return '58 مم';
-      case ReceiptPaperSize.mm80:
-        return '80 مم';
-      case ReceiptPaperSize.a4:
-        return 'A4';
-    }
-  }
-
   // ---------------------------------------------------------------------------
   // Build
   // ---------------------------------------------------------------------------
@@ -266,10 +256,6 @@ class _PosPrintPreviewDialogState
     final ColorScheme scheme = theme.colorScheme;
     final Receipt receipt = widget.receipt;
 
-    final AsyncValue<ReceiptPaperSize> asyncSize =
-        ref.watch(posPaperSizeProvider);
-    final ReceiptPaperSize currentSize = asyncSize.valueOrNull ??
-        PosPreferences.defaultPaperSize;
     final AsyncValue<SavedPrinter?> savedAsync =
         ref.watch(savedPrinterProvider);
     final SavedPrinter? savedPrinter = savedAsync.valueOrNull;
@@ -286,100 +272,15 @@ class _PosPrintPreviewDialogState
           ),
         ],
       ),
+      contentPadding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
       content: SingleChildScrollView(
         child: Column(
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            // ---- WYSIWYG thermal preview ----
             ThermalReceiptPreview(
               receipt: receipt,
-              maxHeight: 520,
-            ),
-            const SizedBox(height: 12),
-
-            // ---- Compact invoice info ----
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(12),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    _summaryRow(theme,
-                        label: 'رقم الفاتورة',
-                        value: receipt.invoiceNumber ?? '—'),
-                    _summaryRow(theme,
-                        label: 'عدد البنود',
-                        value: receipt.lineCount.toString()),
-                    _summaryRow(theme,
-                        label: 'الإجمالي',
-                        value: _formatMoney(receipt.total),
-                        emphasized: true),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 12),
-
-            // ---- Bluetooth printer ----
-            if (savedPrinter != null)
-              _BluetoothPrinterRow(printer: savedPrinter)
-            else
-              _NoBluetoothPrinterHint(
-                onConfigure: () {
-                  Navigator.of(context).pop();
-                },
-              ),
-            const SizedBox(height: 12),
-
-            // ---- Paper size ----
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: scheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 12,
-                  vertical: 10,
-                ),
-                child: Row(
-                  children: <Widget>[
-                    Icon(
-                      Icons.description_outlined,
-                      size: 18,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: Text(
-                        'مقاس الورق',
-                        style: theme.textTheme.bodyMedium,
-                      ),
-                    ),
-                    Text(
-                      _labelOf(currentSize),
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'لتغيير المقاس أو حجم الخط: قائمة الخيارات (⋮) ← إعدادات الطباعة',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: scheme.onSurfaceVariant,
-              ),
-              textAlign: TextAlign.center,
+              maxHeight: 560,
             ),
           ],
         ),
@@ -391,7 +292,7 @@ class _PosPrintPreviewDialogState
           children: <Widget>[
             if (savedPrinter != null)
               AppButton(
-                label: 'طباعة حرارية عبر Bluetooth',
+                label: 'طباعة حرارية',
                 icon: Icons.bluetooth,
                 expanded: true,
                 size: AppButtonSize.large,
@@ -402,7 +303,7 @@ class _PosPrintPreviewDialogState
               ),
             if (savedPrinter != null) const SizedBox(height: 8),
             AppButton(
-              label: 'طباعة (PDF)',
+              label: 'طباعة',
               icon: Icons.print_outlined,
               expanded: true,
               size: savedPrinter != null
@@ -413,7 +314,7 @@ class _PosPrintPreviewDialogState
             ),
             const SizedBox(height: 8),
             AppButton(
-              label: 'مشاركة PDF',
+              label: 'مشاركة',
               icon: Icons.ios_share,
               variant: AppButtonVariant.outline,
               expanded: true,
@@ -425,134 +326,6 @@ class _PosPrintPreviewDialogState
       ],
       backgroundColor: scheme.surface,
       scrollable: false,
-    );
-  }
-
-  Widget _summaryRow(
-    ThemeData theme, {
-    required String label,
-    required String value,
-    bool emphasized = false,
-  }) {
-    final ColorScheme scheme = theme.colorScheme;
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 3),
-      child: Row(
-        children: <Widget>[
-          Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
-          Text(
-            value,
-            style: (emphasized
-                    ? theme.textTheme.titleMedium
-                    : theme.textTheme.bodyLarge)
-                ?.copyWith(
-              color: emphasized ? scheme.primary : scheme.onSurface,
-              fontWeight: emphasized ? FontWeight.w700 : FontWeight.w500,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _formatMoney(double value) {
-    final String fixed = value.toStringAsFixed(2);
-    return '$fixed ج.م';
-  }
-}
-
-// ============================================================================
-// Bluetooth status widgets
-// ============================================================================
-
-class _BluetoothPrinterRow extends StatelessWidget {
-  const _BluetoothPrinterRow({required this.printer});
-
-  final SavedPrinter printer;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.primaryContainer.withValues(alpha: 0.35),
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.primary.withValues(alpha: 0.3)),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: <Widget>[
-            Icon(Icons.bluetooth, size: 18, color: scheme.primary),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    printer.name,
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    'سيتم استخدام الطابعة المحفوظة',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _NoBluetoothPrinterHint extends StatelessWidget {
-  const _NoBluetoothPrinterHint({required this.onConfigure});
-
-  final VoidCallback onConfigure;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
-          children: <Widget>[
-            Icon(
-              Icons.bluetooth_disabled,
-              size: 18,
-              color: scheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 8),
-            Expanded(
-              child: Text(
-                'لا توجد طابعة محفوظة. '
-                'اضبط طابعة من الإعدادات لتفعيل الطباعة المباشرة.',
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
     );
   }
 }
