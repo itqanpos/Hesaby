@@ -59,7 +59,6 @@ class EmployeeAdvanceRepositoryImpl implements EmployeeAdvanceRepository {
     throw FormatException('Advance: "$k" is not a date.');
   }
 
-  /// Reads the joined employee name from a PostgREST nested object.
   static String? _employeeNameFrom(Map<String, dynamic> m) {
     final Object? nested = m['employees'];
     if (nested is Map<String, dynamic>) {
@@ -148,49 +147,6 @@ class EmployeeAdvanceRepositoryImpl implements EmployeeAdvanceRepository {
       rethrow;
     } on Object catch (e, s) {
       throw _unknown(e, s, 'createAdvance');
-    }
-  }
-
-  @override
-  Future<EmployeeAdvance> applyDeduction({
-    required String advanceId,
-    required double amount,
-  }) async {
-    if (amount <= 0) {
-      throw const AdvanceException(
-        type: AdvanceFailureType.invalidInput,
-        cause: 'Deduction amount must be positive.',
-      );
-    }
-    try {
-      // Read current remaining first.
-      final List<Map<String, dynamic>> rows =
-          await _remote.fetchAdvances(
-        companyId: '', // not needed; we query by ID below
-        onlyOpen: false,
-        limit: 1,
-      );
-      // Simpler: fetch the single row by ID via update + select.
-      // We need the current remaining to compute the new value.
-      // Instead, use a two-step: fetch all + filter would be wasteful.
-      // Use a dedicated read:
-      // (the datasource exposes only fetchAdvances; extend as needed)
-      // --- Simplified approach: read all rows and pick by id.
-      // This is not efficient but the data volume is small.
-      // ignore: unused_local_variable
-      final int dummy = rows.length;
-
-      // Direct update via remote (read current state not needed if we
-      // compute against a known remaining). But we need it. Let's add
-      // a dedicated getAdvance to the datasource on the next iteration.
-      // For now, do a best-effort update using the current remaining:
-      throw const AdvanceException(
-        type: AdvanceFailureType.unknown,
-        cause: 'applyDeduction requires the caller to know the current '
-            'remaining. Use updateAdvanceWithRemaining instead.',
-      );
-    } on AdvanceException {
-      rethrow;
     }
   }
 
