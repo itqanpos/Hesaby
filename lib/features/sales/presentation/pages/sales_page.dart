@@ -15,10 +15,15 @@ import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/unit.dart';
+import '../../../products/presentation/providers/product_providers.dart';
+import '../../../products/presentation/providers/unit_providers.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/sales_filter_sheet.dart';
 import '../providers/sales_providers.dart';
+import '../services/sale_print_actions.dart';
 import '../widgets/sales_kpi_row.dart';
 
 /// Sales list page.
@@ -29,10 +34,19 @@ import '../widgets/sales_kpi_row.dart';
 /// list page funnels every new sale through it.
 ///
 /// Layout, top to bottom:
-/// * KPI overview cards (always visible, not affected by filters).
+/// * KPI overview cards (drafts excluded, filters ignored).
 /// * Search field + filter button (with an active-filter badge).
 /// * Compact chip row showing only the active filters (when any).
 /// * The filtered list of sales (pull-to-refresh enabled).
+///
+/// Each sale card exposes two quick actions:
+/// * **طباعة** — direct thermal print to the saved Bluetooth printer
+///   (no preview, no PDF, no share sheet).
+/// * **مشاركة** — build a PDF and open the platform share sheet.
+///
+/// **Drafts are hidden** everywhere on this page — a draft represents a
+/// sale whose confirmation failed, so it must not appear as an invoice
+/// nor be counted in the KPIs.
 class SalesPage extends ConsumerStatefulWidget {
   const SalesPage({super.key});
 
@@ -44,6 +58,12 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   final TextEditingController _searchController = TextEditingController();
   String _searchQuery = '';
   SalesFilter _filter = const SalesFilter();
+
+  /// IDs of sales whose direct-print job is in flight.
+  final Set<String> _printingIds = <String>{};
+
+  /// IDs of sales whose PDF share sheet is in flight.
+  final Set<String> _sharingIds = <String>{};
 
   @override
   void dispose() {
@@ -90,6 +110,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   }
 
   bool _matches(Sale sale, Map<String, String> customerNames) {
+    // Drafts are failed confirmations — never treat them as invoices.
+    if (sale.isDraft) {
+      return false;
+    }
+
     if (_filter.status != null && sale.status != _filter.status) {
       return false;
     }
@@ -127,6 +152,114 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 
     return false;
   }
+
+  // ---------------------------------------------------------------------------
+  // Quick actions
+  // ---------------------------------------------------------------------------
+
+  Future<void> _handlePrint(
+    Sale sale,
+    Map<String, String> customerNames,
+  ) async {
+    if (_printingIds.contains(sale.id)) return;
+    setState(() => _printingIds.add(sale.id));
+
+    try {
+      final List<SaleItem> items =
+          await ref.read(saleItemsProvider(sale.id).future);
+      if (!mounted) return;
+      if (items.isEmpty) {
+        _snack('لا يمكن طباعة فاتورة بدون بنود.');
+        return;
+      }
+
+      final List<Product> products =
+          await ref.read(productsProvider.future);
+      final List<Unit> units = await ref.read(unitsProvider.future);
+      if (!mounted) return;
+
+      final DirectSalePrintResult result = await printSaleDirect(
+        ref: ref,
+        sale: sale,
+        items: items,
+        customerName: _resolveCardCustomerName(customerNames, sale.customerId),
+        productNames: <String, String>{
+          for (final Product p in products) p.id: p.name,
+        },
+        unitNames: <String, String>{
+          for (final Unit u in units) u.id: u.name,
+        },
+      );
+
+      if (!mounted) return;
+      _snack(directSalePrintMessage(result));
+    } on Object {
+      if (!mounted) return;
+      _snack('تعذّر تحضير الفاتورة للطباعة.');
+    } finally {
+      if (mounted) {
+        setState(() => _printingIds.remove(sale.id));
+      }
+    }
+  }
+
+  Future<void> _handleShare(
+    Sale sale,
+    Map<String, String> customerNames,
+  ) async {
+    if (_sharingIds.contains(sale.id)) return;
+    setState(() => _sharingIds.add(sale.id));
+
+    try {
+      final List<SaleItem> items =
+          await ref.read(saleItemsProvider(sale.id).future);
+      if (!mounted) return;
+      if (items.isEmpty) {
+        _snack('لا يمكن مشاركة فاتورة بدون بنود.');
+        return;
+      }
+
+      final List<Product> products =
+          await ref.read(productsProvider.future);
+      final List<Unit> units = await ref.read(unitsProvider.future);
+      if (!mounted) return;
+
+      final bool ok = await shareSalePdf(
+        ref: ref,
+        sale: sale,
+        items: items,
+        customerName: _resolveCardCustomerName(customerNames, sale.customerId),
+        productNames: <String, String>{
+          for (final Product p in products) p.id: p.name,
+        },
+        unitNames: <String, String>{
+          for (final Unit u in units) u.id: u.name,
+        },
+      );
+
+      if (!mounted) return;
+      if (!ok) {
+        _snack('تعذّرت مشاركة الفاتورة.');
+      }
+    } on Object {
+      if (!mounted) return;
+      _snack('تعذّرت مشاركة الفاتورة.');
+    } finally {
+      if (mounted) {
+        setState(() => _sharingIds.remove(sale.id));
+      }
+    }
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -186,21 +319,27 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           final List<Sale> allSales = salesAsync.value ?? const <Sale>[];
           final List<Customer> customers =
               customersAsync.value ?? const <Customer>[];
+
+          // Drafts never count as invoices — exclude them from KPI cards.
+          final List<Sale> realSales = allSales
+              .where((Sale s) => !s.isDraft)
+              .toList(growable: false);
+
           final Map<String, String> customerNames = <String, String>{
             for (final Customer c in customers) c.id: c.name,
           };
 
-          final List<Sale> filtered = allSales
+          final List<Sale> filtered = realSales
               .where((Sale s) => _matches(s, customerNames))
               .toList(growable: false);
 
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- KPI overview ----
+              // ---- KPI overview (drafts excluded) ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
-                child: SalesKpiRow(sales: allSales),
+                child: SalesKpiRow(sales: realSales),
               ),
 
               // ---- Search + Filter button ----
@@ -252,7 +391,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   onRefresh: _refresh,
                   child: Builder(
                     builder: (BuildContext _) {
-                      if (allSales.isEmpty) {
+                      if (realSales.isEmpty) {
                         return _RefreshableMessage(
                           child: AppEmptyView(
                             icon: Icons.point_of_sale_outlined,
@@ -299,7 +438,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                               customerNames,
                               sale.customerId,
                             ),
+                            isPrinting: _printingIds.contains(sale.id),
+                            isSharing: _sharingIds.contains(sale.id),
                             onTap: () => _openDetail(context, sale),
+                            onPrint: () => _handlePrint(sale, customerNames),
+                            onShare: () => _handleShare(sale, customerNames),
                           );
                         },
                       );
@@ -334,9 +477,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 
 // -----------------------------------------------------------------------------
 // Refreshable wrapper for empty / error states.
-//
-// Wraps a non-scrollable widget in a scroll view sized to fill its parent
-// so RefreshIndicator can trigger even when the content is just a message.
 // -----------------------------------------------------------------------------
 
 class _RefreshableMessage extends StatelessWidget {
@@ -540,12 +680,22 @@ class _SaleCard extends StatelessWidget {
   const _SaleCard({
     required this.sale,
     required this.customerName,
+    required this.isPrinting,
+    required this.isSharing,
     required this.onTap,
+    required this.onPrint,
+    required this.onShare,
   });
 
   final Sale sale;
   final String customerName;
+  final bool isPrinting;
+  final bool isSharing;
   final VoidCallback onTap;
+  final VoidCallback onPrint;
+  final VoidCallback onShare;
+
+  bool get _actionsBusy => isPrinting || isSharing;
 
   @override
   Widget build(BuildContext context) {
@@ -577,94 +727,165 @@ class _SaleCard extends StatelessWidget {
         onTap: onTap,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              CircleAvatar(
-                backgroundColor: badgeBg,
-                foregroundColor: badgeFg,
-                child: const Icon(Icons.point_of_sale_outlined),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Row(
+              // ---- Main row: avatar + content ----
+              Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: <Widget>[
+                  CircleAvatar(
+                    backgroundColor: badgeBg,
+                    foregroundColor: badgeFg,
+                    child: const Icon(Icons.point_of_sale_outlined),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
                       children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            headerTitle,
-                            style: theme.textTheme.titleMedium,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        DecoratedBox(
-                          decoration: BoxDecoration(
-                            color: badgeBg,
-                            borderRadius: BorderRadius.circular(999),
-                          ),
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 10,
-                              vertical: 2,
-                            ),
-                            child: Text(
-                              statusLabel,
-                              style: theme.textTheme.labelSmall?.copyWith(
-                                color: badgeFg,
+                        Row(
+                          children: <Widget>[
+                            Expanded(
+                              child: Text(
+                                headerTitle,
+                                style: theme.textTheme.titleMedium,
+                                overflow: TextOverflow.ellipsis,
                               ),
                             ),
-                          ),
+                            DecoratedBox(
+                              decoration: BoxDecoration(
+                                color: badgeBg,
+                                borderRadius: BorderRadius.circular(999),
+                              ),
+                              child: Padding(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 2,
+                                ),
+                                child: Text(
+                                  statusLabel,
+                                  style: theme.textTheme.labelSmall?.copyWith(
+                                    color: badgeFg,
+                                  ),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 4),
+                        Text(
+                          customerName,
+                          style: theme.textTheme.bodyMedium,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                        const SizedBox(height: 4),
+                        Row(
+                          children: <Widget>[
+                            Text(
+                              dateTimeFormat.format(sale.saleDate.toLocal()),
+                              style: theme.textTheme.bodySmall,
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              moneyFormat.format(sale.total),
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                color: scheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                            if (sale.isUnpaid) ...<Widget>[
+                              const SizedBox(width: 8),
+                              _PaymentBadge(
+                                label: 'غير مدفوعة',
+                                background: scheme.errorContainer,
+                                foreground: scheme.onErrorContainer,
+                              ),
+                            ] else if (sale.isPartiallyPaid) ...<Widget>[
+                              const SizedBox(width: 8),
+                              _PaymentBadge(
+                                label:
+                                    'مدفوع جزئيًا (${moneyFormat.format(sale.amountDue)} متبقٍ)',
+                                background: scheme.tertiaryContainer,
+                                foreground: scheme.onTertiaryContainer,
+                              ),
+                            ],
+                          ],
                         ),
                       ],
                     ),
-                    const SizedBox(height: 4),
-                    Text(
-                      customerName,
-                      style: theme.textTheme.bodyMedium,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: <Widget>[
-                        Text(
-                          dateTimeFormat.format(sale.saleDate.toLocal()),
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        const SizedBox(width: 12),
-                        Text(
-                          moneyFormat.format(sale.total),
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w600,
-                          ),
-                        ),
-                        if (sale.isUnpaid) ...<Widget>[
-                          const SizedBox(width: 8),
-                          _PaymentBadge(
-                            label: 'غير مدفوعة',
-                            background: scheme.errorContainer,
-                            foreground: scheme.onErrorContainer,
-                          ),
-                        ] else if (sale.isPartiallyPaid) ...<Widget>[
-                          const SizedBox(width: 8),
-                          _PaymentBadge(
-                            label:
-                                'مدفوع جزئيًا (${moneyFormat.format(sale.amountDue)} متبقٍ)',
-                            background: scheme.tertiaryContainer,
-                            foreground: scheme.onTertiaryContainer,
-                          ),
-                        ],
-                      ],
-                    ),
-                  ],
-                ),
+                  ),
+                ],
+              ),
+
+              // ---- Quick actions row ----
+              const SizedBox(height: 8),
+              Divider(height: 1, color: scheme.outlineVariant),
+              const SizedBox(height: 6),
+              Row(
+                children: <Widget>[
+                  _QuickAction(
+                    icon: Icons.print_outlined,
+                    label: 'طباعة',
+                    isLoading: isPrinting,
+                    onPressed: _actionsBusy ? null : onPrint,
+                  ),
+                  const SizedBox(width: 6),
+                  _QuickAction(
+                    icon: Icons.ios_share,
+                    label: 'مشاركة',
+                    isLoading: isSharing,
+                    onPressed: _actionsBusy ? null : onShare,
+                  ),
+                ],
               ),
             ],
           ),
         ),
+      ),
+    );
+  }
+}
+
+/// Small outlined action button used inside a [_SaleCard].
+class _QuickAction extends StatelessWidget {
+  const _QuickAction({
+    required this.icon,
+    required this.label,
+    required this.isLoading,
+    required this.onPressed,
+  });
+
+  final IconData icon;
+  final String label;
+  final bool isLoading;
+  final VoidCallback? onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool enabled = onPressed != null;
+
+    return OutlinedButton.icon(
+      onPressed: onPressed,
+      icon: isLoading
+          ? const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : Icon(icon, size: 18),
+      label: Text(label),
+      style: OutlinedButton.styleFrom(
+        visualDensity: VisualDensity.compact,
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+        foregroundColor: enabled ? scheme.primary : scheme.onSurfaceVariant,
+        side: BorderSide(
+          color: enabled ? scheme.primary.withValues(alpha: 0.5) : scheme.outlineVariant,
+        ),
+        textStyle: theme.textTheme.labelMedium,
       ),
     );
   }
