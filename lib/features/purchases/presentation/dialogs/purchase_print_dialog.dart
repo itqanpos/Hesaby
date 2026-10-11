@@ -15,6 +15,7 @@ import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
+import '../../data/services/pdf_purchase_receipt_builder.dart';
 import '../../data/services/purchase_receipt_printer.dart';
 import '../../domain/entities/purchase_receipt.dart';
 
@@ -132,17 +133,13 @@ class _PurchasePrintDialogState
     }
   }
 
+  /// Builds the PDF directly for the direct-print path.
   Future<Uint8List> _buildPdf(Uint8List? logo) {
-    // Reuse the builder through the printer interface by calling
-    // `PdfPurchaseReceiptBuilder.build` directly. We import it inline to
-    // avoid adding another import at the top when not strictly needed.
-    return Future<Uint8List>.value(
-      PdfPurchaseReceiptBuilder.build(
-        receipt: widget.receipt,
-        size: _size,
-        style: _readStyle(),
-        logoBytes: logo,
-      ),
+    return PdfPurchaseReceiptBuilder.build(
+      receipt: widget.receipt,
+      size: _size,
+      style: _readStyle(),
+      logoBytes: logo,
     );
   }
 
