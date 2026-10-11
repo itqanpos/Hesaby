@@ -7,6 +7,7 @@ import 'package:intl/intl.dart' hide TextDirection;
 
 import '../../../../shared/widgets/app_button.dart';
 import '../../domain/entities/employee.dart';
+import '../../domain/entities/employee_advance.dart';
 import '../../domain/entities/employee_salary.dart';
 import '../../domain/repositories/employee_salary_repository.dart';
 import '../providers/payroll_providers.dart';
@@ -16,7 +17,8 @@ import '../providers/payroll_providers.dart';
 /// Two actions:
 /// * **حفظ كمسودة** — saves without paying (`paid_at = null`).
 /// * **حفظ ودفع** — saves and marks as paid immediately. The DB trigger
-///   posts the cash movement.
+///   posts the cash movement and reduces the employee's open advances
+///   by the `advancesDeducted` amount (FIFO).
 Future<bool?> showSalaryFormSheet({
   required BuildContext context,
   required Employee employee,
@@ -90,7 +92,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
     _notesController = TextEditingController(text: s?.notes ?? '');
     _paymentMethod = s?.paymentMethod ?? 'cash';
 
-    // Live net recompute.
     _baseController.addListener(_rebuild);
     _bonusesController.addListener(_rebuild);
     _deductionsController.addListener(_rebuild);
@@ -146,7 +147,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
       final String? notes = _emptyToNull(_notesController.text);
 
       if (_isEdit) {
-        // Update amounts first.
         await ref.read(salariesProvider.notifier).updateSalary(
               salaryId: widget.existing!.id,
               baseAmount: base,
@@ -157,7 +157,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
               notes: notes,
               clearNotes: notes == null,
             );
-        // Then mark as paid if requested and not already paid.
         if (markPaid && !_isPaid) {
           await ref.read(salariesProvider.notifier).markPaid(
                 salaryId: widget.existing!.id,
@@ -206,6 +205,19 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
       locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
+    );
+
+    // ---- Available advances (open) for this employee ----
+    final List<EmployeeAdvance> employeeAdvances =
+        (ref.watch(advancesProvider).valueOrNull ??
+                const <EmployeeAdvance>[])
+            .where((EmployeeAdvance a) =>
+                a.employeeId == widget.employee.id &&
+                !a.isFullyDeducted)
+            .toList(growable: false);
+    final double totalAvailableAdvances = employeeAdvances.fold<double>(
+      0,
+      (double s, EmployeeAdvance a) => s + a.remainingAmount,
     );
 
     return Padding(
@@ -269,12 +281,25 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Advances ----
+                // ---- Advances (with available hint) ----
                 _MoneyField(
                   controller: _advancesController,
                   label: 'خصم السلف (-)',
                   enabled: !_isSaving && !_isPaid,
-                  helperText: 'المبلغ المُخصوم من السلف المفتوحة',
+                  helperText: totalAvailableAdvances > 0
+                      ? 'المتاح للخصم من السلف: '
+                          '${money.format(totalAvailableAdvances)}'
+                      : 'لا يوجد سلف مفتوحة لهذا الموظف',
+                  validator: (String? v) {
+                    final String t = (v ?? '').trim();
+                    if (t.isEmpty) return null;
+                    final double? d = double.tryParse(t);
+                    if (d == null || d < 0) return 'قيمة غير صحيحة';
+                    if (d > totalAvailableAdvances + 0.01) {
+                      return 'المتاح: ${money.format(totalAvailableAdvances)}';
+                    }
+                    return null;
+                  },
                 ),
                 const SizedBox(height: 16),
 
@@ -422,12 +447,14 @@ class _MoneyField extends StatelessWidget {
     required this.label,
     required this.enabled,
     this.helperText,
+    this.validator,
   });
 
   final TextEditingController controller;
   final String label;
   final bool enabled;
   final String? helperText;
+  final String? Function(String?)? validator;
 
   @override
   Widget build(BuildContext context) {
@@ -445,13 +472,14 @@ class _MoneyField extends StatelessWidget {
         suffixText: 'ج.م',
         helperText: helperText,
       ),
-      validator: (String? v) {
-        final String t = (v ?? '').trim();
-        if (t.isEmpty) return null; // empty = 0
-        final double? d = double.tryParse(t);
-        if (d == null || d < 0) return 'قيمة غير صحيحة';
-        return null;
-      },
+      validator: validator ??
+          (String? v) {
+            final String t = (v ?? '').trim();
+            if (t.isEmpty) return null;
+            final double? d = double.tryParse(t);
+            if (d == null || d < 0) return 'قيمة غير صحيحة';
+            return null;
+          },
     );
   }
 }
@@ -533,7 +561,8 @@ String _failureMessage(SalaryFailureType type) => switch (type) {
       SalaryFailureType.unauthorized =>
         'لا تملك صلاحية إدارة الرواتب.',
       SalaryFailureType.notFound => 'الراتب غير موجود.',
-      SalaryFailureType.invalidInput => 'تحقق من المبالغ المُدخلة.',
+      SalaryFailureType.invalidInput =>
+        'تحقق من المبالغ المُدخلة (خصم السلف يتجاوز المتاح؟).',
       SalaryFailureType.duplicateEntry =>
         'يوجد راتب مسجَّل لهذا الموظف في هذا الشهر بالفعل.',
       SalaryFailureType.invalidResponse =>
