@@ -42,7 +42,6 @@ import '../features/reports/presentation/pages/receivables_page.dart';
 import '../features/reports/presentation/pages/reports_hub_page.dart';
 import '../features/reports/presentation/pages/sales_summary_page.dart';
 import '../features/reports/presentation/pages/stock_valuation_page.dart';
-import '../features/reports/presentation/pages/supplier_aging_page.dart';
 import '../features/reports/presentation/pages/top_customers_page.dart';
 import '../features/reports/presentation/pages/top_products_page.dart';
 import '../features/sales/presentation/pages/customers_page.dart';
@@ -218,9 +217,6 @@ abstract final class AppRouter {
 
   static const String reportCustomerAgingPath = '/reports/customer-aging';
   static const String reportCustomerAgingName = 'report-customer-aging';
-
-  static const String reportSupplierAgingPath = '/reports/supplier-aging';
-  static const String reportSupplierAgingName = 'report-supplier-aging';
 
   static const String reportPayablesPath = '/reports/payables';
   static const String reportPayablesName = 'report-payables';
@@ -599,12 +595,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.reportCustomerAgingName,
         builder: (BuildContext context, GoRouterState state) =>
             const CustomerAgingPage(),
-      ),
-      GoRoute(
-        path: AppRouter.reportSupplierAgingPath,
-        name: AppRouter.reportSupplierAgingName,
-        builder: (BuildContext context, GoRouterState state) =>
-            const SupplierAgingPage(),
       ),
       GoRoute(
         path: AppRouter.reportPayablesPath,
