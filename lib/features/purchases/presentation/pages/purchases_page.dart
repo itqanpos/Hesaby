@@ -3,9 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../app/router.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -23,7 +23,7 @@ import '../providers/purchase_providers.dart';
 /// Purchases list page.
 ///
 /// Layout (top → bottom):
-/// 1. KPI row (total / drafts / confirmed this month / value this month).
+/// 1. KPI row (drafts / confirmed / cancelled / value this month).
 /// 2. Search by invoice number or supplier name.
 /// 3. Status filter chips + Sort dropdown.
 /// 4. Rich purchase card with status badge, supplier, date and total.
@@ -437,6 +437,7 @@ class _KpiRow extends StatelessWidget {
     int draft = 0;
     int confirmed = 0;
     int cancelled = 0;
+    int confirmedThisMonth = 0;
     double monthValue = 0;
 
     for (final Purchase p in purchases) {
@@ -447,6 +448,7 @@ class _KpiRow extends StatelessWidget {
       if (p.isConfirmed) {
         final DateTime d = p.purchaseDate.toLocal();
         if (d.year == now.year && d.month == now.month) {
+          confirmedThisMonth++;
           monthValue += p.total;
         }
       }
@@ -460,7 +462,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.edit_note_outlined,
                 label: 'مسودات',
-                value: '$draft',
+                value: AppFormatters.integer(draft),
                 color: const Color(0xFFE65100),
                 emphasize: draft > 0,
               ),
@@ -470,7 +472,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.check_circle_outline,
                 label: 'مؤكدة',
-                value: '$confirmed',
+                value: AppFormatters.integer(confirmed),
                 color: const Color(0xFF0F7B6C),
               ),
             ),
@@ -479,7 +481,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.cancel_outlined,
                 label: 'ملغاة',
-                value: '$cancelled',
+                value: AppFormatters.integer(cancelled),
                 color: const Color(0xFFC62828),
               ),
             ),
@@ -487,8 +489,7 @@ class _KpiRow extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         _MonthValueCard(
-          purchasesThisMonth:
-              purchases.where((p) => p.isConfirmed).length,
+          purchasesThisMonth: confirmedThisMonth,
           monthValue: monthValue,
         ),
       ],
@@ -584,11 +585,6 @@ class _MonthValueCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -626,14 +622,14 @@ class _MonthValueCard extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(
-                  moneyFormat.format(monthValue),
+                  AppFormatters.money(monthValue),
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.w800,
                     color: scheme.primary,
                   ),
                 ),
                 Text(
-                  '$purchasesThisMonth فاتورة',
+                  '${AppFormatters.integer(purchasesThisMonth)} فاتورة',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -782,13 +778,6 @@ class _PurchaseCard extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
-    final DateFormat dateFormat = DateFormat.yMd('ar_EG');
-
     final (Color badgeBg, Color badgeFg) = _statusColors(
       scheme,
       purchase.status,
@@ -876,14 +865,14 @@ class _PurchaseCard extends StatelessWidget {
                         ),
                         const SizedBox(width: 4),
                         Text(
-                          dateFormat.format(purchase.purchaseDate.toLocal()),
+                          AppFormatters.date(purchase.purchaseDate),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
                         ),
                         const Spacer(),
                         Text(
-                          moneyFormat.format(purchase.total),
+                          AppFormatters.money(purchase.total),
                           style: theme.textTheme.titleSmall?.copyWith(
                             color: scheme.primary,
                             fontWeight: FontWeight.w800,
