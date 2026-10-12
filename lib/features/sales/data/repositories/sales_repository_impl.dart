@@ -393,12 +393,15 @@ class CustomerRepositoryImpl implements CustomerRepository {
     DateTime? toDate,
   }) async {
     try {
-      // Fetch everything in parallel.
+      // Fetch everything in parallel. Returns are fetched alongside the
+      // other sources so a single round-trip brings every operation that
+      // can affect the customer's balance.
       final List<Object> results = await Future.wait<Object>(<Future<Object>>[
         _remoteDataSource.getCustomer(customerId),
         _remoteDataSource.listCustomerSales(customerId),
         _remoteDataSource.listCustomerPayments(customerId, limit: 1000),
         _remoteDataSource.listCustomerAdjustments(customerId),
+        _remoteDataSource.listCustomerReturns(customerId),
       ]);
 
       final CustomerModel customer = results[0] as CustomerModel;
@@ -407,13 +410,21 @@ class CustomerRepositoryImpl implements CustomerRepository {
           (results[2] as List<CustomerPaymentModel>);
       final List<CustomerAdjustmentModel> adjustments =
           (results[3] as List<CustomerAdjustmentModel>);
+      final List<SaleReturnModel> returns =
+          (results[4] as List<SaleReturnModel>);
 
       final List<CustomerStatementEntry> allEntries =
           <CustomerStatementEntry>[
         ..._buildSaleEntries(sales),
+        ..._buildReturnEntries(returns),
         ..._buildPaymentEntries(payments),
         ..._buildAdjustmentEntries(adjustments),
-      ];
+      ]..sort(
+          // Unified ordering: newest first, so the top of the statement
+          // always shows the most recent activity.
+          (CustomerStatementEntry a, CustomerStatementEntry b) =>
+              b.date.compareTo(a.date),
+        );
 
       final List<CustomerStatementEntry> visible =
           _filterEntriesByWindow(allEntries, fromDate, toDate);
@@ -989,6 +1000,76 @@ List<CustomerStatementEntry> _buildSaleEntries(List<SaleModel> sales) {
           credit: deferred,
           reference: sale.invoiceNumber,
           description: 'إلغاء فاتورة آجلة',
+        ),
+      );
+    }
+  }
+
+  return entries;
+}
+
+/// Converts sale returns into statement entries.
+///
+/// Only `credit_note` refunds affect the customer's balance — cash and
+/// card refunds are paid out at the counter and never touch the running
+/// balance. Drafts are skipped because the statement builder does not
+/// fetch them.
+///
+/// A confirmed `credit_note` return contributes a **credit** equal to
+/// `total`. A return that was confirmed and then cancelled contributes
+/// a **debit** of the same amount at its cancellation timestamp, so both
+/// events appear on the statement and their net effect is zero.
+List<CustomerStatementEntry> _buildReturnEntries(
+  List<SaleReturnModel> returns,
+) {
+  final List<CustomerStatementEntry> entries = <CustomerStatementEntry>[];
+
+  for (final SaleReturnModel r in returns) {
+    if (r.refundMethod != RefundMethod.creditNote) {
+      continue;
+    }
+    if (r.total <= 0) {
+      continue;
+    }
+
+    if (r.status == ReturnStatus.confirmed) {
+      entries.add(
+        CustomerStatementEntry(
+          id: '${r.id}::confirm',
+          type: StatementEntryType.saleReversal,
+          date: r.returnDate,
+          debit: 0,
+          credit: r.total,
+          reference: r.returnNumber,
+          description: 'مرتجع مبيعات — رصيد',
+        ),
+      );
+    } else if (r.status == ReturnStatus.cancelled) {
+      // A cancelled return only affected the balance if it was ever
+      // confirmed. Since the statement builder does not fetch the
+      // confirmation / cancellation timestamps, we conservatively
+      // emit both legs when the record is cancelled — the net effect
+      // is still zero.
+      entries.add(
+        CustomerStatementEntry(
+          id: '${r.id}::confirm',
+          type: StatementEntryType.saleReversal,
+          date: r.returnDate,
+          debit: 0,
+          credit: r.total,
+          reference: r.returnNumber,
+          description: 'مرتجع مبيعات — رصيد',
+        ),
+      );
+      entries.add(
+        CustomerStatementEntry(
+          id: '${r.id}::cancel',
+          type: StatementEntryType.sale,
+          date: r.returnDate,
+          debit: r.total,
+          credit: 0,
+          reference: r.returnNumber,
+          description: 'إلغاء مرتجع مبيعات',
         ),
       );
     }
