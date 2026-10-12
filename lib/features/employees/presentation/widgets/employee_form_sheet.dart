@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
@@ -56,8 +56,6 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
   bool _isSubmitting = false;
   EmployeeFailureType? _failure;
 
-  static final DateFormat _dateFmt = DateFormat('yyyy/MM/dd');
-
   bool get _isEdit => widget.existing != null;
 
   @override
@@ -75,10 +73,13 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
     _notesController = TextEditingController(text: e?.notes ?? '');
     _hireDate = e?.hireDate;
     _isActive = e?.isActive ?? true;
+
+    _baseSalaryController.addListener(_onSalaryChanged);
   }
 
   @override
   void dispose() {
+    _baseSalaryController.removeListener(_onSalaryChanged);
     _nameController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
@@ -87,6 +88,10 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
     _baseSalaryController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  void _onSalaryChanged() {
+    if (mounted) setState(() {});
   }
 
   static String _fmtNum(double v) {
@@ -107,7 +112,6 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
       initialDate: initial,
       firstDate: DateTime(now.year - 30),
       lastDate: DateTime(now.year + 5),
-      locale: const Locale('ar', 'EG'),
     );
     if (picked != null) {
       setState(() => _hireDate = picked);
@@ -180,6 +184,10 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    // Live preview of the entered salary.
+    final double? enteredSalary =
+        double.tryParse(_baseSalaryController.text.trim());
 
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
@@ -312,6 +320,13 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
                     return null;
                   },
                 ),
+
+                // ---- Salary preview ----
+                if (enteredSalary != null && enteredSalary > 0) ...<Widget>[
+                  const SizedBox(height: 6),
+                  _SalaryPreview(amount: enteredSalary),
+                ],
+
                 const SizedBox(height: 12),
 
                 // ---- Hire date ----
@@ -327,7 +342,7 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
                     child: Text(
                       _hireDate == null
                           ? 'اختر التاريخ'
-                          : _dateFmt.format(_hireDate!),
+                          : AppFormatters.date(_hireDate!),
                       style: TextStyle(
                         color: _hireDate == null
                             ? scheme.onSurfaceVariant
@@ -399,6 +414,63 @@ class _EmployeeFormSheetState extends ConsumerState<_EmployeeFormSheet> {
     );
   }
 }
+
+// ============================================================================
+// Salary preview
+// ============================================================================
+
+class _SalaryPreview extends StatelessWidget {
+  const _SalaryPreview({required this.amount});
+
+  final double amount;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    const Color tone = Color(0xFF0F7B6C);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: <Widget>[
+            const Icon(
+              Icons.payments_outlined,
+              size: 16,
+              color: tone,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'الراتب الشهري',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: tone,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              AppFormatters.money(amount),
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: tone,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Failure banner
+// ============================================================================
 
 class _FailureBanner extends StatelessWidget {
   const _FailureBanner({required this.message});
