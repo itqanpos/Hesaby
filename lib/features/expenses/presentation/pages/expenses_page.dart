@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -16,6 +16,9 @@ import '../providers/expense_providers.dart';
 import '../widgets/expense_form_sheet.dart';
 
 /// Expenses list page.
+///
+/// Interaction model: tapping the card does nothing — edit / delete are
+/// reached only from the per-card overflow menu.
 class ExpensesPage extends ConsumerStatefulWidget {
   const ExpensesPage({super.key});
 
@@ -26,13 +29,6 @@ class ExpensesPage extends ConsumerStatefulWidget {
 class _ExpensesPageState extends ConsumerState<ExpensesPage> {
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final DateFormat _dateFmt = DateFormat('yyyy/MM/dd');
 
   @override
   void dispose() {
@@ -159,7 +155,6 @@ class _ExpensesPageState extends ConsumerState<ExpensesPage> {
                 child: _KpiRow(
                   count: all.length,
                   total: total,
-                  money: _money,
                 ),
               ),
               AppTextField(
@@ -206,8 +201,6 @@ class _ExpensesPageState extends ConsumerState<ExpensesPage> {
                           final Expense e = filtered[i];
                           return _ExpenseCard(
                             expense: e,
-                            money: _money,
-                            dateFmt: _dateFmt,
                             onEdit: () => _openForm(existing: e),
                             onDelete: () => _confirmDelete(e),
                           );
@@ -227,15 +220,10 @@ class _ExpensesPageState extends ConsumerState<ExpensesPage> {
 // ============================================================================
 
 class _KpiRow extends StatelessWidget {
-  const _KpiRow({
-    required this.count,
-    required this.total,
-    required this.money,
-  });
+  const _KpiRow({required this.count, required this.total});
 
   final int count;
   final double total;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -245,7 +233,7 @@ class _KpiRow extends StatelessWidget {
           child: _KpiCard(
             icon: Icons.receipt_long_outlined,
             label: 'عدد المصروفات',
-            value: '$count',
+            value: AppFormatters.integer(count),
             color: const Color(0xFF0288D1),
           ),
         ),
@@ -254,7 +242,7 @@ class _KpiRow extends StatelessWidget {
           child: _KpiCard(
             icon: Icons.trending_down_outlined,
             label: 'الإجمالي',
-            value: money.format(total),
+            value: AppFormatters.money(total),
             color: const Color(0xFFC62828),
           ),
         ),
@@ -338,15 +326,11 @@ class _KpiCard extends StatelessWidget {
 class _ExpenseCard extends StatelessWidget {
   const _ExpenseCard({
     required this.expense,
-    required this.money,
-    required this.dateFmt,
     required this.onEdit,
     required this.onDelete,
   });
 
   final Expense expense;
-  final NumberFormat money;
-  final DateFormat dateFmt;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
 
@@ -358,121 +342,120 @@ class _ExpenseCard extends StatelessWidget {
     return Material(
       color: scheme.surface,
       borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onEdit,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              Container(
-                width: 40,
-                height: 40,
-                decoration: BoxDecoration(
-                  color: scheme.error.withValues(alpha: 0.12),
-                  borderRadius: BorderRadius.circular(10),
-                ),
-                child: Icon(
-                  Icons.trending_down_outlined,
-                  color: scheme.error,
-                  size: 22,
-                ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: scheme.error.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(10),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      expense.description,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
-                      ),
-                      maxLines: 2,
-                      overflow: TextOverflow.ellipsis,
+              child: Icon(
+                Icons.trending_down_outlined,
+                color: scheme.error,
+                size: 22,
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    expense.description,
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
                     ),
-                    const SizedBox(height: 4),
-                    Row(
-                      children: <Widget>[
-                        if (expense.categoryName != null) ...<Widget>[
-                          Icon(
-                            Icons.category_outlined,
-                            size: 12,
-                            color: scheme.onSurfaceVariant,
-                          ),
-                          const SizedBox(width: 4),
-                          Text(
-                            expense.categoryName!,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                        ],
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 4),
+                  Row(
+                    children: <Widget>[
+                      if (expense.categoryName != null) ...<Widget>[
                         Icon(
-                          Icons.calendar_today_outlined,
+                          Icons.category_outlined,
                           size: 12,
                           color: scheme.onSurfaceVariant,
                         ),
                         const SizedBox(width: 4),
-                        Text(
-                          dateFmt.format(expense.expenseDate),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                        Flexible(
+                          child: Text(
+                            expense.categoryName!,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                            overflow: TextOverflow.ellipsis,
                           ),
                         ),
+                        const SizedBox(width: 8),
                       ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 8),
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.end,
-                children: <Widget>[
-                  Text(
-                    '-${money.format(expense.amount)}',
-                    style: theme.textTheme.titleSmall?.copyWith(
-                      color: scheme.error,
-                      fontWeight: FontWeight.w800,
-                    ),
-                  ),
-                  PopupMenuButton<_ExpenseAction>(
-                    tooltip: 'خيارات',
-                    onSelected: (_ExpenseAction a) {
-                      switch (a) {
-                        case _ExpenseAction.edit:
-                          onEdit();
-                        case _ExpenseAction.delete:
-                          onDelete();
-                      }
-                    },
-                    itemBuilder: (BuildContext _) =>
-                        <PopupMenuEntry<_ExpenseAction>>[
-                      const PopupMenuItem<_ExpenseAction>(
-                        value: _ExpenseAction.edit,
-                        child: ListTile(
-                          leading: Icon(Icons.edit_outlined),
-                          title: Text('تعديل'),
-                          contentPadding: EdgeInsets.zero,
-                        ),
+                      Icon(
+                        Icons.calendar_today_outlined,
+                        size: 12,
+                        color: scheme.onSurfaceVariant,
                       ),
-                      const PopupMenuItem<_ExpenseAction>(
-                        value: _ExpenseAction.delete,
-                        child: ListTile(
-                          leading: Icon(Icons.delete_outline),
-                          title: Text('حذف'),
-                          contentPadding: EdgeInsets.zero,
+                      const SizedBox(width: 4),
+                      Text(
+                        AppFormatters.date(expense.expenseDate),
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
                         ),
                       ),
                     ],
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+            const SizedBox(width: 8),
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.end,
+              children: <Widget>[
+                Text(
+                  '− ${AppFormatters.money(expense.amount)}',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: scheme.error,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                PopupMenuButton<_ExpenseAction>(
+                  tooltip: 'خيارات',
+                  onSelected: (_ExpenseAction a) {
+                    switch (a) {
+                      case _ExpenseAction.edit:
+                        onEdit();
+                      case _ExpenseAction.delete:
+                        onDelete();
+                    }
+                  },
+                  itemBuilder: (BuildContext _) =>
+                      <PopupMenuEntry<_ExpenseAction>>[
+                    const PopupMenuItem<_ExpenseAction>(
+                      value: _ExpenseAction.edit,
+                      child: ListTile(
+                        leading: Icon(Icons.edit_outlined),
+                        title: Text('تعديل'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                    const PopupMenuItem<_ExpenseAction>(
+                      value: _ExpenseAction.delete,
+                      child: ListTile(
+                        leading: Icon(Icons.delete_outline),
+                        title: Text('حذف'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
