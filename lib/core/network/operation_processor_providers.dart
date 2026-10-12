@@ -14,9 +14,6 @@ import 'pending_operation.dart';
 // ============================================================================
 
 /// Provides the singleton [PendingOperationSender] used by the processor.
-///
-/// The sender wraps the current [SupabaseClient] and is stateless, so a
-/// single instance is safe to share across the app.
 final Provider<PendingOperationSender> operationSenderProvider =
     Provider<PendingOperationSender>((Ref ref) {
   return buildSupabaseOperationSender();
@@ -26,27 +23,12 @@ final Provider<PendingOperationSender> operationSenderProvider =
 // Processor provider
 // ============================================================================
 
-/// Provides a ready-to-use [OperationProcessor].
-///
-/// Returns `null` while [operationQueueProvider] is still loading, or when
-/// it has failed to load. Callers that need a processor synchronously must
-/// guard against `null`:
-///
-/// ```dart
-/// final OperationProcessor? processor = ref.read(operationProcessorProvider);
-/// if (processor == null) return;
-/// await processor.processAll(companyId: companyId);
-/// ```
-///
-/// Because [operationQueueProvider] resolves once and stays cached, this
-/// provider builds the processor exactly once for the lifetime of the
-/// container. The processor's internal `_isRunning` guard therefore
-/// correctly serializes concurrent invocations from all trigger points.
+/// Provides a ready-to-use [OperationProcessor], or `null` while the
+/// queue is still loading / failed to load.
 final Provider<OperationProcessor?> operationProcessorProvider =
     Provider<OperationProcessor?>((Ref ref) {
-  final AsyncValue<OperationQueue> queueAsync =
-      ref.watch(operationQueueProvider);
-  final OperationQueue? queue = queueAsync.valueOrNull;
+  final OperationQueue? queue =
+      ref.watch(operationQueueProvider).valueOrNull;
   if (queue == null) return null;
 
   final PendingOperationSender sender = ref.watch(operationSenderProvider);
@@ -54,21 +36,19 @@ final Provider<OperationProcessor?> operationProcessorProvider =
 });
 
 // ============================================================================
-// Manual trigger
+// Manual triggers (WidgetRef flavours — called from UI)
 // ============================================================================
 
-/// Convenience helper that processes every pending operation for
-/// [companyId] on demand.
+/// Processes every pending operation for [companyId] on demand.
 ///
-/// Intended for the "retry" button on the pending-operations page, or for
-/// any explicit user action that should kick the queue. Automatic
-/// background triggers (connectivity change, app resume) are wired
-/// separately in `operation_trigger_provider.dart`.
+/// Intended for a "send all" button, or the retry action in the pending
+/// operations page. Automatic background triggers (connectivity change,
+/// app resume) live in `operation_trigger.dart` and use a `Ref`.
 ///
 /// Returns the number of operations that were successfully delivered
 /// during this run. Returns `0` when the processor is not ready yet.
 Future<int> runPendingOperations(
-  Ref ref, {
+  WidgetRef ref, {
   required String companyId,
 }) async {
   final OperationProcessor? processor = ref.read(operationProcessorProvider);
@@ -78,17 +58,15 @@ Future<int> runPendingOperations(
     );
     return 0;
   }
-
   return processor.processAll(companyId: companyId);
 }
 
 /// Retries a single failed operation by [clientUuid].
 ///
-/// Intended for the "retry" button next to a failed operation row.
 /// Returns `true` when the operation was delivered and removed from the
 /// queue.
 Future<bool> retryPendingOperation(
-  Ref ref, {
+  WidgetRef ref, {
   required String clientUuid,
 }) async {
   final OperationProcessor? processor = ref.read(operationProcessorProvider);
@@ -97,10 +75,8 @@ Future<bool> retryPendingOperation(
 }
 
 /// Discards a single operation by [clientUuid] without sending it.
-///
-/// Intended for the "discard" button next to a failed operation row.
 Future<void> discardPendingOperation(
-  Ref ref, {
+  WidgetRef ref, {
   required String clientUuid,
 }) async {
   final OperationProcessor? processor = ref.read(operationProcessorProvider);
@@ -113,20 +89,18 @@ Future<void> discardPendingOperation(
 // ============================================================================
 
 /// Snapshot of every queued operation for [companyId], oldest first.
-///
-/// Returns an empty list while the queue is loading or when it fails to
-/// load — the caller should surface a loading state via
-/// [operationQueueProvider] itself if it needs finer-grained feedback.
 final ProviderFamily<List<PendingOperation>, String>
     companyOperationsProvider =
     Provider.family<List<PendingOperation>, String>(
   (Ref ref, String companyId) {
-    final AsyncValue<OperationQueue> queueAsync =
-        ref.watch(operationQueueProvider);
-    return queueAsync.maybeWhen(
-      data: (OperationQueue queue) => queue.forCompany(companyId),
-      orElse: () => const <PendingOperation>[],
-    );
+    // Reactivity trigger — rebuild whenever the queue's revision changes.
+    ref.watch(operationQueueRevisionProvider);
+
+    final OperationQueue? queue =
+        ref.watch(operationQueueProvider).valueOrNull;
+    if (queue == null) return const <PendingOperation>[];
+
+    return queue.forCompany(companyId);
   },
 );
 
@@ -135,14 +109,15 @@ final ProviderFamily<List<PendingOperation>, String>
     failedOperationsProvider =
     Provider.family<List<PendingOperation>, String>(
   (Ref ref, String companyId) {
-    final AsyncValue<OperationQueue> queueAsync =
-        ref.watch(operationQueueProvider);
-    return queueAsync.maybeWhen(
-      data: (OperationQueue queue) => queue
-          .forCompany(companyId)
-          .where((PendingOperation op) => op.isFailed)
-          .toList(growable: false),
-      orElse: () => const <PendingOperation>[],
-    );
+    ref.watch(operationQueueRevisionProvider);
+
+    final OperationQueue? queue =
+        ref.watch(operationQueueProvider).valueOrNull;
+    if (queue == null) return const <PendingOperation>[];
+
+    return queue
+        .forCompany(companyId)
+        .where((PendingOperation op) => op.isFailed)
+        .toList(growable: false);
   },
 );
