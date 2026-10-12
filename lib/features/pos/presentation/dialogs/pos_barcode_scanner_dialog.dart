@@ -12,8 +12,6 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 /// * `formats` restricted to common 1D + QR types.
 /// * **`scanWindow`** — analysis limited to the visible square, which
 ///   speeds up decoding by 30-50% on mobile and reduces false positives.
-/// * **`autoZoom: true`** — the camera zooms in when a small barcode is
-///   detected far from the device.
 /// * **No animated laser** — the previous version repainted a
 ///   `CustomPaint` at ~60 fps, stealing CPU from the decoder. The frame
 ///   is now a static `RepaintBoundary`, and success feedback is a
@@ -220,7 +218,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog> {
                       controller: _controller,
                       onDetect: _handleDetection,
                       scanWindow: scanRect,
-                      autoZoom: true,
                       errorBuilder: (
                         BuildContext context,
                         MobileScannerException error,
