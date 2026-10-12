@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/purchase_cart_line.dart';
 
 /// A single line in the purchase cart — single-row layout.
@@ -39,12 +39,6 @@ class PurchaseCartLineTile extends StatefulWidget {
 }
 
 class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   late final TextEditingController _quantityController;
   late final TextEditingController _costController;
   late final FocusNode _quantityFocus;
@@ -253,7 +247,7 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
           SizedBox(
             width: 72,
             child: Text(
-              _money.format(line.lineTotal),
+              AppFormatters.money(line.lineTotal),
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.primary,
                 fontWeight: FontWeight.w800,
