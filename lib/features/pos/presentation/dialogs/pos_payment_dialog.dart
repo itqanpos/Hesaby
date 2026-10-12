@@ -3,11 +3,11 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../core/invalidation/data_invalidation.dart';
 import '../../../../core/network/network_status_provider.dart';
 import '../../../../core/network/offline_writer.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../cash/domain/entities/cash_entities.dart';
 import '../../../cash/presentation/providers/cash_providers.dart';
@@ -58,12 +58,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   String _method = PosPaymentMethod.cash;
   bool _isSubmitting = false;
   SalesFailureType? _serverFailure;
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
 
   @override
   void initState() {
@@ -568,19 +562,19 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   if (change > 0)
                     _SummaryLine(
                       label: 'الباقي للعميل',
-                      value: _money.format(change),
+                      value: AppFormatters.money(change),
                       emphasized: true,
                       color: scheme.primary,
                     ),
                   if (appliedToBalance > 0) ...<Widget>[
                     _SummaryLine(
                       label: 'مدفوع على الرصيد',
-                      value: _money.format(appliedToBalance),
+                      value: AppFormatters.money(appliedToBalance),
                       color: scheme.primary,
                     ),
                     _SummaryLine(
                       label: 'الرصيد الجديد للعميل',
-                      value: _money.format(resultingBalance),
+                      value: AppFormatters.money(resultingBalance),
                       emphasized: true,
                       color: scheme.primary,
                     ),
@@ -588,12 +582,12 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   if (addedToBalance > 0) ...<Widget>[
                     _SummaryLine(
                       label: 'سيُضاف للرصيد',
-                      value: _money.format(addedToBalance),
+                      value: AppFormatters.money(addedToBalance),
                       color: scheme.error,
                     ),
                     _SummaryLine(
                       label: 'الرصيد الجديد للعميل',
-                      value: _money.format(resultingBalance),
+                      value: AppFormatters.money(resultingBalance),
                       emphasized: true,
                       color: scheme.error,
                     ),
@@ -680,12 +674,6 @@ class _BalanceDetails extends StatelessWidget {
   final double currentInvoice;
   final double totalOwed;
 
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -703,16 +691,16 @@ class _BalanceDetails extends StatelessWidget {
           children: <Widget>[
             _row(context,
                 label: 'الرصيد السابق',
-                value: _money.format(previousBalance),
+                value: AppFormatters.money(previousBalance),
                 color: scheme.error),
             const SizedBox(height: 6),
             _row(context,
                 label: 'قيمة الفاتورة',
-                value: _money.format(currentInvoice)),
+                value: AppFormatters.money(currentInvoice)),
             const Divider(height: 16),
             _row(context,
                 label: 'الإجمالي المطلوب',
-                value: _money.format(totalOwed),
+                value: AppFormatters.money(totalOwed),
                 emphasized: true,
                 color: scheme.primary),
           ],
@@ -761,12 +749,6 @@ class _TotalBanner extends StatelessWidget {
 
   final double total;
 
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -791,7 +773,7 @@ class _TotalBanner extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              _money.format(total),
+              AppFormatters.money(total),
               style: theme.textTheme.headlineMedium?.copyWith(
                 color: scheme.onPrimaryContainer,
                 fontWeight: FontWeight.w800,
@@ -1018,13 +1000,6 @@ class _PosReceiptDialog extends ConsumerWidget {
   /// invoice number, which the server assigns only after delivery.
   final bool isOffline;
 
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final DateFormat _dateTime = DateFormat.yMd('ar_EG').add_Hm();
-
   /// Always shows the print preview dialog first — the user needs to see
   /// the actual thermal shape (WYSIWYG) before choosing a print method.
   Future<void> _handlePrint(BuildContext context, WidgetRef ref) async {
@@ -1123,7 +1098,7 @@ class _PosReceiptDialog extends ConsumerWidget {
                     style: theme.textTheme.bodyMedium,
                   ),
                 Text(
-                  _dateTime.format(receipt.dateTime.toLocal()),
+                  AppFormatters.dateTime(receipt.dateTime),
                   style: theme.textTheme.bodySmall,
                 ),
                 Text(
@@ -1147,13 +1122,13 @@ class _PosReceiptDialog extends ConsumerWidget {
                           ),
                         ),
                         Text(
-                          '${_fmtQty(line.quantity)} × '
-                          '${_money.format(line.unitPrice)}',
+                          '${AppFormatters.quantity(line.quantity)} × '
+                          '${AppFormatters.money(line.unitPrice)}',
                           style: theme.textTheme.bodySmall,
                         ),
                         const SizedBox(width: 8),
                         Text(
-                          _money.format(line.lineTotal),
+                          AppFormatters.money(line.lineTotal),
                           style: theme.textTheme.bodyMedium,
                         ),
                       ],
@@ -1165,32 +1140,37 @@ class _PosReceiptDialog extends ConsumerWidget {
                 const SizedBox(height: 8),
 
                 _row(theme, 'المجموع الفرعي',
-                    _money.format(receipt.subtotal)),
+                    AppFormatters.money(receipt.subtotal)),
                 if (receipt.discount > 0)
-                  _row(theme, 'الخصم', _money.format(receipt.discount)),
+                  _row(theme, 'الخصم',
+                      AppFormatters.money(receipt.discount)),
                 if (receipt.taxAmount > 0)
-                  _row(theme, 'الضريبة', _money.format(receipt.taxAmount)),
-                _row(theme, 'الإجمالي', _money.format(receipt.total),
+                  _row(theme, 'الضريبة',
+                      AppFormatters.money(receipt.taxAmount)),
+                _row(theme, 'الإجمالي',
+                    AppFormatters.money(receipt.total),
                     emphasized: true),
-                _row(theme, 'المدفوع', _money.format(receipt.paidAmount)),
+                _row(theme, 'المدفوع',
+                    AppFormatters.money(receipt.paidAmount)),
                 if (receipt.hasChange)
-                  _row(theme, 'الباقي', _money.format(receipt.change),
+                  _row(theme, 'الباقي',
+                      AppFormatters.money(receipt.change),
                       color: scheme.primary),
 
                 if (receipt.hasBalanceChange) ...<Widget>[
                   const SizedBox(height: 6),
                   _row(theme, 'الرصيد السابق',
-                      _money.format(receipt.previousBalance!),
+                      AppFormatters.money(receipt.previousBalance!),
                       color: scheme.error),
                   if (receipt.hasBalancePayment)
                     _row(
                       theme,
                       'مدفوع على الرصيد السابق',
-                      _money.format(receipt.paidOnBalance),
+                      AppFormatters.money(receipt.paidOnBalance),
                       color: scheme.primary,
                     ),
                   _row(theme, 'الرصيد الجديد',
-                      _money.format(receipt.newBalance!),
+                      AppFormatters.money(receipt.newBalance!),
                       color: scheme.error,
                       emphasized: true),
                 ],
@@ -1223,13 +1203,6 @@ class _PosReceiptDialog extends ConsumerWidget {
         ),
       ),
     );
-  }
-
-  static String _fmtQty(double value) {
-    if (value == value.roundToDouble()) {
-      return value.toInt().toString();
-    }
-    return value.toStringAsFixed(2);
   }
 
   Widget _row(
