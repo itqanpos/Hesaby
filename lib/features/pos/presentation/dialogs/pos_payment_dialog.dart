@@ -6,6 +6,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../../../core/invalidation/data_invalidation.dart';
+import '../../../../core/network/network_status_provider.dart';
+import '../../../../core/network/offline_writer.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../cash/domain/entities/cash_entities.dart';
 import '../../../cash/presentation/providers/cash_providers.dart';
@@ -135,6 +137,14 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   double _resultingBalance() =>
       _cart.customerBalance + _addedToBalance() - _appliedToBalance();
 
+  /// Payment method string accepted by the offline RPC (`cash` / `card`).
+  /// Returns `null` for credit sales (nothing to pay at the register).
+  String? _paymentMethodForOffline() {
+    if (_method == PosPaymentMethod.credit) return null;
+    if (_method == PosPaymentMethod.card) return 'card';
+    return 'cash';
+  }
+
   String? _validationError() {
     if (_cart.isEmpty) return 'السلة فارغة. أضف منتجاً قبل الدفع.';
     if (_method == PosPaymentMethod.credit) {
@@ -160,6 +170,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return null;
   }
 
+  // ---------------------------------------------------------------------------
+  // Submission
+  // ---------------------------------------------------------------------------
+
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
     if (_validationError() != null) return;
@@ -177,6 +191,25 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       _serverFailure = null;
     });
 
+    // ---- Offline short-circuit ----
+    final bool isOnline = ref.read(isOnlineProvider);
+    if (!isOnline) {
+      await _submitOffline(contextState: contextState, branchId: branchId);
+      return;
+    }
+
+    // ---- Online path (existing behaviour) ----
+    await _submitOnline(contextState: contextState, branchId: branchId);
+  }
+
+  /// Direct online submission. Falls back to the offline queue when the
+  /// failure is a network error — this preserves the "sale is not lost"
+  /// guarantee even when the OS reports the device online but a specific
+  /// request times out.
+  Future<void> _submitOnline({
+    required CompanyContextState contextState,
+    required String branchId,
+  }) async {
     final SalesNotifier notifier = ref.read(salesProvider.notifier);
 
     try {
@@ -231,7 +264,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (!mounted) return;
 
       final Receipt receipt = _buildReceipt(
-        sale: confirmed,
+        saleId: confirmed.id,
+        invoiceNumber: confirmed.invoiceNumber,
+        saleDate: confirmed.saleDate,
         contextState: contextState,
       );
 
@@ -247,22 +282,113 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on SaleException catch (error) {
+      // Network error → try to queue instead of showing a hard failure.
+      if (error.type == SalesFailureType.network) {
+        if (!mounted) return;
+        await _submitOffline(
+          contextState: contextState,
+          branchId: branchId,
+        );
+        return;
+      }
       if (!mounted) return;
       setState(() {
         _isSubmitting = false;
         _serverFailure = error.type;
       });
     } on Object {
+      // Unknown error → try to queue, so the sale is not lost.
+      if (!mounted) return;
+      await _submitOffline(
+        contextState: contextState,
+        branchId: branchId,
+      );
+    }
+  }
+
+  /// Offline submission — serialises the cart into an offline queue entry.
+  ///
+  /// The customer-balance portion (if any) is enqueued as a separate
+  /// customer payment so that both effects survive independently.
+  Future<void> _submitOffline({
+    required CompanyContextState contextState,
+    required String branchId,
+  }) async {
+    final List<Map<String, Object?>> items = <Map<String, Object?>>[
+      for (final PosCartLine line in _cart.lines)
+        <String, Object?>{
+          'product_id': line.productId,
+          'unit_id': line.unitId,
+          'quantity': line.quantity,
+          'unit_price': line.unitPrice,
+          'notes': null,
+        },
+    ];
+
+    final double appliedToSale = _appliedToSale();
+    final double appliedToBalance = _appliedToBalance();
+    final String? paymentMethod = _paymentMethodForOffline();
+
+    final String? saleUuid = await OfflineWriter.enqueueSale(
+      ref: ref,
+      branchId: branchId,
+      customerId: _cart.customerId,
+      saleDate: DateTime.now(),
+      items: items,
+      discount: _cart.discount,
+      taxAmount: _effectiveTax,
+      paidAmount: appliedToSale,
+      paymentMethod: paymentMethod,
+      notes: null,
+    );
+
+    if (saleUuid == null) {
       if (!mounted) return;
       setState(() {
         _isSubmitting = false;
         _serverFailure = SalesFailureType.unknown;
       });
+      return;
     }
+
+    if (appliedToBalance > 0 && _cart.customerId != null) {
+      await OfflineWriter.enqueueCustomerPayment(
+        ref: ref,
+        customerId: _cart.customerId!,
+        amount: appliedToBalance,
+        method: paymentMethod ?? 'cash',
+        notes: 'دفعة زيادة من فاتورة أوفلاين',
+      );
+    }
+
+    if (!mounted) return;
+
+    final Receipt receipt = _buildReceipt(
+      saleId: saleUuid,
+      invoiceNumber: null,
+      saleDate: DateTime.now(),
+      contextState: contextState,
+    );
+
+    ref.read(posCartProvider.notifier).reset();
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => _PosReceiptDialog(
+        receipt: receipt,
+        isOffline: true,
+      ),
+    );
+
+    if (!mounted) return;
+    Navigator.of(context).pop(true);
   }
 
   Receipt _buildReceipt({
-    required Sale sale,
+    required String saleId,
+    required String? invoiceNumber,
+    required DateTime saleDate,
     required CompanyContextState contextState,
   }) {
     final double newBalance = _resultingBalance();
@@ -270,9 +396,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         newBalance != _cart.customerBalance;
 
     return Receipt(
-      saleId: sale.id,
-      invoiceNumber: sale.invoiceNumber,
-      dateTime: sale.saleDate,
+      saleId: saleId,
+      invoiceNumber: invoiceNumber,
+      dateTime: saleDate,
       companyName: contextState.currentCompany?.name ?? '—',
       branchName: contextState.currentBranch?.name ?? '—',
       lines: <ReceiptLine>[
@@ -881,9 +1007,16 @@ class _ErrorBanner extends StatelessWidget {
 // ============================================================================
 
 class _PosReceiptDialog extends ConsumerWidget {
-  const _PosReceiptDialog({required this.receipt});
+  const _PosReceiptDialog({
+    required this.receipt,
+    this.isOffline = false,
+  });
 
   final Receipt receipt;
+
+  /// When `true`, the dialog shows a "saved locally" banner and hides the
+  /// invoice number, which the server assigns only after delivery.
+  final bool isOffline;
 
   static final NumberFormat _money = NumberFormat.currency(
     locale: 'en_US',
@@ -894,9 +1027,6 @@ class _PosReceiptDialog extends ConsumerWidget {
 
   /// Always shows the print preview dialog first — the user needs to see
   /// the actual thermal shape (WYSIWYG) before choosing a print method.
-  ///
-  /// The dialog itself exposes the direct thermal print action, so no
-  /// automatic direct print happens here anymore.
   Future<void> _handlePrint(BuildContext context, WidgetRef ref) async {
     if (!context.mounted) return;
     await showPosPrintPreviewDialog(
@@ -928,20 +1058,66 @@ class _PosReceiptDialog extends ConsumerWidget {
               children: <Widget>[
                 Row(
                   children: <Widget>[
-                    Icon(Icons.check_circle,
-                        color: scheme.primary, size: 32),
+                    Icon(
+                      isOffline
+                          ? Icons.cloud_off_outlined
+                          : Icons.check_circle,
+                      color: scheme.primary,
+                      size: 32,
+                    ),
                     const SizedBox(width: 10),
-                    Text(
-                      'تم إتمام البيع',
-                      style: theme.textTheme.titleLarge,
+                    Expanded(
+                      child: Text(
+                        isOffline
+                            ? 'تم حفظ البيع محليًا'
+                            : 'تم إتمام البيع',
+                        style: theme.textTheme.titleLarge,
+                      ),
                     ),
                   ],
                 ),
+
+                if (isOffline) ...<Widget>[
+                  const SizedBox(height: 10),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.schedule,
+                            size: 18,
+                            color: scheme.onTertiaryContainer,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'سيُرسل تلقائيًا عند عودة الاتصال. '
+                              'رقم الفاتورة سيُحدَّد على الخادم.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onTertiaryContainer,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
                 const SizedBox(height: 12),
                 const Divider(height: 1),
                 const SizedBox(height: 12),
 
-                if (receipt.invoiceNumber != null)
+                if (!isOffline && receipt.invoiceNumber != null)
                   Text(
                     'الإيصال: ${receipt.invoiceNumber}',
                     style: theme.textTheme.bodyMedium,
