@@ -8,45 +8,19 @@ import '../models/stock_movement_model.dart';
 
 /// Thin wrapper around the Supabase queries for `inventory_balances` and
 /// `stock_movements`.
-///
-/// This is the only file within the inventory feature that talks to
-/// Supabase directly. Everything above this class deals with
-/// [InventoryBalanceModel] / [StockMovementModel] and never sees Supabase
-/// types.
-///
-/// Tenant isolation is enforced by Row Level Security, and consistency
-/// between the ledger and the balance table is enforced by the database
-/// trigger defined in Phase 5 migration 3:
-/// * `select from inventory_balances` only returns rows of companies where
-///   the current user has an active membership.
-/// * `insert into stock_movements` is only accepted for members holding
-///   owner / admin / manager role, and the trigger keeps the balance
-///   table in sync in the same transaction.
-///
-/// The data source therefore never accepts a `userId` and never trusts a
-/// client-supplied identity. The active identity is always `auth.uid()`,
-/// evaluated inside the database.
 class InventoryRemoteDataSource {
   const InventoryRemoteDataSource(this._client);
 
-  /// Active Supabase client, or `null` when Supabase was not initialised.
   final SupabaseClient? _client;
 
-  /// Whether this data source can perform remote queries.
   bool get isAvailable => _client != null;
 
-  /// Default cap applied by [listMovements] when the caller does not
-  /// provide one. Chosen to protect the client from unbounded payloads.
   static const int defaultMovementLimit = 100;
 
   // ---------------------------------------------------------------------------
   // Balances (read-only)
   // ---------------------------------------------------------------------------
 
-  /// Returns the inventory balances of [branchId], ordered by product id.
-  ///
-  /// When [onlyInStock] is `true`, rows with a zero quantity are omitted
-  /// on the server side (uses the partial index defined in migration 1).
   Future<List<InventoryBalanceModel>> listBalances(
     String companyId,
     String branchId, {
@@ -54,8 +28,6 @@ class InventoryRemoteDataSource {
   }) async {
     final SupabaseClient client = _requireClient();
 
-    // `var` infers `PostgrestFilterBuilder<PostgrestList>`. Reassignment is
-    // used because the filter is applied conditionally.
     var query = client
         .from('inventory_balances')
         .select()
@@ -72,10 +44,6 @@ class InventoryRemoteDataSource {
     return rows.map(InventoryBalanceModel.fromMap).toList(growable: false);
   }
 
-  /// Returns the balance of a single (branch, product) pair.
-  ///
-  /// PostgREST raises `PGRST116` when no row matches; the repository maps
-  /// that to [InventoryFailureType.notFound].
   Future<InventoryBalanceModel> getBalance({
     required String companyId,
     required String branchId,
@@ -98,10 +66,6 @@ class InventoryRemoteDataSource {
   // Movements (append-only)
   // ---------------------------------------------------------------------------
 
-  /// Returns stock movements, most recent first.
-  ///
-  /// [branchId] and [productId] narrow the result when supplied. [limit]
-  /// defaults to [defaultMovementLimit].
   Future<List<StockMovementModel>> listMovements(
     String companyId, {
     String? branchId,
@@ -134,20 +98,17 @@ class InventoryRemoteDataSource {
 
   /// Inserts a stock movement and returns the created row.
   ///
-  /// `created_by` is derived from the authenticated session
-  /// (`auth.currentUser.id`). If no user is signed in, the field is sent as
-  /// `null`; the database allows `null` (ON DELETE SET NULL of the user)
-  /// but in practice every insert happens under an authenticated session.
-  ///
-  /// The database trigger applies the movement to `inventory_balances` in
-  /// the same transaction; a failure there (for example, insufficient
-  /// stock) aborts the whole transaction and no row is persisted.
+  /// [quantity] is expected to already be in the product's **base** unit —
+  /// the caller multiplies any user-entered quantity by the unit's
+  /// conversion factor before calling this method. [unitId] is stored
+  /// verbatim for informational purposes.
   Future<StockMovementModel> recordMovement({
     required String companyId,
     required String branchId,
     required String productId,
     required String movementType,
     required double quantity,
+    String? unitId,
     double? unitCost,
     String? referenceType,
     String? referenceId,
@@ -163,6 +124,7 @@ class InventoryRemoteDataSource {
       'product_id': productId,
       'movement_type': movementType,
       'quantity': quantity,
+      if (unitId != null) 'unit_id': unitId,
       if (unitCost != null) 'unit_cost': unitCost,
       if (referenceType != null) 'reference_type': referenceType,
       if (referenceId != null) 'reference_id': referenceId,
