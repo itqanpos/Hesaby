@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../domain/entities/cash_entities.dart';
 import '../../domain/repositories/cash_repository.dart';
@@ -63,14 +64,20 @@ class _AddCashTransactionSheetState
     super.initState();
     _direction = widget.initialDirection;
     _accountId = widget.initialAccountId;
+    _amountController.addListener(_onAmountChanged);
   }
 
   @override
   void dispose() {
+    _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
     _referenceController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  void _onAmountChanged() {
+    if (mounted) setState(() {});
   }
 
   Future<void> _submit() async {
@@ -84,7 +91,8 @@ class _AddCashTransactionSheetState
       return;
     }
 
-    final double amount = double.tryParse(_amountController.text.trim()) ?? 0;
+    final double amount =
+        double.tryParse(_amountController.text.trim()) ?? 0;
     if (amount <= 0) {
       setState(() => _failure = CashFailureType.invalidInput);
       return;
@@ -96,18 +104,19 @@ class _AddCashTransactionSheetState
     });
 
     try {
-      await ref.read(cashTransactionsProvider.notifier).addManual(
-            accountId: accountId,
-            categoryId: _categoryId,
-            direction: _direction,
-            amount: amount,
-            reference: _emptyToNull(_referenceController.text),
-            notes: _emptyToNull(_notesController.text),
-            transactionDate: DateTime.now(),
-          );
+      final CashTransaction created =
+          await ref.read(cashTransactionsProvider.notifier).addManual(
+                accountId: accountId,
+                categoryId: _categoryId,
+                direction: _direction,
+                amount: amount,
+                reference: _emptyToNull(_referenceController.text),
+                notes: _emptyToNull(_notesController.text),
+                transactionDate: DateTime.now(),
+              );
 
       if (!mounted) return;
-      Navigator.of(context).pop(null);
+      Navigator.of(context).pop(created);
     } on CashException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -153,6 +162,10 @@ class _AddCashTransactionSheetState
       final bool isExpense = c.kind == CashCategoryKind.expense;
       return _direction == CashDirection.inFlow ? isIncome : isExpense;
     }).toList(growable: false);
+
+    // Live preview: parse the entered text and format it with grouping.
+    final double? enteredAmount =
+        double.tryParse(_amountController.text.trim());
 
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
@@ -259,6 +272,16 @@ class _AddCashTransactionSheetState
                     return null;
                   },
                 ),
+
+                // ---- Amount preview ----
+                if (enteredAmount != null && enteredAmount > 0) ...<Widget>[
+                  const SizedBox(height: 6),
+                  _AmountPreview(
+                    amount: enteredAmount,
+                    isIncome: _direction == CashDirection.inFlow,
+                  ),
+                ],
+
                 const SizedBox(height: 12),
 
                 // ---- Category ----
@@ -339,6 +362,69 @@ class _AddCashTransactionSheetState
   }
 }
 
+// ============================================================================
+// Amount preview
+// ============================================================================
+
+class _AmountPreview extends StatelessWidget {
+  const _AmountPreview({
+    required this.amount,
+    required this.isIncome,
+  });
+
+  final double amount;
+  final bool isIncome;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final Color tone =
+        isIncome ? const Color(0xFF0F7B6C) : const Color(0xFFC62828);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              isIncome ? Icons.arrow_downward : Icons.arrow_upward,
+              size: 16,
+              color: tone,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                isIncome ? 'سيُسجَّل وارد' : 'سيُسجَّل صادر',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: tone,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              '${isIncome ? '+' : '−'} ${AppFormatters.money(amount)}',
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: tone,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Empty hint / failure banner
+// ============================================================================
+
 class _EmptyHint extends StatelessWidget {
   const _EmptyHint({required this.message});
 
@@ -391,6 +477,10 @@ class _FailureBanner extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// Localization
+// ============================================================================
 
 String _failureMessage(CashFailureType type) => switch (type) {
       CashFailureType.network =>
