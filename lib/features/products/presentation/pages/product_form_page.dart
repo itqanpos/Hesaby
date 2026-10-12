@@ -7,6 +7,8 @@ import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/validators.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../pos/domain/services/barcode_scanner_service.dart';
+import '../../../pos/presentation/services/mobile_scanner_service.dart';
 import '../../domain/entities/category.dart';
 import '../../domain/entities/product.dart';
 import '../../domain/entities/unit.dart';
@@ -16,17 +18,6 @@ import '../providers/product_providers.dart';
 import '../providers/unit_providers.dart';
 
 /// Opens the product create / edit **page** (full-screen, not a dialog).
-///
-/// * Pass [existing] to edit an existing product, or leave it `null` to
-///   create a new one.
-/// * [initialBarcode] is used to pre-fill the barcode field in **create**
-///   mode only; it is ignored in edit mode.
-/// * [onSaved] is invoked with the saved [Product] just before the page
-///   pops. Used by the POS quick-create flow.
-///
-/// Returns `true` when at least one product was saved, `false` when the
-/// user cancelled, and `null` when the page was dismissed with the system
-/// back gesture without saving.
 Future<bool?> showProductFormDialog({
   required BuildContext context,
   Product? existing,
@@ -62,6 +53,10 @@ class ProductFormPage extends ConsumerStatefulWidget {
 }
 
 class _ProductFormPageState extends ConsumerState<ProductFormPage> {
+  /// Reuses the same scanner that powers POS — already tuned for speed
+  /// (`scanWindow`, `autoZoom`, `unrestricted` detection).
+  static const BarcodeScannerService _scanner = MobileScannerServiceImpl();
+
   final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
 
   late final TextEditingController _nameController;
@@ -176,10 +171,60 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
   }
 
   // ---------------------------------------------------------------------------
+  // Barcode scanner
+  // ---------------------------------------------------------------------------
+
+  /// Opens the tuned barcode scanner and writes the result into the
+  /// barcode field.
+  ///
+  /// Uses the same service as the POS so the scanning experience is
+  /// identical across the app.
+  Future<void> _openBarcodeScanner() async {
+    FocusScope.of(context).unfocus();
+
+    if (!_scanner.isSupported) {
+      _showScannerUnsupportedMessage();
+      return;
+    }
+
+    final String? scanned = await _scanner.scan(context);
+    if (!mounted) return;
+    if (scanned == null || scanned.trim().isEmpty) return;
+
+    final String value = scanned.trim();
+    _barcodeController.value = TextEditingValue(
+      text: value,
+      selection: TextSelection.collapsed(offset: value.length),
+    );
+
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text('تم مسح الباركود: $value'),
+          duration: const Duration(seconds: 2),
+        ),
+      );
+  }
+
+  void _showScannerUnsupportedMessage() {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(
+          content: Text(
+            'المسح بالكاميرا غير مدعوم على هذا الجهاز. '
+            'استخدم قارئ باركود خارجي أو اكتب الرقم يدويًا.',
+          ),
+          duration: Duration(seconds: 3),
+        ),
+      );
+  }
+
+  // ---------------------------------------------------------------------------
   // Toggle active
   // ---------------------------------------------------------------------------
 
-  /// Flips [_isActive]. The change is persisted only when the user saves.
   void _toggleActive() {
     setState(() => _isActive = !_isActive);
   }
@@ -332,9 +377,6 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
         child: ListView(
           padding: const EdgeInsets.only(bottom: 120),
           children: <Widget>[
-            // ============================================================
-            // Section: Basic info
-            // ============================================================
             const _SectionHeader(
               title: 'المعلومات الأساسية',
               icon: Icons.info_outline,
@@ -374,9 +416,6 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
 
             const SizedBox(height: 20),
 
-            // ============================================================
-            // Section: Prices
-            // ============================================================
             const _SectionHeader(
               title: 'الأسعار',
               icon: Icons.attach_money_outlined,
@@ -444,9 +483,6 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
 
             const SizedBox(height: 20),
 
-            // ============================================================
-            // Section: Identification
-            // ============================================================
             const _SectionHeader(
               title: 'التعريف',
               icon: Icons.qr_code_2_outlined,
@@ -464,19 +500,24 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
               right: AppTextField(
                 controller: _barcodeController,
                 label: 'الباركود',
-                hint: 'اختياري',
+                hint: 'اختياري — أو امسح ضوئيًا',
                 enabled: !_isSubmitting,
                 keyboardType: TextInputType.number,
                 textInputAction: TextInputAction.next,
                 validator: _validateBarcode,
+                suffixIcon: IconButton(
+                  tooltip: 'مسح الباركود بالكاميرا',
+                  icon: Icon(
+                    Icons.qr_code_scanner,
+                    color: scheme.primary,
+                  ),
+                  onPressed: _isSubmitting ? null : _openBarcodeScanner,
+                ),
               ),
             ),
 
             const SizedBox(height: 20),
 
-            // ============================================================
-            // Section: Optional (collapsible)
-            // ============================================================
             _CollapsibleHeader(
               title: 'تفاصيل إضافية',
               icon: Icons.notes_outlined,
@@ -500,9 +541,6 @@ class _ProductFormPageState extends ConsumerState<ProductFormPage> {
 
             const SizedBox(height: 20),
 
-            // ============================================================
-            // Section: Status (تعطيل/تفعيل)
-            // ============================================================
             _StatusSection(
               isActive: _isActive,
               enabled: !_isSubmitting,
@@ -953,7 +991,6 @@ class _StatusSection extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    // Active: green tone. Inactive: warning tone.
     final Color tone =
         isActive ? const Color(0xFF0F7B6C) : const Color(0xFFB26A00);
     final IconData statusIcon =
@@ -963,7 +1000,6 @@ class _StatusSection extends StatelessWidget {
         ? 'يظهر للكاشير في نقطة البيع والقوائم.'
         : 'لن يظهر للكاشير عند البيع حتى تفعّله مجددًا.';
 
-    // Button label & colour reflect the *next* action.
     final String actionLabel =
         isActive ? 'تعطيل المنتج' : 'تفعيل المنتج';
     final IconData actionIcon = isActive
