@@ -2,8 +2,10 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/network/network_status_provider.dart';
+import '../../../../core/network/offline_writer.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../domain/entities/supplier_payment.dart';
@@ -16,6 +18,11 @@ import '../providers/supplier_payment_providers.dart';
 /// * When [purchaseId] is provided, the payment is linked to that purchase
 ///   and [suggestedAmount] is pre-filled (typically the remaining balance).
 /// * Returns `true` when a payment was recorded, `false` when cancelled.
+///
+/// **Offline support (Phase O-2):** when the device is offline — or the
+/// direct call fails with a network error — the payment is serialised
+/// into the offline queue and delivered automatically once connectivity
+/// is restored.
 Future<bool?> showSupplierPaymentDialog({
   required BuildContext context,
   required String supplierId,
@@ -78,13 +85,6 @@ class _SupplierPaymentSheetState
   bool _isSubmitting = false;
   SupplierPaymentFailureType? _failure;
 
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final DateFormat _dateFormat = DateFormat.yMd('ar_EG');
-
   @override
   void initState() {
     super.initState();
@@ -135,6 +135,18 @@ class _SupplierPaymentSheetState
 
     setState(() => _isSubmitting = true);
 
+    // ---- Offline short-circuit ----
+    final bool isOnline = ref.read(isOnlineProvider);
+    if (!isOnline) {
+      await _submitOffline(amount: amount);
+      return;
+    }
+
+    // ---- Online path ----
+    await _submitOnline(amount: amount);
+  }
+
+  Future<void> _submitOnline({required double amount}) async {
     try {
       await ref
           .read(supplierPaymentsForSupplierProvider(widget.supplierId).notifier)
@@ -153,21 +165,62 @@ class _SupplierPaymentSheetState
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          SnackBar(content: Text('تم تسجيل الدفعة: ${_money.format(amount)}')),
+          SnackBar(
+            content: Text(
+              'تم تسجيل الدفعة: ${AppFormatters.money(amount)}',
+            ),
+          ),
         );
     } on SupplierPaymentException catch (error) {
+      // Network error → fall back to the offline queue.
+      if (error.type == SupplierPaymentFailureType.network) {
+        if (!mounted) return;
+        await _submitOffline(amount: amount);
+        return;
+      }
       if (!mounted) return;
       setState(() {
         _isSubmitting = false;
         _failure = error.type;
       });
     } on Object {
+      // Unknown error → try to queue so the payment is not lost.
       if (!mounted) return;
+      await _submitOffline(amount: amount);
+    }
+  }
+
+  Future<void> _submitOffline({required double amount}) async {
+    final String? uuid = await OfflineWriter.enqueueSupplierPayment(
+      ref: ref,
+      supplierId: widget.supplierId,
+      amount: amount,
+      method: _method,
+      reference: _nullIfEmpty(_referenceController.text),
+      notes: _nullIfEmpty(_notesController.text),
+    );
+
+    if (!mounted) return;
+
+    if (uuid == null) {
       setState(() {
         _isSubmitting = false;
         _failure = SupplierPaymentFailureType.unknown;
       });
+      return;
     }
+
+    Navigator.of(context).pop(true);
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            'تم حفظ الدفعة محليًا: ${AppFormatters.money(amount)} — '
+            'ستُرسل تلقائيًا عند عودة الاتصال.',
+          ),
+        ),
+      );
   }
 
   static String? _nullIfEmpty(String value) {
@@ -335,7 +388,7 @@ class _SupplierPaymentSheetState
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: <Widget>[
-                            Text(_dateFormat.format(_paymentDate)),
+                            Text(AppFormatters.date(_paymentDate)),
                             const Icon(
                               Icons.calendar_today_outlined,
                               size: 18,
@@ -432,12 +485,6 @@ class _ContextCard extends StatelessWidget {
   final String? purchaseLabel;
   final double? suggestedAmount;
 
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -499,7 +546,8 @@ class _ContextCard extends StatelessWidget {
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
-                      'المتبقي على الفاتورة: ${_money.format(suggestedAmount!)}',
+                      'المتبقي على الفاتورة: '
+                      '${AppFormatters.money(suggestedAmount!)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.primary,
                         fontWeight: FontWeight.w600,
