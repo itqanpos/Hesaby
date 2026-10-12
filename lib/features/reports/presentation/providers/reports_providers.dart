@@ -22,6 +22,7 @@ import '../../data/repositories/reports_repository_impl.dart';
 import '../../domain/entities/aging_reports.dart';
 import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/inventory_reports.dart';
+import '../../domain/entities/profit_reports.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
 import '../../domain/repositories/reports_repository.dart';
@@ -128,6 +129,45 @@ class TopProductsNotifier
 final topProductsProvider = AsyncNotifierProvider.family<
     TopProductsNotifier, List<TopProduct>, ReportPeriod>(
   TopProductsNotifier.new,
+);
+
+// ============================================================================
+// Product profit (per product)
+// ============================================================================
+
+/// Per-product gross profit for a period.
+///
+/// Combines revenue from `sale_items` with cost from `sale_out` stock
+/// movements, so the numbers reflect the historical average cost at the
+/// moment each sale was confirmed.
+class ProductProfitNotifier
+    extends FamilyAsyncNotifier<ProductProfitReport, ReportPeriod> {
+  @override
+  Future<ProductProfitReport> build(ReportPeriod period) async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      return ProductProfitReport.empty();
+    }
+    return ref.read(reportsRepositoryProvider).getProductProfit(
+          companyId: companyId,
+          period: period,
+          productNames: _buildProductNames(ref),
+        );
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+}
+
+final productProfitProvider = AsyncNotifierProvider.family<
+    ProductProfitNotifier, ProductProfitReport, ReportPeriod>(
+  ProductProfitNotifier.new,
 );
 
 // ============================================================================
