@@ -4,9 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
 import '../../../../app/router.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -23,6 +23,9 @@ import '../widgets/employee_form_sheet.dart';
 ///
 /// The AppBar "shield" action opens the permissions page — visible only
 /// when the current user is a manager (owner / admin / manager).
+///
+/// **Interaction model:** tapping a card does nothing — edit / login /
+/// toggle / delete are reached only from the per-card overflow menu.
 class EmployeesPage extends ConsumerStatefulWidget {
   const EmployeesPage({super.key});
 
@@ -33,12 +36,6 @@ class EmployeesPage extends ConsumerStatefulWidget {
 class _EmployeesPageState extends ConsumerState<EmployeesPage> {
   final TextEditingController _searchController = TextEditingController();
   String _query = '';
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 0,
-  );
 
   @override
   void dispose() {
@@ -224,7 +221,6 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                   total: total,
                   active: active,
                   withAccount: withAccount,
-                  money: _money,
                   employees: all,
                 ),
               ),
@@ -272,7 +268,6 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
                           final Employee e = filtered[i];
                           return _EmployeeCard(
                             employee: e,
-                            money: _money,
                             onEdit: () => _openForm(existing: e),
                             onDelete: () => _confirmDelete(e),
                             onToggleActive: () => _toggleActive(e),
@@ -298,14 +293,12 @@ class _KpiRow extends StatelessWidget {
     required this.total,
     required this.active,
     required this.withAccount,
-    required this.money,
     required this.employees,
   });
 
   final int total;
   final int active;
   final int withAccount;
-  final NumberFormat money;
   final List<Employee> employees;
 
   @override
@@ -322,7 +315,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.people_outline,
                 label: 'الكل',
-                value: '$total',
+                value: AppFormatters.integer(total),
                 color: const Color(0xFF0288D1),
               ),
             ),
@@ -331,7 +324,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.check_circle_outline,
                 label: 'نشط',
-                value: '$active',
+                value: AppFormatters.integer(active),
                 color: const Color(0xFF0F7B6C),
               ),
             ),
@@ -340,7 +333,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.vpn_key_outlined,
                 label: 'لديه حساب',
-                value: '$withAccount',
+                value: AppFormatters.integer(withAccount),
                 color: const Color(0xFF6A1B9A),
               ),
             ),
@@ -350,7 +343,7 @@ class _KpiRow extends StatelessWidget {
         _KpiCard(
           icon: Icons.payments_outlined,
           label: 'إجمالي الرواتب الشهرية (النشطون)',
-          value: money.format(totalSalaries),
+          value: AppFormatters.money(totalSalaries),
           color: const Color(0xFF0F7B6C),
         ),
       ],
@@ -433,7 +426,6 @@ class _KpiCard extends StatelessWidget {
 class _EmployeeCard extends StatelessWidget {
   const _EmployeeCard({
     required this.employee,
-    required this.money,
     required this.onEdit,
     required this.onDelete,
     required this.onToggleActive,
@@ -441,7 +433,6 @@ class _EmployeeCard extends StatelessWidget {
   });
 
   final Employee employee;
-  final NumberFormat money;
   final VoidCallback onEdit;
   final VoidCallback onDelete;
   final VoidCallback onToggleActive;
@@ -459,171 +450,167 @@ class _EmployeeCard extends StatelessWidget {
     return Material(
       color: scheme.surface,
       borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onEdit,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              CircleAvatar(
-                radius: 22,
-                backgroundColor: isActive
-                    ? scheme.primaryContainer
-                    : scheme.surfaceContainerHighest,
-                foregroundColor: isActive
-                    ? scheme.onPrimaryContainer
-                    : scheme.onSurfaceVariant,
-                child: Text(
-                  initial,
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            CircleAvatar(
+              radius: 22,
+              backgroundColor: isActive
+                  ? scheme.primaryContainer
+                  : scheme.surfaceContainerHighest,
+              foregroundColor: isActive
+                  ? scheme.onPrimaryContainer
+                  : scheme.onSurfaceVariant,
+              child: Text(
+                initial,
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w800,
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          employee.fullName,
+                          style: theme.textTheme.titleSmall?.copyWith(
+                            fontWeight: FontWeight.w800,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ),
+                      if (!isActive)
+                        _Badge(
+                          label: 'معطّل',
+                          background: scheme.surfaceContainerHighest,
+                          foreground: scheme.onSurfaceVariant,
+                        ),
+                    ],
+                  ),
+                  if (employee.position != null) ...<Widget>[
+                    const SizedBox(height: 3),
+                    Text(
+                      employee.position!,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                  ],
+                  if (employee.phone != null) ...<Widget>[
+                    const SizedBox(height: 3),
                     Row(
                       children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            employee.fullName,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w800,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (!isActive)
-                          _Badge(
-                            label: 'معطّل',
-                            background: scheme.surfaceContainerHighest,
-                            foreground: scheme.onSurfaceVariant,
-                          ),
-                      ],
-                    ),
-                    if (employee.position != null) ...<Widget>[
-                      const SizedBox(height: 3),
-                      Text(
-                        employee.position!,
-                        style: theme.textTheme.bodySmall?.copyWith(
+                        Icon(
+                          Icons.phone_outlined,
+                          size: 12,
                           color: scheme.onSurfaceVariant,
                         ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                    if (employee.phone != null) ...<Widget>[
-                      const SizedBox(height: 3),
-                      Row(
-                        children: <Widget>[
-                          Icon(
-                            Icons.phone_outlined,
-                            size: 12,
+                        const SizedBox(width: 4),
+                        Text(
+                          employee.phone!,
+                          style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
-                          const SizedBox(width: 4),
-                          Text(
-                            employee.phone!,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: scheme.onSurfaceVariant,
-                            ),
-                            textDirection: TextDirection.ltr,
-                          ),
-                        ],
-                      ),
-                    ],
-                    const SizedBox(height: 6),
-                    Text(
-                      'راتب: ${money.format(employee.baseSalary)}',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: scheme.primary,
-                        fontWeight: FontWeight.w800,
-                      ),
+                          textDirection: TextDirection.ltr,
+                        ),
+                      ],
                     ),
-                    const SizedBox(height: 6),
-                    if (employee.hasAccount)
-                      _Badge(
-                        label: 'حساب نشط: ${employee.loginCode ?? "—"}',
-                        background: scheme.tertiaryContainer,
-                        foreground: scheme.onTertiaryContainer,
-                        icon: Icons.vpn_key_outlined,
-                      )
-                    else
-                      _Badge(
-                        label: 'لا يوجد حساب دخول',
-                        background: scheme.surfaceContainerHighest,
-                        foreground: scheme.onSurfaceVariant,
-                        icon: Icons.lock_outline,
-                      ),
                   ],
-                ),
-              ),
-              PopupMenuButton<_EmployeeAction>(
-                tooltip: 'خيارات',
-                onSelected: (_EmployeeAction a) {
-                  switch (a) {
-                    case _EmployeeAction.edit:
-                      onEdit();
-                    case _EmployeeAction.createLogin:
-                      onCreateLogin();
-                    case _EmployeeAction.toggle:
-                      onToggleActive();
-                    case _EmployeeAction.delete:
-                      onDelete();
-                  }
-                },
-                itemBuilder: (BuildContext _) =>
-                    <PopupMenuEntry<_EmployeeAction>>[
-                  const PopupMenuItem<_EmployeeAction>(
-                    value: _EmployeeAction.edit,
-                    child: ListTile(
-                      leading: Icon(Icons.edit_outlined),
-                      title: Text('تعديل'),
-                      contentPadding: EdgeInsets.zero,
+                  const SizedBox(height: 6),
+                  Text(
+                    'راتب: ${AppFormatters.money(employee.baseSalary)}',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: scheme.primary,
+                      fontWeight: FontWeight.w800,
                     ),
                   ),
-                  if (!employee.hasAccount)
-                    const PopupMenuItem<_EmployeeAction>(
-                      value: _EmployeeAction.createLogin,
-                      child: ListTile(
-                        leading: Icon(Icons.vpn_key_outlined),
-                        title: Text('إنشاء حساب دخول'),
-                        contentPadding: EdgeInsets.zero,
-                      ),
+                  const SizedBox(height: 6),
+                  if (employee.hasAccount)
+                    _Badge(
+                      label: 'حساب نشط: ${employee.loginCode ?? "—"}',
+                      background: scheme.tertiaryContainer,
+                      foreground: scheme.onTertiaryContainer,
+                      icon: Icons.vpn_key_outlined,
+                    )
+                  else
+                    _Badge(
+                      label: 'لا يوجد حساب دخول',
+                      background: scheme.surfaceContainerHighest,
+                      foreground: scheme.onSurfaceVariant,
+                      icon: Icons.lock_outline,
                     ),
-                  PopupMenuItem<_EmployeeAction>(
-                    value: _EmployeeAction.toggle,
-                    child: ListTile(
-                      leading: Icon(
-                        employee.isActive
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
-                      ),
-                      title: Text(
-                        employee.isActive ? 'تعطيل' : 'تفعيل',
-                      ),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  const PopupMenuItem<_EmployeeAction>(
-                    value: _EmployeeAction.delete,
-                    child: ListTile(
-                      leading: Icon(Icons.delete_outline),
-                      title: Text('حذف'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
                 ],
               ),
-            ],
-          ),
+            ),
+            PopupMenuButton<_EmployeeAction>(
+              tooltip: 'خيارات',
+              onSelected: (_EmployeeAction a) {
+                switch (a) {
+                  case _EmployeeAction.edit:
+                    onEdit();
+                  case _EmployeeAction.createLogin:
+                    onCreateLogin();
+                  case _EmployeeAction.toggle:
+                    onToggleActive();
+                  case _EmployeeAction.delete:
+                    onDelete();
+                }
+              },
+              itemBuilder: (BuildContext _) =>
+                  <PopupMenuEntry<_EmployeeAction>>[
+                const PopupMenuItem<_EmployeeAction>(
+                  value: _EmployeeAction.edit,
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('تعديل'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                if (!employee.hasAccount)
+                  const PopupMenuItem<_EmployeeAction>(
+                    value: _EmployeeAction.createLogin,
+                    child: ListTile(
+                      leading: Icon(Icons.vpn_key_outlined),
+                      title: Text('إنشاء حساب دخول'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                PopupMenuItem<_EmployeeAction>(
+                  value: _EmployeeAction.toggle,
+                  child: ListTile(
+                    leading: Icon(
+                      employee.isActive
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                    ),
+                    title: Text(
+                      employee.isActive ? 'تعطيل' : 'تفعيل',
+                    ),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                const PopupMenuItem<_EmployeeAction>(
+                  value: _EmployeeAction.delete,
+                  child: ListTile(
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('حذف'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
