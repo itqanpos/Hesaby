@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/entities/employee_advance.dart';
@@ -65,8 +65,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
   String _paymentMethod = 'cash';
   bool _isSaving = false;
   SalaryFailureType? _failure;
-
-  static final DateFormat _monthFmt = DateFormat('yyyy/MM');
 
   bool get _isEdit => widget.existing != null;
   bool get _isPaid => widget.existing?.isPaid ?? false;
@@ -201,11 +199,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
     final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
 
     final Employee e = widget.employee;
-    final NumberFormat money = NumberFormat.currency(
-      locale: 'en_US',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     // ---- Available advances (open) for this employee ----
     final List<EmployeeAdvance> employeeAdvances =
@@ -239,7 +232,8 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${e.fullName} · ${_monthFmt.format(widget.salaryMonth)}',
+                  '${e.fullName} · '
+                  '${AppFormatters.longMonth(widget.salaryMonth)}',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -276,7 +270,7 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 // ---- Deductions ----
                 _MoneyField(
                   controller: _deductionsController,
-                  label: 'الخصومات (-)',
+                  label: 'الخصومات (−)',
                   enabled: !_isSaving && !_isPaid,
                 ),
                 const SizedBox(height: 12),
@@ -284,11 +278,11 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 // ---- Advances (with available hint) ----
                 _MoneyField(
                   controller: _advancesController,
-                  label: 'خصم السلف (-)',
+                  label: 'خصم السلف (−)',
                   enabled: !_isSaving && !_isPaid,
                   helperText: totalAvailableAdvances > 0
                       ? 'المتاح للخصم من السلف: '
-                          '${money.format(totalAvailableAdvances)}'
+                          '${AppFormatters.money(totalAvailableAdvances)}'
                       : 'لا يوجد سلف مفتوحة لهذا الموظف',
                   validator: (String? v) {
                     final String t = (v ?? '').trim();
@@ -296,7 +290,8 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                     final double? d = double.tryParse(t);
                     if (d == null || d < 0) return 'قيمة غير صحيحة';
                     if (d > totalAvailableAdvances + 0.01) {
-                      return 'المتاح: ${money.format(totalAvailableAdvances)}';
+                      return 'المتاح: '
+                          '${AppFormatters.money(totalAvailableAdvances)}';
                     }
                     return null;
                   },
@@ -324,7 +319,7 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                         ),
                         const Spacer(),
                         Text(
-                          money.format(_net),
+                          AppFormatters.money(_net),
                           style: theme.textTheme.headlineSmall?.copyWith(
                             color: scheme.onPrimaryContainer,
                             fontWeight: FontWeight.w800,
