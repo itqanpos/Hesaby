@@ -3,16 +3,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../app/router.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
-import '../../../companies/presentation/providers/company_context_provider.dart';
-import '../../../companies/presentation/providers/company_context_state.dart';
-import '../../../pos/domain/entities/receipt.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
@@ -20,11 +17,18 @@ import '../../../products/presentation/providers/unit_providers.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/entities/sale_return.dart';
 import '../../domain/repositories/sales_repository.dart';
-import '../dialogs/sale_print_dialog.dart';
 import '../dialogs/sale_return_dialog.dart';
 import '../providers/sales_providers.dart';
+import '../services/sale_print_actions.dart';
 
 /// Full-page view of a single sale invoice.
+///
+/// Actions:
+/// * 🖨️ **طباعة** — direct thermal print (no preview, no PDF).
+/// * 📤 **مشاركة** — build a PDF and open the platform share sheet.
+/// * ↩️ **إنشاء مرتجع** — only for confirmed sales.
+/// * 🔒 **إلغاء الفاتورة** — compact icon-only danger action (in the
+///   actions card).
 class SaleDetailPage extends ConsumerStatefulWidget {
   const SaleDetailPage({super.key, required this.saleId});
 
@@ -36,6 +40,10 @@ class SaleDetailPage extends ConsumerStatefulWidget {
 
 class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
   bool _isActing = false;
+  bool _isPrinting = false;
+  bool _isSharing = false;
+
+  bool get _isBusy => _isActing || _isPrinting || _isSharing;
 
   @override
   Widget build(BuildContext context) {
@@ -128,7 +136,7 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
             IconButton(
               tooltip: 'إنشاء مرتجع',
               icon: const Icon(Icons.assignment_return_outlined),
-              onPressed: _isActing || items.isEmpty
+              onPressed: _isBusy || items.isEmpty
                   ? null
                   : () => _openReturnDialog(
                         sale,
@@ -140,10 +148,35 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
             ),
           IconButton(
             tooltip: 'طباعة',
-            icon: const Icon(Icons.print_outlined),
-            onPressed: _isActing || items.isEmpty
+            icon: _isPrinting
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.print_outlined),
+            onPressed: _isBusy || items.isEmpty
                 ? null
-                : () => _printSale(
+                : () => _handlePrint(
+                      sale,
+                      items,
+                      customerName,
+                      productNames,
+                      unitNames,
+                    ),
+          ),
+          IconButton(
+            tooltip: 'مشاركة',
+            icon: _isSharing
+                ? const SizedBox(
+                    width: 18,
+                    height: 18,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.ios_share),
+            onPressed: _isBusy || items.isEmpty
+                ? null
+                : () => _handleShare(
                       sale,
                       items,
                       customerName,
@@ -339,58 +372,71 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Print
+  // Print & share
   // ---------------------------------------------------------------------------
 
-  Future<void> _printSale(
+  Future<void> _handlePrint(
     Sale sale,
     List<SaleItem> items,
     String customerName,
     Map<String, String> productNames,
     Map<String, String> unitNames,
   ) async {
-    if (items.isEmpty) {
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('لا يمكن طباعة فاتورة بدون بنود.'),
-          ),
-        );
-      return;
+    if (_isPrinting) return;
+    setState(() => _isPrinting = true);
+    try {
+      final DirectSalePrintResult result = await printSaleDirect(
+        ref: ref,
+        sale: sale,
+        items: items,
+        customerName: customerName,
+        productNames: productNames,
+        unitNames: unitNames,
+      );
+      if (!mounted) return;
+      _snack(directSalePrintMessage(result));
+    } on Object {
+      if (!mounted) return;
+      _snack('تعذّر تحضير الفاتورة للطباعة.');
+    } finally {
+      if (mounted) setState(() => _isPrinting = false);
     }
+  }
 
-    final CompanyContextState contextState =
-        ref.read(companyContextProvider);
+  Future<void> _handleShare(
+    Sale sale,
+    List<SaleItem> items,
+    String customerName,
+    Map<String, String> productNames,
+    Map<String, String> unitNames,
+  ) async {
+    if (_isSharing) return;
+    setState(() => _isSharing = true);
+    try {
+      final bool ok = await shareSalePdf(
+        ref: ref,
+        sale: sale,
+        items: items,
+        customerName: customerName,
+        productNames: productNames,
+        unitNames: unitNames,
+      );
+      if (!mounted) return;
+      if (!ok) {
+        _snack('تعذّرت مشاركة الفاتورة.');
+      }
+    } on Object {
+      if (!mounted) return;
+      _snack('تعذّرت مشاركة الفاتورة.');
+    } finally {
+      if (mounted) setState(() => _isSharing = false);
+    }
+  }
 
-    final Receipt receipt = Receipt(
-      saleId: sale.id,
-      invoiceNumber: sale.invoiceNumber,
-      dateTime: sale.saleDate,
-      companyName: contextState.currentCompany?.name ?? '—',
-      branchName: contextState.currentBranch?.name ?? '—',
-      lines: <ReceiptLine>[
-        for (final SaleItem item in items)
-          ReceiptLine(
-            productName: productNames[item.productId] ?? 'منتج محذوف',
-            unitName: unitNames[item.unitId] ?? 'وحدة',
-            quantity: item.quantity,
-            unitPrice: item.unitPrice,
-            lineTotal: item.lineTotal,
-          ),
-      ],
-      subtotal: sale.subtotal,
-      discount: sale.discount,
-      taxAmount: sale.taxAmount,
-      total: sale.total,
-      paidAmount: sale.paidAmount,
-      change: 0,
-      customerName: sale.customerId != null ? customerName : null,
-      previousBalance: null,
-      newBalance: null,
-    );
-
-    await showSalePrintDialog(context: context, receipt: receipt);
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   // ---------------------------------------------------------------------------
@@ -436,7 +482,6 @@ class _HeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final DateFormat dateTimeFormat = DateFormat.yMd('ar_EG').add_Hm();
 
     final (Color badgeBg, Color badgeFg) = _statusColors(
       scheme,
@@ -494,7 +539,7 @@ class _HeaderCard extends StatelessWidget {
                 ),
                 const SizedBox(width: 6),
                 Text(
-                  dateTimeFormat.format(sale.saleDate.toLocal()),
+                  AppFormatters.dateTime(sale.saleDate),
                   style: theme.textTheme.bodyMedium,
                 ),
               ],
@@ -547,9 +592,6 @@ class _ActionsCard extends StatelessWidget {
       return const SizedBox.shrink();
     }
 
-    // Edit and Confirm remain equally-wide primary actions. Cancel is a
-    // compact, icon-only danger action pinned to the end of the row so it
-    // never competes with the primary buttons for attention.
     final List<Widget> buttons = <Widget>[];
 
     if (showEdit) {
@@ -649,7 +691,7 @@ class _ItemsCard extends StatelessWidget {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Text(
-              'البنود (${items.length})',
+              'البنود (${AppFormatters.integer(items.length)})',
               style: theme.textTheme.titleMedium,
             ),
             const SizedBox(height: 10),
@@ -693,12 +735,6 @@ class _ItemRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final NumberFormat numberFormat = NumberFormat.decimalPattern('ar_EG');
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -721,8 +757,8 @@ class _ItemRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${numberFormat.format(item.quantity)} $unitName × '
-                    '${moneyFormat.format(item.unitPrice)}',
+                    '${AppFormatters.quantity(item.quantity)} $unitName × '
+                    '${AppFormatters.money(item.unitPrice)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -732,7 +768,7 @@ class _ItemRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              moneyFormat.format(item.lineTotal),
+              AppFormatters.money(item.lineTotal),
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.primary,
                 fontWeight: FontWeight.w700,
@@ -758,11 +794,6 @@ class _TotalsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -778,30 +809,30 @@ class _TotalsCard extends StatelessWidget {
             Text('الإجماليات', style: theme.textTheme.titleMedium),
             const SizedBox(height: 10),
             _line(theme, 'المجموع الفرعي',
-                moneyFormat.format(sale.subtotal)),
+                AppFormatters.money(sale.subtotal)),
             const SizedBox(height: 4),
-            _line(theme, 'الخصم', moneyFormat.format(sale.discount)),
+            _line(theme, 'الخصم', AppFormatters.money(sale.discount)),
             const SizedBox(height: 4),
-            _line(theme, 'الضريبة', moneyFormat.format(sale.taxAmount)),
+            _line(theme, 'الضريبة', AppFormatters.money(sale.taxAmount)),
             const Divider(height: 20),
             _line(
               theme,
               'الإجمالي',
-              moneyFormat.format(sale.total),
+              AppFormatters.money(sale.total),
               emphasized: true,
             ),
             const SizedBox(height: 4),
             _line(
               theme,
               'المدفوع',
-              moneyFormat.format(sale.paidAmount),
+              AppFormatters.money(sale.paidAmount),
             ),
             if (sale.amountDue > 0) ...<Widget>[
               const SizedBox(height: 4),
               _line(
                 theme,
                 'المتبقي',
-                moneyFormat.format(sale.amountDue),
+                AppFormatters.money(sale.amountDue),
                 emphasized: true,
                 color: scheme.error,
               ),
@@ -884,7 +915,7 @@ class _ReturnsCard extends ConsumerWidget {
                     ),
                     const SizedBox(width: 8),
                     Text(
-                      'المرتجعات (${returns.length})',
+                      'المرتجعات (${AppFormatters.integer(returns.length)})',
                       style: theme.textTheme.titleMedium,
                     ),
                   ],
@@ -1000,13 +1031,6 @@ class _ReturnRow extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
-    final DateFormat date = DateFormat.yMd('ar_EG');
-
     final (Color badgeBg, Color badgeFg) =
         _returnStatusColors(scheme, saleReturn.status);
 
@@ -1060,12 +1084,12 @@ class _ReturnRow extends StatelessWidget {
                   Row(
                     children: <Widget>[
                       Text(
-                        date.format(saleReturn.returnDate.toLocal()),
+                        AppFormatters.date(saleReturn.returnDate),
                         style: theme.textTheme.bodySmall,
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        money.format(saleReturn.total),
+                        AppFormatters.money(saleReturn.total),
                         style: theme.textTheme.titleSmall?.copyWith(
                           color: scheme.primary,
                           fontWeight: FontWeight.w700,
