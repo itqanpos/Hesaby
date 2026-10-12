@@ -254,7 +254,6 @@ class _HeroCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
     final bool isProfit = report.totalProfit >= 0;
     final Color tone = isProfit
         ? const Color(0xFF0F7B6C)
