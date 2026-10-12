@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
@@ -20,22 +20,20 @@ class SalesSummaryPage extends ConsumerStatefulWidget {
 }
 
 class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final NumberFormat _percent = NumberFormat.decimalPercentPattern(
-    locale: 'ar_EG',
-    decimalDigits: 1,
-  );
-
   Future<void> _changePeriod(ReportPeriod newPeriod) async {
     ref.read(reportPagePeriodProvider.notifier).setPeriod(newPeriod);
     final ReportPeriod p = ref.read(reportPagePeriodProvider);
     await ref
         .read(salesSummaryProvider(p).future)
         .catchError((_) => SalesSummary.empty(p));
+  }
+
+  /// Returns the localized percent string for a ratio (0..1).
+  ///
+  /// `AppFormatters.percent` expects a value in 0..100, so we multiply.
+  static String _ratio(double ratio) {
+    if (!ratio.isFinite) return '—';
+    return AppFormatters.percent(ratio * 100);
   }
 
   ReportDocument? _buildDocument(
@@ -56,37 +54,46 @@ class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: 'صافي المبيعات',
-              value: _money.format(summary.netSales),
+              value: AppFormatters.money(summary.netSales),
               emphasized: true,
             ),
             ReportKpi(
               label: 'إجمالي المبيعات',
-              value: _money.format(summary.totalSales),
+              value: AppFormatters.money(summary.totalSales),
             ),
             ReportKpi(
               label: 'المحصَّل',
-              value: _money.format(summary.totalPaid),
+              value: AppFormatters.money(summary.totalPaid),
             ),
             ReportKpi(
               label: 'غير محصَّل',
-              value: _money.format(summary.totalDue),
+              value: AppFormatters.money(summary.totalDue),
             ),
             ReportKpi(
               label: 'متوسط الفاتورة',
-              value: _money.format(summary.averageInvoice),
+              value: AppFormatters.money(summary.averageInvoice),
             ),
             ReportKpi(
               label: 'عدد الفواتير',
-              value: '${summary.confirmedCount}',
+              value: AppFormatters.integer(summary.confirmedCount),
             ),
           ],
         ),
         ReportSection(
           title: 'تفاصيل الفواتير',
           lines: <ReportLine>[
-            ReportLine(label: 'مؤكدة', value: '${summary.confirmedCount}'),
-            ReportLine(label: 'مسودة', value: '${summary.draftCount}'),
-            ReportLine(label: 'ملغاة', value: '${summary.cancelledCount}'),
+            ReportLine(
+              label: 'مؤكدة',
+              value: AppFormatters.integer(summary.confirmedCount),
+            ),
+            ReportLine(
+              label: 'مسودة',
+              value: AppFormatters.integer(summary.draftCount),
+            ),
+            ReportLine(
+              label: 'ملغاة',
+              value: AppFormatters.integer(summary.cancelledCount),
+            ),
           ],
         ),
         ReportSection(
@@ -94,15 +101,15 @@ class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
           lines: <ReportLine>[
             ReportLine(
               label: 'إجمالي المبيعات',
-              value: _money.format(summary.totalSales),
+              value: AppFormatters.money(summary.totalSales),
             ),
             ReportLine(
               label: 'إجمالي الخصومات',
-              value: _money.format(summary.totalDiscount),
+              value: AppFormatters.money(summary.totalDiscount),
             ),
             ReportLine(
               label: 'إجمالي الضريبة',
-              value: _money.format(summary.totalTax),
+              value: AppFormatters.money(summary.totalTax),
             ),
           ],
         ),
@@ -111,16 +118,16 @@ class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
           lines: <ReportLine>[
             ReportLine(
               label: 'عدد المرتجعات',
-              value: '${summary.returnCount}',
+              value: AppFormatters.integer(summary.returnCount),
             ),
             ReportLine(
               label: 'قيمة المرتجعات',
-              value: _money.format(summary.returnTotal),
+              value: AppFormatters.money(summary.returnTotal),
             ),
             ReportLine(
               label: 'نسبة المرتجعات',
               value: summary.totalSales > 0
-                  ? _percent.format(summary.returnTotal / summary.totalSales)
+                  ? _ratio(summary.returnTotal / summary.totalSales)
                   : '—',
             ),
           ],
@@ -154,11 +161,7 @@ class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
       body: summaryAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
-        data: (SalesSummary summary) => _SummaryBody(
-          summary: summary,
-          money: _money,
-          percent: _percent,
-        ),
+        data: (SalesSummary summary) => _SummaryBody(summary: summary),
       ),
     );
   }
@@ -187,15 +190,15 @@ class _SalesSummaryPageState extends ConsumerState<SalesSummaryPage> {
 // ============================================================================
 
 class _SummaryBody extends StatelessWidget {
-  const _SummaryBody({
-    required this.summary,
-    required this.money,
-    required this.percent,
-  });
+  const _SummaryBody({required this.summary});
 
   final SalesSummary summary;
-  final NumberFormat money;
-  final NumberFormat percent;
+
+  /// Localised percent string for a ratio (0..1).
+  static String _ratio(double ratio) {
+    if (!ratio.isFinite) return '—';
+    return AppFormatters.percent(ratio * 100);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -206,39 +209,64 @@ class _SummaryBody extends StatelessWidget {
         const SizedBox(height: 12),
         _HeroCard(
           title: 'صافي المبيعات',
-          value: money.format(summary.netSales),
-          subtitle: 'من ${summary.confirmedCount} فاتورة مؤكدة',
+          value: AppFormatters.money(summary.netSales),
+          subtitle: 'من '
+              '${AppFormatters.integer(summary.confirmedCount)} فاتورة مؤكدة',
         ),
         const SizedBox(height: 12),
-        _StatsGrid(summary: summary, money: money),
+        _StatsGrid(summary: summary),
         const SizedBox(height: 16),
         _SectionCard(
           title: 'تفاصيل الفواتير',
           rows: <_RowData>[
-            _RowData('مؤكدة', '${summary.confirmedCount}'),
-            _RowData('مسودة', '${summary.draftCount}'),
-            _RowData('ملغاة', '${summary.cancelledCount}'),
+            _RowData(
+              'مؤكدة',
+              AppFormatters.integer(summary.confirmedCount),
+            ),
+            _RowData(
+              'مسودة',
+              AppFormatters.integer(summary.draftCount),
+            ),
+            _RowData(
+              'ملغاة',
+              AppFormatters.integer(summary.cancelledCount),
+            ),
           ],
         ),
         const SizedBox(height: 12),
         _SectionCard(
           title: 'الإيرادات والخصومات',
           rows: <_RowData>[
-            _RowData('إجمالي المبيعات', money.format(summary.totalSales)),
-            _RowData('إجمالي الخصومات', money.format(summary.totalDiscount)),
-            _RowData('إجمالي الضريبة', money.format(summary.totalTax)),
+            _RowData(
+              'إجمالي المبيعات',
+              AppFormatters.money(summary.totalSales),
+            ),
+            _RowData(
+              'إجمالي الخصومات',
+              AppFormatters.money(summary.totalDiscount),
+            ),
+            _RowData(
+              'إجمالي الضريبة',
+              AppFormatters.money(summary.totalTax),
+            ),
           ],
         ),
         const SizedBox(height: 12),
         _SectionCard(
           title: 'المرتجعات',
           rows: <_RowData>[
-            _RowData('عدد المرتجعات', '${summary.returnCount}'),
-            _RowData('قيمة المرتجعات', money.format(summary.returnTotal)),
+            _RowData(
+              'عدد المرتجعات',
+              AppFormatters.integer(summary.returnCount),
+            ),
+            _RowData(
+              'قيمة المرتجعات',
+              AppFormatters.money(summary.returnTotal),
+            ),
             _RowData(
               'نسبة المرتجعات',
               summary.totalSales > 0
-                  ? percent.format(summary.returnTotal / summary.totalSales)
+                  ? _ratio(summary.returnTotal / summary.totalSales)
                   : '—',
             ),
           ],
@@ -345,10 +373,9 @@ class _HeroCard extends StatelessWidget {
 }
 
 class _StatsGrid extends StatelessWidget {
-  const _StatsGrid({required this.summary, required this.money});
+  const _StatsGrid({required this.summary});
 
   final SalesSummary summary;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -361,7 +388,7 @@ class _StatsGrid extends StatelessWidget {
                 icon: Icons.receipt_long_outlined,
                 color: const Color(0xFF0F7B6C),
                 label: 'إجمالي المبيعات',
-                value: money.format(summary.totalSales),
+                value: AppFormatters.money(summary.totalSales),
               ),
             ),
             const SizedBox(width: 8),
@@ -370,7 +397,7 @@ class _StatsGrid extends StatelessWidget {
                 icon: Icons.account_balance_wallet_outlined,
                 color: const Color(0xFF2E7D32),
                 label: 'المحصَّل',
-                value: money.format(summary.totalPaid),
+                value: AppFormatters.money(summary.totalPaid),
               ),
             ),
           ],
@@ -383,7 +410,7 @@ class _StatsGrid extends StatelessWidget {
                 icon: Icons.error_outline,
                 color: const Color(0xFFC62828),
                 label: 'غير محصَّل',
-                value: money.format(summary.totalDue),
+                value: AppFormatters.money(summary.totalDue),
                 emphasize: summary.totalDue > 0,
               ),
             ),
@@ -393,7 +420,7 @@ class _StatsGrid extends StatelessWidget {
                 icon: Icons.calculate_outlined,
                 color: const Color(0xFF0288D1),
                 label: 'متوسط الفاتورة',
-                value: money.format(summary.averageInvoice),
+                value: AppFormatters.money(summary.averageInvoice),
               ),
             ),
           ],
