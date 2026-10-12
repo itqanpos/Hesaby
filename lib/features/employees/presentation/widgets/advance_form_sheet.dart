@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_advance_repository.dart';
@@ -50,20 +50,24 @@ class _AdvanceFormSheetState extends ConsumerState<_AdvanceFormSheet> {
   bool _isSubmitting = false;
   AdvanceFailureType? _failure;
 
-  static final DateFormat _dateFmt = DateFormat('yyyy/MM/dd');
-
   @override
   void initState() {
     super.initState();
     _employeeId = widget.initialEmployeeId;
+    _amountController.addListener(_onAmountChanged);
   }
 
   @override
   void dispose() {
+    _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
     _reasonController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  void _onAmountChanged() {
+    if (mounted) setState(() {});
   }
 
   static String? _emptyToNull(String s) {
@@ -78,7 +82,6 @@ class _AdvanceFormSheetState extends ConsumerState<_AdvanceFormSheet> {
       initialDate: _advanceDate,
       firstDate: DateTime(now.year - 2),
       lastDate: now,
-      locale: const Locale('ar', 'EG'),
     );
     if (picked != null) {
       setState(() => _advanceDate = picked);
@@ -146,6 +149,10 @@ class _AdvanceFormSheetState extends ConsumerState<_AdvanceFormSheet> {
     if (_employeeId == null && employees.isNotEmpty) {
       _employeeId = employees.first.id;
     }
+
+    // Live preview of the entered amount.
+    final double? enteredAmount =
+        double.tryParse(_amountController.text.trim());
 
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
@@ -230,6 +237,13 @@ class _AdvanceFormSheetState extends ConsumerState<_AdvanceFormSheet> {
                     return null;
                   },
                 ),
+
+                // ---- Amount preview ----
+                if (enteredAmount != null && enteredAmount > 0) ...<Widget>[
+                  const SizedBox(height: 6),
+                  _AmountPreview(amount: enteredAmount),
+                ],
+
                 const SizedBox(height: 12),
 
                 // ---- Date ----
@@ -242,7 +256,7 @@ class _AdvanceFormSheetState extends ConsumerState<_AdvanceFormSheet> {
                       border: OutlineInputBorder(),
                       suffixIcon: Icon(Icons.calendar_today_outlined),
                     ),
-                    child: Text(_dateFmt.format(_advanceDate)),
+                    child: Text(AppFormatters.date(_advanceDate)),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -297,6 +311,59 @@ class _AdvanceFormSheetState extends ConsumerState<_AdvanceFormSheet> {
   }
 }
 
+// ============================================================================
+// Amount preview
+// ============================================================================
+
+class _AmountPreview extends StatelessWidget {
+  const _AmountPreview({required this.amount});
+
+  final double amount;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    const Color tone = Color(0xFFC62828);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: <Widget>[
+            const Icon(Icons.arrow_upward, size: 16, color: tone),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'سيُسجَّل صادر من الخزنة',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: tone,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              '− ${AppFormatters.money(amount)}',
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: tone,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Empty hint / failure banner
+// ============================================================================
+
 class _EmptyHint extends StatelessWidget {
   const _EmptyHint({required this.message});
 
@@ -349,6 +416,10 @@ class _FailureBanner extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// Localization
+// ============================================================================
 
 String _failureMessage(AdvanceFailureType type) => switch (type) {
       AdvanceFailureType.network =>
