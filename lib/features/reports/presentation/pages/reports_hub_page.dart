@@ -92,18 +92,18 @@ class ReportsHubPage extends StatelessWidget {
                 routeName: AppRouter.reportProfitLossName,
               ),
               _ReportTile(
+                icon: Icons.savings_outlined,
+                color: Color(0xFF0F7B6C),
+                title: 'الربح من كل منتج',
+                subtitle: 'إيراد − تكلفة لكل منتج مع الهامش',
+                routeName: AppRouter.reportProfitByProductName,
+              ),
+              _ReportTile(
                 icon: Icons.account_balance_wallet_outlined,
                 color: Color(0xFFEF6C00),
                 title: 'المدينون',
                 subtitle: 'أرصدة العملاء المستحقة',
                 routeName: AppRouter.reportReceivablesName,
-              ),
-              _ReportTile(
-                icon: Icons.timelapse_outlined,
-                color: Color(0xFFB71C1C),
-                title: 'أعمار ديون العملاء',
-                subtitle: 'توزيع الأرصدة على الفترات الزمنية',
-                routeName: AppRouter.reportCustomerAgingName,
               ),
               _ReportTile(
                 icon: Icons.local_shipping_outlined,
