@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
@@ -26,12 +26,6 @@ class CashierReportPage extends ConsumerStatefulWidget {
 }
 
 class _CashierReportPageState extends ConsumerState<CashierReportPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   Future<void> _changePeriod(ReportPeriod newPeriod) async {
     ref.read(reportPagePeriodProvider.notifier).setPeriod(newPeriod);
     final ReportPeriod p = ref.read(reportPagePeriodProvider);
@@ -67,20 +61,20 @@ class _CashierReportPageState extends ConsumerState<CashierReportPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: 'إجمالي المبيعات',
-              value: _money.format(totalSales),
+              value: AppFormatters.money(totalSales),
               emphasized: true,
             ),
             ReportKpi(
               label: 'المحصَّل',
-              value: _money.format(totalPaid),
+              value: AppFormatters.money(totalPaid),
             ),
             ReportKpi(
               label: 'عدد الفواتير',
-              value: '$totalInvoices',
+              value: AppFormatters.integer(totalInvoices),
             ),
             ReportKpi(
               label: 'عدد الكاشير',
-              value: '${rows.length}',
+              value: AppFormatters.integer(rows.length),
             ),
           ],
         ),
@@ -98,10 +92,10 @@ class _CashierReportPageState extends ConsumerState<CashierReportPage> {
               for (final CashierSales c in rows)
                 <String>[
                   c.cashierName,
-                  '${c.invoiceCount}',
-                  _money.format(c.totalSales),
-                  _money.format(c.totalPaid),
-                  _money.format(c.totalDue),
+                  AppFormatters.integer(c.invoiceCount),
+                  AppFormatters.money(c.totalSales),
+                  AppFormatters.money(c.totalPaid),
+                  AppFormatters.money(c.totalDue),
                 ],
             ],
             flex: const <double>[3, 1, 2, 2, 2],
@@ -136,10 +130,7 @@ class _CashierReportPageState extends ConsumerState<CashierReportPage> {
       body: rowsAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
-        data: (List<CashierSales> rows) => _CashierBody(
-          rows: rows,
-          money: _money,
-        ),
+        data: (List<CashierSales> rows) => _CashierBody(rows: rows),
       ),
     );
   }
@@ -168,10 +159,9 @@ class _CashierReportPageState extends ConsumerState<CashierReportPage> {
 // ============================================================================
 
 class _CashierBody extends StatelessWidget {
-  const _CashierBody({required this.rows, required this.money});
+  const _CashierBody({required this.rows});
 
   final List<CashierSales> rows;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -214,14 +204,13 @@ class _CashierBody extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: <Widget>[
-        _TopCashierCard(cashier: top, money: money),
+        _TopCashierCard(cashier: top),
         const SizedBox(height: 12),
         _SummaryGrid(
           totalSales: totalSales,
           totalPaid: totalPaid,
           totalInvoices: totalInvoices,
           cashierCount: rows.length,
-          money: money,
         ),
         const SizedBox(height: 16),
         Padding(
@@ -239,7 +228,6 @@ class _CashierBody extends StatelessWidget {
             rank: i + 1,
             cashier: rows[i],
             totalSales: totalSales,
-            money: money,
           ),
           if (i < rows.length - 1) const SizedBox(height: 8),
         ],
@@ -253,10 +241,9 @@ class _CashierBody extends StatelessWidget {
 // ============================================================================
 
 class _TopCashierCard extends StatelessWidget {
-  const _TopCashierCard({required this.cashier, required this.money});
+  const _TopCashierCard({required this.cashier});
 
   final CashierSales cashier;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -313,7 +300,7 @@ class _TopCashierCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              money.format(cashier.totalSales),
+              AppFormatters.money(cashier.totalSales),
               style: theme.textTheme.displaySmall?.copyWith(
                 color: scheme.onPrimary,
                 fontWeight: FontWeight.w900,
@@ -324,7 +311,7 @@ class _TopCashierCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '${cashier.invoiceCount} فاتورة',
+              '${AppFormatters.integer(cashier.invoiceCount)} فاتورة',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onPrimary.withValues(alpha: 0.9),
               ),
@@ -346,14 +333,12 @@ class _SummaryGrid extends StatelessWidget {
     required this.totalPaid,
     required this.totalInvoices,
     required this.cashierCount,
-    required this.money,
   });
 
   final double totalSales;
   final double totalPaid;
   final int totalInvoices;
   final int cashierCount;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -366,7 +351,7 @@ class _SummaryGrid extends StatelessWidget {
                 icon: Icons.receipt_long_outlined,
                 color: const Color(0xFF0F7B6C),
                 label: 'إجمالي المبيعات',
-                value: money.format(totalSales),
+                value: AppFormatters.money(totalSales),
               ),
             ),
             const SizedBox(width: 8),
@@ -375,7 +360,7 @@ class _SummaryGrid extends StatelessWidget {
                 icon: Icons.account_balance_wallet_outlined,
                 color: const Color(0xFF2E7D32),
                 label: 'المحصَّل',
-                value: money.format(totalPaid),
+                value: AppFormatters.money(totalPaid),
               ),
             ),
           ],
@@ -388,7 +373,7 @@ class _SummaryGrid extends StatelessWidget {
                 icon: Icons.receipt_outlined,
                 color: const Color(0xFF0288D1),
                 label: 'عدد الفواتير',
-                value: '$totalInvoices',
+                value: AppFormatters.integer(totalInvoices),
               ),
             ),
             const SizedBox(width: 8),
@@ -397,7 +382,7 @@ class _SummaryGrid extends StatelessWidget {
                 icon: Icons.people_outline,
                 color: const Color(0xFF6A1B9A),
                 label: 'عدد الكاشير',
-                value: '$cashierCount',
+                value: AppFormatters.integer(cashierCount),
               ),
             ),
           ],
@@ -484,13 +469,11 @@ class _CashierCard extends StatelessWidget {
     required this.rank,
     required this.cashier,
     required this.totalSales,
-    required this.money,
   });
 
   final int rank;
   final CashierSales cashier;
   final double totalSales;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -524,7 +507,7 @@ class _CashierCard extends StatelessWidget {
                   ),
                   alignment: Alignment.center,
                   child: Text(
-                    '$rank',
+                    AppFormatters.integer(rank),
                     style: theme.textTheme.labelLarge?.copyWith(
                       color: scheme.onPrimaryContainer,
                       fontWeight: FontWeight.w800,
@@ -543,7 +526,7 @@ class _CashierCard extends StatelessWidget {
                   ),
                 ),
                 Text(
-                  '${cashier.invoiceCount} فاتورة',
+                  '${AppFormatters.integer(cashier.invoiceCount)} فاتورة',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -565,7 +548,7 @@ class _CashierCard extends StatelessWidget {
                 Expanded(
                   child: _Kv(
                     label: 'المبيعات',
-                    value: money.format(cashier.totalSales),
+                    value: AppFormatters.money(cashier.totalSales),
                     emphasized: true,
                   ),
                 ),
@@ -573,14 +556,14 @@ class _CashierCard extends StatelessWidget {
                 Expanded(
                   child: _Kv(
                     label: 'المحصَّل',
-                    value: money.format(cashier.totalPaid),
+                    value: AppFormatters.money(cashier.totalPaid),
                   ),
                 ),
                 const SizedBox(width: 8),
                 Expanded(
                   child: _Kv(
                     label: 'المتبقي',
-                    value: money.format(cashier.totalDue),
+                    value: AppFormatters.money(cashier.totalDue),
                     danger: cashier.totalDue > 0,
                   ),
                 ),
