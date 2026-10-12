@@ -7,6 +7,7 @@ import 'package:intl/intl.dart';
 
 import '../../../../app/router.dart';
 import '../../../../core/invalidation/data_invalidation.dart';
+import '../../../../core/network/presentation/pending_operations_badge.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -27,26 +28,6 @@ import '../services/sale_print_actions.dart';
 import '../widgets/sales_kpi_row.dart';
 
 /// Sales list page.
-///
-/// The `+` action and the empty-state action both open the POS screen
-/// (`/pos`) instead of the manual sale form. POS is the primary sale
-/// entry point — faster, barcode-aware, and printer-integrated — so the
-/// list page funnels every new sale through it.
-///
-/// Layout, top to bottom:
-/// * KPI overview cards (drafts excluded, filters ignored).
-/// * Search field + filter button (with an active-filter badge).
-/// * Compact chip row showing only the active filters (when any).
-/// * The filtered list of sales (pull-to-refresh enabled).
-///
-/// Each sale card exposes two quick actions:
-/// * **طباعة** — direct thermal print to the saved Bluetooth printer
-///   (no preview, no PDF, no share sheet).
-/// * **مشاركة** — build a PDF and open the platform share sheet.
-///
-/// **Drafts are hidden** everywhere on this page — a draft represents a
-/// sale whose confirmation failed, so it must not appear as an invoice
-/// nor be counted in the KPIs.
 class SalesPage extends ConsumerStatefulWidget {
   const SalesPage({super.key});
 
@@ -59,10 +40,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   String _searchQuery = '';
   SalesFilter _filter = const SalesFilter();
 
-  /// IDs of sales whose direct-print job is in flight.
   final Set<String> _printingIds = <String>{};
-
-  /// IDs of sales whose PDF share sheet is in flight.
   final Set<String> _sharingIds = <String>{};
 
   @override
@@ -93,8 +71,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     });
   }
 
-  /// Pull-to-refresh: reuse the same invalidation surface as post-write so
-  /// the manual and automatic paths converge on identical state.
   Future<void> _refresh() async {
     DataInvalidation.afterSale(ref);
     await Future.wait(<Future<void>>[
@@ -103,8 +79,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
     ]);
   }
 
-  /// Opens POS. The sales list intentionally routes new sales through the
-  /// POS screen — the manual sale form is no longer reachable from here.
   Future<void> _openPos() async {
     await context.pushNamed(AppRouter.posName);
   }
@@ -279,6 +253,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       appBar: AppBar(
         title: const Text('فواتير البيع'),
         actions: <Widget>[
+          const PendingOperationsBadge(),
           IconButton(
             tooltip: 'تحديث',
             onPressed: anyLoading ? null : _refresh,
@@ -320,7 +295,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           final List<Customer> customers =
               customersAsync.value ?? const <Customer>[];
 
-          // Drafts never count as invoices — exclude them from KPI cards.
+          // Drafts never count as invoices.
           final List<Sale> realSales = allSales
               .where((Sale s) => !s.isDraft)
               .toList(growable: false);
@@ -336,13 +311,11 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- KPI overview (drafts excluded) ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: SalesKpiRow(sales: realSales),
               ),
 
-              // ---- Search + Filter button ----
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -375,7 +348,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                 ),
               ),
 
-              // ---- Active filter chips (compact) ----
               if (_filter.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -385,7 +357,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
                   ),
                 ),
 
-              // ---- List (pull-to-refresh enabled) ----
               Expanded(
                 child: RefreshIndicator(
                   onRefresh: _refresh,
@@ -476,7 +447,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
 }
 
 // -----------------------------------------------------------------------------
-// Refreshable wrapper for empty / error states.
+// Refreshable wrapper
 // -----------------------------------------------------------------------------
 
 class _RefreshableMessage extends StatelessWidget {
@@ -567,7 +538,7 @@ class _FilterButton extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// Active filter chips (compact summary)
+// Active filter chips
 // -----------------------------------------------------------------------------
 
 class _ActiveFilterChips extends StatelessWidget {
@@ -730,7 +701,6 @@ class _SaleCard extends StatelessWidget {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- Main row: avatar + content ----
               Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -818,8 +788,6 @@ class _SaleCard extends StatelessWidget {
                   ),
                 ],
               ),
-
-              // ---- Quick actions row ----
               const SizedBox(height: 8),
               Divider(height: 1, color: scheme.outlineVariant),
               const SizedBox(height: 6),
@@ -848,7 +816,6 @@ class _SaleCard extends StatelessWidget {
   }
 }
 
-/// Small outlined action button used inside a [_SaleCard].
 class _QuickAction extends StatelessWidget {
   const _QuickAction({
     required this.icon,
@@ -883,7 +850,9 @@ class _QuickAction extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
         foregroundColor: enabled ? scheme.primary : scheme.onSurfaceVariant,
         side: BorderSide(
-          color: enabled ? scheme.primary.withValues(alpha: 0.5) : scheme.outlineVariant,
+          color: enabled
+              ? scheme.primary.withValues(alpha: 0.5)
+              : scheme.outlineVariant,
         ),
         textStyle: theme.textTheme.labelMedium,
       ),
@@ -923,7 +892,7 @@ class _PaymentBadge extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// Localization helpers
+// Localization
 // -----------------------------------------------------------------------------
 
 String _statusLabel(String status) {
