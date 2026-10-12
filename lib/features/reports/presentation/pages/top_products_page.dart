@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
@@ -20,13 +20,6 @@ class TopProductsPage extends ConsumerStatefulWidget {
 }
 
 class _TopProductsPageState extends ConsumerState<TopProductsPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final NumberFormat _qty = NumberFormat.decimalPattern('ar_EG');
-
   Future<void> _changePeriod(ReportPeriod newPeriod) async {
     ref.read(reportPagePeriodProvider.notifier).setPeriod(newPeriod);
     final ReportPeriod p = ref.read(reportPagePeriodProvider);
@@ -56,11 +49,11 @@ class _TopProductsPageState extends ConsumerState<TopProductsPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: 'عدد المنتجات',
-              value: '${products.length}',
+              value: AppFormatters.integer(products.length),
             ),
             ReportKpi(
               label: 'إجمالي الإيرادات',
-              value: _money.format(totalRevenue),
+              value: AppFormatters.money(totalRevenue),
               emphasized: true,
             ),
           ],
@@ -73,11 +66,11 @@ class _TopProductsPageState extends ConsumerState<TopProductsPage> {
             rows: <List<String>>[
               for (int i = 0; i < products.length; i++)
                 <String>[
-                  '${i + 1}',
+                  AppFormatters.integer(i + 1),
                   products[i].productName,
-                  _qty.format(products[i].totalQuantity),
-                  '${products[i].invoiceCount}',
-                  _money.format(products[i].totalRevenue),
+                  AppFormatters.quantity(products[i].totalQuantity),
+                  AppFormatters.integer(products[i].invoiceCount),
+                  AppFormatters.money(products[i].totalRevenue),
                 ],
             ],
           ),
@@ -114,8 +107,6 @@ class _TopProductsPageState extends ConsumerState<TopProductsPage> {
         data: (List<TopProduct> products) => _Body(
           period: period,
           products: products,
-          money: _money,
-          qty: _qty,
         ),
       ),
     );
@@ -133,14 +124,10 @@ class _Body extends StatelessWidget {
   const _Body({
     required this.period,
     required this.products,
-    required this.money,
-    required this.qty,
   });
 
   final ReportPeriod period;
   final List<TopProduct> products;
-  final NumberFormat money;
-  final NumberFormat qty;
 
   @override
   Widget build(BuildContext context) {
@@ -161,15 +148,12 @@ class _Body extends StatelessWidget {
         _SummaryStrip(
           count: products.length,
           totalRevenue: totalRevenue,
-          money: money,
         ),
         const SizedBox(height: 16),
         for (int i = 0; i < products.length; i++) ...<Widget>[
           _ProductRow(
             rank: i + 1,
             product: products[i],
-            money: money,
-            qty: qty,
           ),
           if (i < products.length - 1) const SizedBox(height: 8),
         ],
@@ -210,12 +194,10 @@ class _SummaryStrip extends StatelessWidget {
   const _SummaryStrip({
     required this.count,
     required this.totalRevenue,
-    required this.money,
   });
 
   final int count;
   final double totalRevenue;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -244,7 +226,7 @@ class _SummaryStrip extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '$count',
+                    AppFormatters.integer(count),
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                     ),
@@ -268,7 +250,7 @@ class _SummaryStrip extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    money.format(totalRevenue),
+                    AppFormatters.money(totalRevenue),
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: scheme.primary,
@@ -288,14 +270,10 @@ class _ProductRow extends StatelessWidget {
   const _ProductRow({
     required this.rank,
     required this.product,
-    required this.money,
-    required this.qty,
   });
 
   final int rank;
   final TopProduct product;
-  final NumberFormat money;
-  final NumberFormat qty;
 
   @override
   Widget build(BuildContext context) {
@@ -322,7 +300,7 @@ class _ProductRow extends StatelessWidget {
                 shape: BoxShape.circle,
               ),
               child: Text(
-                '$rank',
+                AppFormatters.integer(rank),
                 style: theme.textTheme.titleSmall?.copyWith(
                   color: rankColor,
                   fontWeight: FontWeight.w900,
@@ -345,8 +323,8 @@ class _ProductRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${qty.format(product.totalQuantity)} وحدة · '
-                    '${product.invoiceCount} فاتورة',
+                    '${AppFormatters.quantity(product.totalQuantity)} وحدة · '
+                    '${AppFormatters.integer(product.invoiceCount)} فاتورة',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -357,7 +335,7 @@ class _ProductRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              money.format(product.totalRevenue),
+              AppFormatters.money(product.totalRevenue),
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.primary,
                 fontWeight: FontWeight.w800,
