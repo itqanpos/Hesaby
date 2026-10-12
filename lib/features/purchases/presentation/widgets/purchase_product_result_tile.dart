@@ -1,8 +1,8 @@
 // lib/features/purchases/presentation/widgets/purchase_product_result_tile.dart
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../../products/domain/entities/product.dart';
 
 /// A single search-result row in the purchase form.
@@ -17,12 +17,6 @@ class PurchaseProductResultTile extends StatelessWidget {
 
   final Product product;
   final VoidCallback onTap;
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
 
   @override
   Widget build(BuildContext context) {
@@ -96,7 +90,7 @@ class PurchaseProductResultTile extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    _money.format(product.costPrice),
+                    AppFormatters.money(product.costPrice),
                     style: theme.textTheme.bodyMedium?.copyWith(
                       fontWeight: FontWeight.w700,
                       color: scheme.primary,
