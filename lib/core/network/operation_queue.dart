@@ -1,5 +1,6 @@
 // lib/core/network/operation_queue.dart
 
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:shared_preferences/shared_preferences.dart';
@@ -17,17 +18,21 @@ import 'pending_operation.dart';
 /// { "version": 1, "operations": [ {...}, {...} ] }
 /// ```
 ///
-/// The queue is intentionally simple:
-/// * **Serialized writes.** A private lock guarantees that concurrent
-///   mutations cannot interleave disk writes.
-/// * **Corruption-tolerant.** Individual operations that fail to decode
-///   are dropped with a warning; the rest of the queue survives.
-/// * **Multi-tenant aware.** [forCompany] filters by `companyId` so a
-///   user who is a member of more than one company sees only the
-///   operations of the current tenant.
+/// **Reactivity:** the queue is mutable, so every successful mutation
+/// bumps a monotonic [_revision] counter and emits a tick on [onChanged].
+/// Riverpod consumers subscribe to that stream (see
+/// `operationQueueRevisionProvider`) to rebuild whenever the queue
+/// changes.
 ///
-/// This class is **not** thread-safe across isolates. It is designed to be
-/// used from the main isolate only (via [operationQueueProvider]).
+/// **Serialized writes.** A private lock guarantees that concurrent
+/// mutations cannot interleave disk writes.
+///
+/// **Corruption-tolerant.** Individual operations that fail to decode
+/// are dropped with a warning; the rest of the queue survives.
+///
+/// **Multi-tenant aware.** [forCompany] filters by `companyId` so a user
+/// who is a member of more than one company sees only the operations of
+/// the current tenant.
 class OperationQueue {
   OperationQueue(this._prefs);
 
@@ -44,8 +49,46 @@ class OperationQueue {
 
   bool _loaded = false;
 
-  /// Guards [_writeLocked] against concurrent disk writes.
+  /// Guards [_writeToDisk] against concurrent disk writes.
   Future<void>? _writeLock;
+
+  // ---------------------------------------------------------------------------
+  // Reactivity
+  // ---------------------------------------------------------------------------
+
+  int _revision = 0;
+
+  final StreamController<void> _revisionController =
+      StreamController<void>.broadcast();
+
+  /// Monotonic counter incremented after every successful mutation.
+  ///
+  /// Consumers can compare two reads to detect changes without comparing
+  /// the queue's contents.
+  int get revision => _revision;
+
+  /// Broadcast stream that emits once per successful mutation.
+  ///
+  /// Emits `void` — the current [revision] must be read from the queue.
+  /// The stream is closed by [dispose].
+  Stream<void> get onChanged => _revisionController.stream;
+
+  /// Increments [_revision] and notifies listeners.
+  void _bump() {
+    _revision++;
+    if (!_revisionController.isClosed) {
+      _revisionController.add(null);
+    }
+  }
+
+  /// Closes the internal stream. Call once when the queue is no longer
+  /// needed (typically when the Riverpod container is disposed).
+  ///
+  /// Safe to call multiple times.
+  Future<void> dispose() async {
+    if (_revisionController.isClosed) return;
+    await _revisionController.close();
+  }
 
   // ---------------------------------------------------------------------------
   // Loading
@@ -104,9 +147,7 @@ class OperationQueue {
         };
         final PendingOperation? op = PendingOperation.tryFromJson(map);
         if (op == null) {
-          AppLogger.warning(
-            'OperationQueue: skipping corrupt entry.',
-          );
+          AppLogger.warning('OperationQueue: skipping corrupt entry.');
           continue;
         }
         parsed.add(op);
@@ -148,7 +189,7 @@ class OperationQueue {
   }
 
   /// Returns every queued operation of [type] for [companyId], oldest
-  /// first. Useful for building operation-type-specific UIs.
+  /// first.
   List<PendingOperation> forCompanyAndType(
     String companyId,
     PendingOperationType type,
@@ -205,6 +246,7 @@ class OperationQueue {
     }
 
     await _persist();
+    _bump();
   }
 
   /// Replaces an existing operation in place.
@@ -219,6 +261,7 @@ class OperationQueue {
     if (index < 0) return;
     _cache[index] = operation;
     await _persist();
+    _bump();
   }
 
   /// Removes the operation identified by [clientUuid].
@@ -233,16 +276,21 @@ class OperationQueue {
     if (index < 0) return;
     _cache.removeAt(index);
     await _persist();
+    _bump();
   }
 
   /// Removes every operation belonging to [companyId].
   Future<void> clearForCompany(String companyId) async {
     _ensureLoaded();
 
+    final int before = _cache.length;
     _cache.removeWhere(
       (PendingOperation op) => op.companyId == companyId,
     );
+    if (_cache.length == before) return;
+
     await _persist();
+    _bump();
   }
 
   /// Removes every queued operation (all companies).
@@ -251,8 +299,12 @@ class OperationQueue {
   Future<void> clearAll() async {
     _ensureLoaded();
 
+    final bool hadAnything = _cache.isNotEmpty;
     _cache.clear();
     await _prefs.remove(_storageKey);
+    if (hadAnything) {
+      _bump();
+    }
   }
 
   // ---------------------------------------------------------------------------
