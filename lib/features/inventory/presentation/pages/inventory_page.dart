@@ -3,9 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../app/router.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -15,7 +15,10 @@ import '../../../../shared/widgets/app_text_field.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/product_unit.dart';
+import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
+import '../../../products/presentation/providers/unit_providers.dart';
 import '../../domain/entities/inventory_balance.dart';
 import '../../domain/entities/stock_movement.dart';
 import '../../domain/repositories/inventory_repository.dart';
@@ -23,16 +26,16 @@ import '../providers/inventory_providers.dart';
 
 /// Inventory page: current stock levels for the selected branch.
 ///
-/// Data flow:
-/// * Balances come from [inventoryBalancesProvider] (derived from the ledger
-///   by the database trigger).
-/// * Product names and SKUs are resolved from [productsProvider] so the UI
-///   does not need a second round-trip per row.
-/// * Recording a movement goes through [InventoryBalancesNotifier], which
-///   appends to the ledger and lets the database update the balance.
+/// Interaction model:
+/// * Tapping a card opens the movement history for that product.
+/// * Manual adjustments are reached only from the per-card overflow menu.
 ///
-/// The page contains no business rules: everything is delegated to the
-/// repository and the database.
+/// Unit handling:
+/// `inventory_balances.quantity_on_hand` is always expressed in the
+/// product's **base** unit. When the operator records a manual movement
+/// in a non-base unit (e.g. "بلته"), the dialog multiplies the entered
+/// quantity by the unit's conversion factor before persisting it. The
+/// original `unit_id` is stored on the row for reporting only.
 class InventoryPage extends ConsumerStatefulWidget {
   const InventoryPage({super.key});
 
@@ -122,17 +125,36 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
+              // ---- Summary KPI row ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 12),
+                child: _SummaryRow(balances: balances),
+              ),
+
+              // ---- Search ----
+              Padding(
+                padding: const EdgeInsets.only(bottom: 8),
                 child: AppTextField(
                   controller: _searchController,
-                  hint: 'ابحث بالاسم أو SKU',
+                  hint: 'ابحث بالاسم أو SKU أو الباركود',
                   prefixIcon: Icons.search,
+                  suffixIcon: _searchQuery.isEmpty
+                      ? null
+                      : IconButton(
+                          tooltip: 'مسح البحث',
+                          icon: const Icon(Icons.close),
+                          onPressed: () {
+                            _searchController.clear();
+                            setState(() => _searchQuery = '');
+                          },
+                        ),
                   onChanged: (String value) {
                     setState(() => _searchQuery = value);
                   },
                 ),
               ),
+
+              // ---- List ----
               Expanded(
                 child: balances.isEmpty
                     ? const AppEmptyView(
@@ -164,6 +186,11 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                 productName:
                                     product?.name ?? 'منتج محذوف',
                                 sku: product?.sku,
+                                onOpenMovements: () => _openMovements(
+                                  context,
+                                  branchId: branchId,
+                                  productId: balance.productId,
+                                ),
                                 onAdjust: () => _openAdjustment(
                                   context,
                                   branchId: branchId,
@@ -172,11 +199,6 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                       product?.name ?? 'منتج محذوف',
                                   currentQuantity:
                                       balance.quantityOnHand,
-                                ),
-                                onViewMovements: () => _openMovements(
-                                  context,
-                                  branchId: branchId,
-                                  productId: balance.productId,
                                 ),
                               );
                             },
@@ -206,7 +228,10 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
       final Product? product = productsById[balance.productId];
       final String name = (product?.name ?? '').toLowerCase();
       final String sku = (product?.sku ?? '').toLowerCase();
-      return name.contains(trimmed) || sku.contains(trimmed);
+      final String barcode = (product?.barcode ?? '').toLowerCase();
+      return name.contains(trimmed) ||
+          sku.contains(trimmed) ||
+          barcode.contains(trimmed);
     }).toList(growable: false);
   }
 
@@ -236,9 +261,11 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
       return;
     }
 
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تم تسجيل الحركة')),
-    );
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        const SnackBar(content: Text('تم تسجيل الحركة')),
+      );
   }
 
   void _openMovements(
@@ -246,14 +273,148 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
     required String branchId,
     String? productId,
   }) {
-    // Navigation is performed by name only; the target page is imported by
-    // the router, not here, avoiding a forward import.
     context.pushNamed(
       AppRouter.stockMovementsName,
       extra: <String, String?>{
         'branchId': branchId,
         'productId': productId,
       },
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Summary row
+// -----------------------------------------------------------------------------
+
+class _SummaryRow extends StatelessWidget {
+  const _SummaryRow({required this.balances});
+
+  final List<InventoryBalance> balances;
+
+  @override
+  Widget build(BuildContext context) {
+    int itemCount = 0;
+    int outOfStock = 0;
+    double totalValue = 0;
+
+    for (final InventoryBalance b in balances) {
+      itemCount++;
+      if (b.quantityOnHand <= 0) {
+        outOfStock++;
+      }
+      totalValue += b.totalValue;
+    }
+
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: _SummaryCard(
+            icon: Icons.inventory_2_outlined,
+            label: 'منتجات',
+            value: AppFormatters.integer(itemCount),
+            color: const Color(0xFF0288D1),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _SummaryCard(
+            icon: Icons.attach_money_outlined,
+            label: 'قيمة المخزون',
+            value: AppFormatters.money(totalValue),
+            color: const Color(0xFF0F7B6C),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          child: _SummaryCard(
+            icon: Icons.warning_amber_outlined,
+            label: 'نفد',
+            value: AppFormatters.integer(outOfStock),
+            color: outOfStock > 0
+                ? const Color(0xFFC62828)
+                : const Color(0xFF7B5E3A),
+            emphasize: outOfStock > 0,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _SummaryCard extends StatelessWidget {
+  const _SummaryCard({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+    this.emphasize = false,
+  });
+
+  final IconData icon;
+  final String label;
+  final String value;
+  final Color color;
+  final bool emphasize;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: emphasize
+              ? color.withValues(alpha: 0.5)
+              : scheme.outlineVariant,
+          width: emphasize ? 1.5 : 1,
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 8),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          mainAxisSize: MainAxisSize.min,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Container(
+                  padding: const EdgeInsets.all(4),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.12),
+                    borderRadius: BorderRadius.circular(6),
+                  ),
+                  child: Icon(icon, size: 14, color: color),
+                ),
+                const SizedBox(width: 6),
+                Expanded(
+                  child: Text(
+                    label,
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontWeight: FontWeight.w600,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Text(
+              value,
+              style: theme.textTheme.titleSmall?.copyWith(
+                fontWeight: FontWeight.w800,
+                color: emphasize ? color : scheme.onSurface,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -267,26 +428,20 @@ class _BalanceCard extends StatelessWidget {
     required this.balance,
     required this.productName,
     required this.sku,
+    required this.onOpenMovements,
     required this.onAdjust,
-    required this.onViewMovements,
   });
 
   final InventoryBalance balance;
   final String productName;
   final String? sku;
+  final VoidCallback onOpenMovements;
   final VoidCallback onAdjust;
-  final VoidCallback onViewMovements;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final NumberFormat numberFormat = NumberFormat.decimalPattern('ar_EG');
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     final bool inStock = !balance.isOutOfStock;
     final String? skuValue = sku;
@@ -296,7 +451,10 @@ class _BalanceCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: onAdjust,
+        // Tapping the card opens the movement history — the natural
+        // "details" view. Adjustments are reachable only from the
+        // overflow menu so an accidental tap never opens the dialog.
+        onTap: onOpenMovements,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
@@ -334,25 +492,32 @@ class _BalanceCard extends StatelessWidget {
                     Row(
                       children: <Widget>[
                         Text(
-                          '${numberFormat.format(balance.quantityOnHand)} وحدة',
+                          AppFormatters.quantity(balance.quantityOnHand),
                           style: theme.textTheme.titleSmall?.copyWith(
                             color: inStock
                                 ? scheme.primary
                                 : scheme.error,
-                            fontWeight: FontWeight.w600,
+                            fontWeight: FontWeight.w700,
                           ),
                         ),
                         const SizedBox(width: 12),
-                        Text(
-                          'متوسط: ${moneyFormat.format(balance.averageCost)}',
-                          style: theme.textTheme.bodySmall,
+                        Expanded(
+                          child: Text(
+                            'متوسط: '
+                            '${AppFormatters.money(balance.averageCost)}',
+                            style: theme.textTheme.bodySmall,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       ],
                     ),
                     const SizedBox(height: 4),
                     Text(
-                      'القيمة: ${moneyFormat.format(balance.totalValue)}',
-                      style: theme.textTheme.bodySmall,
+                      'القيمة: '
+                      '${AppFormatters.money(balance.totalValue)}',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -361,27 +526,27 @@ class _BalanceCard extends StatelessWidget {
                 tooltip: 'خيارات',
                 onSelected: (_BalanceAction action) {
                   switch (action) {
+                    case _BalanceAction.movements:
+                      onOpenMovements();
                     case _BalanceAction.adjust:
                       onAdjust();
-                    case _BalanceAction.movements:
-                      onViewMovements();
                   }
                 },
                 itemBuilder: (BuildContext context) =>
                     <PopupMenuEntry<_BalanceAction>>[
                   const PopupMenuItem<_BalanceAction>(
-                    value: _BalanceAction.adjust,
-                    child: ListTile(
-                      leading: Icon(Icons.tune_outlined),
-                      title: Text('تسجيل حركة'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  const PopupMenuItem<_BalanceAction>(
                     value: _BalanceAction.movements,
                     child: ListTile(
                       leading: Icon(Icons.history),
                       title: Text('سجل الحركات'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  const PopupMenuItem<_BalanceAction>(
+                    value: _BalanceAction.adjust,
+                    child: ListTile(
+                      leading: Icon(Icons.tune_outlined),
+                      title: Text('تسجيل حركة'),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
@@ -395,7 +560,26 @@ class _BalanceCard extends StatelessWidget {
   }
 }
 
-enum _BalanceAction { adjust, movements }
+enum _BalanceAction { movements, adjust }
+
+// -----------------------------------------------------------------------------
+// Unit option — internal value object for the adjustment dialog
+// -----------------------------------------------------------------------------
+
+@immutable
+class _UnitOption {
+  const _UnitOption({
+    required this.id,
+    required this.name,
+    required this.conversionFactor,
+    required this.isBase,
+  });
+
+  final String id;
+  final String name;
+  final double conversionFactor;
+  final bool isBase;
+}
 
 // -----------------------------------------------------------------------------
 // Adjustment dialog
@@ -412,6 +596,8 @@ class _StockAdjustmentDialog extends ConsumerStatefulWidget {
   final String branchId;
   final String productId;
   final String productName;
+
+  /// Current balance in **base units**.
   final double currentQuantity;
 
   @override
@@ -426,13 +612,23 @@ class _StockAdjustmentDialogState
   final TextEditingController _unitCostController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
 
-  /// `adjustment_in` or `adjustment_out`.
+  /// One of:
+  /// * [StockMovementType.openingBalance] — first-ever movement, only
+  ///   offered when the current balance is zero.
+  /// * [StockMovementType.adjustmentIn]   — add stock.
+  /// * [StockMovementType.adjustmentOut]  — remove stock.
   String _movementType = StockMovementType.adjustmentIn;
+
+  /// Currently selected unit option. Resolved on first build when the
+  /// base unit is available.
+  String? _selectedUnitId;
 
   bool _isSubmitting = false;
   InventoryFailureType? _failureType;
 
-  bool get _isIncoming => _movementType == StockMovementType.adjustmentIn;
+  bool get _isIncoming =>
+      _movementType == StockMovementType.adjustmentIn ||
+      _movementType == StockMovementType.openingBalance;
 
   @override
   void dispose() {
@@ -442,7 +638,63 @@ class _StockAdjustmentDialogState
     super.dispose();
   }
 
-  Future<void> _submit() async {
+  // ---------------------------------------------------------------------------
+  // Unit option resolution
+  // ---------------------------------------------------------------------------
+
+  List<_UnitOption> _buildUnitOptions(
+    List<ProductUnit> productUnits,
+    List<Unit> units,
+    String baseUnitId,
+  ) {
+    String nameOf(String unitId) {
+      for (final Unit u in units) {
+        if (u.id == unitId) return u.name;
+      }
+      return 'وحدة';
+    }
+
+    final List<_UnitOption> options = <_UnitOption>[
+      _UnitOption(
+        id: baseUnitId,
+        name: nameOf(baseUnitId),
+        conversionFactor: 1,
+        isBase: true,
+      ),
+    ];
+
+    for (final ProductUnit pu in productUnits) {
+      options.add(
+        _UnitOption(
+          id: pu.unitId,
+          name: nameOf(pu.unitId),
+          conversionFactor: pu.conversionFactor,
+          isBase: false,
+        ),
+      );
+    }
+
+    return options;
+  }
+
+  _UnitOption? _resolveSelectedOption(List<_UnitOption> options) {
+    if (options.isEmpty) return null;
+
+    final String? id = _selectedUnitId;
+    if (id != null) {
+      for (final _UnitOption o in options) {
+        if (o.id == id) return o;
+      }
+    }
+    // Fall back to the base unit (first element).
+    return options.first;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Submit
+  // ---------------------------------------------------------------------------
+
+  Future<void> _submit(List<_UnitOption> options) async {
     FocusScope.of(context).unfocus();
 
     if (_failureType != null) {
@@ -450,28 +702,38 @@ class _StockAdjustmentDialogState
     }
 
     final bool isValid = _formKey.currentState?.validate() ?? false;
-    if (!isValid) {
+    if (!isValid) return;
+
+    final _UnitOption? unit = _resolveSelectedOption(options);
+    if (unit == null) {
+      setState(() => _failureType = InventoryFailureType.invalidMovement);
       return;
     }
 
-    final double? parsed =
+    final double? enteredQuantity =
         double.tryParse(_quantityController.text.trim());
-    if (parsed == null || parsed <= 0) {
-      setState(() {
-        _failureType = InventoryFailureType.invalidMovement;
-      });
+    if (enteredQuantity == null || enteredQuantity <= 0) {
+      setState(() => _failureType = InventoryFailureType.invalidMovement);
       return;
     }
 
+    // Convert to base units before persisting.
+    final double baseQuantity = enteredQuantity * unit.conversionFactor;
+    final double signedBaseQuantity =
+        _isIncoming ? baseQuantity : -baseQuantity;
+
+    // Unit cost: user enters cost per the *selected* unit; we store the
+    // per-base-unit cost.
     final String costText = _unitCostController.text.trim();
-    final double? unitCost = costText.isEmpty
+    final double? enteredUnitCost = costText.isEmpty
         ? null
         : double.tryParse(costText);
+    final double? baseUnitCost = enteredUnitCost == null
+        ? null
+        : enteredUnitCost / unit.conversionFactor;
 
     final String notesText = _notesController.text.trim();
     final String? notes = notesText.isEmpty ? null : notesText;
-
-    final double signedQuantity = _isIncoming ? parsed : -parsed;
 
     setState(() => _isSubmitting = true);
 
@@ -482,27 +744,22 @@ class _StockAdjustmentDialogState
       await notifier.recordMovement(
         productId: widget.productId,
         movementType: _movementType,
-        quantity: signedQuantity,
-        unitCost: unitCost,
+        quantity: signedBaseQuantity,
+        unitId: unit.id,
+        unitCost: _isIncoming ? baseUnitCost : null,
         notes: notes,
       );
 
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       Navigator.of(context).pop(true);
     } on InventoryException catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       setState(() {
         _isSubmitting = false;
         _failureType = error.type;
       });
     } on Object {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       setState(() {
         _isSubmitting = false;
         _failureType = InventoryFailureType.unknown;
@@ -510,17 +767,65 @@ class _StockAdjustmentDialogState
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final InventoryFailureType? failure = _failureType;
-    final NumberFormat numberFormat = NumberFormat.decimalPattern('ar_EG');
+
+    final AsyncValue<List<ProductUnit>> productUnitsAsync =
+        ref.watch(productUnitsProvider(widget.productId));
+    final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
+    final AsyncValue<List<Product>> productsAsync =
+        ref.watch(productsProvider);
+
+    // Resolve base unit id from the products list.
+    String? baseUnitId;
+    productsAsync.whenData((List<Product> products) {
+      for (final Product p in products) {
+        if (p.id == widget.productId) {
+          baseUnitId = p.defaultUnitId;
+          break;
+        }
+      }
+    });
+
+    final bool ready = productUnitsAsync.hasValue &&
+        unitsAsync.hasValue &&
+        baseUnitId != null;
+
+    if (!ready) {
+      return AlertDialog(
+        title: Text('حركة مخزون — ${widget.productName}'),
+        content: const SizedBox(
+          height: 120,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    final List<_UnitOption> options = _buildUnitOptions(
+      productUnitsAsync.value ?? const <ProductUnit>[],
+      unitsAsync.value ?? const <Unit>[],
+      baseUnitId!,
+    );
+    final _UnitOption? selected = _resolveSelectedOption(options);
+    final bool showOpening =
+        widget.currentQuantity <= 0 && _movementType != StockMovementType.adjustmentOut;
+
+    // Live preview: entered × conversion.
+    final double? entered = double.tryParse(_quantityController.text.trim());
+    final double? basePreview =
+        (entered == null || selected == null) ? null : entered * selected.conversionFactor;
 
     return AlertDialog(
       title: Text('حركة مخزون — ${widget.productName}'),
       content: SizedBox(
-        width: 420,
+        width: 460,
         child: SingleChildScrollView(
           child: Form(
             key: _formKey,
@@ -529,20 +834,30 @@ class _StockAdjustmentDialogState
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
+                // ---- Current balance ----
                 Text(
                   'الرصيد الحالي: '
-                  '${numberFormat.format(widget.currentQuantity)} وحدة',
+                  '${AppFormatters.quantity(widget.currentQuantity)} '
+                  '${options.first.name}',
                   style: theme.textTheme.bodyMedium,
                 ),
                 const SizedBox(height: 12),
+
+                // ---- Movement type ----
                 SegmentedButton<String>(
-                  segments: const <ButtonSegment<String>>[
-                    ButtonSegment<String>(
+                  segments: <ButtonSegment<String>>[
+                    if (showOpening)
+                      const ButtonSegment<String>(
+                        value: StockMovementType.openingBalance,
+                        label: Text('افتتاحي'),
+                        icon: Icon(Icons.flag_outlined),
+                      ),
+                    const ButtonSegment<String>(
                       value: StockMovementType.adjustmentIn,
                       label: Text('إدخال'),
                       icon: Icon(Icons.arrow_downward),
                     ),
-                    ButtonSegment<String>(
+                    const ButtonSegment<String>(
                       value: StockMovementType.adjustmentOut,
                       label: Text('إخراج'),
                       icon: Icon(Icons.arrow_upward),
@@ -552,44 +867,129 @@ class _StockAdjustmentDialogState
                   onSelectionChanged: _isSubmitting
                       ? null
                       : (Set<String> selection) {
-                          if (selection.isEmpty) {
-                            return;
-                          }
+                          if (selection.isEmpty) return;
                           setState(() {
                             _movementType = selection.first;
                           });
                         },
                 ),
                 const SizedBox(height: 12),
+
+                // ---- Unit selector ----
+                if (options.length > 1)
+                  DropdownButtonFormField<String>(
+                    initialValue: selected?.id,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'الوحدة',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: <DropdownMenuItem<String>>[
+                      for (final _UnitOption option in options)
+                        DropdownMenuItem<String>(
+                          value: option.id,
+                          child: Text(
+                            option.isBase
+                                ? '${option.name} (أساسية)'
+                                : '${option.name} '
+                                    '(= ${AppFormatters.quantity(option.conversionFactor)} '
+                                    '${options.first.name})',
+                          ),
+                        ),
+                    ],
+                    onChanged: _isSubmitting
+                        ? null
+                        : (String? value) {
+                            setState(() => _selectedUnitId = value);
+                          },
+                  ),
+                if (options.length > 1) const SizedBox(height: 12),
+
+                // ---- Quantity ----
                 AppTextField(
                   controller: _quantityController,
-                  label: 'الكمية',
-                  hint: 'مثال: 10',
+                  label: 'الكمية (${selected?.name ?? "وحدة"})',
+                  hint: 'مثال: 5',
                   enabled: !_isSubmitting,
                   autofocus: true,
                   keyboardType: const TextInputType.numberWithOptions(
                     decimal: true,
                   ),
+                  onChanged: (_) => setState(() {}),
                   validator: (String? value) {
                     final String trimmed = value?.trim() ?? '';
-                    if (trimmed.isEmpty) {
-                      return 'الرجاء إدخال الكمية';
-                    }
+                    if (trimmed.isEmpty) return 'الرجاء إدخال الكمية';
                     final double? parsed = double.tryParse(trimmed);
-                    if (parsed == null) {
-                      return 'الرجاء إدخال رقم صحيح';
-                    }
-                    if (parsed <= 0) {
-                      return 'يجب أن تكون الكمية أكبر من صفر';
+                    if (parsed == null) return 'الرجاء إدخال رقم صحيح';
+                    if (parsed <= 0) return 'يجب أن تكون الكمية أكبر من صفر';
+
+                    // Early validation for outgoing movements.
+                    if (_movementType ==
+                            StockMovementType.adjustmentOut &&
+                        selected != null) {
+                      final double base =
+                          parsed * selected.conversionFactor;
+                      if (base > widget.currentQuantity) {
+                        final double maxInUnit = widget.currentQuantity /
+                            selected.conversionFactor;
+                        return 'الكمية تتجاوز الرصيد. الأقصى: '
+                            '${AppFormatters.quantity(maxInUnit)} '
+                            '${selected.name}';
+                      }
                     }
                     return null;
                   },
                 ),
+
+                // ---- Conversion preview ----
+                if (basePreview != null &&
+                    selected != null &&
+                    !selected.isBase) ...<Widget>[
+                  const SizedBox(height: 8),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.info_outline,
+                            size: 16,
+                            color: scheme.onPrimaryContainer,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'سيُسجَّل: '
+                              '${AppFormatters.quantity(basePreview)} '
+                              '${options.first.name} '
+                              '(${AppFormatters.quantity(entered ?? 0)} × '
+                              '${AppFormatters.quantity(selected.conversionFactor)})',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onPrimaryContainer,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                // ---- Unit cost (incoming only) ----
                 if (_isIncoming) ...<Widget>[
                   const SizedBox(height: 12),
                   AppTextField(
                     controller: _unitCostController,
-                    label: 'تكلفة الوحدة — اختياري',
+                    label: 'تكلفة الوحدة — اختياري '
+                        '(${selected?.name ?? "وحدة"})',
                     hint: 'اتركه فارغًا للاحتفاظ بالمتوسط الحالي',
                     enabled: !_isSubmitting,
                     keyboardType: const TextInputType.numberWithOptions(
@@ -597,21 +997,18 @@ class _StockAdjustmentDialogState
                     ),
                     validator: (String? value) {
                       final String trimmed = value?.trim() ?? '';
-                      if (trimmed.isEmpty) {
-                        return null;
-                      }
+                      if (trimmed.isEmpty) return null;
                       final double? parsed = double.tryParse(trimmed);
-                      if (parsed == null) {
-                        return 'الرجاء إدخال رقم صحيح';
-                      }
-                      if (parsed < 0) {
-                        return 'لا يمكن أن تكون التكلفة سالبة';
-                      }
+                      if (parsed == null) return 'الرجاء إدخال رقم صحيح';
+                      if (parsed < 0) return 'لا يمكن أن تكون التكلفة سالبة';
                       return null;
                     },
                   ),
                 ],
+
                 const SizedBox(height: 12),
+
+                // ---- Notes ----
                 AppTextField(
                   controller: _notesController,
                   label: 'ملاحظات — اختياري',
@@ -625,6 +1022,7 @@ class _StockAdjustmentDialogState
                     return null;
                   },
                 ),
+
                 if (failure != null) ...<Widget>[
                   const SizedBox(height: 12),
                   _FailureBanner(message: _failureMessage(failure)),
@@ -644,7 +1042,7 @@ class _StockAdjustmentDialogState
         AppButton(
           label: 'تسجيل',
           isLoading: _isSubmitting,
-          onPressed: _isSubmitting ? null : _submit,
+          onPressed: _isSubmitting ? null : () => _submit(options),
         ),
       ],
       backgroundColor: scheme.surface,
