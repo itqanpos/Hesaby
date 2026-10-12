@@ -12,8 +12,11 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/domain/entities/company_member.dart';
+import '../../../companies/domain/entities/member_permission.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../companies/presentation/providers/members_providers.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
@@ -28,7 +31,9 @@ import '../providers/inventory_providers.dart';
 ///
 /// Interaction model:
 /// * Tapping a card opens the movement history for that product.
-/// * Manual adjustments are reached only from the per-card overflow menu.
+/// * Manual adjustments are reached only from the per-card overflow menu
+///   **and** only when the current member holds
+///   [MemberPermission.inventoryAdjust].
 ///
 /// Unit handling:
 /// `inventory_balances.quantity_on_hand` is always expressed in the
@@ -74,6 +79,19 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
         ref.watch(inventoryBalancesProvider(branchId));
     final AsyncValue<List<Product>> productsAsync =
         ref.watch(productsProvider);
+    final AsyncValue<CompanyMember?> memberAsync =
+        ref.watch(currentMemberProvider);
+
+    // Members may only record manual movements when they hold the
+    // `inventory.adjust` permission. While the member is still loading we
+    // optimistically allow the action — the guard is repeated at write time
+    // on the server side.
+    final CompanyMember? member = memberAsync.valueOrNull;
+    final bool canAdjust = memberAsync.isLoading && !memberAsync.hasValue
+        ? true
+        : (member == null
+            ? false
+            : member.hasPermission(MemberPermission.inventoryAdjust));
 
     final bool anyLoading =
         balancesAsync.isLoading || productsAsync.isLoading;
@@ -186,6 +204,7 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
                                 productName:
                                     product?.name ?? 'منتج محذوف',
                                 sku: product?.sku,
+                                canAdjust: canAdjust,
                                 onOpenMovements: () => _openMovements(
                                   context,
                                   branchId: branchId,
@@ -428,6 +447,7 @@ class _BalanceCard extends StatelessWidget {
     required this.balance,
     required this.productName,
     required this.sku,
+    required this.canAdjust,
     required this.onOpenMovements,
     required this.onAdjust,
   });
@@ -435,6 +455,10 @@ class _BalanceCard extends StatelessWidget {
   final InventoryBalance balance;
   final String productName;
   final String? sku;
+
+  /// Whether the current member is allowed to record manual adjustments.
+  final bool canAdjust;
+
   final VoidCallback onOpenMovements;
   final VoidCallback onAdjust;
 
@@ -542,14 +566,17 @@ class _BalanceCard extends StatelessWidget {
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
-                  const PopupMenuItem<_BalanceAction>(
-                    value: _BalanceAction.adjust,
-                    child: ListTile(
-                      leading: Icon(Icons.tune_outlined),
-                      title: Text('تسجيل حركة'),
-                      contentPadding: EdgeInsets.zero,
+                  // Adjust is only offered when the current member holds
+                  // the `inventory.adjust` permission.
+                  if (canAdjust)
+                    const PopupMenuItem<_BalanceAction>(
+                      value: _BalanceAction.adjust,
+                      child: ListTile(
+                        leading: Icon(Icons.tune_outlined),
+                        title: Text('تسجيل حركة'),
+                        contentPadding: EdgeInsets.zero,
+                      ),
                     ),
-                  ),
                 ],
               ),
             ],
@@ -815,12 +842,15 @@ class _StockAdjustmentDialogState
     );
     final _UnitOption? selected = _resolveSelectedOption(options);
     final bool showOpening =
-        widget.currentQuantity <= 0 && _movementType != StockMovementType.adjustmentOut;
+        widget.currentQuantity <= 0 &&
+            _movementType != StockMovementType.adjustmentOut;
 
     // Live preview: entered × conversion.
     final double? entered = double.tryParse(_quantityController.text.trim());
     final double? basePreview =
-        (entered == null || selected == null) ? null : entered * selected.conversionFactor;
+        (entered == null || selected == null)
+            ? null
+            : entered * selected.conversionFactor;
 
     return AlertDialog(
       title: Text('حركة مخزون — ${widget.productName}'),
