@@ -77,6 +77,13 @@ const List<_NavSection> _sections = <_NavSection>[
         requiredPermission: MemberPermission.productsView,
       ),
       _NavDestination(
+        label: 'المخزون',
+        path: '/inventory',
+        icon: Icons.warehouse_outlined,
+        color: Color(0xFF5E35B1),
+        requiredPermission: MemberPermission.productsView,
+      ),
+      _NavDestination(
         label: 'الفواتير',
         path: '/sales',
         icon: Icons.receipt_long_outlined,
@@ -161,27 +168,16 @@ bool _isActive(String location, String path) {
 
 /// Returns the sections the current user is allowed to see, filtered by
 /// their permissions.
-///
-/// A destination is kept when its [requiredPermission] is `null` or when
-/// the current member holds that permission. Sections whose items are all
-/// hidden are dropped entirely.
-///
-/// While the member is still loading, we optimistically show everything so
-/// the sidebar does not flash empty on first paint.
 List<_NavSection> _visibleSections(WidgetRef ref) {
   final AsyncValue<CompanyMember?> memberAsync =
       ref.watch(currentMemberProvider);
 
-  // Show everything during the initial load — avoids a jarring flash of
-  // an almost-empty sidebar.
   if (memberAsync.isLoading && !memberAsync.hasValue) {
     return _sections;
   }
 
   final CompanyMember? member = memberAsync.valueOrNull;
 
-  // No member row available (unauthenticated, or a company was not yet
-  // resolved): keep the sidebar minimal but not broken.
   if (member == null) {
     return _sections
         .map(
