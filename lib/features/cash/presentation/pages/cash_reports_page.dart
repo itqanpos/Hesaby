@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
@@ -24,12 +24,6 @@ class CashReportsPage extends ConsumerStatefulWidget {
 
 class _CashReportsPageState extends ConsumerState<CashReportsPage> {
   _ReportView _view = _ReportView.summary;
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
 
   @override
   Widget build(BuildContext context) {
@@ -88,20 +82,11 @@ class _CashReportsPageState extends ConsumerState<CashReportsPage> {
               data: (CashReportBundle bundle) {
                 switch (_view) {
                   case _ReportView.summary:
-                    return _SummaryView(
-                      bundle: bundle,
-                      money: _money,
-                    );
+                    return _SummaryView(bundle: bundle);
                   case _ReportView.categories:
-                    return _CategoriesView(
-                      items: bundle.byCategory,
-                      money: _money,
-                    );
+                    return _CategoriesView(items: bundle.byCategory);
                   case _ReportView.accounts:
-                    return _AccountsView(
-                      items: bundle.byAccount,
-                      money: _money,
-                    );
+                    return _AccountsView(items: bundle.byAccount);
                 }
               },
             ),
@@ -208,10 +193,9 @@ class _ViewSelector extends StatelessWidget {
 // ============================================================================
 
 class _SummaryView extends StatelessWidget {
-  const _SummaryView({required this.bundle, required this.money});
+  const _SummaryView({required this.bundle});
 
   final CashReportBundle bundle;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -221,7 +205,7 @@ class _SummaryView extends StatelessWidget {
       padding: const EdgeInsets.only(top: 4, bottom: 24),
       children: <Widget>[
         // ---- Flow card ----
-        _FlowCard(summary: s, money: money),
+        _FlowCard(summary: s),
         const SizedBox(height: 12),
 
         // ---- KPIs ----
@@ -233,7 +217,7 @@ class _SummaryView extends StatelessWidget {
                 child: _KpiCard(
                   icon: Icons.arrow_downward,
                   label: 'إجمالي الوارد',
-                  value: money.format(s.totalIn),
+                  value: AppFormatters.money(s.totalIn),
                   color: const Color(0xFF0F7B6C),
                 ),
               ),
@@ -242,7 +226,7 @@ class _SummaryView extends StatelessWidget {
                 child: _KpiCard(
                   icon: Icons.arrow_upward,
                   label: 'إجمالي الصادر',
-                  value: money.format(s.totalOut),
+                  value: AppFormatters.money(s.totalOut),
                   color: const Color(0xFFC62828),
                 ),
               ),
@@ -258,7 +242,7 @@ class _SummaryView extends StatelessWidget {
                 child: _KpiCard(
                   icon: Icons.receipt_long_outlined,
                   label: 'عدد الحركات',
-                  value: '${s.transactionCount}',
+                  value: AppFormatters.integer(s.transactionCount),
                   color: const Color(0xFF0288D1),
                 ),
               ),
@@ -267,7 +251,7 @@ class _SummaryView extends StatelessWidget {
                 child: _KpiCard(
                   icon: Icons.trending_up,
                   label: 'صافي التغيير',
-                  value: money.format(s.netChange),
+                  value: AppFormatters.money(s.netChange),
                   color: s.netChange >= 0
                       ? const Color(0xFF0F7B6C)
                       : const Color(0xFFC62828),
@@ -282,10 +266,9 @@ class _SummaryView extends StatelessWidget {
 }
 
 class _FlowCard extends StatelessWidget {
-  const _FlowCard({required this.summary, required this.money});
+  const _FlowCard({required this.summary});
 
   final CashFlowSummary summary;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -317,22 +300,22 @@ class _FlowCard extends StatelessWidget {
               const SizedBox(height: 12),
               _FlowRow(
                 label: 'الرصيد الافتتاحي',
-                value: money.format(summary.openingBalance),
+                value: AppFormatters.money(summary.openingBalance),
               ),
               _FlowRow(
                 label: 'الوارد (+)',
-                value: money.format(summary.totalIn),
+                value: AppFormatters.money(summary.totalIn),
                 color: const Color(0xFF0F7B6C),
               ),
               _FlowRow(
                 label: 'الصادر (−)',
-                value: money.format(summary.totalOut),
+                value: AppFormatters.money(summary.totalOut),
                 color: const Color(0xFFC62828),
               ),
               const Divider(height: 20),
               _FlowRow(
                 label: 'الرصيد الختامي',
-                value: money.format(summary.closingBalance),
+                value: AppFormatters.money(summary.closingBalance),
                 emphasized: true,
               ),
             ],
@@ -396,10 +379,9 @@ class _FlowRow extends StatelessWidget {
 // ============================================================================
 
 class _CategoriesView extends StatelessWidget {
-  const _CategoriesView({required this.items, required this.money});
+  const _CategoriesView({required this.items});
 
   final List<CashCategoryBreakdown> items;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -420,7 +402,6 @@ class _CategoriesView extends StatelessWidget {
         totalIn: items[i].totalIn,
         totalOut: items[i].totalOut,
         count: items[i].count,
-        money: money,
       ),
     );
   }
@@ -431,10 +412,9 @@ class _CategoriesView extends StatelessWidget {
 // ============================================================================
 
 class _AccountsView extends StatelessWidget {
-  const _AccountsView({required this.items, required this.money});
+  const _AccountsView({required this.items});
 
   final List<CashAccountBreakdown> items;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -455,7 +435,6 @@ class _AccountsView extends StatelessWidget {
         totalIn: items[i].totalIn,
         totalOut: items[i].totalOut,
         count: items[i].count,
-        money: money,
       ),
     );
   }
@@ -468,7 +447,6 @@ class _BreakdownCard extends StatelessWidget {
     required this.totalIn,
     required this.totalOut,
     required this.count,
-    required this.money,
   });
 
   final String title;
@@ -476,7 +454,6 @@ class _BreakdownCard extends StatelessWidget {
   final double totalIn;
   final double totalOut;
   final int count;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -521,7 +498,7 @@ class _BreakdownCard extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    '$count حركة',
+                    '${AppFormatters.integer(count)} حركة',
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -534,7 +511,7 @@ class _BreakdownCard extends StatelessWidget {
                   Expanded(
                     child: _MiniStat(
                       label: 'وارد',
-                      value: money.format(totalIn),
+                      value: AppFormatters.money(totalIn),
                       color: const Color(0xFF0F7B6C),
                     ),
                   ),
@@ -542,7 +519,7 @@ class _BreakdownCard extends StatelessWidget {
                   Expanded(
                     child: _MiniStat(
                       label: 'صادر',
-                      value: money.format(totalOut),
+                      value: AppFormatters.money(totalOut),
                       color: const Color(0xFFC62828),
                     ),
                   ),
@@ -550,7 +527,7 @@ class _BreakdownCard extends StatelessWidget {
                   Expanded(
                     child: _MiniStat(
                       label: 'الصافي',
-                      value: money.format(net),
+                      value: AppFormatters.money(net),
                       color: net >= 0
                           ? const Color(0xFF0F7B6C)
                           : const Color(0xFFC62828),
