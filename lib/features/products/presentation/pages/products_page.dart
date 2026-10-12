@@ -4,8 +4,8 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -30,6 +30,10 @@ import 'product_units_dialog.dart';
 /// 2. Search field (debounced, server-side).
 /// 3. Status chips + Category dropdown + Sort dropdown — server-side.
 /// 4. Paginated product list (20 items per page, auto-loads on scroll).
+///
+/// **Interaction model:** tapping a product card does nothing — actions
+/// live in the per-card overflow menu. This prevents accidental edits
+/// while scrolling.
 ///
 /// **Phase T-1:** all write entry points (add / edit / toggle / delete /
 /// manage units) are guarded by [SubscriptionGuard.ensureCanWrite]. An
@@ -69,7 +73,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     final double threshold =
         _scrollController.position.maxScrollExtent * 0.85;
     if (_scrollController.position.pixels >= threshold) {
-      // Fire-and-forget; the notifier guards against concurrent calls.
       unawaited(ref.read(pagedProductsProvider.notifier).loadMore());
     }
   }
@@ -160,7 +163,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
               categoriesAsync.value ?? const <ProductCategory>[];
           final List<Unit> units = unitsAsync.value ?? const <Unit>[];
 
-          // Fast lookups from id → display name.
           final Map<String, String> categoryNames = <String, String>{
             for (final ProductCategory category in categories)
               category.id: category.name,
@@ -179,7 +181,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- KPI ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 12),
                 child: _KpiRow(
@@ -194,7 +195,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                 ),
               ),
 
-              // ---- Search ----
               AppTextField(
                 controller: _searchController,
                 hint: 'ابحث بالاسم أو SKU أو الباركود',
@@ -218,7 +218,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
 
               const SizedBox(height: 10),
 
-              // ---- Filters ----
               _FilterBar(
                 filter: filter,
                 categories: categories,
@@ -240,7 +239,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
 
               const SizedBox(height: 8),
 
-              // ---- List ----
               Expanded(
                 child: Builder(
                   builder: (BuildContext context) {
@@ -354,7 +352,6 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
     BuildContext context, {
     Product? product,
   }) async {
-    // Phase T-1: create AND edit are both writes.
     final bool allowed = await SubscriptionGuard.ensureCanWrite(
       context: context,
       ref: ref,
@@ -505,7 +502,9 @@ class _KpiRow extends StatelessWidget {
           child: _KpiCard(
             icon: Icons.inventory_2_outlined,
             label: 'الإجمالي',
-            value: isLoading ? '…' : counts.total.toString(),
+            value: isLoading
+                ? '…'
+                : AppFormatters.integer(counts.total),
             color: const Color(0xFF0288D1),
             selected: activeFilter == null,
             onTap: () => onStatusTap(null),
@@ -516,7 +515,9 @@ class _KpiRow extends StatelessWidget {
           child: _KpiCard(
             icon: Icons.check_circle_outline,
             label: 'نشط',
-            value: isLoading ? '…' : counts.active.toString(),
+            value: isLoading
+                ? '…'
+                : AppFormatters.integer(counts.active),
             color: const Color(0xFF0F7B6C),
             selected: activeFilter == true,
             onTap: () => onStatusTap(true),
@@ -527,7 +528,9 @@ class _KpiRow extends StatelessWidget {
           child: _KpiCard(
             icon: Icons.pause_circle_outline,
             label: 'معطّل',
-            value: isLoading ? '…' : counts.inactive.toString(),
+            value: isLoading
+                ? '…'
+                : AppFormatters.integer(counts.inactive),
             color: const Color(0xFF7B5E3A),
             selected: activeFilter == false,
             onTap: () => onStatusTap(false),
@@ -823,170 +826,161 @@ class _ProductCard extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final bool isActive = product.isActive;
-    final NumberFormat priceFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     return Material(
       color: scheme.surface,
       borderRadius: BorderRadius.circular(14),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(14),
-        onTap: onEdit,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: <Widget>[
-              CircleAvatar(
-                radius: 20,
-                backgroundColor: isActive
-                    ? scheme.primaryContainer
-                    : scheme.surfaceContainerHighest,
-                foregroundColor: isActive
-                    ? scheme.onPrimaryContainer
-                    : scheme.onSurfaceVariant,
-                child: Text(
-                  product.name.characters.first.toUpperCase(),
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
-                  ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            CircleAvatar(
+              radius: 20,
+              backgroundColor: isActive
+                  ? scheme.primaryContainer
+                  : scheme.surfaceContainerHighest,
+              foregroundColor: isActive
+                  ? scheme.onPrimaryContainer
+                  : scheme.onSurfaceVariant,
+              child: Text(
+                product.name.characters.first.toUpperCase(),
+                style: theme.textTheme.titleMedium?.copyWith(
+                  fontWeight: FontWeight.w700,
                 ),
               ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            product.name,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                        if (!isActive)
-                          _Badge(
-                            label: 'معطّل',
-                            background: scheme.surfaceContainerHighest,
-                            foreground: scheme.onSurfaceVariant,
-                          ),
-                      ],
-                    ),
-                    if (product.hasSku || product.hasBarcode) ...<Widget>[
-                      const SizedBox(height: 3),
-                      _CodeLine(product: product),
-                    ],
-                    if (categoryName != null || unitName != null) ...<Widget>[
-                      const SizedBox(height: 6),
-                      Wrap(
-                        spacing: 4,
-                        runSpacing: 4,
-                        children: <Widget>[
-                          if (categoryName != null)
-                            _Badge(
-                              icon: Icons.category_outlined,
-                              label: categoryName!,
-                              background: scheme.tertiaryContainer,
-                              foreground: scheme.onTertiaryContainer,
-                            ),
-                          if (unitName != null)
-                            _Badge(
-                              icon: Icons.straighten_outlined,
-                              label: unitName!,
-                              background: scheme.secondaryContainer,
-                              foreground: scheme.onSecondaryContainer,
-                            ),
-                        ],
-                      ),
-                    ],
-                    const SizedBox(height: 8),
-                    Row(
-                      crossAxisAlignment: CrossAxisAlignment.baseline,
-                      textBaseline: TextBaseline.alphabetic,
-                      children: <Widget>[
-                        Text(
-                          priceFormat.format(product.sellingPrice),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: Text(
+                          product.name,
                           style: theme.textTheme.titleSmall?.copyWith(
-                            color: scheme.primary,
-                            fontWeight: FontWeight.w800,
+                            fontWeight: FontWeight.w700,
                           ),
+                          overflow: TextOverflow.ellipsis,
                         ),
-                        const SizedBox(width: 8),
-                        Text(
-                          'تكلفة: ${priceFormat.format(product.costPrice)}',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
+                      ),
+                      if (!isActive)
+                        _Badge(
+                          label: 'معطّل',
+                          background: scheme.surfaceContainerHighest,
+                          foreground: scheme.onSurfaceVariant,
+                        ),
+                    ],
+                  ),
+                  if (product.hasSku || product.hasBarcode) ...<Widget>[
+                    const SizedBox(height: 3),
+                    _CodeLine(product: product),
+                  ],
+                  if (categoryName != null || unitName != null) ...<Widget>[
+                    const SizedBox(height: 6),
+                    Wrap(
+                      spacing: 4,
+                      runSpacing: 4,
+                      children: <Widget>[
+                        if (categoryName != null)
+                          _Badge(
+                            icon: Icons.category_outlined,
+                            label: categoryName!,
+                            background: scheme.tertiaryContainer,
+                            foreground: scheme.onTertiaryContainer,
                           ),
-                        ),
+                        if (unitName != null)
+                          _Badge(
+                            icon: Icons.straighten_outlined,
+                            label: unitName!,
+                            background: scheme.secondaryContainer,
+                            foreground: scheme.onSecondaryContainer,
+                          ),
                       ],
                     ),
                   ],
-                ),
-              ),
-              PopupMenuButton<_ProductAction>(
-                tooltip: 'خيارات',
-                onSelected: (_ProductAction action) {
-                  switch (action) {
-                    case _ProductAction.edit:
-                      onEdit();
-                    case _ProductAction.manageUnits:
-                      onManageUnits();
-                    case _ProductAction.toggleActive:
-                      onToggleActive();
-                    case _ProductAction.delete:
-                      onDelete();
-                  }
-                },
-                itemBuilder: (BuildContext context) =>
-                    <PopupMenuEntry<_ProductAction>>[
-                  const PopupMenuItem<_ProductAction>(
-                    value: _ProductAction.edit,
-                    child: ListTile(
-                      leading: Icon(Icons.edit_outlined),
-                      title: Text('تعديل'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  const PopupMenuItem<_ProductAction>(
-                    value: _ProductAction.manageUnits,
-                    child: ListTile(
-                      leading: Icon(Icons.swap_horiz_outlined),
-                      title: Text('وحدات إضافية'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  PopupMenuItem<_ProductAction>(
-                    value: _ProductAction.toggleActive,
-                    child: ListTile(
-                      leading: Icon(
-                        isActive
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
+                  const SizedBox(height: 8),
+                  Row(
+                    crossAxisAlignment: CrossAxisAlignment.baseline,
+                    textBaseline: TextBaseline.alphabetic,
+                    children: <Widget>[
+                      Text(
+                        AppFormatters.money(product.sellingPrice),
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w800,
+                        ),
                       ),
-                      title: Text(isActive ? 'تعطيل' : 'تفعيل'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
-                  const PopupMenuItem<_ProductAction>(
-                    value: _ProductAction.delete,
-                    child: ListTile(
-                      leading: Icon(Icons.delete_outline),
-                      title: Text('حذف'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
+                      const SizedBox(width: 8),
+                      Text(
+                        'تكلفة: ${AppFormatters.money(product.costPrice)}',
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+                    ],
                   ),
                 ],
               ),
-            ],
-          ),
+            ),
+            PopupMenuButton<_ProductAction>(
+              tooltip: 'خيارات',
+              onSelected: (_ProductAction action) {
+                switch (action) {
+                  case _ProductAction.edit:
+                    onEdit();
+                  case _ProductAction.manageUnits:
+                    onManageUnits();
+                  case _ProductAction.toggleActive:
+                    onToggleActive();
+                  case _ProductAction.delete:
+                    onDelete();
+                }
+              },
+              itemBuilder: (BuildContext context) =>
+                  <PopupMenuEntry<_ProductAction>>[
+                const PopupMenuItem<_ProductAction>(
+                  value: _ProductAction.edit,
+                  child: ListTile(
+                    leading: Icon(Icons.edit_outlined),
+                    title: Text('تعديل'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                const PopupMenuItem<_ProductAction>(
+                  value: _ProductAction.manageUnits,
+                  child: ListTile(
+                    leading: Icon(Icons.swap_horiz_outlined),
+                    title: Text('وحدات إضافية'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                PopupMenuItem<_ProductAction>(
+                  value: _ProductAction.toggleActive,
+                  child: ListTile(
+                    leading: Icon(
+                      isActive
+                          ? Icons.visibility_off_outlined
+                          : Icons.visibility_outlined,
+                    ),
+                    title: Text(isActive ? 'تعطيل' : 'تفعيل'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+                const PopupMenuItem<_ProductAction>(
+                  value: _ProductAction.delete,
+                  child: ListTile(
+                    leading: Icon(Icons.delete_outline),
+                    title: Text('حذف'),
+                    contentPadding: EdgeInsets.zero,
+                  ),
+                ),
+              ],
+            ),
+          ],
         ),
       ),
     );
