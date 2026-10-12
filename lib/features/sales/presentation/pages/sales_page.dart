@@ -8,6 +8,7 @@ import 'package:intl/intl.dart';
 import '../../../../app/router.dart';
 import '../../../../core/invalidation/data_invalidation.dart';
 import '../../../../core/network/presentation/pending_operations_badge.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -519,7 +520,7 @@ class _FilterButton extends StatelessWidget {
                     borderRadius: BorderRadius.circular(999),
                   ),
                   child: Text(
-                    '$activeCount',
+                    AppFormatters.integer(activeCount),
                     style: theme.textTheme.labelSmall?.copyWith(
                       color: scheme.primary,
                       fontWeight: FontWeight.w800,
@@ -606,9 +607,8 @@ class _ActiveFilterChips extends StatelessWidget {
         return 'هذا العام';
       case SalesDateFilter.custom:
         if (filter.customRange != null) {
-          final DateFormat fmt = DateFormat('yy/MM/dd');
-          return '${fmt.format(filter.customRange!.start)} → '
-              '${fmt.format(filter.customRange!.end)}';
+          return '${AppFormatters.date(filter.customRange!.start)} → '
+              '${AppFormatters.date(filter.customRange!.end)}';
         }
         return 'نطاق مخصص';
     }
@@ -670,12 +670,6 @@ class _SaleCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     final (Color badgeBg, Color badgeFg) = _statusColors(
       scheme,
@@ -751,12 +745,12 @@ class _SaleCard extends StatelessWidget {
                         Row(
                           children: <Widget>[
                             Text(
-                              _formatDateTime(sale.saleDate),
+                              AppFormatters.dateTime(sale.saleDate),
                               style: theme.textTheme.bodySmall,
                             ),
                             const SizedBox(width: 12),
                             Text(
-                              moneyFormat.format(sale.total),
+                              AppFormatters.money(sale.total),
                               style: theme.textTheme.titleSmall?.copyWith(
                                 color: scheme.primary,
                                 fontWeight: FontWeight.w600,
@@ -772,8 +766,9 @@ class _SaleCard extends StatelessWidget {
                             ] else if (sale.isPartiallyPaid) ...<Widget>[
                               const SizedBox(width: 8),
                               _PaymentBadge(
-                                label:
-                                    'مدفوع جزئيًا (${moneyFormat.format(sale.amountDue)} متبقٍ)',
+                                label: 'مدفوع جزئيًا '
+                                    '(${AppFormatters.money(sale.amountDue)} '
+                                    'متبقٍ)',
                                 background: scheme.tertiaryContainer,
                                 foreground: scheme.onTertiaryContainer,
                               ),
@@ -891,24 +886,6 @@ class _PaymentBadge extends StatelessWidget {
 // -----------------------------------------------------------------------------
 // Localization
 // -----------------------------------------------------------------------------
-
-/// Formats [value] as `yyyy/MM/dd  hh:mm ص|م` using English numerals and
-/// an explicit 12-hour representation.
-///
-/// Matches the format used on thermal receipts, so the same timestamp
-/// reads identically across the app.
-String _formatDateTime(DateTime value) {
-  final DateTime local = value.toLocal();
-  final int h24 = local.hour;
-  final int h12 = h24 == 0 ? 12 : (h24 > 12 ? h24 - 12 : h24);
-  final String ampm = h24 >= 12 ? 'م' : 'ص';
-  final String y = local.year.toString().padLeft(4, '0');
-  final String m = local.month.toString().padLeft(2, '0');
-  final String d = local.day.toString().padLeft(2, '0');
-  final String hh = h12.toString().padLeft(2, '0');
-  final String mm = local.minute.toString().padLeft(2, '0');
-  return '$y/$m/$d  $hh:$mm $ampm';
-}
 
 String _statusLabel(String status) {
   switch (status) {
