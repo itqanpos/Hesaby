@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../../suppliers/domain/entities/supplier.dart';
 import '../../../suppliers/presentation/providers/supplier_providers.dart';
 import '../../domain/entities/purchase_cart.dart';
@@ -22,8 +22,6 @@ import '../state/purchase_providers.dart';
 /// ```
 class PurchaseHeaderBar extends ConsumerWidget {
   const PurchaseHeaderBar({super.key});
-
-  static final DateFormat _dateFormat = DateFormat.yMd('ar_EG');
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
@@ -72,7 +70,6 @@ class PurchaseHeaderBar extends ConsumerWidget {
                 flex: 2,
                 child: _DateSelector(
                   date: cart.purchaseDate,
-                  dateFormat: _dateFormat,
                   onPicked: notifier.setPurchaseDate,
                 ),
               ),
@@ -339,12 +336,10 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
 class _DateSelector extends StatelessWidget {
   const _DateSelector({
     required this.date,
-    required this.dateFormat,
     required this.onPicked,
   });
 
   final DateTime? date;
-  final DateFormat dateFormat;
   final ValueChanged<DateTime> onPicked;
 
   @override
@@ -380,7 +375,7 @@ class _DateSelector extends StatelessWidget {
               const SizedBox(width: 6),
               Expanded(
                 child: Text(
-                  hasDate ? dateFormat.format(date!) : 'التاريخ',
+                  hasDate ? AppFormatters.date(date!) : 'التاريخ',
                   style: theme.textTheme.bodyMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: hasDate
