@@ -240,6 +240,14 @@ class _CustomerStatementPageState
   Widget build(BuildContext context) {
     return AppShell(
       appBar: AppBar(
+        // Explicit back button that returns to the customers list. The
+        // page is opened via `Navigator.push` from `CustomersPage`, so a
+        // simple `pop()` is the correct navigation target.
+        leading: IconButton(
+          tooltip: 'رجوع',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
         title: const Text('كشف حساب'),
         actions: <Widget>[
           IconButton(
@@ -475,9 +483,20 @@ class _EntriesList extends StatelessWidget {
       );
     }
 
+    // Force the display order to be newest-first, regardless of the
+    // ordering that [CustomerStatement.build] returned upstream.
+    // Sorting here is a guaranteed invariant on the UI layer, so the
+    // statement always shows the most recent activity at the top.
+    final List<CustomerStatementEntry> sorted =
+        List<CustomerStatementEntry>.of(statement.entries)
+          ..sort(
+            (CustomerStatementEntry a, CustomerStatementEntry b) =>
+                b.date.compareTo(a.date),
+          );
+
     return ListView.separated(
       padding: const EdgeInsets.only(bottom: 24),
-      itemCount: statement.entries.length + 2,
+      itemCount: sorted.length + 2,
       separatorBuilder: (_, __) => const SizedBox(height: 6),
       itemBuilder: (BuildContext context, int index) {
         if (index == 0) {
@@ -485,10 +504,10 @@ class _EntriesList extends StatelessWidget {
             openingBalance: statement.openingBalance,
           );
         }
-        if (index == statement.entries.length + 1) {
+        if (index == sorted.length + 1) {
           return _ClosingBalanceCard(statement: statement);
         }
-        return _EntryCard(entry: statement.entries[index - 1]);
+        return _EntryCard(entry: sorted[index - 1]);
       },
     );
   }
@@ -660,7 +679,7 @@ class _EntryCard extends StatelessWidget {
   }
 
   String _metaLine() {
-    final String date = AppFormatters.date(entry.date);
+    final String date = AppFormatters.dateTime(entry.date);
     if (entry.hasReference) {
       return '$date · ${entry.reference}';
     }
