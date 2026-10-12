@@ -6,6 +6,7 @@ import 'package:flutter/foundation.dart';
 import '../entities/aging_reports.dart';
 import '../entities/financial_reports.dart';
 import '../entities/inventory_reports.dart';
+import '../entities/profit_reports.dart';
 import '../entities/report_period.dart';
 import '../entities/sales_reports.dart';
 
@@ -87,6 +88,18 @@ abstract interface class ReportsRepository {
   Future<ProfitLossSummary> getProfitLoss({
     required String companyId,
     required ReportPeriod period,
+  });
+
+  /// Per-product profit for [period].
+  ///
+  /// Revenue is drawn from confirmed `sale_items.line_total`; cost is
+  /// drawn from `sale_out` stock movements (historical average cost at
+  /// the moment of sale). Both are filtered to the same window so the
+  /// numbers match a proper gross-profit calculation.
+  Future<ProductProfitReport> getProductProfit({
+    required String companyId,
+    required ReportPeriod period,
+    required Map<String, String> productNames,
   });
 
   Future<ReceivablesReport> getReceivables({
