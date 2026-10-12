@@ -104,19 +104,18 @@ class _AddCashTransactionSheetState
     });
 
     try {
-      final CashTransaction created =
-          await ref.read(cashTransactionsProvider.notifier).addManual(
-                accountId: accountId,
-                categoryId: _categoryId,
-                direction: _direction,
-                amount: amount,
-                reference: _emptyToNull(_referenceController.text),
-                notes: _emptyToNull(_notesController.text),
-                transactionDate: DateTime.now(),
-              );
+      await ref.read(cashTransactionsProvider.notifier).addManual(
+            accountId: accountId,
+            categoryId: _categoryId,
+            direction: _direction,
+            amount: amount,
+            reference: _emptyToNull(_referenceController.text),
+            notes: _emptyToNull(_notesController.text),
+            transactionDate: DateTime.now(),
+          );
 
       if (!mounted) return;
-      Navigator.of(context).pop(created);
+      Navigator.of(context).pop(null);
     } on CashException catch (e) {
       if (!mounted) return;
       setState(() {
@@ -378,7 +377,6 @@ class _AmountPreview extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
     final Color tone =
         isIncome ? const Color(0xFF0F7B6C) : const Color(0xFFC62828);
 
