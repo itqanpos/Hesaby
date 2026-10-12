@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../cash/domain/entities/cash_entities.dart';
 import '../../../cash/presentation/providers/cash_providers.dart';
@@ -51,8 +51,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
   bool _isSubmitting = false;
   ExpenseFailureType? _failure;
 
-  static final DateFormat _dateFmt = DateFormat('yyyy/MM/dd');
-
   bool get _isEdit => widget.existing != null;
 
   @override
@@ -69,15 +67,22 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
     _expenseDate = e?.expenseDate ?? DateTime.now();
     _categoryId = e?.categoryId;
     _paymentMethod = e?.paymentMethod ?? 'cash';
+
+    _amountController.addListener(_onAmountChanged);
   }
 
   @override
   void dispose() {
+    _amountController.removeListener(_onAmountChanged);
     _descriptionController.dispose();
     _amountController.dispose();
     _referenceController.dispose();
     _notesController.dispose();
     super.dispose();
+  }
+
+  void _onAmountChanged() {
+    if (mounted) setState(() {});
   }
 
   static String _fmtNum(double v) {
@@ -97,7 +102,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
       initialDate: _expenseDate,
       firstDate: DateTime(now.year - 5),
       lastDate: DateTime(now.year + 2),
-      locale: const Locale('ar', 'EG'),
     );
     if (picked != null) {
       setState(() => _expenseDate = picked);
@@ -170,6 +174,10 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
             .where((CashCategory c) => c.kind == CashCategoryKind.expense)
             .toList(growable: false);
 
+    // Live preview of the entered amount.
+    final double? enteredAmount =
+        double.tryParse(_amountController.text.trim());
+
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
       child: SingleChildScrollView(
@@ -240,6 +248,13 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                     return null;
                   },
                 ),
+
+                // ---- Amount preview ----
+                if (enteredAmount != null && enteredAmount > 0) ...<Widget>[
+                  const SizedBox(height: 6),
+                  _AmountPreview(amount: enteredAmount),
+                ],
+
                 const SizedBox(height: 12),
 
                 // ---- Category ----
@@ -318,7 +333,7 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                       border: OutlineInputBorder(),
                       suffixIcon: Icon(Icons.calendar_today_outlined),
                     ),
-                    child: Text(_dateFmt.format(_expenseDate)),
+                    child: Text(AppFormatters.date(_expenseDate)),
                   ),
                 ),
                 const SizedBox(height: 12),
@@ -371,6 +386,63 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
   }
 }
 
+// ============================================================================
+// Amount preview
+// ============================================================================
+
+class _AmountPreview extends StatelessWidget {
+  const _AmountPreview({required this.amount});
+
+  final double amount;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    const Color tone = Color(0xFFC62828);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: tone.withValues(alpha: 0.08),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: tone.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: <Widget>[
+            const Icon(
+              Icons.arrow_upward,
+              size: 16,
+              color: tone,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                'سيُسجَّل صادر',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: tone,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+            Text(
+              '− ${AppFormatters.money(amount)}',
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: tone,
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Failure banner
+// ============================================================================
+
 class _FailureBanner extends StatelessWidget {
   const _FailureBanner({required this.message});
 
@@ -402,6 +474,10 @@ class _FailureBanner extends StatelessWidget {
     );
   }
 }
+
+// ============================================================================
+// Localization
+// ============================================================================
 
 String _failureMessage(ExpenseFailureType type) => switch (type) {
       ExpenseFailureType.network =>
