@@ -4,10 +4,10 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -52,13 +52,6 @@ class _CustomerStatementPageState
   _PeriodPreset _preset = _PeriodPreset.all;
   DateTimeRange? _customRange;
   bool _isPrinting = false;
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final DateFormat _dateShort = DateFormat('yyyy-MM-dd');
 
   // ---------------------------------------------------------------------------
   // Period computation
@@ -275,8 +268,6 @@ class _CustomerStatementPageState
               preset: _preset,
               customRange: _customRange,
               onSelectPreset: _selectPreset,
-              money: _money,
-              dateShort: _dateShort,
             ),
           ),
     );
@@ -293,26 +284,19 @@ class _StatementBody extends StatelessWidget {
     required this.preset,
     required this.customRange,
     required this.onSelectPreset,
-    required this.money,
-    required this.dateShort,
   });
 
   final CustomerStatement statement;
   final _PeriodPreset preset;
   final DateTimeRange? customRange;
   final Future<void> Function(_PeriodPreset) onSelectPreset;
-  final NumberFormat money;
-  final DateFormat dateShort;
 
   @override
   Widget build(BuildContext context) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _CustomerInfoCard(
-          statement: statement,
-          money: money,
-        ),
+        _CustomerInfoCard(statement: statement),
         const SizedBox(height: 8),
         _PeriodChips(
           preset: preset,
@@ -321,11 +305,7 @@ class _StatementBody extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Expanded(
-          child: _EntriesList(
-            statement: statement,
-            money: money,
-            dateShort: dateShort,
-          ),
+          child: _EntriesList(statement: statement),
         ),
       ],
     );
@@ -337,13 +317,9 @@ class _StatementBody extends StatelessWidget {
 // ============================================================================
 
 class _CustomerInfoCard extends StatelessWidget {
-  const _CustomerInfoCard({
-    required this.statement,
-    required this.money,
-  });
+  const _CustomerInfoCard({required this.statement});
 
   final CustomerStatement statement;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -407,7 +383,7 @@ class _CustomerInfoCard extends StatelessWidget {
                 ),
                 const Spacer(),
                 Text(
-                  money.format(customer.balance),
+                  AppFormatters.money(customer.balance),
                   style: theme.textTheme.titleLarge?.copyWith(
                     color: customer.balance > 0
                         ? scheme.error
@@ -470,9 +446,8 @@ class _PeriodChips extends StatelessWidget {
 
   String _customLabel() {
     if (preset == _PeriodPreset.custom && customRange != null) {
-      final DateFormat fmt = DateFormat('yy/MM/dd');
-      return '${fmt.format(customRange!.start)} → '
-          '${fmt.format(customRange!.end)}';
+      return '${AppFormatters.date(customRange!.start)} → '
+          '${AppFormatters.date(customRange!.end)}';
     }
     return 'نطاق مخصص';
   }
@@ -483,15 +458,9 @@ class _PeriodChips extends StatelessWidget {
 // ============================================================================
 
 class _EntriesList extends StatelessWidget {
-  const _EntriesList({
-    required this.statement,
-    required this.money,
-    required this.dateShort,
-  });
+  const _EntriesList({required this.statement});
 
   final CustomerStatement statement;
-  final NumberFormat money;
-  final DateFormat dateShort;
 
   @override
   Widget build(BuildContext context) {
@@ -502,7 +471,6 @@ class _EntriesList extends StatelessWidget {
         message: 'لم تُسجَّل أي حركة على هذا العميل في الفترة المحددة.',
         action: _OpeningBalanceTile(
           openingBalance: statement.openingBalance,
-          money: money,
         ),
       );
     }
@@ -515,20 +483,12 @@ class _EntriesList extends StatelessWidget {
         if (index == 0) {
           return _OpeningBalanceTile(
             openingBalance: statement.openingBalance,
-            money: money,
           );
         }
         if (index == statement.entries.length + 1) {
-          return _ClosingBalanceCard(
-            statement: statement,
-            money: money,
-          );
+          return _ClosingBalanceCard(statement: statement);
         }
-        return _EntryCard(
-          entry: statement.entries[index - 1],
-          money: money,
-          dateShort: dateShort,
-        );
+        return _EntryCard(entry: statement.entries[index - 1]);
       },
     );
   }
@@ -539,13 +499,9 @@ class _EntriesList extends StatelessWidget {
 // ============================================================================
 
 class _OpeningBalanceTile extends StatelessWidget {
-  const _OpeningBalanceTile({
-    required this.openingBalance,
-    required this.money,
-  });
+  const _OpeningBalanceTile({required this.openingBalance});
 
   final double openingBalance;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -576,7 +532,7 @@ class _OpeningBalanceTile extends StatelessWidget {
             ),
             const Spacer(),
             Text(
-              money.format(openingBalance),
+              AppFormatters.money(openingBalance),
               style: theme.textTheme.titleMedium?.copyWith(
                 fontWeight: FontWeight.w800,
                 color: openingBalance > 0
@@ -596,15 +552,9 @@ class _OpeningBalanceTile extends StatelessWidget {
 // ============================================================================
 
 class _EntryCard extends StatelessWidget {
-  const _EntryCard({
-    required this.entry,
-    required this.money,
-    required this.dateShort,
-  });
+  const _EntryCard({required this.entry});
 
   final CustomerStatementEntry entry;
-  final NumberFormat money;
-  final DateFormat dateShort;
 
   @override
   Widget build(BuildContext context) {
@@ -672,7 +622,8 @@ class _EntryCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     Text(
-                      '${entry.isDebit ? '+' : '−'}${money.format(entry.isDebit ? entry.debit : entry.credit)}',
+                      '${entry.isDebit ? '+' : '−'}'
+                      '${AppFormatters.money(entry.isDebit ? entry.debit : entry.credit)}',
                       style: theme.textTheme.titleSmall?.copyWith(
                         color: accent,
                         fontWeight: FontWeight.w800,
@@ -680,7 +631,8 @@ class _EntryCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'الرصيد: ${money.format(entry.balanceAfter ?? 0)}',
+                      'الرصيد: '
+                      '${AppFormatters.money(entry.balanceAfter ?? 0)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -708,7 +660,7 @@ class _EntryCard extends StatelessWidget {
   }
 
   String _metaLine() {
-    final String date = dateShort.format(entry.date.toLocal());
+    final String date = AppFormatters.date(entry.date);
     if (entry.hasReference) {
       return '$date · ${entry.reference}';
     }
@@ -751,13 +703,9 @@ class _EntryCard extends StatelessWidget {
 // ============================================================================
 
 class _ClosingBalanceCard extends StatelessWidget {
-  const _ClosingBalanceCard({
-    required this.statement,
-    required this.money,
-  });
+  const _ClosingBalanceCard({required this.statement});
 
   final CustomerStatement statement;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -799,7 +747,7 @@ class _ClosingBalanceCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              money.format(statement.closingBalance),
+              AppFormatters.money(statement.closingBalance),
               style: theme.textTheme.headlineSmall?.copyWith(
                 fontWeight: FontWeight.w900,
                 color: inDebt
@@ -809,7 +757,8 @@ class _ClosingBalanceCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Text(
-              'عدد الحركات: ${statement.entryCount}',
+              'عدد الحركات: '
+              '${AppFormatters.integer(statement.entryCount)}',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: inDebt
                     ? scheme.onErrorContainer
