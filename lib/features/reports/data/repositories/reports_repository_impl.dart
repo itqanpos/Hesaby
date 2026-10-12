@@ -6,6 +6,7 @@ import '../../../../core/utils/logger.dart';
 import '../../domain/entities/aging_reports.dart';
 import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/inventory_reports.dart';
+import '../../domain/entities/profit_reports.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
 import '../../domain/repositories/reports_repository.dart';
@@ -595,6 +596,112 @@ class ReportsRepositoryImpl implements ReportsRepository {
   }
 
   // ---------------------------------------------------------------------------
+  // Per-product profit
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<ProductProfitReport> getProductProfit({
+    required String companyId,
+    required ReportPeriod period,
+    required Map<String, String> productNames,
+  }) async {
+    try {
+      // ---- 1) Revenue side: confirmed sale_items within the window ------
+      final List<String> saleIds =
+          await _remoteDataSource.fetchConfirmedSaleIds(
+        companyId: companyId,
+        fromDate: period.fromDate,
+        toDate: period.toDate,
+      );
+
+      // ---- 2) Cost side: sale_out movements within the window -----------
+      final List<Map<String, dynamic>> movements =
+          await _remoteDataSource.fetchSaleOutMovements(
+        companyId: companyId,
+        fromDate: period.fromDate,
+        toDate: period.toDate,
+      );
+
+      // Short-circuit when both sides are empty.
+      if (saleIds.isEmpty && movements.isEmpty) {
+        return ProductProfitReport.empty();
+      }
+
+      // Aggregate revenue + quantity + invoice count by product.
+      final Map<String, _ProfitAgg> byProduct = <String, _ProfitAgg>{};
+
+      if (saleIds.isNotEmpty) {
+        final List<Map<String, dynamic>> items =
+            await _remoteDataSource.fetchSaleItems(saleIds: saleIds);
+
+        for (final Map<String, dynamic> row in items) {
+          final String productId = _asString(row['product_id']);
+          if (productId.isEmpty) continue;
+          final double qty = _asDouble(row['quantity']);
+          final double revenue = _asDouble(row['line_total']);
+          final String saleId = _asString(row['sale_id']);
+          byProduct
+              .putIfAbsent(productId, () => _ProfitAgg())
+              .addSale(qty, revenue, saleId);
+        }
+      }
+
+      // Aggregate cost by product. `movements` uses signed quantities
+      // (negative for sale_out), so we take the absolute value.
+      for (final Map<String, dynamic> row in movements) {
+        final String productId = _asString(row['product_id']);
+        if (productId.isEmpty) continue;
+        final double qty = _asDouble(row['quantity']);
+        final double unitCost = _asDouble(row['unit_cost']);
+        final double magnitude = qty < 0 ? -qty : qty;
+        byProduct
+            .putIfAbsent(productId, () => _ProfitAgg())
+            .addCost(magnitude * unitCost);
+      }
+
+      // Build the list of ProductProfit entries.
+      final List<ProductProfit> items = <ProductProfit>[];
+      double totalRevenue = 0;
+      double totalCost = 0;
+      int productsWithLoss = 0;
+
+      byProduct.forEach((String pid, _ProfitAgg agg) {
+        final ProductProfit p = ProductProfit(
+          productId: pid,
+          productName: productNames[pid] ?? 'منتج محذوف',
+          quantitySold: agg.quantity,
+          revenue: agg.revenue,
+          cost: agg.cost,
+          invoiceCount: agg.saleIds.length,
+        );
+        items.add(p);
+        totalRevenue += p.revenue;
+        totalCost += p.cost;
+        if (p.profit < 0) productsWithLoss++;
+      });
+
+      // Sort by profit descending — the most profitable products first.
+      items.sort((ProductProfit a, ProductProfit b) =>
+          b.profit.compareTo(a.profit));
+
+      return ProductProfitReport(
+        items: items,
+        totalRevenue: totalRevenue,
+        totalCost: totalCost,
+        productsWithLoss: productsWithLoss,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getProductProfit');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getProductProfit');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getProductProfit');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
   // Receivables
   // ---------------------------------------------------------------------------
 
@@ -1112,6 +1219,28 @@ class _ProductAgg {
     if (saleId.isNotEmpty) {
       saleIds.add(saleId);
     }
+  }
+}
+
+/// Aggregation helper for [ProductProfitReport]: keeps both the revenue
+/// side (from `sale_items`) and the cost side (from `sale_out` movements)
+/// under a single product id.
+class _ProfitAgg {
+  double quantity = 0;
+  double revenue = 0;
+  double cost = 0;
+  final Set<String> saleIds = <String>{};
+
+  void addSale(double qty, double rev, String saleId) {
+    quantity += qty;
+    revenue += rev;
+    if (saleId.isNotEmpty) {
+      saleIds.add(saleId);
+    }
+  }
+
+  void addCost(double value) {
+    cost += value;
   }
 }
 
