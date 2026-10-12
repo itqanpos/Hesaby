@@ -3,9 +3,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:intl/intl.dart';
 
 import '../../../../app/router.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -50,7 +50,14 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
 
     if (id == null || id.isEmpty) {
       return AppShell(
-        appBar: AppBar(title: const Text('تفاصيل الفاتورة')),
+        appBar: AppBar(
+          leading: IconButton(
+            tooltip: 'رجوع',
+            icon: const Icon(Icons.arrow_back),
+            onPressed: () => context.pop(),
+          ),
+          title: const Text('تفاصيل الفاتورة'),
+        ),
         body: const AppEmptyView(
           icon: Icons.receipt_long_outlined,
           title: 'فاتورة غير معروفة',
@@ -87,6 +94,13 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
 
     return AppShell(
       appBar: AppBar(
+        // Explicit back button — this page is opened via go_router push
+        // from the purchases list, so `pop()` is the correct target.
+        leading: IconButton(
+          tooltip: 'رجوع',
+          icon: const Icon(Icons.arrow_back),
+          onPressed: () => context.pop(),
+        ),
         title: const Text('تفاصيل الفاتورة'),
         actions: <Widget>[
           IconButton(
@@ -230,8 +244,6 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
   }
 
   Future<void> _print(BuildContext context) async {
-    // Re-read every dependency at the moment of printing so any mutation
-    // performed since the page opened is reflected in the output.
     final GoRouterState state = GoRouterState.of(context);
     final String? id = state.pathParameters['id'];
     if (id == null || id.isEmpty) {
@@ -505,8 +517,6 @@ class _HeaderCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final DateFormat dateFormat = DateFormat.yMd('ar_EG');
-    final DateFormat dateTimeFormat = DateFormat.yMd('ar_EG').add_Hm();
 
     final (Color badgeBg, Color badgeFg) = _statusColors(
       scheme,
@@ -566,23 +576,19 @@ class _HeaderCard extends StatelessWidget {
             _row(
               theme,
               label: 'تاريخ الفاتورة',
-              value: dateFormat.format(purchase.purchaseDate.toLocal()),
+              value: AppFormatters.date(purchase.purchaseDate),
             ),
             if (purchase.wasConfirmed && purchase.confirmedAt != null)
               _row(
                 theme,
                 label: 'تم التأكيد في',
-                value: dateTimeFormat.format(
-                  purchase.confirmedAt!.toLocal(),
-                ),
+                value: AppFormatters.dateTime(purchase.confirmedAt!),
               ),
             if (purchase.wasCancelled && purchase.cancelledAt != null)
               _row(
                 theme,
                 label: 'تم الإلغاء في',
-                value: dateTimeFormat.format(
-                  purchase.cancelledAt!.toLocal(),
-                ),
+                value: AppFormatters.dateTime(purchase.cancelledAt!),
               ),
             if (purchase.hasNotes)
               _row(
@@ -701,12 +707,6 @@ class _ItemRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final NumberFormat numberFormat = NumberFormat.decimalPattern('ar_EG');
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -728,17 +728,17 @@ class _ItemRow extends StatelessWidget {
             Row(
               children: <Widget>[
                 Text(
-                  '${numberFormat.format(item.quantity)} $unitName',
+                  '${AppFormatters.quantity(item.quantity)} $unitName',
                   style: theme.textTheme.bodySmall,
                 ),
                 const SizedBox(width: 12),
                 Text(
-                  '× ${moneyFormat.format(item.unitCost)}',
+                  '× ${AppFormatters.money(item.unitCost)}',
                   style: theme.textTheme.bodySmall,
                 ),
                 const Spacer(),
                 Text(
-                  moneyFormat.format(item.lineTotal),
+                  AppFormatters.money(item.lineTotal),
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: theme.colorScheme.primary,
                     fontWeight: FontWeight.w600,
@@ -776,11 +776,6 @@ class _TotalsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -798,25 +793,25 @@ class _TotalsCard extends StatelessWidget {
             _line(
               theme,
               'المجموع الفرعي',
-              moneyFormat.format(purchase.subtotal),
+              AppFormatters.money(purchase.subtotal),
             ),
             const SizedBox(height: 4),
             _line(
               theme,
               'الخصم',
-              moneyFormat.format(purchase.discount),
+              AppFormatters.money(purchase.discount),
             ),
             const SizedBox(height: 4),
             _line(
               theme,
               'الضريبة',
-              moneyFormat.format(purchase.taxAmount),
+              AppFormatters.money(purchase.taxAmount),
             ),
             const Divider(height: 20),
             _line(
               theme,
               'الإجمالي',
-              moneyFormat.format(purchase.total),
+              AppFormatters.money(purchase.total),
               emphasized: true,
             ),
           ],
@@ -873,11 +868,6 @@ class _PaymentsCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     final bool isFullyPaid = remaining <= 0;
 
@@ -916,20 +906,20 @@ class _PaymentsCard extends StatelessWidget {
             _summaryRow(
               theme,
               label: 'إجمالي الفاتورة',
-              value: moneyFormat.format(totalPaid + remaining),
+              value: AppFormatters.money(totalPaid + remaining),
             ),
             const SizedBox(height: 4),
             _summaryRow(
               theme,
               label: 'المدفوع',
-              value: moneyFormat.format(totalPaid),
+              value: AppFormatters.money(totalPaid),
               color: const Color(0xFF0F7B6C),
             ),
             const SizedBox(height: 4),
             _summaryRow(
               theme,
               label: 'المتبقي',
-              value: moneyFormat.format(remaining),
+              value: AppFormatters.money(remaining),
               color: isFullyPaid
                   ? const Color(0xFF0F7B6C)
                   : const Color(0xFFC62828),
@@ -1030,12 +1020,6 @@ class _PaymentRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final NumberFormat moneyFormat = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
-    final DateFormat dateFormat = DateFormat.yMd('ar_EG');
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1073,7 +1057,7 @@ class _PaymentRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    dateFormat.format(payment.paymentDate.toLocal()),
+                    AppFormatters.date(payment.paymentDate),
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -1092,7 +1076,7 @@ class _PaymentRow extends StatelessWidget {
               ),
             ),
             Text(
-              moneyFormat.format(payment.amount),
+              AppFormatters.money(payment.amount),
               style: theme.textTheme.titleSmall?.copyWith(
                 color: const Color(0xFF0F7B6C),
                 fontWeight: FontWeight.w800,
