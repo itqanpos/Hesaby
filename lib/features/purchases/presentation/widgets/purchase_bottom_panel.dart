@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../domain/entities/purchase_cart.dart';
 import '../state/purchase_providers.dart';
@@ -37,12 +37,6 @@ class PurchaseBottomPanel extends ConsumerStatefulWidget {
 
 class _PurchaseBottomPanelState
     extends ConsumerState<PurchaseBottomPanel> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   late final TextEditingController _discountController;
   late final TextEditingController _taxController;
 
@@ -131,16 +125,19 @@ class _PurchaseBottomPanelState
           const SizedBox(height: 8),
 
           // ---- Subtotals ----
-          _row(theme, 'المجموع الفرعي', _money.format(cart.subtotal)),
+          _row(theme, 'المجموع الفرعي',
+              AppFormatters.money(cart.subtotal)),
           if (cart.discount > 0)
-            _row(theme, 'الخصم', '- ${_money.format(cart.discount)}'),
+            _row(theme, 'الخصم',
+                '- ${AppFormatters.money(cart.discount)}'),
           if (cart.taxAmount > 0)
-            _row(theme, 'الضريبة', '+ ${_money.format(cart.taxAmount)}'),
+            _row(theme, 'الضريبة',
+                '+ ${AppFormatters.money(cart.taxAmount)}'),
           const Divider(height: 12),
           _row(
             theme,
             'الإجمالي',
-            _money.format(cart.total),
+            AppFormatters.money(cart.total),
             emphasized: true,
           ),
           const SizedBox(height: 10),
