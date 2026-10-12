@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/validators.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
@@ -25,6 +25,10 @@ import 'supplier_statement_page.dart';
 /// 2. Search field (name / code / phone).
 /// 3. Status chips + Sort dropdown.
 /// 4. Enhanced supplier card showing the running balance.
+///
+/// **Interaction model:** tapping a supplier card opens its account
+/// statement. Edit / payment / toggle / delete are reachable only from
+/// the per-card overflow menu — accidental taps never open the edit form.
 class SuppliersPage extends ConsumerStatefulWidget {
   const SuppliersPage({super.key});
 
@@ -423,7 +427,9 @@ class _KpiRow extends StatelessWidget {
           child: _KpiCard(
             icon: Icons.local_shipping_outlined,
             label: 'الإجمالي',
-            value: isLoading ? '…' : counts.total.toString(),
+            value: isLoading
+                ? '…'
+                : AppFormatters.integer(counts.total),
             color: const Color(0xFF0288D1),
             isSelected: selected == _StatusFilter.all,
             onTap: () => onSelect(_StatusFilter.all),
@@ -434,7 +440,9 @@ class _KpiRow extends StatelessWidget {
           child: _KpiCard(
             icon: Icons.check_circle_outline,
             label: 'نشط',
-            value: isLoading ? '…' : counts.active.toString(),
+            value: isLoading
+                ? '…'
+                : AppFormatters.integer(counts.active),
             color: const Color(0xFF0F7B6C),
             isSelected: selected == _StatusFilter.active,
             onTap: () => onSelect(_StatusFilter.active),
@@ -445,7 +453,9 @@ class _KpiRow extends StatelessWidget {
           child: _KpiCard(
             icon: Icons.pause_circle_outline,
             label: 'معطّل',
-            value: isLoading ? '…' : counts.inactive.toString(),
+            value: isLoading
+                ? '…'
+                : AppFormatters.integer(counts.inactive),
             color: const Color(0xFF7B5E3A),
             isSelected: selected == _StatusFilter.inactive,
             onTap: () => onSelect(_StatusFilter.inactive),
@@ -655,12 +665,6 @@ class _SupplierCard extends StatelessWidget {
   final VoidCallback onToggleActive;
   final VoidCallback onDelete;
 
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -682,7 +686,10 @@ class _SupplierCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: onEdit,
+        // Tapping the card opens the account statement — the natural
+        // "details" view. Editing is reachable only from the overflow
+        // menu, so an accidental tap never opens the edit form.
+        onTap: onViewStatement,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
           child: Row(
@@ -735,7 +742,7 @@ class _SupplierCard extends StatelessWidget {
                       ),
                     ],
                     const SizedBox(height: 8),
-                    _BalanceLine(balance: balance, money: _money),
+                    _BalanceLine(balance: balance),
                   ],
                 ),
               ),
@@ -817,10 +824,9 @@ class _SupplierCard extends StatelessWidget {
 // ============================================================================
 
 class _BalanceLine extends StatelessWidget {
-  const _BalanceLine({required this.balance, required this.money});
+  const _BalanceLine({required this.balance});
 
   final SupplierBalance balance;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -884,7 +890,7 @@ class _BalanceLine extends StatelessWidget {
             ),
             const Spacer(),
             Text(
-              money.format(b.abs()),
+              AppFormatters.money(b.abs()),
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: accent,
                 fontWeight: FontWeight.w800,
@@ -931,7 +937,7 @@ class _Badge extends StatelessWidget {
 }
 
 // ============================================================================
-// Supplier form dialog (unchanged)
+// Supplier form dialog
 // ============================================================================
 
 class _SupplierFormDialog extends ConsumerStatefulWidget {
