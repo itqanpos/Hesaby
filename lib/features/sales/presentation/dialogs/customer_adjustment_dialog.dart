@@ -3,8 +3,8 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../domain/entities/customer_adjustment.dart';
@@ -72,12 +72,6 @@ class _CustomerAdjustmentSheetState
   String _reason = AdjustmentReason.openingBalance;
   bool _isSubmitting = false;
   CustomerFailureType? _serverFailure;
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
 
   @override
   void initState() {
@@ -268,7 +262,6 @@ class _CustomerAdjustmentSheetState
                   _CustomerBanner(
                     customerName: widget.customerName,
                     currentBalance: widget.currentBalance,
-                    money: _money,
                   ),
 
                   const SizedBox(height: 16),
@@ -339,18 +332,18 @@ class _CustomerAdjustmentSheetState
 
                   _SummaryLine(
                     label: 'الرصيد الحالي',
-                    value: _money.format(widget.currentBalance),
+                    value: AppFormatters.money(widget.currentBalance),
                   ),
                   _SummaryLine(
                     label: _isIncrease ? 'الزيادة' : 'التخفيض',
-                    value: _money.format(
+                    value: AppFormatters.money(
                       _inputAmount < 0 ? 0 : _inputAmount,
                     ),
                     color: _isIncrease ? scheme.error : scheme.primary,
                   ),
                   _SummaryLine(
                     label: 'الرصيد بعد التعديل',
-                    value: _money.format(resulting < 0 ? 0 : resulting),
+                    value: AppFormatters.money(resulting < 0 ? 0 : resulting),
                     emphasized: true,
                     color: resultingIsValid ? null : scheme.error,
                   ),
@@ -383,12 +376,10 @@ class _CustomerBanner extends StatelessWidget {
   const _CustomerBanner({
     required this.customerName,
     required this.currentBalance,
-    required this.money,
   });
 
   final String customerName;
   final double currentBalance;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -422,7 +413,8 @@ class _CustomerBanner extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'الرصيد الحالي: ${money.format(currentBalance)}',
+                    'الرصيد الحالي: '
+                    '${AppFormatters.money(currentBalance)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.error,
                       fontWeight: FontWeight.w600,
