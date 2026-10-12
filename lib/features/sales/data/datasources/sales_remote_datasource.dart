@@ -268,6 +268,31 @@ class SalesRemoteDataSource {
   }
 
   // ===========================================================================
+  // CUSTOMER RETURNS (for statement)
+  // ===========================================================================
+
+  /// Lists sale returns that involve [customerId].
+  ///
+  /// Used by the statement builder to include credit-note refunds (which
+  /// reduce the customer's balance) and their reversals when a confirmed
+  /// return is later cancelled. Drafts are excluded — they have not
+  /// affected the balance yet.
+  Future<List<SaleReturnModel>> listCustomerReturns(
+    String customerId,
+  ) async {
+    final SupabaseClient client = _requireClient();
+
+    final List<Map<String, dynamic>> rows = await client
+        .from('sale_returns')
+        .select()
+        .eq('customer_id', customerId)
+        .neq('status', 'draft')
+        .order('return_date', ascending: true);
+
+    return rows.map(SaleReturnModel.fromMap).toList(growable: false);
+  }
+
+  // ===========================================================================
   // SALES
   // ===========================================================================
 
