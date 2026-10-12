@@ -1,7 +1,9 @@
 // lib/shared/layouts/app_shell.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../core/network/operation_trigger.dart';
 import '../../core/responsive/responsive_helper.dart';
 import '../widgets/offline_banner.dart';
 import 'app_navigation.dart';
@@ -24,8 +26,12 @@ import 'app_navigation.dart';
 ///
 /// **Phase O-1:** an [OfflineBanner] is automatically rendered at the top
 /// of the content area. It takes zero height while online, so it is safe
-/// on every screen (including login and loading screens).
-class AppShell extends StatelessWidget {
+/// on every screen.
+///
+/// **Phase O-2:** the shell is wrapped in an [OperationTriggerScope] so
+/// every screen automatically fires the offline queue when the device
+/// comes back online, the company switches, or the app resumes.
+class AppShell extends ConsumerWidget {
   const AppShell({
     super.key,
     required this.body,
@@ -62,7 +68,7 @@ class AppShell extends StatelessWidget {
   final bool includeNavigation;
 
   @override
-  Widget build(BuildContext context) {
+  Widget build(BuildContext context, WidgetRef ref) {
     final DeviceType deviceType = context.deviceType;
     final double horizontalPadding = applyHorizontalPadding
         ? ResponsiveHelper.horizontalPadding(deviceType)
@@ -101,7 +107,7 @@ class AppShell extends StatelessWidget {
       ),
     );
 
-    return Scaffold(
+    final Widget scaffold = Scaffold(
       backgroundColor: backgroundColor,
       appBar: appBar,
       drawer: showDrawer ? const AppDrawer() : null,
@@ -121,5 +127,10 @@ class AppShell extends StatelessWidget {
             )
           : content,
     );
+
+    // The trigger scope is mounted once per shell. It observes
+    // connectivity, company switches and app-resume events to drive the
+    // offline queue. Renders `scaffold` unchanged.
+    return OperationTriggerScope(child: scaffold);
   }
 }
