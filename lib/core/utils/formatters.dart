@@ -109,6 +109,15 @@ abstract final class AppFormatters {
     return '${l.day} ${_arabicMonth(l.month)} ${l.year}';
   }
 
+  /// `أكتوبر 2026` — month + year, no day.
+  ///
+  /// Used by the salary page to display the month a payment covers, and
+  /// anywhere a "period" label is required at month granularity.
+  static String longMonth(DateTime value) {
+    final DateTime l = value.toLocal();
+    return '${_arabicMonth(l.month)} ${l.year}';
+  }
+
   /// Short day label used in the receipts (`الأحد`).
   static String dayName(DateTime value) {
     final DateTime l = value.toLocal();
