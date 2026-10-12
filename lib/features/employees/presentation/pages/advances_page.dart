@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -17,13 +17,6 @@ import '../widgets/advance_form_sheet.dart';
 /// Advances management page.
 class AdvancesPage extends ConsumerWidget {
   const AdvancesPage({super.key});
-
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final DateFormat _dateFmt = DateFormat('yyyy/MM/dd');
 
   Future<void> _openForm(BuildContext context) async {
     final bool? saved = await showAdvanceFormSheet(context: context);
@@ -47,7 +40,7 @@ class AdvancesPage extends ConsumerWidget {
         title: const Text('حذف السلفة'),
         content: Text(
           'هل تريد حذف سلفة ${advance.employeeName ?? 'الموظف'} '
-          'بمبلغ ${_money.format(advance.amount)}؟\n'
+          'بمبلغ ${AppFormatters.money(advance.amount)}؟\n'
           'ستُحذف الحركة المرتبطة في الخزنة أيضًا.',
         ),
         actions: <Widget>[
@@ -146,7 +139,6 @@ class AdvancesPage extends ConsumerWidget {
                   openCount: openCount,
                   openRemaining: openAmount,
                   totalPaid: totalPaid,
-                  money: _money,
                 ),
               ),
               Expanded(
@@ -172,8 +164,6 @@ class AdvancesPage extends ConsumerWidget {
                           final EmployeeAdvance a = all[i];
                           return _AdvanceCard(
                             advance: a,
-                            money: _money,
-                            dateFmt: _dateFmt,
                             onDelete: () =>
                                 _confirmDelete(context, ref, a),
                           );
@@ -198,14 +188,12 @@ class _KpiRow extends StatelessWidget {
     required this.openCount,
     required this.openRemaining,
     required this.totalPaid,
-    required this.money,
   });
 
   final int totalCount;
   final int openCount;
   final double openRemaining;
   final double totalPaid;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -217,7 +205,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.receipt_long_outlined,
                 label: 'إجمالي السلف',
-                value: '$totalCount',
+                value: AppFormatters.integer(totalCount),
                 color: const Color(0xFF0288D1),
               ),
             ),
@@ -226,7 +214,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.pending_outlined,
                 label: 'غير مخصومة',
-                value: '$openCount',
+                value: AppFormatters.integer(openCount),
                 color: const Color(0xFFE65100),
               ),
             ),
@@ -239,7 +227,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.money_off_outlined,
                 label: 'متبقٍ للخصم',
-                value: money.format(openRemaining),
+                value: AppFormatters.money(openRemaining),
                 color: const Color(0xFFC62828),
               ),
             ),
@@ -248,7 +236,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.summarize_outlined,
                 label: 'إجمالي المصروف',
-                value: money.format(totalPaid),
+                value: AppFormatters.money(totalPaid),
                 color: const Color(0xFF6A1B9A),
               ),
             ),
@@ -334,14 +322,10 @@ class _KpiCard extends StatelessWidget {
 class _AdvanceCard extends StatelessWidget {
   const _AdvanceCard({
     required this.advance,
-    required this.money,
-    required this.dateFmt,
     required this.onDelete,
   });
 
   final EmployeeAdvance advance;
-  final NumberFormat money;
-  final DateFormat dateFmt;
   final VoidCallback onDelete;
 
   @override
@@ -396,7 +380,7 @@ class _AdvanceCard extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        dateFmt.format(advance.advanceDate),
+                        AppFormatters.date(advance.advanceDate),
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
@@ -410,7 +394,7 @@ class _AdvanceCard extends StatelessWidget {
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
                     Text(
-                      money.format(advance.amount),
+                      AppFormatters.money(advance.amount),
                       style: theme.textTheme.titleSmall?.copyWith(
                         fontWeight: FontWeight.w800,
                         color: scheme.error,
@@ -419,7 +403,8 @@ class _AdvanceCard extends StatelessWidget {
                     if (!fullyDeducted) ...<Widget>[
                       const SizedBox(height: 2),
                       Text(
-                        'متبقٍ: ${money.format(advance.remainingAmount)}',
+                        'متبقٍ: '
+                        '${AppFormatters.money(advance.remainingAmount)}',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
