@@ -3,13 +3,16 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show Supabase, SupabaseClient;
 
+import '../../../../core/utils/logger.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../data/datasources/sales_remote_datasource.dart';
 import '../../data/repositories/sales_repository_impl.dart';
+import '../../data/services/sales_cache_service.dart';
 import '../../domain/entities/customer_adjustment.dart';
 import '../../domain/entities/customer_payment.dart';
 import '../../domain/entities/customer_statement.dart';
@@ -55,6 +58,25 @@ final Provider<ReturnsRepository> returnsRepositoryProvider =
     client = null;
   }
   return ReturnsRepositoryImpl(SalesRemoteDataSource(client));
+});
+
+/// SharedPreferences-backed cache for the sales list.
+///
+/// Returns `null` while SharedPreferences is still loading; consumers must
+/// treat `null` as "cache not available yet".
+final FutureProvider<SalesCacheService?> salesCacheServiceProvider =
+    FutureProvider<SalesCacheService?>((Ref ref) async {
+  try {
+    final SharedPreferences prefs = await SharedPreferences.getInstance();
+    return SalesCacheService(prefs);
+  } on Object catch (error, stackTrace) {
+    AppLogger.error(
+      'salesCacheServiceProvider: init failed.',
+      error,
+      stackTrace,
+    );
+    return null;
+  }
 });
 
 // ============================================================================
@@ -308,6 +330,14 @@ final customerStatementProvider = AsyncNotifierProvider.family<
 // ============================================================================
 
 /// Provides the list of sales for the currently selected company.
+///
+/// **Offline behaviour (Phase O-2):**
+///
+/// 1. On success, the response is written to a local cache.
+/// 2. On a network failure (`SalesFailureType.network`), the cached list
+///    is served instead of throwing, so the Sales page remains usable
+///    while offline.
+/// 3. If no cache exists yet, the empty list is returned — never an error.
 class SalesNotifier extends AsyncNotifier<List<Sale>> {
   @override
   Future<List<Sale>> build() async {
@@ -321,7 +351,37 @@ class SalesNotifier extends AsyncNotifier<List<Sale>> {
       return const <Sale>[];
     }
 
-    return ref.read(salesRepositoryProvider).listSales(companyId);
+    final SalesCacheService? cache =
+        await ref.watch(salesCacheServiceProvider.future);
+
+    try {
+      final List<Sale> sales =
+          await ref.read(salesRepositoryProvider).listSales(companyId);
+
+      // Cache the fresh list for the next offline session.
+      if (cache != null) {
+        await cache.save(companyId, sales);
+      }
+
+      return sales;
+    } on SaleException catch (error) {
+      if (error.type == SalesFailureType.network) {
+        final List<Sale>? cached = await cache?.load(companyId);
+        if (cached != null) {
+          AppLogger.info(
+            'SalesNotifier: served ${cached.length} cached sales '
+            '(offline).',
+          );
+          return cached;
+        }
+        // No cache yet — return empty rather than crash the page.
+        AppLogger.warning(
+          'SalesNotifier: offline with no cache — returning empty list.',
+        );
+        return const <Sale>[];
+      }
+      rethrow;
+    }
   }
 
   Future<Sale> createSale({
@@ -419,9 +479,6 @@ class SalesNotifier extends AsyncNotifier<List<Sale>> {
     return companyId;
   }
 
-  /// Invalidates the returns list attached to [saleId] so that the
-  /// remaining returnable quantity shown in any open return dialog is
-  /// refreshed after a sale confirmation or cancellation.
   void _invalidateSaleReturns(String saleId) {
     ref.invalidate(saleReturnsProvider(saleId));
   }
@@ -464,10 +521,6 @@ final saleItemsProvider = AsyncNotifierProvider.family<
 // ============================================================================
 
 /// Provides the list of sale returns for the currently selected company.
-///
-/// The notifier reloads automatically whenever [companyContextProvider]
-/// reports a different `currentCompany.id`. When no company is selected it
-/// resolves to an empty list.
 class ReturnsNotifier extends AsyncNotifier<List<SaleReturn>> {
   @override
   Future<List<SaleReturn>> build() async {
@@ -484,7 +537,6 @@ class ReturnsNotifier extends AsyncNotifier<List<SaleReturn>> {
     return ref.read(returnsRepositoryProvider).listReturns(companyId);
   }
 
-  /// Creates a draft return and invalidates any provider derived from it.
   Future<SaleReturn> createReturn({
     required String branchId,
     required String saleId,
@@ -513,7 +565,6 @@ class ReturnsNotifier extends AsyncNotifier<List<SaleReturn>> {
     return created;
   }
 
-  /// Replaces the header and items of a draft return.
   Future<SaleReturn> updateDraft({
     required String returnId,
     required String branchId,
@@ -545,12 +596,6 @@ class ReturnsNotifier extends AsyncNotifier<List<SaleReturn>> {
     return updated;
   }
 
-  /// Confirms a draft return.
-  ///
-  /// The database trigger creates the `return_in` stock movements and,
-  /// when the refund method is `credit_note`, reduces the customer
-  /// balance. Both the customer list and any open statement are
-  /// invalidated afterwards so the UI reflects the new balance.
   Future<SaleReturn> confirmReturn({
     required String returnId,
     required String saleId,
@@ -566,7 +611,6 @@ class ReturnsNotifier extends AsyncNotifier<List<SaleReturn>> {
     return confirmed;
   }
 
-  /// Cancels a draft or confirmed return.
   Future<SaleReturn> cancelReturn({
     required String returnId,
     required String saleId,
@@ -636,9 +680,6 @@ final returnItemsProvider = AsyncNotifierProvider.family<
 // Returns for a specific sale (per sale)
 // ============================================================================
 
-/// Lists every return (draft, confirmed, or cancelled) recorded against a
-/// specific sale. Used by the return creation dialog to compute the
-/// remaining returnable quantity per sale item.
 class SaleReturnsNotifier
     extends FamilyAsyncNotifier<List<SaleReturn>, String> {
   @override
