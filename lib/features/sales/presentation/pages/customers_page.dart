@@ -21,6 +21,11 @@ import 'customer_statement_page.dart';
 /// create / edit / toggle-active / delete actions. All actions go through
 /// [CustomersNotifier], which delegates to the repository and therefore to
 /// Row Level Security in the database.
+///
+/// **Interaction model:** tapping a customer card opens its account
+/// statement (the natural "details" view). Edit / toggle / delete are
+/// reachable only from the per-card overflow menu — accidental taps never
+/// open the edit form.
 class CustomersPage extends ConsumerStatefulWidget {
   const CustomersPage({super.key});
 
@@ -307,7 +312,10 @@ class _CustomerCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        onTap: onEdit,
+        // Tapping the card opens the account statement — the natural
+        // "details" view. Editing is reachable only from the overflow
+        // menu, so an accidental tap never opens the edit form.
+        onTap: onStatement,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
           child: Row(
