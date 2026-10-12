@@ -1,8 +1,8 @@
 // lib/features/sales/presentation/widgets/sales_kpi_row.dart
 
 import 'package:flutter/material.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/sale_entities.dart';
 
 /// A 2×2 grid of KPI cards shown at the top of the sales page.
@@ -10,6 +10,9 @@ import '../../domain/entities/sale_entities.dart';
 /// All four KPIs are computed from the full sales list (never from the
 /// filtered result), so the cards always reflect the company's overall
 /// performance regardless of what filters the user applies below.
+///
+/// Numbers are rendered with [AppFormatters] so they always use Latin
+/// digits, even when the locale would otherwise default to Arabic-Indic.
 class SalesKpiRow extends StatelessWidget {
   const SalesKpiRow({super.key, required this.sales});
 
@@ -18,11 +21,6 @@ class SalesKpiRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final _KpiData data = _KpiData.from(sales);
-    final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
-      symbol: 'ج.م ',
-      decimalDigits: 2,
-    );
 
     return Column(
       children: <Widget>[
@@ -33,8 +31,9 @@ class SalesKpiRow extends StatelessWidget {
                 icon: Icons.today_outlined,
                 iconColor: const Color(0xFF0F7B6C),
                 label: 'اليوم',
-                value: money.format(data.todayTotal),
-                subtitle: '${data.todayCount} فاتورة',
+                value: AppFormatters.money(data.todayTotal),
+                subtitle:
+                    '${AppFormatters.integer(data.todayCount)} فاتورة',
               ),
             ),
             const SizedBox(width: 8),
@@ -43,8 +42,9 @@ class SalesKpiRow extends StatelessWidget {
                 icon: Icons.calendar_month_outlined,
                 iconColor: const Color(0xFF0288D1),
                 label: 'هذا الشهر',
-                value: money.format(data.monthTotal),
-                subtitle: '${data.monthCount} فاتورة',
+                value: AppFormatters.money(data.monthTotal),
+                subtitle:
+                    '${AppFormatters.integer(data.monthCount)} فاتورة',
               ),
             ),
           ],
@@ -57,8 +57,9 @@ class SalesKpiRow extends StatelessWidget {
                 icon: Icons.account_balance_wallet_outlined,
                 iconColor: const Color(0xFFE65100),
                 label: 'غير محصَّل',
-                value: money.format(data.uncollectedTotal),
-                subtitle: '${data.uncollectedCount} فاتورة',
+                value: AppFormatters.money(data.uncollectedTotal),
+                subtitle:
+                    '${AppFormatters.integer(data.uncollectedCount)} فاتورة',
                 emphasize: data.uncollectedTotal > 0,
               ),
             ),
@@ -68,7 +69,7 @@ class SalesKpiRow extends StatelessWidget {
                 icon: Icons.cancel_outlined,
                 iconColor: const Color(0xFFC62828),
                 label: 'ملغاة (الشهر)',
-                value: '${data.cancelledThisMonthCount}',
+                value: AppFormatters.integer(data.cancelledThisMonthCount),
                 subtitle: 'فاتورة',
               ),
             ),
