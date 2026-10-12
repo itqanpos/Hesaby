@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -24,15 +24,12 @@ import '../widgets/salary_form_sheet.dart';
 /// 3. List of salaries for the selected month.
 /// 4. FAB: "Generate drafts" — creates rows for active employees that do
 ///    not yet have one for this month.
+///
+/// **Interaction model:** tapping a card opens the salary form (edit /
+/// pay). A dedicated ⋮ menu is also provided for discoverability.
 class SalariesPage extends ConsumerWidget {
   const SalariesPage({super.key});
 
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'en_US',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final DateFormat _monthFmt = DateFormat('yyyy/MM');
   static const List<String> _arabicMonths = <String>[
     'يناير',
     'فبراير',
@@ -89,8 +86,8 @@ class SalariesPage extends ConsumerWidget {
       builder: (BuildContext ctx) => AlertDialog(
         title: const Text('توليد المسودات'),
         content: Text(
-          'سيتم إنشاء ${toCreate.length} سجل راتب بحالة مسودة '
-          'بمبلغ الراتب الأساسي لكل موظف.\n\n'
+          'سيتم إنشاء ${AppFormatters.integer(toCreate.length)} سجل راتب '
+          'بحالة مسودة بمبلغ الراتب الأساسي لكل موظف.\n\n'
           'الشهر: ${_monthLabel(month)}\n'
           'يمكنك تعديل كل سجل قبل الدفع.',
         ),
@@ -131,8 +128,9 @@ class SalariesPage extends ConsumerWidget {
         SnackBar(
           content: Text(
             failed == 0
-                ? 'تم توليد $created مسودة.'
-                : 'تم توليد $created مسودة. فشل $failed.',
+                ? 'تم توليد ${AppFormatters.integer(created)} مسودة.'
+                : 'تم توليد ${AppFormatters.integer(created)} مسودة. '
+                    'فشل ${AppFormatters.integer(failed)}.',
           ),
         ),
       );
@@ -265,7 +263,6 @@ class SalariesPage extends ConsumerWidget {
                   total: totalNet,
                   paid: paidNet,
                   unpaid: unpaidNet,
-                  money: _money,
                 ),
               ),
 
@@ -296,9 +293,7 @@ class SalariesPage extends ConsumerWidget {
                             employeeName: s.employeeName ??
                                 emp?.fullName ??
                                 'موظف',
-                            money: _money,
-                            monthFmt: _monthFmt,
-                            onTap: emp == null
+                            onOpen: emp == null
                                 ? null
                                 : () => _openForm(context, ref, emp, s),
                           );
@@ -385,14 +380,12 @@ class _KpiRow extends StatelessWidget {
     required this.total,
     required this.paid,
     required this.unpaid,
-    required this.money,
   });
 
   final int count;
   final double total;
   final double paid;
   final double unpaid;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -404,7 +397,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.people_outline,
                 label: 'عدد السجلات',
-                value: '$count',
+                value: AppFormatters.integer(count),
                 color: const Color(0xFF0288D1),
               ),
             ),
@@ -413,7 +406,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.summarize_outlined,
                 label: 'الإجمالي',
-                value: money.format(total),
+                value: AppFormatters.money(total),
                 color: const Color(0xFF6A1B9A),
               ),
             ),
@@ -426,7 +419,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.check_circle_outline,
                 label: 'مدفوع',
-                value: money.format(paid),
+                value: AppFormatters.money(paid),
                 color: const Color(0xFF0F7B6C),
               ),
             ),
@@ -435,7 +428,7 @@ class _KpiRow extends StatelessWidget {
               child: _KpiCard(
                 icon: Icons.pending_outlined,
                 label: 'غير مدفوع',
-                value: money.format(unpaid),
+                value: AppFormatters.money(unpaid),
                 color: const Color(0xFFE65100),
               ),
             ),
@@ -522,16 +515,15 @@ class _SalaryCard extends StatelessWidget {
   const _SalaryCard({
     required this.salary,
     required this.employeeName,
-    required this.money,
-    required this.monthFmt,
-    required this.onTap,
+    required this.onOpen,
   });
 
   final EmployeeSalary salary;
   final String employeeName;
-  final NumberFormat money;
-  final DateFormat monthFmt;
-  final VoidCallback? onTap;
+
+  /// Opens the salary form for edit / pay. Null when the linked employee
+  /// could not be resolved.
+  final VoidCallback? onOpen;
 
   @override
   Widget build(BuildContext context) {
@@ -547,7 +539,7 @@ class _SalaryCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(14),
       child: InkWell(
         borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
+        onTap: onOpen,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Column(
@@ -583,7 +575,7 @@ class _SalaryCard extends StatelessWidget {
                         ),
                         const SizedBox(height: 2),
                         Text(
-                          monthFmt.format(salary.salaryMonth),
+                          AppFormatters.longMonth(salary.salaryMonth),
                           style: theme.textTheme.bodySmall?.copyWith(
                             color: scheme.onSurfaceVariant,
                           ),
@@ -593,12 +585,20 @@ class _SalaryCard extends StatelessWidget {
                   ),
                   const SizedBox(width: 8),
                   Text(
-                    money.format(salary.netAmount),
+                    AppFormatters.money(salary.netAmount),
                     style: theme.textTheme.titleMedium?.copyWith(
                       fontWeight: FontWeight.w800,
                       color: scheme.onSurface,
                     ),
                   ),
+                  if (onOpen != null) ...<Widget>[
+                    const SizedBox(width: 4),
+                    Icon(
+                      Icons.chevron_left,
+                      size: 18,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ],
                 ],
               ),
               const SizedBox(height: 8),
@@ -612,17 +612,18 @@ class _SalaryCard extends StatelessWidget {
                   ),
                   if (salary.bonuses > 0)
                     _Badge(
-                      label: '+${money.format(salary.bonuses)}',
+                      label: '+${AppFormatters.money(salary.bonuses)}',
                       color: const Color(0xFF0F7B6C),
                     ),
                   if (salary.deductions > 0)
                     _Badge(
-                      label: '-${money.format(salary.deductions)}',
+                      label: '−${AppFormatters.money(salary.deductions)}',
                       color: const Color(0xFFC62828),
                     ),
                   if (salary.advancesDeducted > 0)
                     _Badge(
-                      label: 'سلف: ${money.format(salary.advancesDeducted)}',
+                      label: 'سلف: '
+                          '${AppFormatters.money(salary.advancesDeducted)}',
                       color: const Color(0xFF6A1B9A),
                     ),
                 ],
