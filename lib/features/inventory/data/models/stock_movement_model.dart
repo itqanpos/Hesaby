@@ -5,19 +5,6 @@ import 'package:equatable/equatable.dart';
 import '../../domain/entities/stock_movement.dart';
 
 /// Data-layer representation of a row in `public.stock_movements`.
-///
-/// Maps the PostgreSQL snake_case columns into a pure [StockMovement] entity
-/// via [toEntity]. This is the only place in the inventory feature that is
-/// allowed to know the physical column names for stock movements.
-///
-/// Precision:
-/// `quantity` and `unit_cost` are `numeric(15,4)` in the database.
-/// PostgREST returns `numeric` values as JSON *strings* to preserve
-/// precision, so the helpers below accept `String`, `int` and `double`
-/// inputs and convert safely to `double`. `quantity` is NOT NULL and never
-/// zero, so it is parsed with a strict helper that raises [FormatException]
-/// on absence or unparseable input; `unit_cost` is optional and falls back
-/// to `null`.
 class StockMovementModel extends Equatable {
   const StockMovementModel({
     required this.id,
@@ -27,6 +14,7 @@ class StockMovementModel extends Equatable {
     required this.movementType,
     required this.quantity,
     required this.createdAt,
+    this.unitId,
     this.unitCost,
     this.referenceType,
     this.referenceId,
@@ -34,7 +22,6 @@ class StockMovementModel extends Equatable {
     this.createdBy,
   });
 
-  /// Builds a model from a row returned by Supabase / PostgreSQL.
   factory StockMovementModel.fromMap(Map<String, dynamic> map) {
     return StockMovementModel(
       id: _requireString(map, 'id'),
@@ -43,6 +30,7 @@ class StockMovementModel extends Equatable {
       productId: _requireString(map, 'product_id'),
       movementType: _requireString(map, 'movement_type'),
       quantity: _requireDouble(map, 'quantity'),
+      unitId: _optionalString(map, 'unit_id'),
       unitCost: _optionalDouble(map, 'unit_cost'),
       referenceType: _optionalString(map, 'reference_type'),
       referenceId: _optionalString(map, 'reference_id'),
@@ -58,6 +46,7 @@ class StockMovementModel extends Equatable {
   final String productId;
   final String movementType;
   final double quantity;
+  final String? unitId;
   final double? unitCost;
   final String? referenceType;
   final String? referenceId;
@@ -65,7 +54,6 @@ class StockMovementModel extends Equatable {
   final String? createdBy;
   final DateTime createdAt;
 
-  /// Maps this data-layer model into the pure Domain entity.
   StockMovement toEntity() => StockMovement(
         id: id,
         companyId: companyId,
@@ -73,6 +61,7 @@ class StockMovementModel extends Equatable {
         productId: productId,
         movementType: movementType,
         quantity: quantity,
+        unitId: unitId,
         unitCost: unitCost,
         referenceType: referenceType,
         referenceId: referenceId,
@@ -97,9 +86,7 @@ class StockMovementModel extends Equatable {
 
   static String? _optionalString(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value == null) {
-      return null;
-    }
+    if (value == null) return null;
     if (value is String) {
       final String trimmed = value.trim();
       return trimmed.isEmpty ? null : trimmed;
@@ -107,27 +94,16 @@ class StockMovementModel extends Equatable {
     return value.toString();
   }
 
-  /// Parses a mandatory numeric column that may arrive as a JSON string
-  /// (PostgREST returns `numeric` as string), an `int`, or a `double`.
-  /// Throws [FormatException] on absence or unparseable input.
   static double _requireDouble(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value is double) {
-      return value;
-    }
-    if (value is int) {
-      return value.toDouble();
-    }
-    if (value is num) {
-      return value.toDouble();
-    }
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
     if (value is String) {
       final String trimmed = value.trim();
       if (trimmed.isNotEmpty) {
         final double? parsed = double.tryParse(trimmed);
-        if (parsed != null) {
-          return parsed;
-        }
+        if (parsed != null) return parsed;
       }
     }
     throw FormatException(
@@ -135,27 +111,15 @@ class StockMovementModel extends Equatable {
     );
   }
 
-  /// Parses an optional numeric column. Returns `null` when the value is
-  /// absent or unparseable.
   static double? _optionalDouble(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value == null) {
-      return null;
-    }
-    if (value is double) {
-      return value;
-    }
-    if (value is int) {
-      return value.toDouble();
-    }
-    if (value is num) {
-      return value.toDouble();
-    }
+    if (value == null) return null;
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
     if (value is String) {
       final String trimmed = value.trim();
-      if (trimmed.isEmpty) {
-        return null;
-      }
+      if (trimmed.isEmpty) return null;
       return double.tryParse(trimmed);
     }
     return null;
@@ -163,14 +127,10 @@ class StockMovementModel extends Equatable {
 
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value is DateTime) {
-      return value.toUtc();
-    }
+    if (value is DateTime) return value.toUtc();
     if (value is String && value.isNotEmpty) {
       final DateTime? parsed = DateTime.tryParse(value);
-      if (parsed != null) {
-        return parsed.toUtc();
-      }
+      if (parsed != null) return parsed.toUtc();
     }
     throw FormatException(
       'StockMovementModel: missing or invalid timestamp column "$key".',
@@ -185,6 +145,7 @@ class StockMovementModel extends Equatable {
         productId,
         movementType,
         quantity,
+        unitId,
         unitCost,
         referenceType,
         referenceId,
