@@ -1,0 +1,136 @@
+// lib/core/network/operation_trigger.dart
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+
+import '../../features/companies/presentation/providers/company_context_provider.dart';
+import '../../features/companies/presentation/providers/company_context_state.dart';
+import 'network_status_provider.dart';
+import 'operation_processor.dart';
+import 'operation_processor_providers.dart';
+
+/// Provides the singleton service that decides when the offline queue
+/// should run.
+final Provider<OperationTriggerService> operationTriggerProvider =
+    Provider<OperationTriggerService>(OperationTriggerService.new);
+
+/// Central decision point for "kick the offline queue".
+///
+/// Every trigger path funnels through [triggerIfPossible], which applies
+/// the same guards:
+///
+/// 1. A company must be selected.
+/// 2. The device must be online (per `connectivity_plus`).
+/// 3. The processor must be ready (queue loaded) and not already running.
+///
+/// Concurrent calls are safe — [OperationProcessor] serializes its runs
+/// internally via its `_isRunning` flag, so a redundant call is a
+/// guaranteed no-op.
+class OperationTriggerService {
+  OperationTriggerService(this._ref);
+
+  final Ref _ref;
+
+  Future<void> triggerIfPossible() async {
+    final String? companyId =
+        _ref.read(companyContextProvider).currentCompany?.id;
+    if (companyId == null) return;
+
+    if (!_ref.read(isOnlineProvider)) return;
+
+    final OperationProcessor? processor =
+        _ref.read(operationProcessorProvider);
+    if (processor == null || processor.isRunning) return;
+
+    await processor.processAll(companyId: companyId);
+  }
+}
+
+/// Invisible widget that wires automatic trigger paths into
+/// [OperationTriggerService].
+///
+/// Place it high in the widget tree — typically wrapping the body of
+/// [AppShell]. Renders [child] unchanged.
+///
+/// **Automatic triggers:**
+/// * Cold start (after the first frame).
+/// * Network transition offline → online.
+/// * Company switch.
+/// * App resumed from background.
+///
+/// **Manual triggers** (e.g. a "retry" button) should call
+/// `runPendingOperations` from `operation_processor_providers.dart`
+/// directly.
+class OperationTriggerScope extends ConsumerStatefulWidget {
+  const OperationTriggerScope({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  ConsumerState<OperationTriggerScope> createState() =>
+      _OperationTriggerScopeState();
+}
+
+class _OperationTriggerScopeState extends ConsumerState<OperationTriggerScope>
+    with WidgetsBindingObserver {
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+    // Kick after the first frame — providers may still be settling.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _trigger());
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) {
+      _trigger();
+    }
+  }
+
+  void _trigger() {
+    if (!mounted) return;
+    // Fire-and-forget. All failures are captured inside the service and
+    // the processor; nothing here needs to observe the result.
+    final OperationTriggerService service =
+        ref.read(operationTriggerProvider);
+    service.triggerIfPossible();
+  }
+
+  void _scheduleTrigger() {
+    if (!mounted) return;
+    // Defer to the next frame so listeners attached during the same
+    // rebuild cycle do not race with this one.
+    WidgetsBinding.instance.addPostFrameCallback((_) => _trigger());
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Network transitioned offline → online.
+    ref.listen<bool>(isOnlineProvider, (bool? prev, bool next) {
+      if (next && prev != true) {
+        _scheduleTrigger();
+      }
+    });
+
+    // Company switched to a different tenant.
+    ref.listen<String?>(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+      (String? prev, String? next) {
+        if (next != null && next != prev) {
+          _scheduleTrigger();
+        }
+      },
+    );
+
+    return widget.child;
+  }
+}
