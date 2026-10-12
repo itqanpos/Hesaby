@@ -84,7 +84,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   }
 
   bool _matches(Sale sale, Map<String, String> customerNames) {
-    // Drafts are failed confirmations — never treat them as invoices.
     if (sale.isDraft) {
       return false;
     }
@@ -295,7 +294,6 @@ class _SalesPageState extends ConsumerState<SalesPage> {
           final List<Customer> customers =
               customersAsync.value ?? const <Customer>[];
 
-          // Drafts never count as invoices.
           final List<Sale> realSales = allSales
               .where((Sale s) => !s.isDraft)
               .toList(growable: false);
@@ -678,7 +676,6 @@ class _SaleCard extends StatelessWidget {
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
-    final DateFormat dateTimeFormat = DateFormat.yMd('ar_EG').add_Hm();
 
     final (Color badgeBg, Color badgeFg) = _statusColors(
       scheme,
@@ -754,7 +751,7 @@ class _SaleCard extends StatelessWidget {
                         Row(
                           children: <Widget>[
                             Text(
-                              dateTimeFormat.format(sale.saleDate.toLocal()),
+                              _formatDateTime(sale.saleDate),
                               style: theme.textTheme.bodySmall,
                             ),
                             const SizedBox(width: 12),
@@ -894,6 +891,24 @@ class _PaymentBadge extends StatelessWidget {
 // -----------------------------------------------------------------------------
 // Localization
 // -----------------------------------------------------------------------------
+
+/// Formats [value] as `yyyy/MM/dd  hh:mm ص|م` using English numerals and
+/// an explicit 12-hour representation.
+///
+/// Matches the format used on thermal receipts, so the same timestamp
+/// reads identically across the app.
+String _formatDateTime(DateTime value) {
+  final DateTime local = value.toLocal();
+  final int h24 = local.hour;
+  final int h12 = h24 == 0 ? 12 : (h24 > 12 ? h24 - 12 : h24);
+  final String ampm = h24 >= 12 ? 'م' : 'ص';
+  final String y = local.year.toString().padLeft(4, '0');
+  final String m = local.month.toString().padLeft(2, '0');
+  final String d = local.day.toString().padLeft(2, '0');
+  final String hh = h12.toString().padLeft(2, '0');
+  final String mm = local.minute.toString().padLeft(2, '0');
+  return '$y/$m/$d  $hh:$mm $ampm';
+}
 
 String _statusLabel(String status) {
   switch (status) {
