@@ -240,9 +240,13 @@ jobs:
             echo "!! KEYSTORE_BASE64 secret is empty"
             exit 1
           fi
-          echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          echo "Base64 length: ${#KEYSTORE_BASE64}"
+          # Strip all whitespace (in case iPhone paste introduced line breaks)
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > android/app/upload-keystore.jks
           ls -lh android/app/upload-keystore.jks
-          file android/app/upload-keystore.jks
+          file android/app/upload-keystore.jks || true
+          echo "First 4 bytes (hex):"
+          head -c 4 android/app/upload-keystore.jks | xxd || true
 
       - name: Create key.properties
         env:
@@ -268,29 +272,17 @@ jobs:
           python3 - <<'PY'
           import pathlib
           import re
+          import sys
 
-          def patch_groovy(text: str) -> str:
-              # Add keystoreProperties loader before the android {} block
-              if 'keystoreProperties' not in text:
-                  text = re.sub(
-                      r'\nandroid\s*\{',
-                      '''
+          GROOVY_LOADER = """
           def keystoreProperties = new Properties()
           def keystorePropertiesFile = rootProject.file('key.properties')
           if (keystorePropertiesFile.exists()) {
               keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
           }
+          """
 
-          android {''',
-                      text,
-                      count=1,
-                  )
-
-              # Add signingConfigs.release if missing
-              if 'signingConfigs' not in text:
-                  text = re.sub(
-                      r'(android\s*\{)',
-                      r'''\1
+          GROOVY_SIGNING = """
               signingConfigs {
                   release {
                       keyAlias keystoreProperties['keyAlias']
@@ -299,12 +291,58 @@ jobs:
                       storePassword keystoreProperties['storePassword']
                   }
               }
-          ''',
+          """
+
+          KOTLIN_LOADER = """
+          val keystoreProperties = java.util.Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+          }
+          """
+
+          KOTLIN_SIGNING = """
+              signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                      storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+                      storePassword = keystoreProperties["storePassword"] as String
+                  }
+              }
+          """
+
+          def patch_groovy(text: str) -> str:
+              if 'keystoreProperties' in text:
+                  print('Groovy: already patched — skipping loader insert')
+              else:
+                  # Insert loader before the first "android {" block
+                  new_text, n = re.subn(
+                      r'\nandroid\s*\{',
+                      '\n' + GROOVY_LOADER + '\nandroid {',
                       text,
                       count=1,
                   )
+                  if n == 0:
+                      print('Groovy: FAILED to find "android {" — aborting')
+                      sys.exit(1)
+                  text = new_text
 
-              # Redirect release buildType to the release signing config
+              if 'signingConfigs.release' in text:
+                  print('Groovy: signingConfigs.release already present')
+              else:
+                  # Insert signingConfigs block right after "android {"
+                  text, n = re.subn(
+                      r'(android\s*\{)',
+                      r'\1\n' + GROOVY_SIGNING,
+                      text,
+                      count=1,
+                  )
+                  if n == 0:
+                      print('Groovy: FAILED to insert signingConfigs — aborting')
+                      sys.exit(1)
+
+              # Point release buildType to the new signing config
               text = text.replace(
                   'signingConfig = signingConfigs.debug',
                   'signingConfig = signingConfigs.release',
@@ -316,67 +354,62 @@ jobs:
               return text
 
           def patch_kotlin(text: str) -> str:
-              # Add imports before plugins {}
-              if 'import java.util.Properties' not in text:
-                  text = re.sub(
-                      r'^plugins\s*\{',
-                      'import java.util.Properties\nimport java.io.FileInputStream\n\nplugins {',
-                      text,
-                      count=1,
-                      flags=re.MULTILINE,
-                  )
-
-              # Add keystoreProperties loader before android {}
-              if 'keystoreProperties' not in text:
-                  text = re.sub(
+              if 'keystoreProperties' in text:
+                  print('Kotlin: already patched — skipping loader insert')
+              else:
+                  # Insert loader before the first "android {" block
+                  new_text, n = re.subn(
                       r'\nandroid\s*\{',
-                      '''
-          val keystoreProperties = Properties()
-          val keystorePropertiesFile = rootProject.file("key.properties")
-          if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
-          }
-
-          android {''',
+                      '\n' + KOTLIN_LOADER + '\nandroid {',
                       text,
                       count=1,
                   )
+                  if n == 0:
+                      print('Kotlin: FAILED to find "android {" — aborting')
+                      sys.exit(1)
+                  text = new_text
 
-              # Add signingConfigs.release
-              if 'signingConfigs' not in text:
-                  text = re.sub(
+              if 'create("release")' in text:
+                  print('Kotlin: signingConfigs.release already present')
+              else:
+                  # Insert signingConfigs block right after "android {"
+                  text, n = re.subn(
                       r'(android\s*\{)',
-                      r'''\1
-              signingConfigs {
-                  create("release") {
-                      keyAlias = keystoreProperties["keyAlias"] as String
-                      keyPassword = keystoreProperties["keyPassword"] as String
-                      storeFile = keystoreProperties["storeFile"]?.let { file(it) }
-                      storePassword = keystoreProperties["storePassword"] as String
-                  }
-              }
-          ''',
+                      r'\1\n' + KOTLIN_SIGNING,
                       text,
                       count=1,
                   )
+                  if n == 0:
+                      print('Kotlin: FAILED to insert signingConfigs — aborting')
+                      sys.exit(1)
 
-              # Redirect release buildType
+              # Point release buildType to the new signing config
               text = text.replace(
                   'signingConfig = signingConfigs.getByName("debug")',
                   'signingConfig = signingConfigs.getByName("release")',
               )
               return text
 
+          any_found = False
           for f in ('android/app/build.gradle', 'android/app/build.gradle.kts'):
               p = pathlib.Path(f)
               if not p.exists():
+                  print(f'Skip: {f} does not exist')
                   continue
-              text = p.read_text()
-              new = patch_kotlin(text) if p.suffix == '.kts' else patch_groovy(text)
-              p.write_text(new)
-              print(f'--- {f} (after patch) ---')
-              print(new)
-              print()
+              any_found = True
+              original = p.read_text()
+              if p.suffix == '.kts':
+                  patched = patch_kotlin(original)
+              else:
+                  patched = patch_groovy(original)
+              p.write_text(patched)
+              print(f'================= {f} (after patch) =================')
+              print(patched)
+              print('======================================================')
+
+          if not any_found:
+              print('ERROR: no android/app/build.gradle(.kts) found — aborting')
+              sys.exit(1)
           PY
 
       - name: Build APK
@@ -398,7 +431,6 @@ jobs:
           echo "--- APK info ---"
           ls -lh "$APK"
           echo "--- Signature ---"
-          # apksigner is part of the Android SDK which is preinstalled on ubuntu-24.04
           APKSIGNER=$(find $ANDROID_HOME -name apksigner -type f 2>/dev/null | head -1 || true)
           if [ -n "$APKSIGNER" ]; then
             "$APKSIGNER" verify --print-certs "$APK" || true
