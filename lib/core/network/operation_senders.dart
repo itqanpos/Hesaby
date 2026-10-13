@@ -33,12 +33,21 @@ import 'operation_processor.dart';
 /// balances, cash triggers) runs uniformly whether the operation arrives
 /// online or via the offline queue.
 ///
-/// The matching SQL migration is provided separately.
+/// The matching SQL migrations are provided separately
+/// (31, 32, 33).
 class SupabaseOperationSender implements PendingOperationSender {
   SupabaseOperationSender({required SupabaseClient client})
       : _client = client;
 
   final SupabaseClient _client;
+
+  /// Hard ceiling on a single RPC call.
+  ///
+  /// Prevents a stuck network call from blocking the queue indefinitely.
+  /// When the limit is hit, a [TimeoutException] is thrown; the processor
+  /// classifies it as **transient** and retries without consuming the
+  /// retry budget.
+  static const Duration _rpcTimeout = Duration(seconds: 20);
 
   @override
   Future<void> send(PendingOperation operation) async {
@@ -59,19 +68,20 @@ class SupabaseOperationSender implements PendingOperationSender {
   // ---------------------------------------------------------------------------
 
   Future<void> _sendSale(PendingOperation op) async {
-    // Expected payload (all keys optional except branchId + items):
+    // Expected payload (as produced by OfflineWriter.enqueueSale):
     // {
-    //   "branch_id":    "<uuid>",
-    //   "customer_id":  "<uuid>|null",
-    //   "sale_date":    "2026-10-12T10:30:00.000Z",
+    //   "branch_id":      "<uuid>",
+    //   "customer_id":    "<uuid>|null",
+    //   "sale_date":      "2026-10-12T10:30:00.000Z",
     //   "items": [
     //     {"product_id": "<uuid>", "unit_id": "<uuid>",
     //      "quantity": 2, "unit_price": 100.0, "notes": null}
     //   ],
-    //   "discount":     0.0,
-    //   "tax_amount":   0.0,
-    //   "paid_amount":  100.0,
-    //   "notes":        null
+    //   "discount":       0.0,
+    //   "tax_amount":     0.0,
+    //   "paid_amount":    100.0,
+    //   "payment_method": "cash",
+    //   "notes":          null
     // }
     await _callRpc(
       name: 'create_offline_sale',
@@ -92,7 +102,7 @@ class SupabaseOperationSender implements PendingOperationSender {
     // {
     //   "customer_id": "<uuid>",
     //   "amount":      500.0,
-    //   "method":      "cash" | "card" | "transfer",
+    //   "method":      "cash" | "card" | "wallet" | "transfer",
     //   "reference":   null,
     //   "notes":       null
     // }
@@ -115,7 +125,7 @@ class SupabaseOperationSender implements PendingOperationSender {
     // {
     //   "supplier_id": "<uuid>",
     //   "amount":      300.0,
-    //   "method":      "cash" | "card" | "transfer",
+    //   "method":      "cash" | "card" | "wallet" | "transfer",
     //   "reference":   null,
     //   "notes":       null
     // }
@@ -136,12 +146,12 @@ class SupabaseOperationSender implements PendingOperationSender {
   Future<void> _sendExpense(PendingOperation op) async {
     // Expected payload:
     // {
-    //   "branch_id":     "<uuid>",
-    //   "category_id":   "<uuid>",
-    //   "amount":        150.0,
-    //   "expense_date":  "2026-10-12T10:30:00.000Z",
-    //   "payment_method": "cash" | "card" | "transfer",
-    //   "notes":         null
+    //   "branch_id":      "<uuid>",
+    //   "category_id":    "<uuid>",
+    //   "amount":         150.0,
+    //   "expense_date":   "2026-10-12T10:30:00.000Z",
+    //   "payment_method": "cash" | "card" | "wallet" | "transfer",
+    //   "notes":          null
     // }
     await _callRpc(
       name: 'create_offline_expense',
@@ -161,20 +171,22 @@ class SupabaseOperationSender implements PendingOperationSender {
   /// / failure contract expected by [PendingOperationSender.send].
   ///
   /// * Success → returns normally.
-  /// * Any exception → rethrown unchanged (the processor will catch it,
-  ///   increment `attemptCount`, and either retry or mark the operation
-  ///   as failed).
+  /// * `23505` duplicate-key → treated as success (idempotency belt-and-
+  ///   braces on top of the UNIQUE index and the SQL-level guard).
+  /// * Any other exception, including [TimeoutException] — rethrown
+  ///   unchanged so the processor can classify it (transient vs permanent)
+  ///   and decide whether to retry.
   ///
-  /// **Idempotency contract:** the RPC functions must return success when
-  /// a row with the same `client_uuid` already exists. If they instead
-  /// raise a `23505` duplicate-key error, that error is treated here as
-  /// success (belt and braces).
+  /// The call is bounded by [_rpcTimeout]; a stuck network cannot pin the
+  /// processor forever.
   Future<void> _callRpc({
     required String name,
     required Map<String, Object?> body,
   }) async {
     try {
-      await _client.rpc(name, params: body);
+      await _client
+          .rpc(name, params: body)
+          .timeout(_rpcTimeout);
     } on PostgrestException catch (error) {
       // Duplicate client_uuid → someone else already delivered this
       // operation (e.g. a retry that we thought had failed). Treat as
