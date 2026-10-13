@@ -1,10 +1,18 @@
 # ============================================================================
 # HESABI — Build Android APK
 # ============================================================================
-# Builds a signed-with-debug-key Android APK entirely in CI, without
-# requiring an `android/` folder in the repository.
+# Builds a release-signed Android APK entirely in CI, using a dedicated
+# upload keystore stored in GitHub Secrets.
 #
-# This project is Flutter/Dart only. Do NOT add Node.js, npm, or their caches.
+# Required repository secrets:
+#   - KEYSTORE_BASE64    : base64-encoded contents of upload-keystore.jks
+#   - KEYSTORE_PASSWORD  : password for the keystore
+#   - KEY_ALIAS          : key alias inside the keystore (e.g. "hesaby")
+#   - KEY_PASSWORD       : password for the key (usually same as keystore)
+#   - SUPABASE_URL       : Supabase project URL
+#   - SUPABASE_ANON_KEY  : Supabase anon key
+#
+# This project is Flutter/Dart only. Do NOT add Node.js, npm, or caches.
 # ============================================================================
 
 name: Build Android APK
@@ -93,14 +101,6 @@ jobs:
 
       - name: Patch compileSdk for ALL plugins in pub cache (dynamic)
         run: |
-          # Many Flutter plugins hard-code a `compileSdkVersion` that is
-          # lower than what their own transitive dependencies now require
-          # (androidx 1.13+, androidx.window, fragment 1.7+, etc.). Gradle's
-          # AAR metadata check fails for each one of them individually, so
-          # instead of chasing them one by one we walk the entire pub-cache
-          # and bring every Android module up to compileSdk 36.
-          #
-          # Runs entirely inside the CI runner; the repository is untouched.
           set -e
 
           PUB_CACHE_ROOT="${PUB_CACHE:-$HOME/.pub-cache}/hosted/pub.dev"
@@ -131,19 +131,14 @@ jobs:
                   text = f.read_text()
                   original = text
 
-                  # Groovy: compileSdkVersion 31, compileSdkVersion = 31
                   text = re.sub(r'compileSdkVersion\s*=?\s*[0-9]+',
                                 'compileSdkVersion 36', text)
-                  # Groovy: compileSdkVersion(31)
                   text = re.sub(r'compileSdkVersion\(\s*[0-9]+\s*\)',
                                 'compileSdkVersion(36)', text)
-                  # Kotlin DSL: compileSdk = 31
                   text = re.sub(r'compileSdk\s*=\s*[0-9]+',
                                 'compileSdk = 36', text)
-                  # Kotlin DSL: compileSdk(31)
                   text = re.sub(r'compileSdk\(\s*[0-9]+\s*\)',
                                 'compileSdk(36)', text)
-                  # Kotlin DSL: compileSdk 31 (space form)
                   text = re.sub(r'\bcompileSdk\s+[0-9]+\b',
                                 'compileSdk 36', text)
 
@@ -237,14 +232,152 @@ jobs:
       - name: Generate native splash
         run: dart run flutter_native_splash:create
 
-      - name: Patch release signing to reuse debug keystore
+      - name: Decode keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          for f in android/app/build.gradle android/app/build.gradle.kts; do
-            if [ -f "$f" ]; then
-              sed -i 's/signingConfig signingConfigs\.release/signingConfig signingConfigs.debug/g' "$f" || true
-              sed -i 's/signingConfig = signingConfigs\.getByName("release")/signingConfig = signingConfigs.getByName("debug")/g' "$f" || true
-            fi
-          done
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "!! KEYSTORE_BASE64 secret is empty"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
+          ls -lh android/app/upload-keystore.jks
+          file android/app/upload-keystore.jks
+
+      - name: Create key.properties
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+        run: |
+          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
+            echo "!! Missing one of KEYSTORE_PASSWORD / KEY_PASSWORD / KEY_ALIAS"
+            exit 1
+          fi
+          cat > android/key.properties <<EOF
+          storePassword=$KEYSTORE_PASSWORD
+          keyPassword=$KEY_PASSWORD
+          keyAlias=$KEY_ALIAS
+          storeFile=upload-keystore.jks
+          EOF
+          echo "--- key.properties (values hidden) ---"
+          sed 's/=.*/=<redacted>/' android/key.properties
+
+      - name: Patch build.gradle for release signing
+        run: |
+          python3 - <<'PY'
+          import pathlib
+          import re
+
+          def patch_groovy(text: str) -> str:
+              # Add keystoreProperties loader before the android {} block
+              if 'keystoreProperties' not in text:
+                  text = re.sub(
+                      r'\nandroid\s*\{',
+                      '''
+          def keystoreProperties = new Properties()
+          def keystorePropertiesFile = rootProject.file('key.properties')
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
+          }
+
+          android {''',
+                      text,
+                      count=1,
+                  )
+
+              # Add signingConfigs.release if missing
+              if 'signingConfigs' not in text:
+                  text = re.sub(
+                      r'(android\s*\{)',
+                      r'''\1
+              signingConfigs {
+                  release {
+                      keyAlias keystoreProperties['keyAlias']
+                      keyPassword keystoreProperties['keyPassword']
+                      storeFile keystoreProperties['storeFile'] ? file(keystoreProperties['storeFile']) : null
+                      storePassword keystoreProperties['storePassword']
+                  }
+              }
+          ''',
+                      text,
+                      count=1,
+                  )
+
+              # Redirect release buildType to the release signing config
+              text = text.replace(
+                  'signingConfig = signingConfigs.debug',
+                  'signingConfig = signingConfigs.release',
+              )
+              text = text.replace(
+                  'signingConfig signingConfigs.debug',
+                  'signingConfig signingConfigs.release',
+              )
+              return text
+
+          def patch_kotlin(text: str) -> str:
+              # Add imports before plugins {}
+              if 'import java.util.Properties' not in text:
+                  text = re.sub(
+                      r'^plugins\s*\{',
+                      'import java.util.Properties\nimport java.io.FileInputStream\n\nplugins {',
+                      text,
+                      count=1,
+                      flags=re.MULTILINE,
+                  )
+
+              # Add keystoreProperties loader before android {}
+              if 'keystoreProperties' not in text:
+                  text = re.sub(
+                      r'\nandroid\s*\{',
+                      '''
+          val keystoreProperties = Properties()
+          val keystorePropertiesFile = rootProject.file("key.properties")
+          if (keystorePropertiesFile.exists()) {
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
+          }
+
+          android {''',
+                      text,
+                      count=1,
+                  )
+
+              # Add signingConfigs.release
+              if 'signingConfigs' not in text:
+                  text = re.sub(
+                      r'(android\s*\{)',
+                      r'''\1
+              signingConfigs {
+                  create("release") {
+                      keyAlias = keystoreProperties["keyAlias"] as String
+                      keyPassword = keystoreProperties["keyPassword"] as String
+                      storeFile = keystoreProperties["storeFile"]?.let { file(it) }
+                      storePassword = keystoreProperties["storePassword"] as String
+                  }
+              }
+          ''',
+                      text,
+                      count=1,
+                  )
+
+              # Redirect release buildType
+              text = text.replace(
+                  'signingConfig = signingConfigs.getByName("debug")',
+                  'signingConfig = signingConfigs.getByName("release")',
+              )
+              return text
+
+          for f in ('android/app/build.gradle', 'android/app/build.gradle.kts'):
+              p = pathlib.Path(f)
+              if not p.exists():
+                  continue
+              text = p.read_text()
+              new = patch_kotlin(text) if p.suffix == '.kts' else patch_groovy(text)
+              p.write_text(new)
+              print(f'--- {f} (after patch) ---')
+              print(new)
+              print()
+          PY
 
       - name: Build APK
         env:
@@ -256,6 +389,22 @@ jobs:
             --dart-define=APP_ENV=production \
             --dart-define=SUPABASE_URL="$SUPABASE_URL" \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Verify APK signature
+        env:
+          BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
+        run: |
+          APK="build/app/outputs/flutter-apk/app-$BUILD_TYPE.apk"
+          echo "--- APK info ---"
+          ls -lh "$APK"
+          echo "--- Signature ---"
+          # apksigner is part of the Android SDK which is preinstalled on ubuntu-24.04
+          APKSIGNER=$(find $ANDROID_HOME -name apksigner -type f 2>/dev/null | head -1 || true)
+          if [ -n "$APKSIGNER" ]; then
+            "$APKSIGNER" verify --print-certs "$APK" || true
+          else
+            echo "apksigner not found — skipping signature dump"
+          fi
 
       - name: Collect APK
         env:
@@ -284,6 +433,7 @@ jobs:
             - Commit: `${{ github.sha }}`
             - Build type: `${{ github.event.inputs.build_type || 'release' }}`
             - Built from: `${{ github.ref_name }}`
+            - Signed with: release keystore (stable signature)
 
             حمّل ملف APK من قسم Assets أدناه، ثم افتحه على جهاز Android
             لتثبيت Hesabi.
