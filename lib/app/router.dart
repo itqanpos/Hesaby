@@ -55,7 +55,6 @@ import '../features/settings/presentation/pages/settings_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
-import '../shared/widgets/app_loader.dart';
 
 /// Route paths and names used across the application.
 abstract final class AppRouter {
@@ -635,12 +634,134 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
   return router;
 });
 
-/// Minimal loading screen shown while session restoration is in flight.
+/// Branded loading screen shown while session restoration is in flight.
+///
+/// Displays:
+/// 1. App logo (from `assets/images/logo.png`) with an icon fallback if
+///    the asset cannot be loaded.
+/// 2. The brand name ("حسابي") in the primary colour.
+/// 3. A short tagline.
+/// 4. A spinner.
+/// 5. A version label at the bottom.
+///
+/// Uses [Spacer]s so the content is vertically centred on tall screens and
+/// stays readable on short screens without overflow.
 class _AuthLoadingPage extends StatelessWidget {
   const _AuthLoadingPage();
 
+  static const String _logoAsset = 'assets/images/logo.png';
+  static const String _brandName = 'حسابي';
+  static const String _tagline = 'نظام إدارة المتاجر الذكي';
+  static const String _loadingLabel = 'جارٍ التحميل...';
+  static const String _versionLabel = 'v0.1.0';
+
   @override
   Widget build(BuildContext context) {
-    return const Scaffold(body: AppLoader());
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Scaffold(
+      body: SafeArea(
+        child: Center(
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 420),
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 32),
+              child: Column(
+                children: <Widget>[
+                  const Spacer(flex: 3),
+
+                  // ---- Logo ----
+                  Image.asset(
+                    _logoAsset,
+                    width: 120,
+                    height: 120,
+                    fit: BoxFit.contain,
+                    errorBuilder: (
+                      BuildContext _,
+                      Object __,
+                      StackTrace? ___,
+                    ) =>
+                        Container(
+                      width: 120,
+                      height: 120,
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(28),
+                      ),
+                      child: Icon(
+                        Icons.point_of_sale_outlined,
+                        size: 64,
+                        color: scheme.onPrimaryContainer,
+                      ),
+                    ),
+                  ),
+
+                  const SizedBox(height: 24),
+
+                  // ---- Brand name ----
+                  Text(
+                    _brandName,
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      fontWeight: FontWeight.w800,
+                      color: scheme.primary,
+                      letterSpacing: 0.5,
+                    ),
+                  ),
+
+                  const SizedBox(height: 6),
+
+                  // ---- Tagline ----
+                  Text(
+                    _tagline,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+
+                  const SizedBox(height: 40),
+
+                  // ---- Spinner ----
+                  SizedBox(
+                    width: 32,
+                    height: 32,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      valueColor:
+                          AlwaysStoppedAnimation<Color>(scheme.primary),
+                    ),
+                  ),
+
+                  const SizedBox(height: 12),
+
+                  // ---- Loading label ----
+                  Text(
+                    _loadingLabel,
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+
+                  const Spacer(flex: 3),
+
+                  // ---- Version ----
+                  Padding(
+                    padding: const EdgeInsets.only(bottom: 16),
+                    child: Text(
+                      _versionLabel,
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color:
+                            scheme.onSurfaceVariant.withValues(alpha: 0.6),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
