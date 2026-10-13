@@ -352,14 +352,12 @@ jobs:
               return text
 
           def patch_kotlin(text: str) -> str:
-              # 1) Prepend imports at the very top (Kotlin DSL requires them)
               if 'import java.util.Properties' not in text:
                   text = KOTLIN_IMPORTS + text
                   print('Kotlin: added imports at top of file')
               else:
                   print('Kotlin: imports already present')
 
-              # 2) Insert loader before "android {"
               if 'val keystoreProperties' in text:
                   print('Kotlin: keystoreProperties already present')
               else:
@@ -375,7 +373,6 @@ jobs:
                   text = new_text
                   print('Kotlin: inserted keystoreProperties loader')
 
-              # 3) Insert signingConfigs.release inside android { }
               if 'create("release")' in text:
                   print('Kotlin: signingConfigs.release already present')
               else:
@@ -390,7 +387,6 @@ jobs:
                       sys.exit(1)
                   print('Kotlin: inserted signingConfigs.release')
 
-              # 4) Point release buildType to the new signing config
               text = text.replace(
                   'signingConfig = signingConfigs.getByName("debug")',
                   'signingConfig = signingConfigs.getByName("release")',
@@ -425,7 +421,12 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
+          # --target-platform=android-arm64 cuts the APK from ~94 MB to ~30 MB.
+          # ARM64 covers every Android device released since ~2016.
+          # If 32-bit (ARMv7) support is ever needed, add: android-arm
+          # If Intel x86_64 (emulators only) is needed, add: android-x64
           flutter build apk --$BUILD_TYPE \
+            --target-platform=android-arm64 \
             --dart-define=APP_ENV=production \
             --dart-define=SUPABASE_URL="$SUPABASE_URL" \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
@@ -473,6 +474,7 @@ jobs:
             - Build type: `${{ github.event.inputs.build_type || 'release' }}`
             - Built from: `${{ github.ref_name }}`
             - Signed with: release keystore (stable signature)
+            - Target: Android ARM64 (works on phones from ~2016 onwards)
 
             حمّل ملف APK من قسم Assets أدناه، ثم افتحه على جهاز Android
             لتثبيت Hesabi.
