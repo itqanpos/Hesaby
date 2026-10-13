@@ -706,9 +706,16 @@ class _CategoryChip extends StatelessWidget {
     }
 
     final bool hasSelection = selectedId != null;
-    final String label = hasSelection
-        ? categories.firstWhere((c) => c.id == selectedId).name
-        : 'التصنيف';
+
+    // Safe lookup: uses where+map+toList instead of firstWhere so that a
+    // stale selectedId (e.g. category deleted elsewhere) falls back to the
+    // generic label instead of throwing StateError and crashing the screen.
+    final List<String> matchingNames = categories
+        .where((ProductCategory c) => c.id == selectedId)
+        .map((ProductCategory c) => c.name)
+        .toList(growable: false);
+    final String label =
+        matchingNames.isEmpty ? 'التصنيف' : matchingNames.first;
 
     return PopupMenuButton<String?>(
       tooltip: 'اختر تصنيفًا',
@@ -757,10 +764,17 @@ class _SortChip extends StatelessWidget {
       tooltip: 'ترتيب',
       onSelected: (String value) {
         final List<String> parts = value.split('|');
-        final ProductSortField field =
-            ProductSortField.values.firstWhere((f) => f.name == parts[0]);
+        if (parts.length != 2) return;
+
+        // Safe lookup: firstOrNull semantics via where+toList so a stale or
+        // unexpected value falls back silently instead of crashing.
+        final List<ProductSortField> matchingFields = ProductSortField.values
+            .where((ProductSortField f) => f.name == parts[0])
+            .toList(growable: false);
+        if (matchingFields.isEmpty) return;
+
         final bool asc = parts[1] == 'asc';
-        onChanged(field, asc);
+        onChanged(matchingFields.first, asc);
       },
       itemBuilder: (BuildContext _) => <PopupMenuEntry<String>>[
         for (final ProductSortField f in ProductSortField.values) ...<PopupMenuEntry<String>>[
