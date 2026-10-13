@@ -241,7 +241,6 @@ jobs:
             exit 1
           fi
           echo "Base64 length: ${#KEYSTORE_BASE64}"
-          # Strip all whitespace (in case iPhone paste introduced line breaks)
           printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > android/app/upload-keystore.jks
           ls -lh android/app/upload-keystore.jks
           file android/app/upload-keystore.jks || true
@@ -293,11 +292,13 @@ jobs:
               }
           """
 
+          KOTLIN_IMPORTS = "import java.util.Properties\nimport java.io.FileInputStream\n\n"
+
           KOTLIN_LOADER = """
-          val keystoreProperties = java.util.Properties()
+          val keystoreProperties = Properties()
           val keystorePropertiesFile = rootProject.file("key.properties")
           if (keystorePropertiesFile.exists()) {
-              keystoreProperties.load(java.io.FileInputStream(keystorePropertiesFile))
+              keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
           """
 
@@ -314,9 +315,8 @@ jobs:
 
           def patch_groovy(text: str) -> str:
               if 'keystoreProperties' in text:
-                  print('Groovy: already patched — skipping loader insert')
+                  print('Groovy: already patched - skipping loader insert')
               else:
-                  # Insert loader before the first "android {" block
                   new_text, n = re.subn(
                       r'\nandroid\s*\{',
                       '\n' + GROOVY_LOADER + '\nandroid {',
@@ -324,14 +324,13 @@ jobs:
                       count=1,
                   )
                   if n == 0:
-                      print('Groovy: FAILED to find "android {" — aborting')
+                      print('Groovy: FAILED to find "android {" - aborting')
                       sys.exit(1)
                   text = new_text
 
-              if 'signingConfigs.release' in text:
+              if 'signingConfigs {' in text and 'release {' in text:
                   print('Groovy: signingConfigs.release already present')
               else:
-                  # Insert signingConfigs block right after "android {"
                   text, n = re.subn(
                       r'(android\s*\{)',
                       r'\1\n' + GROOVY_SIGNING,
@@ -339,10 +338,9 @@ jobs:
                       count=1,
                   )
                   if n == 0:
-                      print('Groovy: FAILED to insert signingConfigs — aborting')
+                      print('Groovy: FAILED to insert signingConfigs - aborting')
                       sys.exit(1)
 
-              # Point release buildType to the new signing config
               text = text.replace(
                   'signingConfig = signingConfigs.debug',
                   'signingConfig = signingConfigs.release',
@@ -354,10 +352,17 @@ jobs:
               return text
 
           def patch_kotlin(text: str) -> str:
-              if 'keystoreProperties' in text:
-                  print('Kotlin: already patched — skipping loader insert')
+              # 1) Prepend imports at the very top (Kotlin DSL requires them)
+              if 'import java.util.Properties' not in text:
+                  text = KOTLIN_IMPORTS + text
+                  print('Kotlin: added imports at top of file')
               else:
-                  # Insert loader before the first "android {" block
+                  print('Kotlin: imports already present')
+
+              # 2) Insert loader before "android {"
+              if 'val keystoreProperties' in text:
+                  print('Kotlin: keystoreProperties already present')
+              else:
                   new_text, n = re.subn(
                       r'\nandroid\s*\{',
                       '\n' + KOTLIN_LOADER + '\nandroid {',
@@ -365,14 +370,15 @@ jobs:
                       count=1,
                   )
                   if n == 0:
-                      print('Kotlin: FAILED to find "android {" — aborting')
+                      print('Kotlin: FAILED to find "android {" - aborting')
                       sys.exit(1)
                   text = new_text
+                  print('Kotlin: inserted keystoreProperties loader')
 
+              # 3) Insert signingConfigs.release inside android { }
               if 'create("release")' in text:
                   print('Kotlin: signingConfigs.release already present')
               else:
-                  # Insert signingConfigs block right after "android {"
                   text, n = re.subn(
                       r'(android\s*\{)',
                       r'\1\n' + KOTLIN_SIGNING,
@@ -380,10 +386,11 @@ jobs:
                       count=1,
                   )
                   if n == 0:
-                      print('Kotlin: FAILED to insert signingConfigs — aborting')
+                      print('Kotlin: FAILED to insert signingConfigs - aborting')
                       sys.exit(1)
+                  print('Kotlin: inserted signingConfigs.release')
 
-              # Point release buildType to the new signing config
+              # 4) Point release buildType to the new signing config
               text = text.replace(
                   'signingConfig = signingConfigs.getByName("debug")',
                   'signingConfig = signingConfigs.getByName("release")',
@@ -408,7 +415,7 @@ jobs:
               print('======================================================')
 
           if not any_found:
-              print('ERROR: no android/app/build.gradle(.kts) found — aborting')
+              print('ERROR: no android/app/build.gradle(.kts) found - aborting')
               sys.exit(1)
           PY
 
@@ -435,7 +442,7 @@ jobs:
           if [ -n "$APKSIGNER" ]; then
             "$APKSIGNER" verify --print-certs "$APK" || true
           else
-            echo "apksigner not found — skipping signature dump"
+            echo "apksigner not found - skipping signature dump"
           fi
 
       - name: Collect APK
@@ -459,7 +466,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-latest
-          name: "Hesabi APK — Latest"
+          name: "Hesabi APK - Latest"
           body: |
             **Build #${{ github.run_number }}**
             - Commit: `${{ github.sha }}`
