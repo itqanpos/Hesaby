@@ -108,6 +108,23 @@ class SettingsPage extends ConsumerWidget {
                   context.pushNamed(AppRouter.subscriptionName),
             ),
 
+          const SizedBox(height: 8),
+
+          // ---- الكتالوج ----
+          const _SectionHeader(title: 'الكتالوج'),
+          _SettingsTile(
+            icon: Icons.category_outlined,
+            title: 'التصنيفات',
+            subtitle: 'مجموعات المنتجات لتنظيم الكتالوج',
+            onTap: () => context.pushNamed(AppRouter.categoriesName),
+          ),
+          _SettingsTile(
+            icon: Icons.straighten_outlined,
+            title: 'وحدات القياس',
+            subtitle: 'الوحدات الأساسية ومعاملات التحويل',
+            onTap: () => context.pushNamed(AppRouter.unitsName),
+          ),
+
           // ---- المالك (Platform Admin) ----
           if (isPlatformAdmin) ...<Widget>[
             const SizedBox(height: 8),
