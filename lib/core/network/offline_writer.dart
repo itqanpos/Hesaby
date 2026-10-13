@@ -5,6 +5,7 @@ import 'package:uuid/uuid.dart';
 
 import '../../features/companies/presentation/providers/company_context_provider.dart';
 import '../utils/logger.dart';
+import 'operation_queue.dart';
 import 'operation_queue_providers.dart';
 import 'pending_operation.dart';
 
@@ -187,8 +188,9 @@ abstract final class OfflineWriter {
       return null;
     }
 
-    final OperationQueueRef queue = await _resolveQueue(ref);
-    if (queue.queue == null) {
+    final OperationQueueRef queueRef = await _resolveQueue(ref);
+    final OperationQueue? queue = queueRef.queue;
+    if (queue == null) {
       AppLogger.warning(
         'OfflineWriter: queue not ready — cannot enqueue ${type.name}.',
       );
@@ -205,7 +207,7 @@ abstract final class OfflineWriter {
     );
 
     try {
-      await queue.queue!.enqueue(operation);
+      await queue.enqueue(operation);
       AppLogger.info(
         'OfflineWriter: enqueued ${type.name} ($uuid).',
       );
@@ -226,11 +228,9 @@ abstract final class OfflineWriter {
   /// returns synchronously without touching disk.
   static Future<OperationQueueRef> _resolveQueue(WidgetRef ref) async {
     try {
-      // `.future` completes on first build and is cached thereafter, so
-      // this is effectively synchronous after warm-up.
-      return OperationQueueRef(
-        await ref.read(operationQueueProvider.future),
-      );
+      final OperationQueue queue =
+          await ref.read(operationQueueProvider.future);
+      return OperationQueueRef(queue);
     } on Object catch (error, stackTrace) {
       AppLogger.error(
         'OfflineWriter: failed to resolve the operation queue.',
@@ -242,11 +242,15 @@ abstract final class OfflineWriter {
   }
 }
 
-/// Tiny wrapper so [OfflineWriter._resolveQueue] can return both a
-/// resolved queue and a null signal without importing `OperationQueue`
-/// here.
+/// Small wrapper around a possibly-null [OperationQueue] so that
+/// [OfflineWriter._resolveQueue] can signal "queue not ready" without
+/// throwing.
+///
+/// **Type-safe:** `queue` is `OperationQueue?`, not `dynamic` — so any
+/// future rename or removal of a member on [OperationQueue] surfaces at
+/// compile time.
 class OperationQueueRef {
   const OperationQueueRef(this.queue);
 
-  final dynamic queue;
+  final OperationQueue? queue;
 }
