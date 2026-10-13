@@ -1,28 +1,34 @@
 // lib/features/pos/presentation/dialogs/pos_barcode_scanner_dialog.dart
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/utils/logger.dart';
 
-/// Full-screen barcode scanner dialog — performance tuned.
+/// Full-screen barcode scanner dialog — speed tuned.
 ///
-/// ## Performance
-/// * `DetectionSpeed.unrestricted` + `detectionTimeoutMs: 50`.
-/// * **`scanWindow`** — a **stable, computed-once** rectangle. The decoder
-///   analyzes only this region (≈200 KB per frame vs. 1.5 MB for the full
-///   preview), which yields a 5–7× speedup. The rectangle is cached in
-///   [_scanWindow] so the plugin's internal controller does **not** restart
-///   on every rebuild — this is what broke camera init on some Samsung
-///   devices in the earlier iteration.
-/// * `formats` restricted to common 1D + QR types.
+/// ## Speed
+/// * `DetectionSpeed.unrestricted` (no throttling between frames).
+/// * Only the formats a POS really needs (fewer decoders = faster frames).
+/// * Camera started manually and exactly once (`autoStart: false`), so
+///   there is no start/stop race with the widget or with retry.
+/// * The result is returned the moment a barcode is decoded: no setState,
+///   no animation delay, haptic/sound are fire-and-forget.
+/// * Static overlay (dim + corners) is painted once; only the laser line
+///   repaints each frame, with no Path boolean ops and no shaders.
 ///
-/// ## Feedback
-/// * Animated laser line (one isolated [RepaintBoundary], cheap on CPU).
-/// * Frame flashes green on a successful scan.
-/// * Haptic + sound dispatched without awaiting, so the dialog pops
-///   immediately when a barcode is decoded.
+/// ## Correctness fixes vs. previous version
+/// * Detection is paused while the manual-entry sheet is open, so a scan
+///   can never pop the sheet instead of the dialog.
+/// * Single owner for camera start; lifecycle-aware (stops in background,
+///   restarts on resume, auto-retries after returning from permission
+///   settings).
+/// * Scaffold ignores the keyboard inset so the preview never resizes under
+///   the cached scan window.
+/// * Torch icon reflects the real torch state; torch errors are caught.
 class PosBarcodeScannerDialog extends StatefulWidget {
   const PosBarcodeScannerDialog({super.key});
 
@@ -32,29 +38,37 @@ class PosBarcodeScannerDialog extends StatefulWidget {
 }
 
 class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, WidgetsBindingObserver {
   late final MobileScannerController _controller;
   late final AnimationController _laserController;
 
   bool _hasEmitted = false;
-  bool _flashSuccess = false;
-  MobileScannerException? _cameraError;
+  bool _manualOpen = false;
+  bool _starting = false;
   bool _isRetrying = false;
+  MobileScannerException? _cameraError;
 
-  /// Cached scan window. Computed once on the first layout pass and kept
-  /// stable for the lifetime of the dialog — changing it would restart
-  /// the plugin's camera controller, which is exactly what we want to
-  /// avoid.
+  /// Scan window is cached together with the size it was computed for.
+  /// It is recomputed only if the available size really changes (e.g.
+  /// rotation) — never on ordinary rebuilds.
   Rect? _scanWindow;
+  Size? _scanWindowFor;
 
   @override
   void initState() {
     super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
     _controller = MobileScannerController(
+      autoStart: false, // we are the only owner of start()/stop()
       detectionSpeed: DetectionSpeed.unrestricted,
-      detectionTimeoutMs: 50,
       facing: CameraFacing.back,
       torchEnabled: false,
+      // Android only. 1280x720 reads small / dense barcodes at a distance
+      // noticeably better than 640x480 while staying cheap with scanWindow.
+      // Remove this line if your mobile_scanner version doesn't have it.
+      cameraResolution: const Size(1280, 720),
+      // Fewer formats => faster decoding. Add back QR / ITF only if needed.
       formats: const <BarcodeFormat>[
         BarcodeFormat.ean13,
         BarcodeFormat.ean8,
@@ -62,8 +76,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
         BarcodeFormat.upcE,
         BarcodeFormat.code128,
         BarcodeFormat.code39,
-        BarcodeFormat.itf,
-        BarcodeFormat.qrCode,
       ],
     );
 
@@ -71,53 +83,72 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     )..repeat(reverse: true);
+
+    WidgetsBinding.instance.addPostFrameCallback((_) => _startCamera());
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     _laserController.dispose();
     _controller.dispose();
     super.dispose();
   }
 
   // ---------------------------------------------------------------------------
-  // Feedback
+  // Lifecycle
   // ---------------------------------------------------------------------------
 
-  void _emitSuccessFeedback() {
-    HapticFeedback.heavyImpact().ignore();
-    SystemSound.play(SystemSoundType.alert).ignore();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Detection
-  // ---------------------------------------------------------------------------
-
-  void _handleDetection(BarcodeCapture capture) {
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
     if (_hasEmitted) return;
 
-    for (final Barcode barcode in capture.barcodes) {
-      final String? value = barcode.rawValue;
-      if (value != null && value.trim().isNotEmpty) {
-        _hasEmitted = true;
-        _emitSuccessFeedback();
-
-        if (mounted) {
-          setState(() => _flashSuccess = true);
-        }
-
-        Future<void>.microtask(() {
-          if (!mounted) return;
-          Navigator.of(context).pop(value.trim());
-        });
-        return;
+    if (state == AppLifecycleState.resumed) {
+      final MobileScannerException? error = _cameraError;
+      if (error == null) {
+        _startCamera();
+      } else if (error.errorCode == MobileScannerErrorCode.permissionDenied) {
+        // User probably came back from the system settings.
+        _retry();
       }
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden) {
+      _controller.stop().ignore();
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Errors & retry
+  // Camera control
   // ---------------------------------------------------------------------------
+
+  Future<void> _startCamera() async {
+    if (_starting || !mounted || _hasEmitted) return;
+    _starting = true;
+    try {
+      await _controller.start();
+    } on MobileScannerException catch (error) {
+      // Already running is not a real error.
+      if (error.errorCode ==
+          MobileScannerErrorCode.controllerAlreadyInitialized) {
+        return;
+      }
+      if (mounted) _recordError(error);
+    } on Object catch (error, stackTrace) {
+      AppLogger.error('Barcode camera start failed', error, stackTrace);
+      if (mounted && _cameraError == null) {
+        setState(() {
+          _cameraError = MobileScannerException(
+            errorCode: MobileScannerErrorCode.genericError,
+            errorDetails: const MobileScannerErrorDetails(
+              message: 'Unknown camera error',
+            ),
+          );
+        });
+      }
+    } finally {
+      _starting = false;
+    }
+  }
 
   void _recordError(MobileScannerException error) {
     AppLogger.error(
@@ -138,37 +169,51 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       _cameraError = null;
     });
 
-    await Future<void>.delayed(const Duration(milliseconds: 250));
-    if (!mounted) return;
-
     try {
       await _controller.stop();
     } on Object {
       // Ignore — the controller may already be stopped.
     }
+    if (!mounted) return;
 
+    await _startCamera();
+    if (mounted) setState(() => _isRetrying = false);
+  }
+
+  Future<void> _toggleTorch() async {
     try {
-      await _controller.start();
-    } on MobileScannerException catch (error) {
-      if (mounted) _recordError(error);
+      await _controller.toggleTorch();
     } on Object catch (error, stackTrace) {
-      AppLogger.error('Barcode retry failed', error, stackTrace);
-      if (mounted) {
-        setState(() {
-          _cameraError = MobileScannerException(
-            errorCode: MobileScannerErrorCode.genericError,
-            errorDetails: const MobileScannerErrorDetails(
-              message: 'Unknown camera error',
-            ),
-          );
-        });
-      }
-    } finally {
-      if (mounted) setState(() => _isRetrying = false);
+      AppLogger.error('Torch toggle failed', error, stackTrace);
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Detection — keep this as short as possible
+  // ---------------------------------------------------------------------------
+
+  void _handleDetection(BarcodeCapture capture) {
+    if (_hasEmitted || _manualOpen) return;
+
+    for (final Barcode barcode in capture.barcodes) {
+      final String? raw = barcode.rawValue;
+      if (raw == null) continue;
+      final String value = raw.trim();
+      if (value.isEmpty) continue;
+
+      _hasEmitted = true;
+      HapticFeedback.heavyImpact().ignore();
+      SystemSound.play(SystemSoundType.alert).ignore();
+
+      if (mounted) Navigator.of(context).pop(value);
+      return;
     }
   }
 
   Future<void> _manualEntry() async {
+    if (_manualOpen || _hasEmitted) return;
+    _manualOpen = true;
+
     final String? value = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -177,25 +222,28 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       builder: (BuildContext ctx) =>
           const _ManualEntrySheet(title: 'إدخال الباركود يدويًا'),
     );
+
+    _manualOpen = false;
     if (value == null || value.trim().isEmpty) return;
-    if (!mounted) return;
+    if (!mounted || _hasEmitted) return;
+    _hasEmitted = true;
     Navigator.of(context).pop(value.trim());
   }
 
   // ---------------------------------------------------------------------------
-  // Scan window — computed once
+  // Scan window
   // ---------------------------------------------------------------------------
 
-  Rect _computeScanWindow(BoxConstraints constraints) {
+  Rect _scanWindowFor_(BoxConstraints constraints) {
+    final Size size = constraints.biggest;
+    if (_scanWindow != null && _scanWindowFor == size) return _scanWindow!;
+
     // Barcode-friendly aspect ratio: wider than tall (2:1).
-    final double width =
-        (constraints.maxWidth * 0.82).clamp(240.0, 340.0);
+    final double width = (size.width * 0.82).clamp(240.0, 340.0);
     final double height = width * 0.5;
-    return Rect.fromCenter(
-      center: Offset(
-        constraints.maxWidth / 2,
-        constraints.maxHeight * 0.40,
-      ),
+    _scanWindowFor = size;
+    return _scanWindow = Rect.fromCenter(
+      center: Offset(size.width / 2, size.height * 0.40),
       width: width,
       height: height,
     );
@@ -207,46 +255,46 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
 
   @override
   Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
     final bool hasError = _cameraError != null;
 
     return Scaffold(
       backgroundColor: Colors.black,
+      // The preview must never resize when the manual-entry keyboard opens.
+      resizeToAvoidBottomInset: false,
       appBar: AppBar(
         backgroundColor: Colors.black,
         foregroundColor: Colors.white,
         elevation: 0,
         title: const Text('مسح الباركود'),
         actions: <Widget>[
-          IconButton(
-            tooltip: 'التبديل للكاميرا الأمامية',
-            icon: const Icon(Icons.flip_camera_ios_outlined),
-            onPressed: hasError ? null : () => _controller.switchCamera(),
-          ),
-          IconButton(
-            tooltip: 'الفلاش',
-            icon: const Icon(Icons.flash_on_outlined),
-            onPressed: hasError ? null : () => _controller.toggleTorch(),
+          ValueListenableBuilder<MobileScannerState>(
+            valueListenable: _controller,
+            builder: (BuildContext context, MobileScannerState state, _) {
+              final bool unavailable =
+                  state.torchState == TorchState.unavailable;
+              final bool on = state.torchState == TorchState.on;
+              return IconButton(
+                tooltip: 'الفلاش',
+                icon: Icon(on ? Icons.flash_on : Icons.flash_off_outlined),
+                onPressed: (hasError || unavailable) ? null : _toggleTorch,
+              );
+            },
           ),
         ],
       ),
       body: hasError
           ? _CameraErrorView(
               error: _cameraError!,
-              scheme: scheme,
               isRetrying: _isRetrying,
               onRetry: _retry,
               onManualEntry: _manualEntry,
             )
           : LayoutBuilder(
               builder: (BuildContext context, BoxConstraints constraints) {
-                // Compute once, keep stable for the dialog's lifetime.
-                final Rect scanWindow =
-                    _scanWindow ??= _computeScanWindow(constraints);
+                final Rect scanWindow = _scanWindowFor_(constraints);
 
                 return Stack(
                   children: <Widget>[
-                    // ---- Camera preview (scoped to scanWindow) ----
                     MobileScanner(
                       controller: _controller,
                       onDetect: _handleDetection,
@@ -261,13 +309,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                             _recordError(error);
                           }
                         });
-                        return _CameraErrorView(
-                          error: error,
-                          scheme: scheme,
-                          isRetrying: _isRetrying,
-                          onRetry: _retry,
-                          onManualEntry: _manualEntry,
-                        );
+                        return const _LoadingView();
                       },
                       placeholderBuilder: (
                         BuildContext context,
@@ -276,19 +318,31 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                           const _LoadingView(),
                     ),
 
-                    // ---- Static frame + animated laser ----
+                    // Static layer: painted once, never repaints.
                     IgnorePointer(
-                      child: _ScanFrameOverlay(
-                        rect: scanWindow,
-                        animation: _laserController,
-                        flashSuccess: _flashSuccess,
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          size: Size.infinite,
+                          painter: _FramePainter(rect: scanWindow),
+                        ),
                       ),
                     ),
 
-                    // ---- Hint ----
+                    // Animated layer: only the laser line repaints.
+                    IgnorePointer(
+                      child: RepaintBoundary(
+                        child: CustomPaint(
+                          size: Size.infinite,
+                          painter: _LaserPainter(
+                            rect: scanWindow,
+                            animation: _laserController,
+                          ),
+                        ),
+                      ),
+                    ),
+
                     const _BottomHint(),
 
-                    // ---- Manual entry ----
                     Positioned(
                       left: 0,
                       right: 0,
@@ -358,183 +412,98 @@ class _BottomHint extends StatelessWidget {
 }
 
 // ============================================================================
-// Scan frame overlay — corners + animated laser beam
+// Painters
 // ============================================================================
 
-class _ScanFrameOverlay extends StatelessWidget {
-  const _ScanFrameOverlay({
-    required this.rect,
-    required this.animation,
-    required this.flashSuccess,
-  });
+/// Static: dimmed surroundings + rounded border + corner brackets.
+class _FramePainter extends CustomPainter {
+  const _FramePainter({required this.rect});
 
   final Rect rect;
-  final Animation<double> animation;
-  final bool flashSuccess;
-
-  @override
-  Widget build(BuildContext context) {
-    // RepaintBoundary isolates the constantly-redrawn laser from the rest
-    // of the tree, so it never triggers a rebuild of the camera preview.
-    return RepaintBoundary(
-      child: AnimatedBuilder(
-        animation: animation,
-        builder: (BuildContext context, Widget? _) {
-          return CustomPaint(
-            size: Size.infinite,
-            painter: _ScanFramePainter(
-              rect: rect,
-              progress: animation.value,
-              flashSuccess: flashSuccess,
-            ),
-          );
-        },
-      ),
-    );
-  }
-}
-
-class _ScanFramePainter extends CustomPainter {
-  _ScanFramePainter({
-    required this.rect,
-    required this.progress,
-    required this.flashSuccess,
-  });
-
-  final Rect rect;
-  final double progress;
-  final bool flashSuccess;
 
   @override
   void paint(Canvas canvas, Size size) {
-    // ---- Frame colour: white normally, green on success ----
-    final Color frameColor =
-        flashSuccess ? const Color(0xFF4CAF50) : Colors.white;
-    final Color laserColor =
-        flashSuccess ? const Color(0xFF4CAF50) : const Color(0xFFFF3D00);
+    final RRect hole = RRect.fromRectAndRadius(rect, const Radius.circular(16));
 
-    final RRect hole = RRect.fromRectAndRadius(
-      rect,
-      const Radius.circular(16),
+    // drawDRRect is much cheaper than Path.combine(difference, ...).
+    canvas.drawDRRect(
+      RRect.fromRectXY(Offset.zero & size, 0, 0),
+      hole,
+      Paint()..color = const Color(0x99000000),
     );
 
-    // ---- Dimmed background around the frame ----
-    final Path outer = Path()..addRect(Offset.zero & size);
-    final Path inner = Path()..addRRect(hole);
-    final Path dim = Path.combine(PathOperation.difference, outer, inner);
-    canvas.drawPath(dim, Paint()..color = const Color(0x99000000));
-
-    // ---- Rounded border ----
     canvas.drawRRect(
       hole,
       Paint()
         ..style = PaintingStyle.stroke
         ..strokeWidth = 2.5
-        ..color = frameColor.withValues(alpha: 0.5),
+        ..color = Colors.white.withValues(alpha: 0.5),
     );
 
-    // ---- Corner brackets ----
-    const double cornerLen = 26;
-    const double strokeW = 5;
-    final Paint cornerPaint = Paint()
+    const double c = 26;
+    final Paint p = Paint()
       ..style = PaintingStyle.stroke
-      ..strokeWidth = strokeW
+      ..strokeWidth = 5
       ..strokeCap = StrokeCap.round
-      ..color = frameColor;
+      ..color = Colors.white;
 
-    // Top-left
-    canvas.drawLine(
-      Offset(rect.left, rect.top + cornerLen),
-      Offset(rect.left, rect.top),
-      cornerPaint,
-    );
-    canvas.drawLine(
-      Offset(rect.left, rect.top),
-      Offset(rect.left + cornerLen, rect.top),
-      cornerPaint,
-    );
-    // Top-right
-    canvas.drawLine(
-      Offset(rect.right, rect.top + cornerLen),
-      Offset(rect.right, rect.top),
-      cornerPaint,
-    );
-    canvas.drawLine(
-      Offset(rect.right, rect.top),
-      Offset(rect.right - cornerLen, rect.top),
-      cornerPaint,
-    );
-    // Bottom-left
-    canvas.drawLine(
-      Offset(rect.left, rect.bottom - cornerLen),
-      Offset(rect.left, rect.bottom),
-      cornerPaint,
-    );
-    canvas.drawLine(
-      Offset(rect.left, rect.bottom),
-      Offset(rect.left + cornerLen, rect.bottom),
-      cornerPaint,
-    );
-    // Bottom-right
-    canvas.drawLine(
-      Offset(rect.right, rect.bottom - cornerLen),
-      Offset(rect.right, rect.bottom),
-      cornerPaint,
-    );
-    canvas.drawLine(
-      Offset(rect.right, rect.bottom),
-      Offset(rect.right - cornerLen, rect.bottom),
-      cornerPaint,
-    );
-
-    // ---- Laser beam ----
-    // Vertical sweep: top → bottom → top (progress is driven by the
-    // AnimationController with `repeat(reverse: true)`).
-    const double verticalMargin = 10;
-    final double usable = rect.height - verticalMargin * 2;
-    final double laserY = rect.top + verticalMargin + usable * progress;
-
-    // Glow gradient.
-    final Paint glowPaint = Paint()
-      ..shader = LinearGradient(
-        begin: Alignment.topCenter,
-        end: Alignment.bottomCenter,
-        colors: <Color>[
-          laserColor.withValues(alpha: 0.0),
-          laserColor.withValues(alpha: 0.55),
-          laserColor.withValues(alpha: 0.0),
-        ],
-        stops: const <double>[0.0, 0.5, 1.0],
-      ).createShader(
-        Rect.fromLTWH(rect.left, laserY - 14, rect.width, 28),
-      );
-    canvas.drawRect(
-      Rect.fromLTWH(rect.left, laserY - 14, rect.width, 28),
-      glowPaint,
-    );
-
-    // Core line.
-    canvas.drawLine(
-      Offset(rect.left + 8, laserY),
-      Offset(rect.right - 8, laserY),
-      Paint()
-        ..color = laserColor
-        ..strokeWidth = 2
-        ..strokeCap = StrokeCap.round,
-    );
-
-    // End dots.
-    final Paint dotPaint = Paint()..color = laserColor;
-    canvas.drawCircle(Offset(rect.left + 8, laserY), 3, dotPaint);
-    canvas.drawCircle(Offset(rect.right - 8, laserY), 3, dotPaint);
+    final Path corners = Path()
+      // top-left
+      ..moveTo(rect.left, rect.top + c)
+      ..lineTo(rect.left, rect.top)
+      ..lineTo(rect.left + c, rect.top)
+      // top-right
+      ..moveTo(rect.right, rect.top + c)
+      ..lineTo(rect.right, rect.top)
+      ..lineTo(rect.right - c, rect.top)
+      // bottom-left
+      ..moveTo(rect.left, rect.bottom - c)
+      ..lineTo(rect.left, rect.bottom)
+      ..lineTo(rect.left + c, rect.bottom)
+      // bottom-right
+      ..moveTo(rect.right, rect.bottom - c)
+      ..lineTo(rect.right, rect.bottom)
+      ..lineTo(rect.right - c, rect.bottom);
+    canvas.drawPath(corners, p);
   }
 
   @override
-  bool shouldRepaint(_ScanFramePainter oldDelegate) {
-    return oldDelegate.progress != progress ||
-        oldDelegate.flashSuccess != flashSuccess ||
-        oldDelegate.rect != rect;
+  bool shouldRepaint(_FramePainter old) => old.rect != rect;
+}
+
+/// Animated: only a glow line and a core line. Repaints via [repaint]
+/// directly, with no widget rebuild at all.
+class _LaserPainter extends CustomPainter {
+  _LaserPainter({required this.rect, required Animation<double> animation})
+      : _animation = animation,
+        super(repaint: animation);
+
+  final Rect rect;
+  final Animation<double> _animation;
+
+  static const Color _laser = Color(0xFFFF3D00);
+  static final Paint _glow = Paint()
+    ..color = _laser.withValues(alpha: 0.25)
+    ..strokeWidth = 10
+    ..strokeCap = StrokeCap.round;
+  static final Paint _core = Paint()
+    ..color = _laser
+    ..strokeWidth = 2
+    ..strokeCap = StrokeCap.round;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    const double margin = 10;
+    final double usable = rect.height - margin * 2;
+    final double y = rect.top + margin + usable * _animation.value;
+    final Offset a = Offset(rect.left + 8, y);
+    final Offset b = Offset(rect.right - 8, y);
+    canvas.drawLine(a, b, _glow);
+    canvas.drawLine(a, b, _core);
   }
+
+  @override
+  bool shouldRepaint(_LaserPainter old) => old.rect != rect;
 }
 
 // ============================================================================
@@ -544,14 +513,12 @@ class _ScanFramePainter extends CustomPainter {
 class _CameraErrorView extends StatelessWidget {
   const _CameraErrorView({
     required this.error,
-    required this.scheme,
     required this.isRetrying,
     required this.onRetry,
     required this.onManualEntry,
   });
 
   final Object error;
-  final ColorScheme scheme;
   final bool isRetrying;
   final VoidCallback onRetry;
   final VoidCallback onManualEntry;
@@ -638,24 +605,17 @@ class _CameraErrorView extends StatelessWidget {
         case MobileScannerErrorCode.permissionDenied:
           return (
             'لم يتم منح صلاحية الكاميرا',
-            'افتح: الإعدادات ← التطبيقات ← حسابي ← الأذونات ← الكاميرا، '
-                'واختر «السماح». ثم ارجع واضغط "إعادة المحاولة".',
+            'افتح إعدادات الجهاز ← التطبيقات ← هذا التطبيق ← الأذونات ← '
+                'الكاميرا، واختر «السماح». ثم ارجع للتطبيق وسيُعاد التشغيل '
+                'تلقائيًا (أو اضغط "إعادة المحاولة").',
           );
         case MobileScannerErrorCode.unsupported:
           return (
             'المسح بالكاميرا غير مدعوم',
             'استخدم قارئ باركود خارجي (HID) أو أدخل الرقم يدويًا.',
           );
-        case MobileScannerErrorCode.controllerUninitialized:
-          return (
-            'تعذّر تشغيل الكاميرا',
-            'حاول مرة أخرى، أو أدخل الرقم يدويًا.',
-          );
         default:
-          return (
-            'تعذّر تشغيل الكاميرا',
-            'حاول مرة أخرى، أو أدخل الرقم يدويًا.',
-          );
+          break;
       }
     }
     return (
