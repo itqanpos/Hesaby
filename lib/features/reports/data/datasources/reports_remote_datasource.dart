@@ -16,6 +16,15 @@ class ReportsRemoteDataSource {
   static const int saleItemsSafetyLimit = 50000;
   static const int inFilterChunkSize = 150;
 
+  /// The movement types that contribute to the *cost* side of a sale.
+  ///
+  /// `sale_out` moves stock out with a **negative** quantity.
+  /// `return_in` moves stock back in with a **positive** quantity.
+  static const List<String> _costMovementTypes = <String>[
+    'sale_out',
+    'return_in',
+  ];
+
   // ===========================================================================
   // SALES
   // ===========================================================================
@@ -104,7 +113,6 @@ class ReportsRemoteDataSource {
     return allRows;
   }
 
-  /// Fetches every confirmed sale belonging to the supplied customers.
   Future<List<Map<String, dynamic>>> fetchConfirmedSalesForCustomers({
     required String companyId,
     required List<String> customerIds,
@@ -134,6 +142,42 @@ class ReportsRemoteDataSource {
     }
 
     return allRows;
+  }
+
+  // ===========================================================================
+  // CUSTOMER PAYMENTS  (independent payments, not tied to a specific sale)
+  // ===========================================================================
+
+  /// Fetches every standalone customer payment in the period.
+  ///
+  /// A "standalone" payment is any row in `customer_payments`. Unlike
+  /// `sale_payments` (which is tied to a specific invoice), these are
+  /// recorded via the "تحصيل من عميل" flow and reduce the customer's
+  /// running balance directly.
+  ///
+  /// Used by [getTopCustomers] to make `totalPaid` / `totalDue` correct
+  /// even when the customer has settled part of an old balance without a
+  /// new invoice.
+  Future<List<Map<String, dynamic>>> fetchCustomerPayments({
+    required String companyId,
+    required DateTime? fromDate,
+    required DateTime? toDate,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    var query = client
+        .from('customer_payments')
+        .select('customer_id, amount, created_at')
+        .eq('company_id', companyId);
+
+    if (fromDate != null) {
+      query = query.gte('created_at', _formatTimestamp(fromDate));
+    }
+    if (toDate != null) {
+      query = query.lte('created_at', _formatTimestamp(toDate));
+    }
+
+    return await query.limit(safetyLimit);
   }
 
   // ===========================================================================
@@ -248,19 +292,6 @@ class ReportsRemoteDataSource {
   // FINANCIAL
   // ===========================================================================
 
-  /// Fetches the stock movements that back the *cost* side of a sale:
-  /// the outgoing `sale_out` movements AND the incoming `sale_return_in`
-  /// movements (customer returns put stock back on the shelf, reducing
-  /// the net cost of goods sold).
-  ///
-  /// Quantities are signed:
-  /// * `sale_out` → **negative** (stock decreases).
-  /// * `sale_return_in` → **positive** (stock returns).
-  ///
-  /// Callers must therefore compute the *signed* cost contribution as
-  /// `-quantity * unit_cost`:
-  /// * sale_out with qty = -5, cost = 100 → +500 (cost added).
-  /// * sale_return_in with qty = +5, cost = 100 → -500 (cost removed).
   Future<List<Map<String, dynamic>>> fetchSaleCostMovements({
     required String companyId,
     required DateTime? fromDate,
@@ -275,10 +306,7 @@ class ReportsRemoteDataSource {
           'reference_id, movement_type',
         )
         .eq('company_id', companyId)
-        .inFilter(
-          'movement_type',
-          <String>['sale_out', 'sale_return_in'],
-        );
+        .inFilter('movement_type', _costMovementTypes);
 
     if (fromDate != null) {
       query = query.gte('created_at', _formatTimestamp(fromDate));
@@ -327,7 +355,6 @@ class ReportsRemoteDataSource {
     return await query.limit(safetyLimit);
   }
 
-  /// Fetches every confirmed purchase belonging to the supplied suppliers.
   Future<List<Map<String, dynamic>>> fetchConfirmedPurchasesForSuppliers({
     required String companyId,
     required List<String> supplierIds,
@@ -359,7 +386,41 @@ class ReportsRemoteDataSource {
     return allRows;
   }
 
+  /// Fetches every standalone supplier payment in the period.
+  ///
+  /// A "standalone" supplier payment is any row in `supplier_payments`.
+  /// Unlike `purchases.paid_amount` (which is tied to a specific
+  /// invoice), these reduce the supplier's running balance directly.
+  ///
+  /// Used by [getPayables] to make `totalPaid` / `totalDue` correct
+  /// when the company has settled part of an old balance without a new
+  /// invoice.
+  Future<List<Map<String, dynamic>>> fetchSupplierPayments({
+    required String companyId,
+    required DateTime? fromDate,
+    required DateTime? toDate,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    var query = client
+        .from('supplier_payments')
+        .select('supplier_id, amount, created_at')
+        .eq('company_id', companyId);
+
+    if (fromDate != null) {
+      query = query.gte('created_at', _formatTimestamp(fromDate));
+    }
+    if (toDate != null) {
+      query = query.lte('created_at', _formatTimestamp(toDate));
+    }
+
+    return await query.limit(safetyLimit);
+  }
+
   /// Fetches every payment made to the supplied suppliers.
+  ///
+  /// Deprecated alias kept for the aging report; new callers should use
+  /// [fetchSupplierPayments] (period-aware).
   Future<List<Map<String, dynamic>>> fetchPaymentsForSuppliers({
     required String companyId,
     required List<String> supplierIds,
@@ -390,7 +451,6 @@ class ReportsRemoteDataSource {
     return allRows;
   }
 
-  /// Returns suppliers of a company (active only) with minimal fields.
   Future<List<Map<String, dynamic>>> fetchAllSuppliers({
     required String companyId,
   }) async {
@@ -404,16 +464,6 @@ class ReportsRemoteDataSource {
         .limit(safetyLimit);
   }
 
-  /// Fetches every expense of the company in the given period.
-  ///
-  /// Used to compute [operatingExpenses] in the profit & loss report.
-  ///
-  /// Assumptions (verify with:
-  ///   select data_type from information_schema.columns
-  ///   where table_name='expenses' and column_name='expense_date';
-  /// ):
-  /// * Column `expense_date` exists and is a date or timestamp.
-  /// * Column `amount` is numeric.
   Future<List<Map<String, dynamic>>> fetchExpenses({
     required String companyId,
     required DateTime? fromDate,
