@@ -4,7 +4,10 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/repositories/product_repository.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../domain/entities/pos_cart.dart';
 import 'pos_cart_notifier.dart';
@@ -29,54 +32,93 @@ final NotifierProvider<PosSearchNotifier, PosSearchState> posSearchProvider =
 );
 
 // ============================================================================
-// Search results — combines search query with the products stream
+// Search results — server-side (fixes >1000 product catalogues)
 // ============================================================================
+
+/// Server-side POS search.
+///
+/// ## Why server-side?
+///
+/// The previous implementation searched the in-memory product list. That
+/// list is capped at 1000 rows by the Supabase default, so any catalogue
+/// larger than 1000 products silently hid the rest from the cashier.
+///
+/// This provider sends the query to the database via
+/// `ProductRepository.listProductsPaged`, which:
+/// * Filters by company, active flag, and a substring match on
+///   name / SKU / barcode.
+/// * Applies a stable order and a hard limit of [maxResults].
+///
+/// ## Debounce
+///
+/// Every keystroke would otherwise trigger a network round-trip. We wait
+/// [_debounceDelay] before issuing the request; if the query changes
+/// during that window the previous computation is disposed and only the
+/// latest one runs to completion.
+///
+/// ## Cancellation
+///
+/// Riverpod 2.6.1 does not expose `ref.mounted` (that is 3.x only). We
+/// track disposal with a local flag set in `ref.onDispose` instead.
+final FutureProvider<List<Product>> posServerSearchProvider =
+    FutureProvider<List<Product>>((ref) async {
+  final PosSearchState search = ref.watch(posSearchProvider);
+  if (search.isEmpty) {
+    return const <Product>[];
+  }
+
+  bool isDisposed = false;
+  ref.onDispose(() => isDisposed = true);
+
+  // Debounce: collapse a burst of keystrokes into one request.
+  await Future<void>.delayed(_debounceDelay);
+  if (isDisposed) return const <Product>[];
+
+  final String? companyId = ref.watch(
+    companyContextProvider.select(
+      (CompanyContextState s) => s.currentCompany?.id,
+    ),
+  );
+  if (companyId == null) return const <Product>[];
+
+  final ProductsPageResult page = await ref
+      .read(productRepositoryProvider)
+      .listProductsPaged(
+        companyId: companyId,
+        offset: 0,
+        limit: _maxResults,
+        searchQuery: search.normalizedQuery,
+        isActive: true,
+        sortField: ProductSortField.name,
+        sortAscending: true,
+      );
+
+  if (isDisposed) return const <Product>[];
+  return page.items;
+});
+
+/// Debounce window for the POS search.
+///
+/// Long enough to collapse normal typing, short enough that a barcode
+/// scan still feels immediate.
+const Duration _debounceDelay = Duration(milliseconds: 200);
+
+/// Hard cap on the number of POS search results returned to the UI.
+const int _maxResults = 20;
 
 /// Provides the list of products matching the current POS search query.
 ///
-/// The result is an `AsyncValue<List<Product>>` so the presentation layer
-/// can render loading and error states coming from the products stream
-/// without extra work.
-///
-/// Behaviour:
-/// * When the query is empty (only whitespace), resolves immediately to an
-///   empty list — the POS never displays the full catalogue on the search
-///   screen.
-/// * When the products stream is still loading, forwards `AsyncLoading`.
-/// * When the products stream errored, forwards the error.
-/// * Otherwise returns the first [maxResults] matches, in source order,
-///   matched on name, SKU or barcode (case-insensitive, trimmed).
+/// Delegates to [posServerSearchProvider]. Kept as a separate provider so
+/// the presentation layer does not need to change.
 final Provider<AsyncValue<List<Product>>> posSearchResultsProvider =
     Provider<AsyncValue<List<Product>>>((ref) {
-  const int maxResults = 20;
-
-  final PosSearchState search = ref.watch(posSearchProvider);
-  if (search.isEmpty) {
-    return const AsyncData<List<Product>>(<Product>[]);
-  }
-
-  final AsyncValue<List<Product>> productsAsync =
-      ref.watch(productsProvider);
-
-  return productsAsync.whenData((List<Product> products) {
-    final String query = search.normalizedQuery;
-    final List<Product> matches = <Product>[];
-    for (final Product product in products) {
-      if (_matches(product, query)) {
-        matches.add(product);
-        if (matches.length >= maxResults) {
-          break;
-        }
-      }
-    }
-    return matches;
-  });
+  return ref.watch(posServerSearchProvider);
 });
 
 /// Whether the current search produced at least one result.
 ///
-/// Returns `false` when the query is empty, when the products stream is
-/// loading, or when it errored. Intended for empty-state handling on the
+/// Returns `false` when the query is empty, while the request is in
+/// flight, or when it errored. Intended for empty-state handling on the
 /// search screen.
 final Provider<bool> posHasSearchResultsProvider = Provider<bool>((ref) {
   final AsyncValue<List<Product>> results =
@@ -152,27 +194,3 @@ final Provider<PosTotals> posTotalsProvider = Provider<PosTotals>((ref) {
     total: cart.total,
   );
 });
-
-// ============================================================================
-// Internal matcher
-// ============================================================================
-
-/// Returns `true` when [product] matches the normalised [query].
-///
-/// Matching is performed on the display name, the SKU and the barcode. The
-/// query is expected to be already trimmed and lowercased.
-bool _matches(Product product, String query) {
-  final String name = product.name.toLowerCase();
-  if (name.contains(query)) {
-    return true;
-  }
-  final String? sku = product.sku;
-  if (sku != null && sku.toLowerCase().contains(query)) {
-    return true;
-  }
-  final String? barcode = product.barcode;
-  if (barcode != null && barcode.toLowerCase().contains(query)) {
-    return true;
-  }
-  return false;
-}
