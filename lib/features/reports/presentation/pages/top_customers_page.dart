@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
 import '../../domain/entities/sales_reports.dart';
@@ -20,12 +20,6 @@ class TopCustomersPage extends ConsumerStatefulWidget {
 }
 
 class _TopCustomersPageState extends ConsumerState<TopCustomersPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   Future<void> _changePeriod(ReportPeriod newPeriod) async {
     ref.read(reportPagePeriodProvider.notifier).setPeriod(newPeriod);
     final ReportPeriod p = ref.read(reportPagePeriodProvider);
@@ -55,15 +49,18 @@ class _TopCustomersPageState extends ConsumerState<TopCustomersPage> {
       sections: <ReportSection>[
         ReportSection(
           kpis: <ReportKpi>[
-            ReportKpi(label: 'عدد العملاء', value: '${customers.length}'),
+            ReportKpi(
+              label: 'عدد العملاء',
+              value: AppFormatters.integer(customers.length),
+            ),
             ReportKpi(
               label: 'إجمالي الشراء',
-              value: _money.format(totalSpent),
+              value: AppFormatters.money(totalSpent),
               emphasized: true,
             ),
             ReportKpi(
               label: 'إجمالي المستحق',
-              value: _money.format(totalDue),
+              value: AppFormatters.money(totalDue),
             ),
           ],
         ),
@@ -83,9 +80,9 @@ class _TopCustomersPageState extends ConsumerState<TopCustomersPage> {
                 <String>[
                   '${i + 1}',
                   customers[i].customerName,
-                  '${customers[i].invoiceCount}',
-                  _money.format(customers[i].totalSpent),
-                  _money.format(customers[i].totalDue),
+                  AppFormatters.integer(customers[i].invoiceCount),
+                  AppFormatters.money(customers[i].totalSpent),
+                  AppFormatters.money(customers[i].totalDue),
                 ],
             ],
           ),
@@ -122,7 +119,6 @@ class _TopCustomersPageState extends ConsumerState<TopCustomersPage> {
         data: (List<TopCustomer> customers) => _Body(
           period: period,
           customers: customers,
-          money: _money,
         ),
       ),
     );
@@ -140,12 +136,10 @@ class _Body extends StatelessWidget {
   const _Body({
     required this.period,
     required this.customers,
-    required this.money,
   });
 
   final ReportPeriod period;
   final List<TopCustomer> customers;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -169,14 +163,12 @@ class _Body extends StatelessWidget {
           count: customers.length,
           totalSpent: totalSpent,
           totalDue: totalDue,
-          money: money,
         ),
         const SizedBox(height: 16),
         for (int i = 0; i < customers.length; i++) ...<Widget>[
           _CustomerRow(
             rank: i + 1,
             customer: customers[i],
-            money: money,
           ),
           if (i < customers.length - 1) const SizedBox(height: 8),
         ],
@@ -218,13 +210,11 @@ class _SummaryStrip extends StatelessWidget {
     required this.count,
     required this.totalSpent,
     required this.totalDue,
-    required this.money,
   });
 
   final int count;
   final double totalSpent;
   final double totalDue;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -239,7 +229,15 @@ class _SummaryStrip extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
         child: Row(
           children: <Widget>[
-            Expanded(child: _cell(theme, scheme, 'عدد العملاء', '$count', null)),
+            Expanded(
+              child: _cell(
+                theme,
+                scheme,
+                'عدد العملاء',
+                AppFormatters.integer(count),
+                null,
+              ),
+            ),
             Container(width: 1, height: 32, color: scheme.outlineVariant),
             const SizedBox(width: 14),
             Expanded(
@@ -247,7 +245,7 @@ class _SummaryStrip extends StatelessWidget {
                 theme,
                 scheme,
                 'إجمالي الشراء',
-                money.format(totalSpent),
+                AppFormatters.money(totalSpent),
                 scheme.primary,
               ),
             ),
@@ -258,7 +256,7 @@ class _SummaryStrip extends StatelessWidget {
                 theme,
                 scheme,
                 'المستحق',
-                money.format(totalDue),
+                AppFormatters.money(totalDue),
                 totalDue > 0 ? scheme.error : null,
               ),
             ),
@@ -306,12 +304,10 @@ class _CustomerRow extends StatelessWidget {
   const _CustomerRow({
     required this.rank,
     required this.customer,
-    required this.money,
   });
 
   final int rank;
   final TopCustomer customer;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -375,7 +371,7 @@ class _CustomerRow extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  money.format(customer.totalSpent),
+                  AppFormatters.money(customer.totalSpent),
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: scheme.primary,
                     fontWeight: FontWeight.w800,
@@ -391,7 +387,7 @@ class _CustomerRow extends StatelessWidget {
                 children: <Widget>[
                   Expanded(
                     child: Text(
-                      'المدفوع: ${money.format(customer.totalPaid)}',
+                      'المدفوع: ${AppFormatters.money(customer.totalPaid)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -399,7 +395,7 @@ class _CustomerRow extends StatelessWidget {
                     ),
                   ),
                   Text(
-                    'المستحق: ${money.format(customer.totalDue)}',
+                    'المستحق: ${AppFormatters.money(customer.totalDue)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.error,
                       fontWeight: FontWeight.w700,
