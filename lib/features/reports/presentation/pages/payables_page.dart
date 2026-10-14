@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
@@ -20,12 +20,6 @@ class PayablesPage extends ConsumerStatefulWidget {
 }
 
 class _PayablesPageState extends ConsumerState<PayablesPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   Future<void> _changePeriod(ReportPeriod newPeriod) async {
     ref.read(reportPagePeriodProvider.notifier).setPeriod(newPeriod);
     final ReportPeriod p = ref.read(reportPagePeriodProvider);
@@ -50,20 +44,20 @@ class _PayablesPageState extends ConsumerState<PayablesPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: 'إجمالي المشتريات',
-              value: _money.format(report.totalPurchases),
+              value: AppFormatters.money(report.totalPurchases),
               emphasized: true,
             ),
             ReportKpi(
               label: 'المدفوع',
-              value: _money.format(report.totalPaid),
+              value: AppFormatters.money(report.totalPaid),
             ),
             ReportKpi(
               label: 'المتبقي',
-              value: _money.format(report.totalDue),
+              value: AppFormatters.money(report.totalDue),
             ),
             ReportKpi(
               label: 'عدد الموردين',
-              value: '${report.supplierCount}',
+              value: AppFormatters.integer(report.supplierCount),
             ),
           ],
         ),
@@ -84,10 +78,10 @@ class _PayablesPageState extends ConsumerState<PayablesPage> {
                 <String>[
                   '${i + 1}',
                   report.items[i].supplierName,
-                  '${report.items[i].invoiceCount}',
-                  _money.format(report.items[i].totalPurchases),
-                  _money.format(report.items[i].totalPaid),
-                  _money.format(report.items[i].totalDue),
+                  AppFormatters.integer(report.items[i].invoiceCount),
+                  AppFormatters.money(report.items[i].totalPurchases),
+                  AppFormatters.money(report.items[i].totalPaid),
+                  AppFormatters.money(report.items[i].totalDue),
                 ],
             ],
           ),
@@ -120,10 +114,7 @@ class _PayablesPageState extends ConsumerState<PayablesPage> {
       body: reportAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
-        data: (PayablesReport report) => _Body(
-          report: report,
-          money: _money,
-        ),
+        data: (PayablesReport report) => _Body(report: report),
       ),
     );
   }
@@ -137,10 +128,9 @@ class _PayablesPageState extends ConsumerState<PayablesPage> {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({required this.report, required this.money});
+  const _Body({required this.report});
 
   final PayablesReport report;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -151,10 +141,10 @@ class _Body extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: <Widget>[
-        _SummaryCard(report: report, money: money),
+        _SummaryCard(report: report),
         const SizedBox(height: 16),
         for (int i = 0; i < report.items.length; i++) ...<Widget>[
-          _PayableRow(item: report.items[i], money: money),
+          _PayableRow(item: report.items[i]),
           if (i < report.items.length - 1) const SizedBox(height: 8),
         ],
       ],
@@ -163,10 +153,9 @@ class _Body extends StatelessWidget {
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({required this.report, required this.money});
+  const _SummaryCard({required this.report});
 
   final PayablesReport report;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -205,7 +194,7 @@ class _SummaryCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              money.format(report.totalPurchases),
+              AppFormatters.money(report.totalPurchases),
               style: theme.textTheme.displaySmall?.copyWith(
                 color: scheme.onPrimary,
                 fontWeight: FontWeight.w900,
@@ -222,7 +211,7 @@ class _SummaryCard extends StatelessWidget {
                     theme,
                     scheme,
                     'المدفوع',
-                    money.format(report.totalPaid),
+                    AppFormatters.money(report.totalPaid),
                   ),
                 ),
                 Expanded(
@@ -230,7 +219,7 @@ class _SummaryCard extends StatelessWidget {
                     theme,
                     scheme,
                     'المتبقي',
-                    money.format(report.totalDue),
+                    AppFormatters.money(report.totalDue),
                   ),
                 ),
                 Expanded(
@@ -238,7 +227,7 @@ class _SummaryCard extends StatelessWidget {
                     theme,
                     scheme,
                     'الموردون',
-                    '${report.supplierCount}',
+                    AppFormatters.integer(report.supplierCount),
                   ),
                 ),
               ],
@@ -282,10 +271,9 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _PayableRow extends StatelessWidget {
-  const _PayableRow({required this.item, required this.money});
+  const _PayableRow({required this.item});
 
   final PayableItem item;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -332,7 +320,7 @@ class _PayableRow extends StatelessWidget {
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        '${item.invoiceCount} فاتورة',
+                        '${AppFormatters.integer(item.invoiceCount)} فاتورة',
                         style: theme.textTheme.bodySmall?.copyWith(
                           color: scheme.onSurfaceVariant,
                         ),
@@ -342,7 +330,7 @@ class _PayableRow extends StatelessWidget {
                 ),
                 const SizedBox(width: 8),
                 Text(
-                  money.format(item.totalPurchases),
+                  AppFormatters.money(item.totalPurchases),
                   style: theme.textTheme.titleSmall?.copyWith(
                     color: scheme.primary,
                     fontWeight: FontWeight.w800,
@@ -358,14 +346,14 @@ class _PayableRow extends StatelessWidget {
                 children: <Widget>[
                   Expanded(
                     child: Text(
-                      'المدفوع: ${money.format(item.totalPaid)}',
+                      'المدفوع: ${AppFormatters.money(item.totalPaid)}',
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
                     ),
                   ),
                   Text(
-                    'المستحق: ${money.format(item.totalDue)}',
+                    'المستحق: ${AppFormatters.money(item.totalDue)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.error,
                       fontWeight: FontWeight.w700,
