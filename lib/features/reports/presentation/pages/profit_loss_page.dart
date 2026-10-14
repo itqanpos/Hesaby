@@ -62,7 +62,7 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
             ReportKpi(
               label: 'هامش الربح',
               value: report.netRevenue > 0
-                  ? AppFormatters.percent(report.netMargin)
+                  ? AppFormatters.percent(report.netMargin * 100)
                   : '—',
             ),
           ],
@@ -121,7 +121,7 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
             ReportLine(
               label: 'هامش الربح الإجمالي',
               value: report.netRevenue > 0
-                  ? AppFormatters.percent(report.grossMargin)
+                  ? AppFormatters.percent(report.grossMargin * 100)
                   : '—',
             ),
           ],
@@ -257,7 +257,7 @@ class _Body extends StatelessWidget {
             _RowData(
               'هامش الربح الإجمالي',
               report.netRevenue > 0
-                  ? AppFormatters.percent(report.grossMargin)
+                  ? AppFormatters.percent(report.grossMargin * 100)
                   : '—',
             ),
           ],
@@ -364,7 +364,7 @@ class _HeroCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               report.netRevenue > 0
-                  ? 'هامش: ${AppFormatters.percent(report.netMargin)} · '
+                  ? 'هامش: ${AppFormatters.percent(report.netMargin * 100)} · '
                       'إيرادات: ${AppFormatters.money(report.netRevenue)}'
                   : 'لا توجد إيرادات في هذه الفترة',
               style: theme.textTheme.bodyMedium?.copyWith(
