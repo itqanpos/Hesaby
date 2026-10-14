@@ -16,6 +16,10 @@ class ReportsRemoteDataSource {
   static const int saleItemsSafetyLimit = 50000;
   static const int inFilterChunkSize = 150;
 
+  /// The movement types that contribute to the *cost* side of a sale.
+  ///
+  /// `sale_out` moves stock out with a **negative** quantity.
+  /// `return_in` moves stock back in with a **positive** quantity.
   static const List<String> _costMovementTypes = <String>[
     'sale_out',
     'return_in',
@@ -402,6 +406,40 @@ class ReportsRemoteDataSource {
     }
 
     return await query.limit(safetyLimit);
+  }
+
+  /// Fetches every payment made to the supplied suppliers.
+  ///
+  /// Used by the supplier aging report, which needs payments grouped by
+  /// supplier (no date filter).
+  Future<List<Map<String, dynamic>>> fetchPaymentsForSuppliers({
+    required String companyId,
+    required List<String> supplierIds,
+  }) async {
+    if (supplierIds.isEmpty) {
+      return const <Map<String, dynamic>>[];
+    }
+
+    final SupabaseClient client = _requireClient();
+    final List<Map<String, dynamic>> allRows = <Map<String, dynamic>>[];
+
+    for (int i = 0; i < supplierIds.length; i += inFilterChunkSize) {
+      final int end = (i + inFilterChunkSize < supplierIds.length)
+          ? i + inFilterChunkSize
+          : supplierIds.length;
+      final List<String> chunk = supplierIds.sublist(i, end);
+
+      final List<Map<String, dynamic>> rows = await client
+          .from('supplier_payments')
+          .select('supplier_id, amount')
+          .eq('company_id', companyId)
+          .inFilter('supplier_id', chunk)
+          .limit(safetyLimit);
+
+      allRows.addAll(rows);
+    }
+
+    return allRows;
   }
 
   Future<List<Map<String, dynamic>>> fetchAllSuppliers({
