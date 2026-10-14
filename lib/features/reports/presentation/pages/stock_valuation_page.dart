@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
@@ -21,13 +21,6 @@ class StockValuationPage extends ConsumerStatefulWidget {
 }
 
 class _StockValuationPageState extends ConsumerState<StockValuationPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final NumberFormat _qty = NumberFormat.decimalPattern('ar_EG');
-
   ReportDocument? _buildDocument(StockValuationReport report) {
     if (report.isEmpty) return null;
 
@@ -40,16 +33,16 @@ class _StockValuationPageState extends ConsumerState<StockValuationPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: 'إجمالي القيمة',
-              value: _money.format(report.totalValue),
+              value: AppFormatters.money(report.totalValue),
               emphasized: true,
             ),
             ReportKpi(
               label: 'عدد المنتجات',
-              value: '${report.itemCount}',
+              value: AppFormatters.integer(report.itemCount),
             ),
             ReportKpi(
               label: 'إجمالي الكميات',
-              value: _qty.format(report.totalQuantity),
+              value: AppFormatters.quantity(report.totalQuantity),
             ),
           ],
         ),
@@ -69,9 +62,9 @@ class _StockValuationPageState extends ConsumerState<StockValuationPage> {
                 <String>[
                   '${i + 1}',
                   report.items[i].productName,
-                  _qty.format(report.items[i].quantityOnHand),
-                  _money.format(report.items[i].averageCost),
-                  _money.format(report.items[i].totalValue),
+                  AppFormatters.quantity(report.items[i].quantityOnHand),
+                  AppFormatters.money(report.items[i].averageCost),
+                  AppFormatters.money(report.items[i].totalValue),
                 ],
             ],
           ),
@@ -103,11 +96,7 @@ class _StockValuationPageState extends ConsumerState<StockValuationPage> {
       body: reportAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
-        data: (StockValuationReport report) => _Body(
-          report: report,
-          money: _money,
-          qty: _qty,
-        ),
+        data: (StockValuationReport report) => _Body(report: report),
       ),
     );
   }
@@ -121,15 +110,9 @@ class _StockValuationPageState extends ConsumerState<StockValuationPage> {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({
-    required this.report,
-    required this.money,
-    required this.qty,
-  });
+  const _Body({required this.report});
 
   final StockValuationReport report;
-  final NumberFormat money;
-  final NumberFormat qty;
 
   @override
   Widget build(BuildContext context) {
@@ -140,10 +123,10 @@ class _Body extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: <Widget>[
-        _SummaryStrip(report: report, money: money),
+        _SummaryStrip(report: report),
         const SizedBox(height: 16),
         for (int i = 0; i < report.items.length; i++) ...<Widget>[
-          _ValuationRow(item: report.items[i], money: money, qty: qty),
+          _ValuationRow(item: report.items[i]),
           if (i < report.items.length - 1) const SizedBox(height: 8),
         ],
       ],
@@ -152,10 +135,9 @@ class _Body extends StatelessWidget {
 }
 
 class _SummaryStrip extends StatelessWidget {
-  const _SummaryStrip({required this.report, required this.money});
+  const _SummaryStrip({required this.report});
 
   final StockValuationReport report;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -184,7 +166,7 @@ class _SummaryStrip extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              money.format(report.totalValue),
+              AppFormatters.money(report.totalValue),
               style: theme.textTheme.headlineMedium?.copyWith(
                 color: scheme.onPrimary,
                 fontWeight: FontWeight.w900,
@@ -194,7 +176,7 @@ class _SummaryStrip extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '${report.itemCount} منتج',
+              '${AppFormatters.integer(report.itemCount)} منتج',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onPrimary.withValues(alpha: 0.9),
               ),
@@ -207,15 +189,9 @@ class _SummaryStrip extends StatelessWidget {
 }
 
 class _ValuationRow extends StatelessWidget {
-  const _ValuationRow({
-    required this.item,
-    required this.money,
-    required this.qty,
-  });
+  const _ValuationRow({required this.item});
 
   final StockValuationItem item;
-  final NumberFormat money;
-  final NumberFormat qty;
 
   @override
   Widget build(BuildContext context) {
@@ -248,8 +224,8 @@ class _ValuationRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    '${qty.format(item.quantityOnHand)}$unitSuffix · '
-                    'متوسط التكلفة: ${money.format(item.averageCost)}',
+                    '${AppFormatters.quantity(item.quantityOnHand)}$unitSuffix · '
+                    'متوسط التكلفة: ${AppFormatters.money(item.averageCost)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -260,7 +236,7 @@ class _ValuationRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              money.format(item.totalValue),
+              AppFormatters.money(item.totalValue),
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.primary,
                 fontWeight: FontWeight.w800,
