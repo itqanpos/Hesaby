@@ -11,16 +11,19 @@ import 'report_period.dart';
 
 /// Gross-profit summary for a company over a period.
 ///
-/// The report has two halves:
+/// The report has three components:
 /// * **Revenue side** — net sales after returns.
-/// * **Cost side** — cost of goods sold (COGS), computed from the
-///   `sale_out` stock movements that back the confirmed sales in the
-///   period. This is an *historical* figure: each movement stores the
-///   MAW cost that applied at the time of the sale, so the report is
-///   accurate even if product costs changed afterwards.
+/// * **Cost of goods sold (COGS)** — computed from `sale_out` and
+///   `sale_return_in` stock movements that back the confirmed sales
+///   and returns in the period. Each movement stores the MAW cost that
+///   applied at the time of the transaction, so the figure is accurate
+///   even if product costs changed afterwards.
+/// * **Operating expenses** — sum of the `expenses` rows within the
+///   period (rent, salaries, utilities, etc.).
 ///
-/// Operating expenses and other income are not tracked in the schema yet,
-/// so [netProfit] currently equals [grossProfit].
+/// [netProfit] = [grossProfit] − [operatingExpenses].
+/// [netRevenue] may be negative when returns exceed gross sales in the
+/// period.
 @immutable
 class ProfitLossSummary extends Equatable {
   const ProfitLossSummary({
@@ -51,16 +54,18 @@ class ProfitLossSummary extends Equatable {
   /// Sum of `total` for confirmed returns in the period.
   final double returnTotal;
 
-  /// `grossRevenue − returnTotal` (never below zero).
+  /// `grossRevenue − returnTotal`. May be negative if returns exceed
+  /// sales in a given window.
   final double netRevenue;
 
-  /// Historical cost of the goods that were sold in the period.
+  /// Historical cost of the goods that were sold (net of returns) in the
+  /// period. Always non-negative.
   final double costOfGoodsSold;
 
   /// `netRevenue − costOfGoodsSold`.
   final double grossProfit;
 
-  /// Reserved for future expense tracking; currently always zero.
+  /// Sum of all expense rows recorded in the period.
   final double operatingExpenses;
 
   // ---------------------------------------------------------------------------
@@ -70,15 +75,15 @@ class ProfitLossSummary extends Equatable {
   /// `grossProfit − operatingExpenses`.
   double get netProfit => grossProfit - operatingExpenses;
 
-  /// Gross margin as a fraction of [netRevenue] (`0`..`1`). Zero when the
-  /// revenue is zero.
+  /// Gross margin as a fraction of [netRevenue]. Zero when revenue is
+  /// non-positive.
   double get grossMargin {
     if (netRevenue <= 0) return 0;
     return grossProfit / netRevenue;
   }
 
-  /// Net margin as a fraction of [netRevenue]. Zero when the revenue is
-  /// zero.
+  /// Net margin as a fraction of [netRevenue]. Zero when revenue is
+  /// non-positive.
   double get netMargin {
     if (netRevenue <= 0) return 0;
     return netProfit / netRevenue;
@@ -106,8 +111,7 @@ class ProfitLossSummary extends Equatable {
 /// A customer with an outstanding balance at the current moment.
 ///
 /// The list is derived from `customers` where `balance > 0`, sorted by
-/// descending balance. `lastSaleAt` is the most recent confirmed sale date
-/// for the customer within the last 180 days, when available.
+/// descending balance.
 @immutable
 class ReceivableItem extends Equatable {
   const ReceivableItem({
