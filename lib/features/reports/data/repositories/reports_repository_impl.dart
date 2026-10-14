@@ -184,13 +184,26 @@ class ReportsRepositoryImpl implements ReportsRepository {
     required Map<String, String> customerNames,
   }) async {
     try {
-      final List<Map<String, dynamic>> sales =
-          await _remoteDataSource.fetchSales(
-        companyId: companyId,
-        fromDate: period.fromDate,
-        toDate: period.toDate,
-      );
+      // Fetch sales AND standalone customer payments in parallel.
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchSales(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+        _remoteDataSource.fetchCustomerPayments(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+      ]);
 
+      final List<Map<String, dynamic>> sales =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> payments =
+          (results[1] as List<Map<String, dynamic>>);
+
+      // Aggregate sales per customer.
       final Map<String, _CustomerAgg> byCustomer =
           <String, _CustomerAgg>{};
 
@@ -205,6 +218,20 @@ class ReportsRepositoryImpl implements ReportsRepository {
         byCustomer
             .putIfAbsent(customerId, () => _CustomerAgg())
             .add(total, paid);
+      }
+
+      // Fold standalone customer payments into the paid totals.
+      // These payments are not attached to a specific sale; they reduce
+      // the customer's running balance directly.
+      for (final Map<String, dynamic> row in payments) {
+        final String? customerId = row['customer_id'] is String
+            ? row['customer_id'] as String
+            : null;
+        if (customerId == null || customerId.isEmpty) continue;
+        final double amount = _asDouble(row['amount']);
+        byCustomer
+            .putIfAbsent(customerId, () => _CustomerAgg())
+            .addStandalonePayment(amount);
       }
 
       final List<TopCustomer> all = byCustomer.entries.map(
@@ -575,17 +602,19 @@ class ReportsRepositoryImpl implements ReportsRepository {
       }
 
       // Cost of goods sold, net of returns.
-      //
-      // `sale_out` movements have NEGATIVE quantity, `sale_return_in`
-      // movements have POSITIVE quantity. We want:
-      //   sale_out qty=-5, cost=100 → +500 (cost added)
-      //   sale_return_in qty=+5, cost=100 → -500 (cost removed)
-      // Hence: cogs += -quantity * unit_cost.
+      // `movement_type` decides the sign of the contribution; the sign of
+      // `quantity` is ignored (see reports_remote_datasource.dart).
       double cogs = 0;
       for (final Map<String, dynamic> row in movements) {
+        final String type = _asString(row['movement_type']);
         final double qty = _asDouble(row['quantity']);
         final double cost = _asDouble(row['unit_cost']);
-        cogs += -qty * cost;
+        final double absQty = qty < 0 ? -qty : qty;
+        if (type == 'return_in') {
+          cogs -= absQty * cost;
+        } else {
+          cogs += absQty * cost;
+        }
       }
 
       double operatingExpenses = 0;
@@ -627,7 +656,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
     required Map<String, String> productNames,
   }) async {
     try {
-      // ---- 1) Revenue side: confirmed sale_items within the window ------
       final List<String> saleIds =
           await _remoteDataSource.fetchConfirmedSaleIds(
         companyId: companyId,
@@ -635,7 +663,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         toDate: period.toDate,
       );
 
-      // ---- 2) Cost side: sale_out + sale_return_in movements ------------
       final List<Map<String, dynamic>> movements =
           await _remoteDataSource.fetchSaleCostMovements(
         companyId: companyId,
@@ -643,12 +670,10 @@ class ReportsRepositoryImpl implements ReportsRepository {
         toDate: period.toDate,
       );
 
-      // Short-circuit when both sides are empty.
       if (saleIds.isEmpty && movements.isEmpty) {
         return ProductProfitReport.empty();
       }
 
-      // Aggregate revenue + quantity + invoice count by product.
       final Map<String, _ProfitAgg> byProduct = <String, _ProfitAgg>{};
 
       if (saleIds.isNotEmpty) {
@@ -667,22 +692,22 @@ class ReportsRepositoryImpl implements ReportsRepository {
         }
       }
 
-      // Aggregate cost by product. `sale_out` movements carry a negative
-      // quantity, `sale_return_in` movements carry a positive one, so the
-      // signed contribution is `-quantity * unit_cost`:
-      //   sale_out qty=-5, cost=100 → +500
-      //   sale_return_in qty=+5, cost=100 → -500
+      // Signed cost per product, using movement_type (see P&L above).
       for (final Map<String, dynamic> row in movements) {
         final String productId = _asString(row['product_id']);
         if (productId.isEmpty) continue;
+        final String type = _asString(row['movement_type']);
         final double qty = _asDouble(row['quantity']);
         final double unitCost = _asDouble(row['unit_cost']);
+        final double absQty = qty < 0 ? -qty : qty;
+        final double signedCost = type == 'return_in'
+            ? -(absQty * unitCost)
+            : (absQty * unitCost);
         byProduct
             .putIfAbsent(productId, () => _ProfitAgg())
-            .addCost(-qty * unitCost);
+            .addCost(signedCost);
       }
 
-      // Build the list of ProductProfit entries.
       final List<ProductProfit> items = <ProductProfit>[];
       double totalRevenue = 0;
       double totalCost = 0;
@@ -703,7 +728,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         if (p.profit < 0) productsWithLoss++;
       });
 
-      // Sort by profit descending — the most profitable products first.
       items.sort((ProductProfit a, ProductProfit b) =>
           b.profit.compareTo(a.profit));
 
@@ -794,14 +818,26 @@ class ReportsRepositoryImpl implements ReportsRepository {
     required Map<String, String> supplierNames,
   }) async {
     try {
-      final List<Map<String, dynamic>> rows =
-          await _remoteDataSource.fetchPurchases(
-        companyId: companyId,
-        fromDate: period.fromDate,
-        toDate: period.toDate,
-      );
+      // Fetch purchases AND standalone supplier payments in parallel.
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchPurchases(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+        _remoteDataSource.fetchSupplierPayments(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+      ]);
 
-      if (rows.isEmpty) {
+      final List<Map<String, dynamic>> rows =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> standalonePayments =
+          (results[1] as List<Map<String, dynamic>>);
+
+      if (rows.isEmpty && standalonePayments.isEmpty) {
         return PayablesReport.empty(period);
       }
 
@@ -820,6 +856,18 @@ class ReportsRepositoryImpl implements ReportsRepository {
               _asDouble(row['total']),
               _asDouble(row['paid_amount']),
             );
+      }
+
+      // Fold standalone supplier payments into the paid totals.
+      for (final Map<String, dynamic> row in standalonePayments) {
+        final String? sid = row['supplier_id'] is String
+            ? row['supplier_id'] as String
+            : null;
+        if (sid == null || sid.isEmpty) continue;
+        final double amount = _asDouble(row['amount']);
+        bySupplier
+            .putIfAbsent(sid, () => _SupplierAgg())
+            .addStandalonePayment(amount);
       }
 
       final List<PayableItem> items = bySupplier.entries.map(
@@ -965,476 +1013,4 @@ class ReportsRepositoryImpl implements ReportsRepository {
             phone: customer.phone,
             balance: customer.balance,
             buckets: AgingBuckets(
-              days0to30: b0to30,
-              days31to60: b31to60,
-              days61to90: b61to90,
-              days90plus: b90plus,
-            ),
-          ),
-        );
-      }
-
-      rows.sort((CustomerAgingRow a, CustomerAgingRow b) =>
-          b.balance.compareTo(a.balance));
-
-      double t0to30 = 0;
-      double t31to60 = 0;
-      double t61to90 = 0;
-      double t90plus = 0;
-      for (final CustomerAgingRow r in rows) {
-        t0to30 += r.buckets.days0to30;
-        t31to60 += r.buckets.days31to60;
-        t61to90 += r.buckets.days61to90;
-        t90plus += r.buckets.days90plus;
-      }
-
-      return AgingReport(
-        rows: rows,
-        totals: AgingBuckets(
-          days0to30: t0to30,
-          days31to60: t31to60,
-          days61to90: t61to90,
-          days90plus: t90plus,
-        ),
-        customerCount: rows.length,
-      );
-    } on ReportException {
-      rethrow;
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'getCustomerAging');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'getCustomerAging');
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'getCustomerAging');
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Supplier aging
-  // ---------------------------------------------------------------------------
-
-  @override
-  Future<SupplierAgingReport> getSupplierAging({
-    required String companyId,
-  }) async {
-    try {
-      final List<Map<String, dynamic>> supplierRows =
-          await _remoteDataSource.fetchAllSuppliers(companyId: companyId);
-
-      if (supplierRows.isEmpty) {
-        return SupplierAgingReport.empty();
-      }
-
-      final Map<String, _AgingSupplier> suppliers =
-          <String, _AgingSupplier>{};
-      for (final Map<String, dynamic> row in supplierRows) {
-        final String id = _asString(row['id']);
-        if (id.isEmpty) continue;
-        suppliers[id] = _AgingSupplier(
-          id: id,
-          name: _asString(row['name']),
-          phone: _asNullableString(row['phone']),
-        );
-      }
-
-      if (suppliers.isEmpty) {
-        return SupplierAgingReport.empty();
-      }
-
-      final List<String> ids = suppliers.keys.toList(growable: false);
-
-      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
-        _remoteDataSource.fetchConfirmedPurchasesForSuppliers(
-          companyId: companyId,
-          supplierIds: ids,
-        ),
-        _remoteDataSource.fetchPaymentsForSuppliers(
-          companyId: companyId,
-          supplierIds: ids,
-        ),
-      ]);
-
-      final List<Map<String, dynamic>> purchases =
-          (results[0] as List<Map<String, dynamic>>);
-      final List<Map<String, dynamic>> payments =
-          (results[1] as List<Map<String, dynamic>>);
-
-      final Map<String, List<_AgingSale>> purchasesBySupplier =
-          <String, List<_AgingSale>>{};
-      for (final Map<String, dynamic> row in purchases) {
-        final String? sid = _asNullableString(row['supplier_id']);
-        if (sid == null) continue;
-        purchasesBySupplier
-            .putIfAbsent(sid, () => <_AgingSale>[])
-            .add(
-              _AgingSale(
-                date: _asDate(row['purchase_date']),
-                total: _asDouble(row['total']),
-              ),
-            );
-      }
-      for (final List<_AgingSale> list in purchasesBySupplier.values) {
-        list.sort((_AgingSale a, _AgingSale b) => a.date.compareTo(b.date));
-      }
-
-      final Map<String, double> totalPaidBySupplier = <String, double>{};
-      for (final Map<String, dynamic> row in payments) {
-        final String? sid = _asNullableString(row['supplier_id']);
-        if (sid == null) continue;
-        totalPaidBySupplier[sid] =
-            (totalPaidBySupplier[sid] ?? 0) + _asDouble(row['amount']);
-      }
-
-      final DateTime now = DateTime.now().toUtc();
-      final List<SupplierAgingRow> rows = <SupplierAgingRow>[];
-
-      for (final _AgingSupplier supplier in suppliers.values) {
-        final List<_AgingSale> list =
-            purchasesBySupplier[supplier.id] ?? const <_AgingSale>[];
-        double totalPurchased = 0;
-        for (final _AgingSale s in list) {
-          totalPurchased += s.total;
-        }
-        final double totalPaid = totalPaidBySupplier[supplier.id] ?? 0;
-        double remaining = totalPurchased - totalPaid;
-
-        if (remaining <= 0 || list.isEmpty) {
-          continue;
-        }
-
-        double b0to30 = 0;
-        double b31to60 = 0;
-        double b61to90 = 0;
-        double b90plus = 0;
-
-        for (final _AgingSale sale in list) {
-          if (remaining <= 0) break;
-          final double allocated =
-              remaining < sale.total ? remaining : sale.total;
-          remaining -= allocated;
-
-          final int days = now.difference(sale.date).inDays;
-          if (days <= 30) {
-            b0to30 += allocated;
-          } else if (days <= 60) {
-            b31to60 += allocated;
-          } else if (days <= 90) {
-            b61to90 += allocated;
-          } else {
-            b90plus += allocated;
-          }
-        }
-
-        if (remaining > 0) {
-          b90plus += remaining;
-        }
-
-        final double balance = b0to30 + b31to60 + b61to90 + b90plus;
-
-        rows.add(
-          SupplierAgingRow(
-            supplierId: supplier.id,
-            supplierName:
-                supplier.name.isEmpty ? 'مورد محذوف' : supplier.name,
-            phone: supplier.phone,
-            balance: balance,
-            buckets: AgingBuckets(
-              days0to30: b0to30,
-              days31to60: b31to60,
-              days61to90: b61to90,
-              days90plus: b90plus,
-            ),
-          ),
-        );
-      }
-
-      rows.sort((SupplierAgingRow a, SupplierAgingRow b) =>
-          b.balance.compareTo(a.balance));
-
-      double t0to30 = 0;
-      double t31to60 = 0;
-      double t61to90 = 0;
-      double t90plus = 0;
-      for (final SupplierAgingRow r in rows) {
-        t0to30 += r.buckets.days0to30;
-        t31to60 += r.buckets.days31to60;
-        t61to90 += r.buckets.days61to90;
-        t90plus += r.buckets.days90plus;
-      }
-
-      return SupplierAgingReport(
-        rows: rows,
-        totals: AgingBuckets(
-          days0to30: t0to30,
-          days31to60: t31to60,
-          days61to90: t61to90,
-          days90plus: t90plus,
-        ),
-        supplierCount: rows.length,
-      );
-    } on ReportException {
-      rethrow;
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'getSupplierAging');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'getSupplierAging');
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'getSupplierAging');
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Internal helpers
-  // ---------------------------------------------------------------------------
-
-  static String _asString(Object? value) {
-    if (value is String) return value;
-    return value?.toString() ?? '';
-  }
-
-  static double _asDouble(Object? value) {
-    if (value is double) return value;
-    if (value is int) return value.toDouble();
-    if (value is num) return value.toDouble();
-    if (value is String) {
-      final double? parsed = double.tryParse(value);
-      if (parsed != null) return parsed;
-    }
-    return 0;
-  }
-
-  static String? _asNullableString(Object? value) {
-    if (value == null) return null;
-    if (value is String) {
-      final String t = value.trim();
-      return t.isEmpty ? null : t;
-    }
-    return value.toString();
-  }
-
-  static DateTime _asDate(Object? value) {
-    if (value is DateTime) return value.toUtc();
-    if (value is String) {
-      final DateTime? parsed = DateTime.tryParse(value);
-      if (parsed != null) return parsed.toUtc();
-    }
-    return DateTime.now().toUtc();
-  }
-
-  static String _shortId(String id) {
-    if (id.length <= 6) return id;
-    return 'كاشير ${id.substring(id.length - 6)}';
-  }
-}
-
-// ============================================================================
-// Internal aggregation helpers
-// ============================================================================
-
-class _ProductAgg {
-  double quantity = 0;
-  double revenue = 0;
-  final Set<String> saleIds = <String>{};
-
-  void add(double qty, double rev, String saleId) {
-    quantity += qty;
-    revenue += rev;
-    if (saleId.isNotEmpty) {
-      saleIds.add(saleId);
-    }
-  }
-}
-
-/// Aggregation helper for [ProductProfitReport]: keeps both the revenue
-/// side (from `sale_items`) and the cost side (from `sale_out` +
-/// `sale_return_in` movements) under a single product id.
-class _ProfitAgg {
-  double quantity = 0;
-  double revenue = 0;
-  double cost = 0;
-  final Set<String> saleIds = <String>{};
-
-  void addSale(double qty, double rev, String saleId) {
-    quantity += qty;
-    revenue += rev;
-    if (saleId.isNotEmpty) {
-      saleIds.add(saleId);
-    }
-  }
-
-  void addCost(double value) {
-    cost += value;
-  }
-}
-
-class _CustomerAgg {
-  int count = 0;
-  double spent = 0;
-  double paid = 0;
-
-  void add(double total, double paidAmount) {
-    count++;
-    spent += total;
-    paid += paidAmount;
-  }
-}
-
-class _CashierAgg {
-  int count = 0;
-  double sales = 0;
-  double paid = 0;
-
-  void add(double total, double paidAmount) {
-    count++;
-    sales += total;
-    paid += paidAmount;
-  }
-}
-
-class _ValuationAgg {
-  double quantity = 0;
-  double costValue = 0;
-
-  void add(double qty, double value) {
-    quantity += qty;
-    costValue += value;
-  }
-}
-
-class _SupplierAgg {
-  int count = 0;
-  double purchases = 0;
-  double paid = 0;
-
-  void add(double total, double paidAmount) {
-    count++;
-    purchases += total;
-    paid += paidAmount;
-  }
-}
-
-class _AgingCustomer {
-  _AgingCustomer({
-    required this.id,
-    required this.name,
-    required this.balance,
-    this.phone,
-  });
-
-  final String id;
-  final String name;
-  final String? phone;
-  final double balance;
-}
-
-class _AgingSupplier {
-  _AgingSupplier({
-    required this.id,
-    required this.name,
-    this.phone,
-  });
-
-  final String id;
-  final String name;
-  final String? phone;
-}
-
-class _AgingSale {
-  _AgingSale({required this.date, required this.total});
-
-  final DateTime date;
-  final double total;
-}
-
-// ============================================================================
-// Error mapping
-// ============================================================================
-
-ReportException _mapPostgrest(
-  supabase.PostgrestException error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  final ReportFailureType type = _classifyPostgrest(error);
-  AppLogger.warning(
-    'Report PostgREST error during "$operation" mapped to ${type.name} '
-    '(code: ${error.code ?? 'n/a'}).',
-  );
-  return ReportException(
-    type: type,
-    cause: error,
-    stackTrace: stackTrace,
-  );
-}
-
-ReportException _mapAuth(
-  supabase.AuthException error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  AppLogger.warning(
-    'Report auth error during "$operation" mapped to unauthorized.',
-  );
-  return ReportException(
-    type: ReportFailureType.unauthorized,
-    cause: error,
-    stackTrace: stackTrace,
-  );
-}
-
-ReportException _mapUnknown(
-  Object error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  final ReportFailureType type = _looksLikeNetwork(error)
-      ? ReportFailureType.network
-      : ReportFailureType.unknown;
-  AppLogger.error(
-    'Unhandled report error during "$operation" '
-    '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
-    error,
-    stackTrace,
-  );
-  return ReportException(
-    type: type,
-    cause: error,
-    stackTrace: stackTrace,
-  );
-}
-
-ReportFailureType _classifyPostgrest(supabase.PostgrestException error) {
-  final String code = (error.code ?? '').toUpperCase();
-  final String message = error.message.toLowerCase();
-
-  if (code == 'PGRST116') {
-    return ReportFailureType.notFound;
-  }
-  if (code.startsWith('42501') || code.startsWith('28')) {
-    return ReportFailureType.unauthorized;
-  }
-  if (code.startsWith('42')) {
-    return ReportFailureType.invalidResponse;
-  }
-  if (message.contains('permission denied') ||
-      message.contains('row level security') ||
-      message.contains('jwt')) {
-    return ReportFailureType.unauthorized;
-  }
-  if (_looksLikeNetwork(message)) {
-    return ReportFailureType.network;
-  }
-  return ReportFailureType.unknown;
-}
-
-bool _looksLikeNetwork(Object error) {
-  final String s = error.toString().toLowerCase();
-  return s.contains('socket') ||
-      s.contains('network') ||
-      s.contains('connection') ||
-      s.contains('timeout') ||
-      s.contains('timed out') ||
-      s.contains('unreachable') ||
-      s.contains('failed host lookup') ||
-      s.contains('clientexception');
-}
+              days0to30: b
