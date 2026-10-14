@@ -248,7 +248,20 @@ class ReportsRemoteDataSource {
   // FINANCIAL
   // ===========================================================================
 
-  Future<List<Map<String, dynamic>>> fetchSaleOutMovements({
+  /// Fetches the stock movements that back the *cost* side of a sale:
+  /// the outgoing `sale_out` movements AND the incoming `sale_return_in`
+  /// movements (customer returns put stock back on the shelf, reducing
+  /// the net cost of goods sold).
+  ///
+  /// Quantities are signed:
+  /// * `sale_out` → **negative** (stock decreases).
+  /// * `sale_return_in` → **positive** (stock returns).
+  ///
+  /// Callers must therefore compute the *signed* cost contribution as
+  /// `-quantity * unit_cost`:
+  /// * sale_out with qty = -5, cost = 100 → +500 (cost added).
+  /// * sale_return_in with qty = +5, cost = 100 → -500 (cost removed).
+  Future<List<Map<String, dynamic>>> fetchSaleCostMovements({
     required String companyId,
     required DateTime? fromDate,
     required DateTime? toDate,
@@ -257,9 +270,15 @@ class ReportsRemoteDataSource {
 
     var query = client
         .from('stock_movements')
-        .select('product_id, quantity, unit_cost, created_at, reference_id')
+        .select(
+          'product_id, quantity, unit_cost, created_at, '
+          'reference_id, movement_type',
+        )
         .eq('company_id', companyId)
-        .eq('movement_type', 'sale_out');
+        .inFilter(
+          'movement_type',
+          <String>['sale_out', 'sale_return_in'],
+        );
 
     if (fromDate != null) {
       query = query.gte('created_at', _formatTimestamp(fromDate));
@@ -383,6 +402,38 @@ class ReportsRemoteDataSource {
         .eq('company_id', companyId)
         .eq('is_active', true)
         .limit(safetyLimit);
+  }
+
+  /// Fetches every expense of the company in the given period.
+  ///
+  /// Used to compute [operatingExpenses] in the profit & loss report.
+  ///
+  /// Assumptions (verify with:
+  ///   select data_type from information_schema.columns
+  ///   where table_name='expenses' and column_name='expense_date';
+  /// ):
+  /// * Column `expense_date` exists and is a date or timestamp.
+  /// * Column `amount` is numeric.
+  Future<List<Map<String, dynamic>>> fetchExpenses({
+    required String companyId,
+    required DateTime? fromDate,
+    required DateTime? toDate,
+  }) async {
+    final SupabaseClient client = _requireClient();
+
+    var query = client
+        .from('expenses')
+        .select('amount, expense_date')
+        .eq('company_id', companyId);
+
+    if (fromDate != null) {
+      query = query.gte('expense_date', _formatDateOnly(fromDate));
+    }
+    if (toDate != null) {
+      query = query.lte('expense_date', _formatDateOnly(toDate));
+    }
+
+    return await query.limit(safetyLimit);
   }
 
   // ===========================================================================
