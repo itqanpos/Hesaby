@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
@@ -20,12 +20,6 @@ class ReceivablesPage extends ConsumerStatefulWidget {
 }
 
 class _ReceivablesPageState extends ConsumerState<ReceivablesPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-
   ReportDocument? _buildDocument(ReceivablesReport report) {
     if (report.isEmpty) return null;
 
@@ -38,16 +32,16 @@ class _ReceivablesPageState extends ConsumerState<ReceivablesPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: 'إجمالي المديونيات',
-              value: _money.format(report.totalBalance),
+              value: AppFormatters.money(report.totalBalance),
               emphasized: true,
             ),
             ReportKpi(
               label: 'عدد العملاء',
-              value: '${report.customerCount}',
+              value: AppFormatters.integer(report.customerCount),
             ),
             ReportKpi(
               label: 'متوسط الرصيد',
-              value: _money.format(report.averageBalance),
+              value: AppFormatters.money(report.averageBalance),
             ),
           ],
         ),
@@ -67,7 +61,7 @@ class _ReceivablesPageState extends ConsumerState<ReceivablesPage> {
                   '${i + 1}',
                   report.items[i].customerName,
                   report.items[i].phone ?? '—',
-                  _money.format(report.items[i].balance),
+                  AppFormatters.money(report.items[i].balance),
                 ],
             ],
           ),
@@ -99,10 +93,7 @@ class _ReceivablesPageState extends ConsumerState<ReceivablesPage> {
       body: reportAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
-        data: (ReceivablesReport report) => _Body(
-          report: report,
-          money: _money,
-        ),
+        data: (ReceivablesReport report) => _Body(report: report),
       ),
     );
   }
@@ -116,10 +107,9 @@ class _ReceivablesPageState extends ConsumerState<ReceivablesPage> {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({required this.report, required this.money});
+  const _Body({required this.report});
 
   final ReceivablesReport report;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -130,10 +120,10 @@ class _Body extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(bottom: 24),
       children: <Widget>[
-        _HeroCard(report: report, money: money),
+        _HeroCard(report: report),
         const SizedBox(height: 16),
         for (int i = 0; i < report.items.length; i++) ...<Widget>[
-          _ReceivableRow(item: report.items[i], money: money),
+          _ReceivableRow(item: report.items[i]),
           if (i < report.items.length - 1) const SizedBox(height: 8),
         ],
       ],
@@ -142,10 +132,9 @@ class _Body extends StatelessWidget {
 }
 
 class _HeroCard extends StatelessWidget {
-  const _HeroCard({required this.report, required this.money});
+  const _HeroCard({required this.report});
 
   final ReceivablesReport report;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -194,7 +183,7 @@ class _HeroCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              money.format(report.totalBalance),
+              AppFormatters.money(report.totalBalance),
               style: theme.textTheme.displaySmall?.copyWith(
                 color: scheme.onPrimary,
                 fontWeight: FontWeight.w900,
@@ -205,8 +194,8 @@ class _HeroCard extends StatelessWidget {
             ),
             const SizedBox(height: 4),
             Text(
-              '${report.customerCount} عميل · '
-              'متوسط ${money.format(report.averageBalance)}',
+              '${AppFormatters.integer(report.customerCount)} عميل · '
+              'متوسط ${AppFormatters.money(report.averageBalance)}',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onPrimary.withValues(alpha: 0.9),
               ),
@@ -219,10 +208,9 @@ class _HeroCard extends StatelessWidget {
 }
 
 class _ReceivableRow extends StatelessWidget {
-  const _ReceivableRow({required this.item, required this.money});
+  const _ReceivableRow({required this.item});
 
   final ReceivableItem item;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -271,7 +259,7 @@ class _ReceivableRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              money.format(item.balance),
+              AppFormatters.money(item.balance),
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.error,
                 fontWeight: FontWeight.w800,
