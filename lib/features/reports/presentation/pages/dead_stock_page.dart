@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
@@ -20,14 +20,6 @@ class DeadStockPage extends ConsumerStatefulWidget {
 }
 
 class _DeadStockPageState extends ConsumerState<DeadStockPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final NumberFormat _qty = NumberFormat.decimalPattern('ar_EG');
-  static final DateFormat _date = DateFormat.yMd('ar_EG');
-
   ReportDocument? _buildDocument(
     DeadStockWindow window,
     List<DeadStockItem> items,
@@ -51,17 +43,17 @@ class _DeadStockPageState extends ConsumerState<DeadStockPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: 'عدد المنتجات',
-              value: '${items.length}',
+              value: AppFormatters.integer(items.length),
             ),
             ReportKpi(
               label: 'قيمة المخزون',
-              value: _money.format(totalValue),
+              value: AppFormatters.money(totalValue),
               emphasized: true,
             ),
             if (neverSold > 0)
               ReportKpi(
                 label: 'لم تُبَع أبدًا',
-                value: '$neverSold',
+                value: AppFormatters.integer(neverSold),
               ),
           ],
         ),
@@ -81,11 +73,11 @@ class _DeadStockPageState extends ConsumerState<DeadStockPage> {
                 <String>[
                   '${i + 1}',
                   items[i].productName,
-                  _qty.format(items[i].quantityOnHand),
-                  _money.format(items[i].stockValue),
+                  AppFormatters.quantity(items[i].quantityOnHand),
+                  AppFormatters.money(items[i].stockValue),
                   items[i].lastSoldAt == null
                       ? 'لم تُبَع أبدًا'
-                      : _date.format(items[i].lastSoldAt!.toLocal()),
+                      : AppFormatters.date(items[i].lastSoldAt!.toLocal()),
                 ],
             ],
           ),
@@ -131,9 +123,6 @@ class _DeadStockPageState extends ConsumerState<DeadStockPage> {
         data: (List<DeadStockItem> items) => _Body(
           window: window,
           items: items,
-          money: _money,
-          qty: _qty,
-          date: _date,
         ),
       ),
     );
@@ -254,16 +243,10 @@ class _Body extends StatelessWidget {
   const _Body({
     required this.window,
     required this.items,
-    required this.money,
-    required this.qty,
-    required this.date,
   });
 
   final DeadStockWindow window;
   final List<DeadStockItem> items;
-  final NumberFormat money;
-  final NumberFormat qty;
-  final DateFormat date;
 
   @override
   Widget build(BuildContext context) {
@@ -286,16 +269,10 @@ class _Body extends StatelessWidget {
           count: items.length,
           totalValue: totalValue,
           neverSold: neverSold,
-          money: money,
         ),
         const SizedBox(height: 16),
         for (int i = 0; i < items.length; i++) ...<Widget>[
-          _DeadStockRow(
-            item: items[i],
-            money: money,
-            qty: qty,
-            date: date,
-          ),
+          _DeadStockRow(item: items[i]),
           if (i < items.length - 1) const SizedBox(height: 8),
         ],
       ],
@@ -309,14 +286,12 @@ class _SummaryStrip extends StatelessWidget {
     required this.count,
     required this.totalValue,
     required this.neverSold,
-    required this.money,
   });
 
   final DeadStockWindow window;
   final int count;
   final double totalValue;
   final int neverSold;
-  final NumberFormat money;
 
   @override
   Widget build(BuildContext context) {
@@ -347,7 +322,7 @@ class _SummaryStrip extends StatelessWidget {
                     theme,
                     scheme,
                     'عدد المنتجات',
-                    '$count',
+                    AppFormatters.integer(count),
                     null,
                   ),
                 ),
@@ -358,7 +333,7 @@ class _SummaryStrip extends StatelessWidget {
                     theme,
                     scheme,
                     'قيمة المخزون',
-                    money.format(totalValue),
+                    AppFormatters.money(totalValue),
                     scheme.error,
                   ),
                 ),
@@ -374,7 +349,7 @@ class _SummaryStrip extends StatelessWidget {
                       theme,
                       scheme,
                       'لم تُبَع أبدًا',
-                      '$neverSold',
+                      AppFormatters.integer(neverSold),
                       scheme.error,
                     ),
                   ),
@@ -422,17 +397,9 @@ class _SummaryStrip extends StatelessWidget {
 }
 
 class _DeadStockRow extends StatelessWidget {
-  const _DeadStockRow({
-    required this.item,
-    required this.money,
-    required this.qty,
-    required this.date,
-  });
+  const _DeadStockRow({required this.item});
 
   final DeadStockItem item;
-  final NumberFormat money;
-  final NumberFormat qty;
-  final DateFormat date;
 
   @override
   Widget build(BuildContext context) {
@@ -479,7 +446,7 @@ class _DeadStockRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'الرصيد: ${qty.format(item.quantityOnHand)}$unitSuffix · '
+                    'الرصيد: ${AppFormatters.quantity(item.quantityOnHand)}$unitSuffix · '
                     '${_lastSoldLabel()}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
@@ -491,7 +458,7 @@ class _DeadStockRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              money.format(item.stockValue),
+              AppFormatters.money(item.stockValue),
               style: theme.textTheme.titleSmall?.copyWith(
                 color: scheme.error,
                 fontWeight: FontWeight.w800,
@@ -508,7 +475,8 @@ class _DeadStockRow extends StatelessWidget {
       return 'لم تُبَع أبدًا';
     }
     final int? days = item.daysSinceLastSale;
-    final String dateStr = date.format(item.lastSoldAt!.toLocal());
+    final String dateStr =
+        AppFormatters.date(item.lastSoldAt!.toLocal());
     if (days == null) return 'آخر بيع: $dateStr';
     return 'آخر بيع: $dateStr ($days يومًا)';
   }
