@@ -1013,4 +1013,492 @@ class ReportsRepositoryImpl implements ReportsRepository {
             phone: customer.phone,
             balance: customer.balance,
             buckets: AgingBuckets(
-              days0to30: b
+              days0to30: b0to30,
+              days31to60: b31to60,
+              days61to90: b61to90,
+              days90plus: b90plus,
+            ),
+          ),
+        );
+      }
+
+      rows.sort((CustomerAgingRow a, CustomerAgingRow b) =>
+          b.balance.compareTo(a.balance));
+
+      double t0to30 = 0;
+      double t31to60 = 0;
+      double t61to90 = 0;
+      double t90plus = 0;
+      for (final CustomerAgingRow r in rows) {
+        t0to30 += r.buckets.days0to30;
+        t31to60 += r.buckets.days31to60;
+        t61to90 += r.buckets.days61to90;
+        t90plus += r.buckets.days90plus;
+      }
+
+      return AgingReport(
+        rows: rows,
+        totals: AgingBuckets(
+          days0to30: t0to30,
+          days31to60: t31to60,
+          days61to90: t61to90,
+          days90plus: t90plus,
+        ),
+        customerCount: rows.length,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getCustomerAging');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getCustomerAging');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getCustomerAging');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Supplier aging
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<SupplierAgingReport> getSupplierAging({
+    required String companyId,
+  }) async {
+    try {
+      final List<Map<String, dynamic>> supplierRows =
+          await _remoteDataSource.fetchAllSuppliers(companyId: companyId);
+
+      if (supplierRows.isEmpty) {
+        return SupplierAgingReport.empty();
+      }
+
+      final Map<String, _AgingSupplier> suppliers =
+          <String, _AgingSupplier>{};
+      for (final Map<String, dynamic> row in supplierRows) {
+        final String id = _asString(row['id']);
+        if (id.isEmpty) continue;
+        suppliers[id] = _AgingSupplier(
+          id: id,
+          name: _asString(row['name']),
+          phone: _asNullableString(row['phone']),
+        );
+      }
+
+      if (suppliers.isEmpty) {
+        return SupplierAgingReport.empty();
+      }
+
+      final List<String> ids = suppliers.keys.toList(growable: false);
+
+      final List<Object> results = await Future.wait<Object>(<Future<Object>>[
+        _remoteDataSource.fetchConfirmedPurchasesForSuppliers(
+          companyId: companyId,
+          supplierIds: ids,
+        ),
+        _remoteDataSource.fetchPaymentsForSuppliers(
+          companyId: companyId,
+          supplierIds: ids,
+        ),
+      ]);
+
+      final List<Map<String, dynamic>> purchases =
+          (results[0] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> payments =
+          (results[1] as List<Map<String, dynamic>>);
+
+      final Map<String, List<_AgingSale>> purchasesBySupplier =
+          <String, List<_AgingSale>>{};
+      for (final Map<String, dynamic> row in purchases) {
+        final String? sid = _asNullableString(row['supplier_id']);
+        if (sid == null) continue;
+        purchasesBySupplier
+            .putIfAbsent(sid, () => <_AgingSale>[])
+            .add(
+              _AgingSale(
+                date: _asDate(row['purchase_date']),
+                total: _asDouble(row['total']),
+              ),
+            );
+      }
+      for (final List<_AgingSale> list in purchasesBySupplier.values) {
+        list.sort((_AgingSale a, _AgingSale b) => a.date.compareTo(b.date));
+      }
+
+      final Map<String, double> totalPaidBySupplier = <String, double>{};
+      for (final Map<String, dynamic> row in payments) {
+        final String? sid = _asNullableString(row['supplier_id']);
+        if (sid == null) continue;
+        totalPaidBySupplier[sid] =
+            (totalPaidBySupplier[sid] ?? 0) + _asDouble(row['amount']);
+      }
+
+      final DateTime now = DateTime.now().toUtc();
+      final List<SupplierAgingRow> rows = <SupplierAgingRow>[];
+
+      for (final _AgingSupplier supplier in suppliers.values) {
+        final List<_AgingSale> list =
+            purchasesBySupplier[supplier.id] ?? const <_AgingSale>[];
+        double totalPurchased = 0;
+        for (final _AgingSale s in list) {
+          totalPurchased += s.total;
+        }
+        final double totalPaid = totalPaidBySupplier[supplier.id] ?? 0;
+        double remaining = totalPurchased - totalPaid;
+
+        if (remaining <= 0 || list.isEmpty) {
+          continue;
+        }
+
+        double b0to30 = 0;
+        double b31to60 = 0;
+        double b61to90 = 0;
+        double b90plus = 0;
+
+        for (final _AgingSale sale in list) {
+          if (remaining <= 0) break;
+          final double allocated =
+              remaining < sale.total ? remaining : sale.total;
+          remaining -= allocated;
+
+          final int days = now.difference(sale.date).inDays;
+          if (days <= 30) {
+            b0to30 += allocated;
+          } else if (days <= 60) {
+            b31to60 += allocated;
+          } else if (days <= 90) {
+            b61to90 += allocated;
+          } else {
+            b90plus += allocated;
+          }
+        }
+
+        if (remaining > 0) {
+          b90plus += remaining;
+        }
+
+        final double balance = b0to30 + b31to60 + b61to90 + b90plus;
+
+        rows.add(
+          SupplierAgingRow(
+            supplierId: supplier.id,
+            supplierName:
+                supplier.name.isEmpty ? 'مورد محذوف' : supplier.name,
+            phone: supplier.phone,
+            balance: balance,
+            buckets: AgingBuckets(
+              days0to30: b0to30,
+              days31to60: b31to60,
+              days61to90: b61to90,
+              days90plus: b90plus,
+            ),
+          ),
+        );
+      }
+
+      rows.sort((SupplierAgingRow a, SupplierAgingRow b) =>
+          b.balance.compareTo(a.balance));
+
+      double t0to30 = 0;
+      double t31to60 = 0;
+      double t61to90 = 0;
+      double t90plus = 0;
+      for (final SupplierAgingRow r in rows) {
+        t0to30 += r.buckets.days0to30;
+        t31to60 += r.buckets.days31to60;
+        t61to90 += r.buckets.days61to90;
+        t90plus += r.buckets.days90plus;
+      }
+
+      return SupplierAgingReport(
+        rows: rows,
+        totals: AgingBuckets(
+          days0to30: t0to30,
+          days31to60: t31to60,
+          days61to90: t61to90,
+          days90plus: t90plus,
+        ),
+        supplierCount: rows.length,
+      );
+    } on ReportException {
+      rethrow;
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(error, stackTrace, operation: 'getSupplierAging');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getSupplierAging');
+    } on Object catch (error, stackTrace) {
+      throw _mapUnknown(error, stackTrace, operation: 'getSupplierAging');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Internal helpers
+  // ---------------------------------------------------------------------------
+
+  static String _asString(Object? value) {
+    if (value is String) return value;
+    return value?.toString() ?? '';
+  }
+
+  static double _asDouble(Object? value) {
+    if (value is double) return value;
+    if (value is int) return value.toDouble();
+    if (value is num) return value.toDouble();
+    if (value is String) {
+      final double? parsed = double.tryParse(value);
+      if (parsed != null) return parsed;
+    }
+    return 0;
+  }
+
+  static String? _asNullableString(Object? value) {
+    if (value == null) return null;
+    if (value is String) {
+      final String t = value.trim();
+      return t.isEmpty ? null : t;
+    }
+    return value.toString();
+  }
+
+  static DateTime _asDate(Object? value) {
+    if (value is DateTime) return value.toUtc();
+    if (value is String) {
+      final DateTime? parsed = DateTime.tryParse(value);
+      if (parsed != null) return parsed.toUtc();
+    }
+    return DateTime.now().toUtc();
+  }
+
+  static String _shortId(String id) {
+    if (id.length <= 6) return id;
+    return 'كاشير ${id.substring(id.length - 6)}';
+  }
+}
+
+// ============================================================================
+// Internal aggregation helpers
+// ============================================================================
+
+class _ProductAgg {
+  double quantity = 0;
+  double revenue = 0;
+  final Set<String> saleIds = <String>{};
+
+  void add(double qty, double rev, String saleId) {
+    quantity += qty;
+    revenue += rev;
+    if (saleId.isNotEmpty) {
+      saleIds.add(saleId);
+    }
+  }
+}
+
+class _ProfitAgg {
+  double quantity = 0;
+  double revenue = 0;
+  double cost = 0;
+  final Set<String> saleIds = <String>{};
+
+  void addSale(double qty, double rev, String saleId) {
+    quantity += qty;
+    revenue += rev;
+    if (saleId.isNotEmpty) {
+      saleIds.add(saleId);
+    }
+  }
+
+  void addCost(double value) {
+    cost += value;
+  }
+}
+
+class _CustomerAgg {
+  int count = 0;
+  double spent = 0;
+  double paid = 0;
+
+  /// Adds a sale: bumps invoice count, and adds to spent + paid.
+  void add(double total, double paidAmount) {
+    count++;
+    spent += total;
+    paid += paidAmount;
+  }
+
+  /// Adds a standalone customer payment (not tied to a sale).
+  ///
+  /// Increases `paid` only. The invoice count is NOT bumped, and `spent`
+  /// is NOT affected — the debt was already recorded when the sale was
+  /// created; this payment just reduces it.
+  void addStandalonePayment(double amount) {
+    paid += amount;
+  }
+}
+
+class _CashierAgg {
+  int count = 0;
+  double sales = 0;
+  double paid = 0;
+
+  void add(double total, double paidAmount) {
+    count++;
+    sales += total;
+    paid += paidAmount;
+  }
+}
+
+class _ValuationAgg {
+  double quantity = 0;
+  double costValue = 0;
+
+  void add(double qty, double value) {
+    quantity += qty;
+    costValue += value;
+  }
+}
+
+class _SupplierAgg {
+  int count = 0;
+  double purchases = 0;
+  double paid = 0;
+
+  /// Adds a purchase: bumps invoice count, adds to purchases + paid.
+  void add(double total, double paidAmount) {
+    count++;
+    purchases += total;
+    paid += paidAmount;
+  }
+
+  /// Adds a standalone supplier payment (not tied to a purchase).
+  ///
+  /// Increases `paid` only. The invoice count is NOT bumped, and
+  /// `purchases` is NOT affected.
+  void addStandalonePayment(double amount) {
+    paid += amount;
+  }
+}
+
+class _AgingCustomer {
+  _AgingCustomer({
+    required this.id,
+    required this.name,
+    required this.balance,
+    this.phone,
+  });
+
+  final String id;
+  final String name;
+  final String? phone;
+  final double balance;
+}
+
+class _AgingSupplier {
+  _AgingSupplier({
+    required this.id,
+    required this.name,
+    this.phone,
+  });
+
+  final String id;
+  final String name;
+  final String? phone;
+}
+
+class _AgingSale {
+  _AgingSale({required this.date, required this.total});
+
+  final DateTime date;
+  final double total;
+}
+
+// ============================================================================
+// Error mapping
+// ============================================================================
+
+ReportException _mapPostgrest(
+  supabase.PostgrestException error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  final ReportFailureType type = _classifyPostgrest(error);
+  AppLogger.warning(
+    'Report PostgREST error during "$operation" mapped to ${type.name} '
+    '(code: ${error.code ?? 'n/a'}).',
+  );
+  return ReportException(
+    type: type,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReportException _mapAuth(
+  supabase.AuthException error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  AppLogger.warning(
+    'Report auth error during "$operation" mapped to unauthorized.',
+  );
+  return ReportException(
+    type: ReportFailureType.unauthorized,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReportException _mapUnknown(
+  Object error,
+  StackTrace stackTrace, {
+  required String operation,
+}) {
+  final ReportFailureType type = _looksLikeNetwork(error)
+      ? ReportFailureType.network
+      : ReportFailureType.unknown;
+  AppLogger.error(
+    'Unhandled report error during "$operation" '
+    '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
+    error,
+    stackTrace,
+  );
+  return ReportException(
+    type: type,
+    cause: error,
+    stackTrace: stackTrace,
+  );
+}
+
+ReportFailureType _classifyPostgrest(supabase.PostgrestException error) {
+  final String code = (error.code ?? '').toUpperCase();
+  final String message = error.message.toLowerCase();
+
+  if (code == 'PGRST116') {
+    return ReportFailureType.notFound;
+  }
+  if (code.startsWith('42501') || code.startsWith('28')) {
+    return ReportFailureType.unauthorized;
+  }
+  if (code.startsWith('42')) {
+    return ReportFailureType.invalidResponse;
+  }
+  if (message.contains('permission denied') ||
+      message.contains('row level security') ||
+      message.contains('jwt')) {
+    return ReportFailureType.unauthorized;
+  }
+  if (_looksLikeNetwork(message)) {
+    return ReportFailureType.network;
+  }
+  return ReportFailureType.unknown;
+}
+
+bool _looksLikeNetwork(Object error) {
+  final String s = error.toString().toLowerCase();
+  return s.contains('socket') ||
+      s.contains('network') ||
+      s.contains('connection') ||
+      s.contains('timeout') ||
+      s.contains('timed out') ||
+      s.contains('unreachable') ||
+      s.contains('failed host lookup') ||
+      s.contains('clientexception');
+}
