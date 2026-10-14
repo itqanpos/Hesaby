@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/financial_reports.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
@@ -20,16 +20,6 @@ class ProfitLossPage extends ConsumerStatefulWidget {
 }
 
 class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
-  static final NumberFormat _money = NumberFormat.currency(
-    locale: 'ar_EG',
-    symbol: 'ج.م ',
-    decimalDigits: 2,
-  );
-  static final NumberFormat _percent = NumberFormat.decimalPercentPattern(
-    locale: 'ar_EG',
-    decimalDigits: 1,
-  );
-
   Future<void> _changePeriod(ReportPeriod newPeriod) async {
     ref.read(reportPagePeriodProvider.notifier).setPeriod(newPeriod);
     final ReportPeriod p = ref.read(reportPagePeriodProvider);
@@ -58,21 +48,21 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: report.isProfitable ? 'صافي الربح' : 'صافي الخسارة',
-              value: _money.format(report.netProfit.abs()),
+              value: AppFormatters.money(report.netProfit.abs()),
               emphasized: true,
             ),
             ReportKpi(
               label: 'صافي الإيرادات',
-              value: _money.format(report.netRevenue),
+              value: AppFormatters.money(report.netRevenue),
             ),
             ReportKpi(
               label: 'تكلفة المبيعات',
-              value: _money.format(report.costOfGoodsSold),
+              value: AppFormatters.money(report.costOfGoodsSold),
             ),
             ReportKpi(
               label: 'هامش الربح',
               value: report.netRevenue > 0
-                  ? _percent.format(report.netMargin)
+                  ? AppFormatters.percent(report.netMargin)
                   : '—',
             ),
           ],
@@ -82,16 +72,16 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
           lines: <ReportLine>[
             ReportLine(
               label: 'إجمالي المبيعات',
-              value: _money.format(report.grossRevenue),
+              value: AppFormatters.money(report.grossRevenue),
             ),
             if (report.returnTotal > 0)
               ReportLine(
                 label: 'المرتجعات',
-                value: '−${_money.format(report.returnTotal)}',
+                value: '−${AppFormatters.money(report.returnTotal)}',
               ),
             ReportLine(
               label: 'صافي الإيرادات',
-              value: _money.format(report.netRevenue),
+              value: AppFormatters.money(report.netRevenue),
               emphasized: true,
             ),
           ],
@@ -101,15 +91,15 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
           lines: <ReportLine>[
             ReportLine(
               label: 'تكلفة المبيعات (COGS)',
-              value: _money.format(report.costOfGoodsSold),
+              value: AppFormatters.money(report.costOfGoodsSold),
             ),
             ReportLine(
               label: 'المصروفات التشغيلية',
-              value: _money.format(report.operatingExpenses),
+              value: AppFormatters.money(report.operatingExpenses),
             ),
             ReportLine(
               label: 'إجمالي التكاليف',
-              value: _money.format(
+              value: AppFormatters.money(
                 report.costOfGoodsSold + report.operatingExpenses,
               ),
               emphasized: true,
@@ -121,17 +111,17 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
           lines: <ReportLine>[
             ReportLine(
               label: 'الربح الإجمالي',
-              value: _money.format(report.grossProfit),
+              value: AppFormatters.money(report.grossProfit),
             ),
             ReportLine(
               label: 'صافي الربح',
-              value: _money.format(report.netProfit),
+              value: AppFormatters.money(report.netProfit),
               emphasized: true,
             ),
             ReportLine(
               label: 'هامش الربح الإجمالي',
               value: report.netRevenue > 0
-                  ? _percent.format(report.grossMargin)
+                  ? AppFormatters.percent(report.grossMargin)
                   : '—',
             ),
           ],
@@ -164,11 +154,7 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
       body: reportAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
-        data: (ProfitLossSummary report) => _Body(
-          report: report,
-          money: _money,
-          percent: _percent,
-        ),
+        data: (ProfitLossSummary report) => _Body(report: report),
       ),
     );
   }
@@ -197,15 +183,9 @@ class _ProfitLossPageState extends ConsumerState<ProfitLossPage> {
 // ============================================================================
 
 class _Body extends StatelessWidget {
-  const _Body({
-    required this.report,
-    required this.money,
-    required this.percent,
-  });
+  const _Body({required this.report});
 
   final ProfitLossSummary report;
-  final NumberFormat money;
-  final NumberFormat percent;
 
   @override
   Widget build(BuildContext context) {
@@ -214,21 +194,24 @@ class _Body extends StatelessWidget {
       children: <Widget>[
         _PeriodHeader(period: report.period),
         const SizedBox(height: 12),
-        _HeroCard(report: report, money: money, percent: percent),
+        _HeroCard(report: report),
         const SizedBox(height: 16),
         _BreakdownCard(
           title: 'الإيرادات',
           tone: const Color(0xFF0F7B6C),
           rows: <_RowData>[
-            _RowData('إجمالي المبيعات', money.format(report.grossRevenue)),
+            _RowData(
+              'إجمالي المبيعات',
+              AppFormatters.money(report.grossRevenue),
+            ),
             if (report.returnTotal > 0)
               _RowData(
                 'المرتجعات',
-                '−${money.format(report.returnTotal)}',
+                '−${AppFormatters.money(report.returnTotal)}',
               ),
             _RowData(
               'صافي الإيرادات',
-              money.format(report.netRevenue),
+              AppFormatters.money(report.netRevenue),
               emphasized: true,
             ),
           ],
@@ -240,15 +223,15 @@ class _Body extends StatelessWidget {
           rows: <_RowData>[
             _RowData(
               'تكلفة المبيعات (COGS)',
-              money.format(report.costOfGoodsSold),
+              AppFormatters.money(report.costOfGoodsSold),
             ),
             _RowData(
               'المصروفات التشغيلية',
-              money.format(report.operatingExpenses),
+              AppFormatters.money(report.operatingExpenses),
             ),
             _RowData(
               'إجمالي التكاليف',
-              money.format(
+              AppFormatters.money(
                 report.costOfGoodsSold + report.operatingExpenses,
               ),
               emphasized: true,
@@ -264,17 +247,17 @@ class _Body extends StatelessWidget {
           rows: <_RowData>[
             _RowData(
               'الربح الإجمالي',
-              money.format(report.grossProfit),
+              AppFormatters.money(report.grossProfit),
             ),
             _RowData(
               'صافي الربح',
-              money.format(report.netProfit),
+              AppFormatters.money(report.netProfit),
               emphasized: true,
             ),
             _RowData(
               'هامش الربح الإجمالي',
               report.netRevenue > 0
-                  ? percent.format(report.grossMargin)
+                  ? AppFormatters.percent(report.grossMargin)
                   : '—',
             ),
           ],
@@ -313,15 +296,9 @@ class _PeriodHeader extends StatelessWidget {
 }
 
 class _HeroCard extends StatelessWidget {
-  const _HeroCard({
-    required this.report,
-    required this.money,
-    required this.percent,
-  });
+  const _HeroCard({required this.report});
 
   final ProfitLossSummary report;
-  final NumberFormat money;
-  final NumberFormat percent;
 
   @override
   Widget build(BuildContext context) {
@@ -375,7 +352,7 @@ class _HeroCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              money.format(report.netProfit.abs()),
+              AppFormatters.money(report.netProfit.abs()),
               style: theme.textTheme.displaySmall?.copyWith(
                 color: scheme.onPrimary,
                 fontWeight: FontWeight.w900,
@@ -387,8 +364,8 @@ class _HeroCard extends StatelessWidget {
             const SizedBox(height: 4),
             Text(
               report.netRevenue > 0
-                  ? 'هامش: ${percent.format(report.netMargin)} · '
-                      'إيرادات: ${money.format(report.netRevenue)}'
+                  ? 'هامش: ${AppFormatters.percent(report.netMargin)} · '
+                      'إيرادات: ${AppFormatters.money(report.netRevenue)}'
                   : 'لا توجد إيرادات في هذه الفترة',
               style: theme.textTheme.bodyMedium?.copyWith(
                 color: scheme.onPrimary.withValues(alpha: 0.9),
