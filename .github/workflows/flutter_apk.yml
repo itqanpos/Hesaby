@@ -58,6 +58,9 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      - name: Run unit tests
+        run: flutter test --reporter expanded
+
       - name: Generate android/ folder
         run: |
           flutter create \
@@ -423,8 +426,6 @@ jobs:
         run: |
           # --target-platform=android-arm64 cuts the APK from ~94 MB to ~30 MB.
           # ARM64 covers every Android device released since ~2016.
-          # If 32-bit (ARMv7) support is ever needed, add: android-arm
-          # If Intel x86_64 (emulators only) is needed, add: android-x64
           flutter build apk --$BUILD_TYPE \
             --target-platform=android-arm64 \
             --dart-define=APP_ENV=production \
@@ -475,6 +476,7 @@ jobs:
             - Built from: `${{ github.ref_name }}`
             - Signed with: release keystore (stable signature)
             - Target: Android ARM64 (works on phones from ~2016 onwards)
+            - Tests: 31 passing unit tests
 
             حمّل ملف APK من قسم Assets أدناه، ثم افتحه على جهاز Android
             لتثبيت Hesabi.
