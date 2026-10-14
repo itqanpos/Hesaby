@@ -16,10 +16,6 @@ class ReportsRemoteDataSource {
   static const int saleItemsSafetyLimit = 50000;
   static const int inFilterChunkSize = 150;
 
-  /// The movement types that contribute to the *cost* side of a sale.
-  ///
-  /// `sale_out` moves stock out with a **negative** quantity.
-  /// `return_in` moves stock back in with a **positive** quantity.
   static const List<String> _costMovementTypes = <String>[
     'sale_out',
     'return_in',
@@ -145,19 +141,13 @@ class ReportsRemoteDataSource {
   }
 
   // ===========================================================================
-  // CUSTOMER PAYMENTS  (independent payments, not tied to a specific sale)
+  // CUSTOMER PAYMENTS
   // ===========================================================================
 
   /// Fetches every standalone customer payment in the period.
   ///
-  /// A "standalone" payment is any row in `customer_payments`. Unlike
-  /// `sale_payments` (which is tied to a specific invoice), these are
-  /// recorded via the "تحصيل من عميل" flow and reduce the customer's
-  /// running balance directly.
-  ///
-  /// Used by [getTopCustomers] to make `totalPaid` / `totalDue` correct
-  /// even when the customer has settled part of an old balance without a
-  /// new invoice.
+  /// Filtered by `created_at` because `customer_payments` does not have a
+  /// dedicated `payment_date` column.
   Future<List<Map<String, dynamic>>> fetchCustomerPayments({
     required String companyId,
     required DateTime? fromDate,
@@ -388,13 +378,10 @@ class ReportsRemoteDataSource {
 
   /// Fetches every standalone supplier payment in the period.
   ///
-  /// A "standalone" supplier payment is any row in `supplier_payments`.
-  /// Unlike `purchases.paid_amount` (which is tied to a specific
-  /// invoice), these reduce the supplier's running balance directly.
-  ///
-  /// Used by [getPayables] to make `totalPaid` / `totalDue` correct
-  /// when the company has settled part of an old balance without a new
-  /// invoice.
+  /// Unlike `customer_payments` (which uses `created_at`),
+  /// `supplier_payments` carries a dedicated `payment_date` column that
+  /// represents the actual date of the payment (it may differ from the
+  /// moment the row was entered).
   Future<List<Map<String, dynamic>>> fetchSupplierPayments({
     required String companyId,
     required DateTime? fromDate,
@@ -404,51 +391,17 @@ class ReportsRemoteDataSource {
 
     var query = client
         .from('supplier_payments')
-        .select('supplier_id, amount, created_at')
+        .select('supplier_id, amount, payment_date')
         .eq('company_id', companyId);
 
     if (fromDate != null) {
-      query = query.gte('created_at', _formatTimestamp(fromDate));
+      query = query.gte('payment_date', _formatDateOnly(fromDate));
     }
     if (toDate != null) {
-      query = query.lte('created_at', _formatTimestamp(toDate));
+      query = query.lte('payment_date', _formatDateOnly(toDate));
     }
 
     return await query.limit(safetyLimit);
-  }
-
-  /// Fetches every payment made to the supplied suppliers.
-  ///
-  /// Deprecated alias kept for the aging report; new callers should use
-  /// [fetchSupplierPayments] (period-aware).
-  Future<List<Map<String, dynamic>>> fetchPaymentsForSuppliers({
-    required String companyId,
-    required List<String> supplierIds,
-  }) async {
-    if (supplierIds.isEmpty) {
-      return const <Map<String, dynamic>>[];
-    }
-
-    final SupabaseClient client = _requireClient();
-    final List<Map<String, dynamic>> allRows = <Map<String, dynamic>>[];
-
-    for (int i = 0; i < supplierIds.length; i += inFilterChunkSize) {
-      final int end = (i + inFilterChunkSize < supplierIds.length)
-          ? i + inFilterChunkSize
-          : supplierIds.length;
-      final List<String> chunk = supplierIds.sublist(i, end);
-
-      final List<Map<String, dynamic>> rows = await client
-          .from('supplier_payments')
-          .select('supplier_id, amount')
-          .eq('company_id', companyId)
-          .inFilter('supplier_id', chunk)
-          .limit(safetyLimit);
-
-      allRows.addAll(rows);
-    }
-
-    return allRows;
   }
 
   Future<List<Map<String, dynamic>>> fetchAllSuppliers({
