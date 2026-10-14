@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/inventory_reports.dart';
 import '../../domain/entities/report_document.dart';
 import '../../domain/entities/report_period.dart';
@@ -20,8 +20,6 @@ class LowStockPage extends ConsumerStatefulWidget {
 }
 
 class _LowStockPageState extends ConsumerState<LowStockPage> {
-  static final NumberFormat _qty = NumberFormat.decimalPattern('ar_EG');
-
   ReportDocument? _buildDocument(List<LowStockItem> items) {
     if (items.isEmpty) return null;
 
@@ -37,12 +35,12 @@ class _LowStockPageState extends ConsumerState<LowStockPage> {
           kpis: <ReportKpi>[
             ReportKpi(
               label: 'إجمالي المنتجات',
-              value: '${items.length}',
+              value: AppFormatters.integer(items.length),
               emphasized: true,
             ),
             ReportKpi(
               label: 'نفدت تمامًا',
-              value: '$outOfStock',
+              value: AppFormatters.integer(outOfStock),
             ),
           ],
         ),
@@ -62,11 +60,11 @@ class _LowStockPageState extends ConsumerState<LowStockPage> {
                 <String>[
                   '${i + 1}',
                   items[i].productName,
-                  _qty.format(items[i].quantityOnHand),
-                  _qty.format(items[i].minStock),
+                  AppFormatters.quantity(items[i].quantityOnHand),
+                  AppFormatters.quantity(items[i].minStock),
                   items[i].isOutOfStock
                       ? 'نفد'
-                      : _qty.format(items[i].deficit),
+                      : AppFormatters.quantity(items[i].deficit),
                 ],
             ],
           ),
@@ -98,7 +96,7 @@ class _LowStockPageState extends ConsumerState<LowStockPage> {
       body: itemsAsync.when(
         loading: () => const SizedBox.shrink(),
         error: (_, __) => const SizedBox.shrink(),
-        data: (List<LowStockItem> items) => _Body(items: items, qty: _qty),
+        data: (List<LowStockItem> items) => _Body(items: items),
       ),
     );
   }
@@ -112,10 +110,9 @@ class _LowStockPageState extends ConsumerState<LowStockPage> {
 }
 
 class _Body extends StatelessWidget {
-  const _Body({required this.items, required this.qty});
+  const _Body({required this.items});
 
   final List<LowStockItem> items;
-  final NumberFormat qty;
 
   @override
   Widget build(BuildContext context) {
@@ -132,7 +129,7 @@ class _Body extends StatelessWidget {
         _SummaryStrip(total: items.length, outOfStock: outOfStock),
         const SizedBox(height: 16),
         for (int i = 0; i < items.length; i++) ...<Widget>[
-          _LowStockRow(item: items[i], qty: qty),
+          _LowStockRow(item: items[i]),
           if (i < items.length - 1) const SizedBox(height: 8),
         ],
       ],
@@ -160,7 +157,13 @@ class _SummaryStrip extends StatelessWidget {
         child: Row(
           children: <Widget>[
             Expanded(
-              child: _cell(theme, scheme, 'إجمالي المنتجات', '$total', null),
+              child: _cell(
+                theme,
+                scheme,
+                'إجمالي المنتجات',
+                AppFormatters.integer(total),
+                null,
+              ),
             ),
             Container(width: 1, height: 32, color: scheme.outlineVariant),
             const SizedBox(width: 14),
@@ -169,7 +172,7 @@ class _SummaryStrip extends StatelessWidget {
                 theme,
                 scheme,
                 'نفدت تمامًا',
-                '$outOfStock',
+                AppFormatters.integer(outOfStock),
                 outOfStock > 0 ? scheme.error : null,
               ),
             ),
@@ -212,10 +215,9 @@ class _SummaryStrip extends StatelessWidget {
 }
 
 class _LowStockRow extends StatelessWidget {
-  const _LowStockRow({required this.item, required this.qty});
+  const _LowStockRow({required this.item});
 
   final LowStockItem item;
-  final NumberFormat qty;
 
   @override
   Widget build(BuildContext context) {
@@ -264,8 +266,8 @@ class _LowStockRow extends StatelessWidget {
                   ),
                   const SizedBox(height: 2),
                   Text(
-                    'الرصيد: ${qty.format(item.quantityOnHand)}$unitSuffix · '
-                    'الحد: ${qty.format(item.minStock)}',
+                    'الرصيد: ${AppFormatters.quantity(item.quantityOnHand)}$unitSuffix · '
+                    'الحد: ${AppFormatters.quantity(item.minStock)}',
                     style: theme.textTheme.bodySmall?.copyWith(
                       color: scheme.onSurfaceVariant,
                     ),
@@ -276,7 +278,9 @@ class _LowStockRow extends StatelessWidget {
             ),
             const SizedBox(width: 8),
             Text(
-              isOut ? 'نفد' : 'نقص ${qty.format(item.deficit)}',
+              isOut
+                  ? 'نفد'
+                  : 'نقص ${AppFormatters.quantity(item.deficit)}',
               style: theme.textTheme.labelLarge?.copyWith(
                 color: accent,
                 fontWeight: FontWeight.w800,
