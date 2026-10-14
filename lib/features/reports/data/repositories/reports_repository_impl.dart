@@ -541,7 +541,12 @@ class ReportsRepositoryImpl implements ReportsRepository {
           fromDate: period.fromDate,
           toDate: period.toDate,
         ),
-        _remoteDataSource.fetchSaleOutMovements(
+        _remoteDataSource.fetchSaleCostMovements(
+          companyId: companyId,
+          fromDate: period.fromDate,
+          toDate: period.toDate,
+        ),
+        _remoteDataSource.fetchExpenses(
           companyId: companyId,
           fromDate: period.fromDate,
           toDate: period.toDate,
@@ -554,6 +559,8 @@ class ReportsRepositoryImpl implements ReportsRepository {
           (results[1] as List<Map<String, dynamic>>);
       final List<Map<String, dynamic>> movements =
           (results[2] as List<Map<String, dynamic>>);
+      final List<Map<String, dynamic>> expenseRows =
+          (results[3] as List<Map<String, dynamic>>);
 
       double grossRevenue = 0;
       for (final Map<String, dynamic> row in sales) {
@@ -567,22 +574,36 @@ class ReportsRepositoryImpl implements ReportsRepository {
         returnTotal += _asDouble(row['total']);
       }
 
+      // Cost of goods sold, net of returns.
+      //
+      // `sale_out` movements have NEGATIVE quantity, `sale_return_in`
+      // movements have POSITIVE quantity. We want:
+      //   sale_out qty=-5, cost=100 → +500 (cost added)
+      //   sale_return_in qty=+5, cost=100 → -500 (cost removed)
+      // Hence: cogs += -quantity * unit_cost.
       double cogs = 0;
       for (final Map<String, dynamic> row in movements) {
         final double qty = _asDouble(row['quantity']);
         final double cost = _asDouble(row['unit_cost']);
-        cogs += qty * cost;
+        cogs += -qty * cost;
+      }
+
+      double operatingExpenses = 0;
+      for (final Map<String, dynamic> row in expenseRows) {
+        operatingExpenses += _asDouble(row['amount']);
       }
 
       final double netRevenue = grossRevenue - returnTotal;
+      final double grossProfit = netRevenue - cogs;
+
       return ProfitLossSummary(
         period: period,
         grossRevenue: grossRevenue,
         returnTotal: returnTotal,
-        netRevenue: netRevenue < 0 ? 0 : netRevenue,
+        netRevenue: netRevenue,
         costOfGoodsSold: cogs,
-        grossProfit: netRevenue - cogs,
-        operatingExpenses: 0,
+        grossProfit: grossProfit,
+        operatingExpenses: operatingExpenses,
       );
     } on ReportException {
       rethrow;
@@ -614,9 +635,9 @@ class ReportsRepositoryImpl implements ReportsRepository {
         toDate: period.toDate,
       );
 
-      // ---- 2) Cost side: sale_out movements within the window -----------
+      // ---- 2) Cost side: sale_out + sale_return_in movements ------------
       final List<Map<String, dynamic>> movements =
-          await _remoteDataSource.fetchSaleOutMovements(
+          await _remoteDataSource.fetchSaleCostMovements(
         companyId: companyId,
         fromDate: period.fromDate,
         toDate: period.toDate,
@@ -646,17 +667,19 @@ class ReportsRepositoryImpl implements ReportsRepository {
         }
       }
 
-      // Aggregate cost by product. `movements` uses signed quantities
-      // (negative for sale_out), so we take the absolute value.
+      // Aggregate cost by product. `sale_out` movements carry a negative
+      // quantity, `sale_return_in` movements carry a positive one, so the
+      // signed contribution is `-quantity * unit_cost`:
+      //   sale_out qty=-5, cost=100 → +500
+      //   sale_return_in qty=+5, cost=100 → -500
       for (final Map<String, dynamic> row in movements) {
         final String productId = _asString(row['product_id']);
         if (productId.isEmpty) continue;
         final double qty = _asDouble(row['quantity']);
         final double unitCost = _asDouble(row['unit_cost']);
-        final double magnitude = qty < 0 ? -qty : qty;
         byProduct
             .putIfAbsent(productId, () => _ProfitAgg())
-            .addCost(magnitude * unitCost);
+            .addCost(-qty * unitCost);
       }
 
       // Build the list of ProductProfit entries.
@@ -1223,8 +1246,8 @@ class _ProductAgg {
 }
 
 /// Aggregation helper for [ProductProfitReport]: keeps both the revenue
-/// side (from `sale_items`) and the cost side (from `sale_out` movements)
-/// under a single product id.
+/// side (from `sale_items`) and the cost side (from `sale_out` +
+/// `sale_return_in` movements) under a single product id.
 class _ProfitAgg {
   double quantity = 0;
   double revenue = 0;
