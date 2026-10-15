@@ -57,6 +57,7 @@ import '../features/settings/presentation/pages/settings_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
+import '../shared/widgets/app_loader.dart';
 
 /// Route paths and names used across the application.
 abstract final class AppRouter {
