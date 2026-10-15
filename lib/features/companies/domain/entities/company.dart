@@ -22,6 +22,8 @@ class Company extends Equatable {
     this.phone,
     this.email,
     this.address,
+    this.taxNumber,
+    this.commercialRegister,
     this.subscriptionStatus = 'trial',
     this.trialEndsAt,
     this.subscriptionStartedAt,
@@ -36,6 +38,15 @@ class Company extends Equatable {
   final String? phone;
   final String? email;
   final String? address;
+
+  /// Tax registration number (الرقم الضريبي), printed on invoices when
+  /// enabled in company settings.
+  final String? taxNumber;
+
+  /// Commercial register number (السجل التجاري), printed on invoices when
+  /// enabled in company settings.
+  final String? commercialRegister;
+
   final String currency;
   final String timezone;
   final bool isActive;
@@ -44,29 +55,71 @@ class Company extends Equatable {
 
   // ---- Subscription ----
 
-  /// Raw status stored in the database.
-  ///
-  /// One of `trial` / `active` / `expired` / `cancelled`. Prefer
-  /// `CompanySubscription.effectiveStatus` (which folds in the dates) for
-  /// any access decision.
   final String subscriptionStatus;
-
-  /// When the 7-day free trial ends. Meaningful only while
-  /// [subscriptionStatus] is `trial`.
   final DateTime? trialEndsAt;
-
-  /// When the trial (or the very first paid period) started.
   final DateTime? subscriptionStartedAt;
-
-  /// `basic` | `pro` — null while on trial.
   final String? planId;
-
-  /// `monthly` | `yearly` — null while on trial.
   final String? billingCycle;
-
-  /// End of the current paid period. Meaningful only while
-  /// [subscriptionStatus] is `active`.
   final DateTime? subscribedUntil;
+
+  // ---------------------------------------------------------------------------
+  // Convenience
+  // ---------------------------------------------------------------------------
+
+  bool get hasTaxNumber =>
+      taxNumber != null && taxNumber!.trim().isNotEmpty;
+
+  bool get hasCommercialRegister =>
+      commercialRegister != null && commercialRegister!.trim().isNotEmpty;
+
+  // ---------------------------------------------------------------------------
+  // copyWith
+  // ---------------------------------------------------------------------------
+
+  Company copyWith({
+    String? name,
+    String? legalName,
+    bool clearLegalName = false,
+    String? phone,
+    bool clearPhone = false,
+    String? email,
+    bool clearEmail = false,
+    String? address,
+    bool clearAddress = false,
+    String? taxNumber,
+    bool clearTaxNumber = false,
+    String? commercialRegister,
+    bool clearCommercialRegister = false,
+    String? currency,
+    String? timezone,
+    bool? isActive,
+    DateTime? updatedAt,
+  }) {
+    return Company(
+      id: id,
+      name: name ?? this.name,
+      legalName: clearLegalName ? null : (legalName ?? this.legalName),
+      phone: clearPhone ? null : (phone ?? this.phone),
+      email: clearEmail ? null : (email ?? this.email),
+      address: clearAddress ? null : (address ?? this.address),
+      taxNumber:
+          clearTaxNumber ? null : (taxNumber ?? this.taxNumber),
+      commercialRegister: clearCommercialRegister
+          ? null
+          : (commercialRegister ?? this.commercialRegister),
+      currency: currency ?? this.currency,
+      timezone: timezone ?? this.timezone,
+      isActive: isActive ?? this.isActive,
+      createdAt: createdAt,
+      updatedAt: updatedAt ?? this.updatedAt,
+      subscriptionStatus: subscriptionStatus,
+      trialEndsAt: trialEndsAt,
+      subscriptionStartedAt: subscriptionStartedAt,
+      planId: planId,
+      billingCycle: billingCycle,
+      subscribedUntil: subscribedUntil,
+    );
+  }
 
   @override
   List<Object?> get props => <Object?>[
@@ -76,6 +129,8 @@ class Company extends Equatable {
         phone,
         email,
         address,
+        taxNumber,
+        commercialRegister,
         currency,
         timezone,
         isActive,
