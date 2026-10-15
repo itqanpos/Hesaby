@@ -23,6 +23,8 @@ import '../features/employees/presentation/pages/salaries_page.dart';
 import '../features/expenses/presentation/pages/expenses_page.dart';
 import '../features/home/presentation/pages/home_page.dart';
 import '../features/inventory/presentation/pages/inventory_page.dart';
+import '../features/inventory/presentation/pages/stock_count_session_detail_page.dart';
+import '../features/inventory/presentation/pages/stock_count_sessions_page.dart';
 import '../features/inventory/presentation/pages/stock_movements_page.dart';
 import '../features/pos/presentation/pages/pos_page.dart';
 import '../features/pos/presentation/pages/printer_settings_page.dart';
@@ -88,6 +90,13 @@ abstract final class AppRouter {
 
   static const String stockMovementsPath = '/inventory/movements';
   static const String stockMovementsName = 'stock-movements';
+
+  // ---- Stock count ----
+  static const String stockCountSessionsPath = '/inventory/stock-count';
+  static const String stockCountSessionsName = 'stock-count-sessions';
+
+  static const String stockCountDetailPath = '/inventory/stock-count/:id';
+  static const String stockCountDetailName = 'stock-count-detail';
 
   static const String suppliersPath = '/suppliers';
   static const String suppliersName = 'suppliers';
@@ -364,6 +373,25 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
             const StockMovementsPage(),
       ),
       GoRoute(
+        path: AppRouter.stockCountSessionsPath,
+        name: AppRouter.stockCountSessionsName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const StockCountSessionsPage(),
+        routes: <RouteBase>[
+          GoRoute(
+            path: ':id',
+            name: AppRouter.stockCountDetailName,
+            builder: (BuildContext context, GoRouterState state) {
+              final String? id = state.pathParameters['id'];
+              return StockCountSessionDetailPage(
+                key: ValueKey<String>(id ?? ''),
+                sessionId: id ?? '',
+              );
+            },
+          ),
+        ],
+      ),
+      GoRoute(
         path: AppRouter.suppliersPath,
         name: AppRouter.suppliersName,
         builder: (BuildContext context, GoRouterState state) =>
@@ -635,133 +663,11 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
 });
 
 /// Branded loading screen shown while session restoration is in flight.
-///
-/// Displays:
-/// 1. App logo (from `assets/images/logo.png`) with an icon fallback if
-///    the asset cannot be loaded.
-/// 2. The brand name ("حسابي") in the primary colour.
-/// 3. A short tagline.
-/// 4. A spinner.
-/// 5. A version label at the bottom.
-///
-/// Uses [Spacer]s so the content is vertically centred on tall screens and
-/// stays readable on short screens without overflow.
 class _AuthLoadingPage extends StatelessWidget {
   const _AuthLoadingPage();
 
-  static const String _logoAsset = 'assets/images/logo.png';
-  static const String _brandName = 'حسابي';
-  static const String _tagline = 'نظام إدارة المتاجر الذكي';
-  static const String _loadingLabel = 'جارٍ التحميل...';
-  static const String _versionLabel = 'v0.1.0';
-
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return Scaffold(
-      body: SafeArea(
-        child: Center(
-          child: ConstrainedBox(
-            constraints: const BoxConstraints(maxWidth: 420),
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 32),
-              child: Column(
-                children: <Widget>[
-                  const Spacer(flex: 3),
-
-                  // ---- Logo ----
-                  Image.asset(
-                    _logoAsset,
-                    width: 120,
-                    height: 120,
-                    fit: BoxFit.contain,
-                    errorBuilder: (
-                      BuildContext _,
-                      Object __,
-                      StackTrace? ___,
-                    ) =>
-                        Container(
-                      width: 120,
-                      height: 120,
-                      decoration: BoxDecoration(
-                        color: scheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(28),
-                      ),
-                      child: Icon(
-                        Icons.point_of_sale_outlined,
-                        size: 64,
-                        color: scheme.onPrimaryContainer,
-                      ),
-                    ),
-                  ),
-
-                  const SizedBox(height: 24),
-
-                  // ---- Brand name ----
-                  Text(
-                    _brandName,
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w800,
-                      color: scheme.primary,
-                      letterSpacing: 0.5,
-                    ),
-                  ),
-
-                  const SizedBox(height: 6),
-
-                  // ---- Tagline ----
-                  Text(
-                    _tagline,
-                    textAlign: TextAlign.center,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-
-                  const SizedBox(height: 40),
-
-                  // ---- Spinner ----
-                  SizedBox(
-                    width: 32,
-                    height: 32,
-                    child: CircularProgressIndicator(
-                      strokeWidth: 2.5,
-                      valueColor:
-                          AlwaysStoppedAnimation<Color>(scheme.primary),
-                    ),
-                  ),
-
-                  const SizedBox(height: 12),
-
-                  // ---- Loading label ----
-                  Text(
-                    _loadingLabel,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-
-                  const Spacer(flex: 3),
-
-                  // ---- Version ----
-                  Padding(
-                    padding: const EdgeInsets.only(bottom: 16),
-                    child: Text(
-                      _versionLabel,
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color:
-                            scheme.onSurfaceVariant.withValues(alpha: 0.6),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
+    return const Scaffold(body: AppLoader());
   }
 }
