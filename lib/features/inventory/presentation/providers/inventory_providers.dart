@@ -1,5 +1,6 @@
 // lib/features/inventory/presentation/providers/inventory_providers.dart
 
+import 'package:flutter/foundation.dart' show immutable;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show Supabase, SupabaseClient;
