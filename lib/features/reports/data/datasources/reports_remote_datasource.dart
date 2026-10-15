@@ -148,10 +148,6 @@ class ReportsRemoteDataSource {
   // CUSTOMER PAYMENTS
   // ===========================================================================
 
-  /// Fetches every standalone customer payment in the period.
-  ///
-  /// Filtered by `created_at` because `customer_payments` does not have a
-  /// dedicated `payment_date` column.
   Future<List<Map<String, dynamic>>> fetchCustomerPayments({
     required String companyId,
     required DateTime? fromDate,
@@ -326,6 +322,10 @@ class ReportsRemoteDataSource {
         .limit(safetyLimit);
   }
 
+  /// NOTE: `purchases` has NO `paid_amount` column. Every payment
+  /// (whether linked to a purchase via `purchase_id` or standalone)
+  /// lives in `supplier_payments`. The repository sums the payments
+  /// separately and combines them with the totals returned here.
   Future<List<Map<String, dynamic>>> fetchPurchases({
     required String companyId,
     required DateTime? fromDate,
@@ -335,7 +335,7 @@ class ReportsRemoteDataSource {
 
     var query = client
         .from('purchases')
-        .select('id, supplier_id, total, paid_amount, status, purchase_date')
+        .select('id, supplier_id, total, status, purchase_date')
         .eq('company_id', companyId)
         .eq('status', 'confirmed');
 
@@ -380,12 +380,6 @@ class ReportsRemoteDataSource {
     return allRows;
   }
 
-  /// Fetches every standalone supplier payment in the period.
-  ///
-  /// Unlike `customer_payments` (which uses `created_at`),
-  /// `supplier_payments` carries a dedicated `payment_date` column that
-  /// represents the actual date of the payment (it may differ from the
-  /// moment the row was entered).
   Future<List<Map<String, dynamic>>> fetchSupplierPayments({
     required String companyId,
     required DateTime? fromDate,
@@ -408,10 +402,6 @@ class ReportsRemoteDataSource {
     return await query.limit(safetyLimit);
   }
 
-  /// Fetches every payment made to the supplied suppliers.
-  ///
-  /// Used by the supplier aging report, which needs payments grouped by
-  /// supplier (no date filter).
   Future<List<Map<String, dynamic>>> fetchPaymentsForSuppliers({
     required String companyId,
     required List<String> supplierIds,
