@@ -119,11 +119,19 @@ class _PayablesPageState extends ConsumerState<PayablesPage> {
     );
   }
 
+  /// TEMPORARY diagnostic: surfaces the underlying cause of any failure
+  /// so we can identify the real problem instead of the generic
+  /// "could not load" message. Revert this to a friendly message once the
+  /// bug is fixed.
   static String _errorMessage(Object error) {
     if (error is ReportException) {
-      return 'تعذّر تحميل تقرير الموردين.';
+      final Object? cause = error.cause;
+      final String causeText = cause?.toString() ?? '(no cause)';
+      return 'تعذّر تحميل تقرير الموردين.\n\n'
+          'النوع: ${error.type.name}\n\n'
+          'السبب:\n$causeText';
     }
-    return 'تعذّر تحميل التقرير.';
+    return 'تعذّر تحميل التقرير.\n\n${error.toString()}';
   }
 }
 
