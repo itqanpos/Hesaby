@@ -7,8 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
-import '../../../companies/presentation/providers/company_context_provider.dart';
-import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../domain/entities/customer_adjustment.dart';
 import '../../domain/entities/customer_payment.dart';
 import '../../domain/entities/sale_entities.dart';
@@ -17,20 +15,11 @@ import '../providers/sales_providers.dart';
 
 /// The three operations the adjustment sheet can perform.
 enum _AdjustmentMode {
-  /// Increase the customer's balance (e.g. opening balance, penalty).
   increase,
-
-  /// Decrease the balance without recording a payment — pure correction.
   decrease,
-
-  /// Decrease the balance AND record a `customer_payments` row.
   collect,
 }
 
-/// Opens the customer balance adjustment dialog.
-///
-/// Returns the updated [Customer] when the operation was successfully
-/// recorded, or `null` when the operator cancelled.
 Future<Customer?> showCustomerAdjustmentDialog({
   required BuildContext context,
   required String customerId,
@@ -50,10 +39,6 @@ Future<Customer?> showCustomerAdjustmentDialog({
     ),
   );
 }
-
-// ============================================================================
-// Sheet
-// ============================================================================
 
 class _CustomerAdjustmentSheet extends ConsumerStatefulWidget {
   const _CustomerAdjustmentSheet({
@@ -109,18 +94,9 @@ class _CustomerAdjustmentSheetState
     setState(() => _serverFailure = null);
   }
 
-  // ---------------------------------------------------------------------------
-  // Computed
-  // ---------------------------------------------------------------------------
-
   double get _inputAmount =>
       double.tryParse(_amountController.text.trim()) ?? 0;
 
-  /// The amount that gets applied to the balance, signed.
-  ///
-  /// * increase → +input
-  /// * decrease → -input
-  /// * collect  → -input
   double get _signedAmount {
     switch (_mode) {
       case _AdjustmentMode.increase:
@@ -133,10 +109,6 @@ class _CustomerAdjustmentSheetState
 
   double get _resultingBalance => widget.currentBalance + _signedAmount;
 
-  // ---------------------------------------------------------------------------
-  // Validation
-  // ---------------------------------------------------------------------------
-
   String? _validationError() {
     if (_inputAmount <= 0) {
       return 'المبلغ يجب أن يكون أكبر من صفر.';
@@ -146,10 +118,6 @@ class _CustomerAdjustmentSheetState
     }
     return null;
   }
-
-  // ---------------------------------------------------------------------------
-  // Submit
-  // ---------------------------------------------------------------------------
 
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
@@ -174,9 +142,6 @@ class _CustomerAdjustmentSheetState
         await _submitAdjustment(notes: notes);
       }
 
-      // Fetch the fresh customer directly from the repository so the
-      // returned balance is guaranteed to reflect the DB trigger's
-      // update, independent of any in-memory list timing.
       final Customer updated = await ref
           .read(customerRepositoryProvider)
           .getCustomer(widget.customerId);
@@ -214,23 +179,13 @@ class _CustomerAdjustmentSheetState
   }
 
   Future<void> _submitCollect({required String? notes}) async {
-    // The company id is required by `recordPayment`. It is resolved
-    // from the active company context.
-    final CompanyContextState ctx = ref.read(companyContextProvider);
-    final String? companyId = ctx.currentCompany?.id;
-    if (companyId == null) {
-      throw const CustomerException(
-        type: CustomerFailureType.unauthorized,
-        cause: 'No company is currently selected.',
-      );
-    }
-
+    // NOTE: `CustomersNotifier.recordPayment` resolves the active company
+    // id itself, so it is NOT passed here.
     final String? reference = _referenceController.text.trim().isEmpty
         ? null
         : _referenceController.text.trim();
 
     await ref.read(customersProvider.notifier).recordPayment(
-          companyId: companyId,
           customerId: widget.customerId,
           amount: _inputAmount,
           method: _paymentMethod,
@@ -244,7 +199,6 @@ class _CustomerAdjustmentSheetState
       _mode = mode;
       _serverFailure = null;
 
-      // Default reason for increase/decrease: opening balance / correction.
       if (mode == _AdjustmentMode.increase) {
         _reason = AdjustmentReason.openingBalance;
       } else if (mode == _AdjustmentMode.decrease) {
@@ -266,10 +220,6 @@ class _CustomerAdjustmentSheetState
       _serverFailure = null;
     });
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -344,7 +294,6 @@ class _CustomerAdjustmentSheetState
                   Text('نوع العملية', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 8),
 
-                  // Three tiles, arranged in one row.
                   Row(
                     children: <Widget>[
                       Expanded(
@@ -385,7 +334,6 @@ class _CustomerAdjustmentSheetState
                     ],
                   ),
 
-                  // Contextual hint.
                   const SizedBox(height: 6),
                   Text(
                     _modeDescription(_mode),
@@ -404,7 +352,6 @@ class _CustomerAdjustmentSheetState
                     hasError: displayError != null,
                   ),
 
-                  // Payment-method selector — only for "تحصيل".
                   if (isCollect) ...<Widget>[
                     const SizedBox(height: 16),
                     Text('طريقة الدفع',
@@ -424,7 +371,6 @@ class _CustomerAdjustmentSheetState
                     ),
                   ],
 
-                  // Reason selector — for increase/decrease only.
                   if (!isCollect) ...<Widget>[
                     const SizedBox(height: 16),
                     Text('السبب', style: theme.textTheme.labelLarge),
@@ -499,7 +445,7 @@ class _CustomerAdjustmentSheetState
 }
 
 // ============================================================================
-// Sub-widgets
+// Sub-widgets (كما هي من قبل)
 // ============================================================================
 
 class _CustomerBanner extends StatelessWidget {
@@ -905,10 +851,6 @@ class _ErrorBanner extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Localization
-// ============================================================================
 
 String _modeDescription(_AdjustmentMode mode) {
   switch (mode) {
