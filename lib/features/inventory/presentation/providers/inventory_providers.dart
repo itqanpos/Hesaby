@@ -4,11 +4,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show Supabase, SupabaseClient;
 
-import '../../../../core/utils/logger.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
-import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
@@ -165,6 +163,7 @@ final stockMovementsProvider = AsyncNotifierProvider.family<
 // ============================================================================
 
 /// Filter arguments for [stockCountSessionsProvider].
+@immutable
 class StockCountSessionsArgs {
   const StockCountSessionsArgs({
     this.branchId,
@@ -319,14 +318,20 @@ class StockCountItemsNotifier
       for (final Unit u in units) u.id: u.name,
     };
 
-    return raw
-        .map((StockCountItem item) => item.copyWith(
-              // copyWith in this entity only handles actualQuantity / notes;
-              // productName / unitName are set via the constructor — we use
-              // the entity constructor here to keep it immutable.
-              // ignore: avoid_redundant_argument_values
-            ))
-        .toList();
+    return raw.map((StockCountItem item) {
+      return StockCountItem(
+        id: item.id,
+        companyId: item.companyId,
+        sessionId: item.sessionId,
+        productId: item.productId,
+        expectedQuantity: item.expectedQuantity,
+        unitId: item.unitId,
+        actualQuantity: item.actualQuantity,
+        notes: item.notes,
+        productName: productNames[item.productId],
+        unitName: item.unitId == null ? null : unitNames[item.unitId!],
+      );
+    }).toList(growable: false);
   }
 
   /// Updates one item's counted quantity.
