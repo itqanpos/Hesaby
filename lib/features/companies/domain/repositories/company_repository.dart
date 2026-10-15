@@ -6,8 +6,6 @@ import 'package:flutter/foundation.dart';
 import '../entities/branch.dart';
 import '../entities/company.dart';
 
-/// Categories of company/branch retrieval and mutation failures that the
-/// presentation layer can safely translate into localized user messages.
 enum CompanyFailureType {
   network,
   unauthorized,
@@ -42,6 +40,11 @@ class CompanyException extends Equatable implements Exception {
 abstract interface class CompanyRepository {
   Future<List<Company>> getMyCompanies();
   Future<List<Company>> getAllCompanies();
+
+  /// Updates a company's profile.
+  ///
+  /// [taxNumber] and [commercialRegister] are optional; passing `null`
+  /// clears the corresponding column on the server.
   Future<Company> updateCompany({
     required String companyId,
     required String name,
@@ -51,7 +54,10 @@ abstract interface class CompanyRepository {
     String? phone,
     String? email,
     String? address,
+    String? taxNumber,
+    String? commercialRegister,
   });
+
   Future<Company> updateCompanySubscription({
     required String companyId,
     required String subscriptionStatus,
@@ -60,18 +66,6 @@ abstract interface class CompanyRepository {
     DateTime? subscribedUntil,
   });
 
-  /// Phase T-3: creates a company owned by the current authenticated user,
-  /// with one owner membership and one default branch.
-  ///
-  /// Used after Google Sign-In, where Supabase Auth does not let the client
-  /// pass custom `company_name` metadata to the trigger. The backend RPC
-  /// `create_my_company` performs the whole bootstrap in one transaction
-  /// and enforces "one owned company per user".
-  ///
-  /// Throws [CompanyException] when:
-  /// * the caller is not authenticated → [CompanyFailureType.unauthorized],
-  /// * the caller already owns a company → [CompanyFailureType.invalidResponse],
-  /// * the company name is invalid → [CompanyFailureType.invalidResponse].
   Future<Company> createMyCompany({required String name});
 
   Future<List<Branch>> getCompanyBranches(String companyId);
