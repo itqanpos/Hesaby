@@ -424,10 +424,12 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          # --target-platform=android-arm64 cuts the APK from ~94 MB to ~30 MB.
-          # ARM64 covers every Android device released since ~2016.
+          # --target-platform: covers BOTH modern ARM64 devices AND older
+          # ARMv7 (32-bit) devices. Removing android-arm drops support for
+          # 32-bit phones, which causes an immediate crash at launch on
+          # those devices. Do NOT remove it without a good reason.
           flutter build apk --$BUILD_TYPE \
-            --target-platform=android-arm64 \
+            --target-platform=android-arm64,android-arm \
             --dart-define=APP_ENV=production \
             --dart-define=SUPABASE_URL="$SUPABASE_URL" \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
@@ -475,8 +477,7 @@ jobs:
             - Build type: `${{ github.event.inputs.build_type || 'release' }}`
             - Built from: `${{ github.ref_name }}`
             - Signed with: release keystore (stable signature)
-            - Target: Android ARM64 (works on phones from ~2016 onwards)
-            - Tests: 31 passing unit tests
+            - Target: Android ARM64 + ARMv7 (all phones from ~2010 onwards)
 
             حمّل ملف APK من قسم Assets أدناه، ثم افتحه على جهاز Android
             لتثبيت Hesabi.
