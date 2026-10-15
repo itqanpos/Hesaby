@@ -19,6 +19,8 @@ class CompanyModel extends Equatable {
     this.phone,
     this.email,
     this.address,
+    this.taxNumber,
+    this.commercialRegister,
     this.trialEndsAt,
     this.subscriptionStartedAt,
     this.planId,
@@ -34,6 +36,8 @@ class CompanyModel extends Equatable {
       phone: _optionalString(map, 'phone'),
       email: _optionalString(map, 'email'),
       address: _optionalString(map, 'address'),
+      taxNumber: _optionalString(map, 'tax_number'),
+      commercialRegister: _optionalString(map, 'commercial_register'),
       currency: _optionalString(map, 'currency') ?? 'EGP',
       timezone: _optionalString(map, 'timezone') ?? 'Africa/Cairo',
       isActive: _optionalBool(map, 'is_active') ?? true,
@@ -56,6 +60,8 @@ class CompanyModel extends Equatable {
   final String? phone;
   final String? email;
   final String? address;
+  final String? taxNumber;
+  final String? commercialRegister;
   final String currency;
   final String timezone;
   final bool isActive;
@@ -76,6 +82,8 @@ class CompanyModel extends Equatable {
         phone: phone,
         email: email,
         address: address,
+        taxNumber: taxNumber,
+        commercialRegister: commercialRegister,
         currency: currency,
         timezone: timezone,
         isActive: isActive,
@@ -147,6 +155,8 @@ class CompanyModel extends Equatable {
         phone,
         email,
         address,
+        taxNumber,
+        commercialRegister,
         currency,
         timezone,
         isActive,
