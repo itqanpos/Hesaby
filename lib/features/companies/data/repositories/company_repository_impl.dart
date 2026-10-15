@@ -2,6 +2,7 @@
 
 import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
+import '../../../../core/utils/logger.dart';
 import '../../domain/entities/branch.dart';
 import '../../domain/entities/company.dart';
 import '../../domain/repositories/company_repository.dart';
@@ -16,21 +17,25 @@ class CompanyRepositoryImpl implements CompanyRepository {
   final CompanyRemoteDataSource _remoteDataSource;
 
   // ---------------------------------------------------------------------------
-  // Companies — reads
+  // Companies
   // ---------------------------------------------------------------------------
 
   @override
   Future<List<Company>> getMyCompanies() async {
     try {
-      final List<CompanyModel> rows =
+      final List<CompanyModel> models =
           await _remoteDataSource.fetchMyCompanies();
-      return rows.map((CompanyModel m) => m.toEntity()).toList(
-            growable: false,
-          );
-    } on CompanyException {
-      rethrow;
+      return models
+          .map((CompanyModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(error, stackTrace, operation: 'getMyCompanies');
     } on supabase.PostgrestException catch (error, stackTrace) {
       throw _mapPostgrest(error, stackTrace, operation: 'getMyCompanies');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'getMyCompanies');
+    } on CompanyException {
+      rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(error, stackTrace, operation: 'getMyCompanies');
     }
@@ -39,23 +44,39 @@ class CompanyRepositoryImpl implements CompanyRepository {
   @override
   Future<List<Company>> getAllCompanies() async {
     try {
-      final List<CompanyModel> rows =
+      final List<CompanyModel> models =
           await _remoteDataSource.fetchAllCompanies();
-      return rows.map((CompanyModel m) => m.toEntity()).toList(
-            growable: false,
-          );
+      return models
+          .map((CompanyModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'getAllCompanies',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'getAllCompanies',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'getAllCompanies',
+      );
     } on CompanyException {
       rethrow;
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'getAllCompanies');
     } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'getAllCompanies');
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'getAllCompanies',
+      );
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Companies — mutations
-  // ---------------------------------------------------------------------------
 
   @override
   Future<Company> updateCompany({
@@ -71,8 +92,7 @@ class CompanyRepositoryImpl implements CompanyRepository {
     String? commercialRegister,
   }) async {
     try {
-      final CompanyModel updated =
-          await _remoteDataSource.updateCompany(
+      final CompanyModel model = await _remoteDataSource.updateCompany(
         companyId: companyId,
         name: name,
         currency: currency,
@@ -84,11 +104,15 @@ class CompanyRepositoryImpl implements CompanyRepository {
         taxNumber: taxNumber,
         commercialRegister: commercialRegister,
       );
-      return updated.toEntity();
-    } on CompanyException {
-      rethrow;
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(error, stackTrace, operation: 'updateCompany');
     } on supabase.PostgrestException catch (error, stackTrace) {
       throw _mapPostgrest(error, stackTrace, operation: 'updateCompany');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'updateCompany');
+    } on CompanyException {
+      rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(error, stackTrace, operation: 'updateCompany');
     }
@@ -103,7 +127,7 @@ class CompanyRepositoryImpl implements CompanyRepository {
     DateTime? subscribedUntil,
   }) async {
     try {
-      final CompanyModel updated =
+      final CompanyModel model =
           await _remoteDataSource.updateCompanySubscription(
         companyId: companyId,
         subscriptionStatus: subscriptionStatus,
@@ -111,15 +135,27 @@ class CompanyRepositoryImpl implements CompanyRepository {
         billingCycle: billingCycle,
         subscribedUntil: subscribedUntil,
       );
-      return updated.toEntity();
-    } on CompanyException {
-      rethrow;
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'updateCompanySubscription',
+      );
     } on supabase.PostgrestException catch (error, stackTrace) {
       throw _mapPostgrest(
         error,
         stackTrace,
         operation: 'updateCompanySubscription',
       );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'updateCompanySubscription',
+      );
+    } on CompanyException {
+      rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(
         error,
@@ -132,15 +168,35 @@ class CompanyRepositoryImpl implements CompanyRepository {
   @override
   Future<Company> createMyCompany({required String name}) async {
     try {
-      final CompanyModel created =
+      final CompanyModel model =
           await _remoteDataSource.createMyCompany(name: name);
-      return created.toEntity();
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'createMyCompany',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'createMyCompany',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'createMyCompany',
+      );
     } on CompanyException {
       rethrow;
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'createMyCompany');
     } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'createMyCompany');
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'createMyCompany',
+      );
     }
   }
 
@@ -151,36 +207,68 @@ class CompanyRepositoryImpl implements CompanyRepository {
   @override
   Future<List<Branch>> getCompanyBranches(String companyId) async {
     try {
-      final List<BranchModel> rows =
+      final List<BranchModel> models =
           await _remoteDataSource.fetchCompanyBranches(companyId);
-      return rows.map((BranchModel m) => m.toEntity()).toList(
-            growable: false,
-          );
+      return models
+          .map((BranchModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'getCompanyBranches',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'getCompanyBranches',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'getCompanyBranches',
+      );
     } on CompanyException {
       rethrow;
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'getCompanyBranches');
     } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'getCompanyBranches');
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'getCompanyBranches',
+      );
     }
   }
 
   @override
   Future<List<Branch>> getAllCompanyBranches(String companyId) async {
     try {
-      final List<BranchModel> rows =
+      final List<BranchModel> models =
           await _remoteDataSource.fetchAllCompanyBranches(companyId);
-      return rows.map((BranchModel m) => m.toEntity()).toList(
-            growable: false,
-          );
-    } on CompanyException {
-      rethrow;
+      return models
+          .map((BranchModel model) => model.toEntity())
+          .toList(growable: false);
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'getAllCompanyBranches',
+      );
     } on supabase.PostgrestException catch (error, stackTrace) {
       throw _mapPostgrest(
         error,
         stackTrace,
         operation: 'getAllCompanyBranches',
       );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'getAllCompanyBranches',
+      );
+    } on CompanyException {
+      rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(
         error,
@@ -203,18 +291,22 @@ class CompanyRepositoryImpl implements CompanyRepository {
     String? phone,
   }) async {
     try {
-      final BranchModel created = await _remoteDataSource.insertBranch(
+      final BranchModel model = await _remoteDataSource.insertBranch(
         companyId: companyId,
         name: name,
         code: code,
         address: address,
         phone: phone,
       );
-      return created.toEntity();
-    } on CompanyException {
-      rethrow;
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(error, stackTrace, operation: 'createBranch');
     } on supabase.PostgrestException catch (error, stackTrace) {
       throw _mapPostgrest(error, stackTrace, operation: 'createBranch');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'createBranch');
+    } on CompanyException {
+      rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(error, stackTrace, operation: 'createBranch');
     }
@@ -229,18 +321,22 @@ class CompanyRepositoryImpl implements CompanyRepository {
     String? phone,
   }) async {
     try {
-      final BranchModel updated = await _remoteDataSource.updateBranch(
+      final BranchModel model = await _remoteDataSource.updateBranch(
         branchId: branchId,
         name: name,
         code: code,
         address: address,
         phone: phone,
       );
-      return updated.toEntity();
-    } on CompanyException {
-      rethrow;
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(error, stackTrace, operation: 'updateBranch');
     } on supabase.PostgrestException catch (error, stackTrace) {
       throw _mapPostgrest(error, stackTrace, operation: 'updateBranch');
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(error, stackTrace, operation: 'updateBranch');
+    } on CompanyException {
+      rethrow;
     } on Object catch (error, stackTrace) {
       throw _mapUnknown(error, stackTrace, operation: 'updateBranch');
     }
@@ -252,64 +348,166 @@ class CompanyRepositoryImpl implements CompanyRepository {
     required bool isActive,
   }) async {
     try {
-      final BranchModel updated = await _remoteDataSource.updateBranchActive(
+      final BranchModel model = await _remoteDataSource.updateBranchActive(
         branchId: branchId,
         isActive: isActive,
       );
-      return updated.toEntity();
+      return model.toEntity();
+    } on FormatException catch (error, stackTrace) {
+      throw _mapInvalidResponse(
+        error,
+        stackTrace,
+        operation: 'setBranchActive',
+      );
+    } on supabase.PostgrestException catch (error, stackTrace) {
+      throw _mapPostgrest(
+        error,
+        stackTrace,
+        operation: 'setBranchActive',
+      );
+    } on supabase.AuthException catch (error, stackTrace) {
+      throw _mapAuth(
+        error,
+        stackTrace,
+        operation: 'setBranchActive',
+      );
     } on CompanyException {
       rethrow;
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'setBranchActive');
     } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'setBranchActive');
+      throw _mapUnknown(
+        error,
+        stackTrace,
+        operation: 'setBranchActive',
+      );
     }
   }
-}
 
-// ============================================================================
-// Error mapping
-// ============================================================================
+  // ---------------------------------------------------------------------------
+  // Error mapping
+  // ---------------------------------------------------------------------------
 
-CompanyException _mapPostgrest(
-  supabase.PostgrestException error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  final CompanyFailureType type = _classify(error);
-  return CompanyException(
-    type: type,
-    cause: error,
-    stackTrace: stackTrace,
-  );
-}
-
-CompanyException _mapUnknown(
-  Object error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  return CompanyException(
-    type: CompanyFailureType.unknown,
-    cause: error,
-    stackTrace: stackTrace,
-  );
-}
-
-CompanyFailureType _classify(supabase.PostgrestException error) {
-  final String code = (error.code ?? '').toUpperCase();
-  final String message = error.message.toLowerCase();
-
-  if (code == 'PGRST116') {
-    return CompanyFailureType.companyNotAccessible;
+  static CompanyException _mapInvalidResponse(
+    FormatException error,
+    StackTrace stackTrace, {
+    required String operation,
+  }) {
+    AppLogger.error(
+      'Invalid response during "$operation" '
+      '(FormatException).',
+      error,
+      stackTrace,
+    );
+    return CompanyException(
+      type: CompanyFailureType.invalidResponse,
+      cause: error,
+      stackTrace: stackTrace,
+    );
   }
-  if (code.startsWith('42501') || code.startsWith('28')) {
-    return CompanyFailureType.unauthorized;
+
+  static CompanyException _mapPostgrest(
+    supabase.PostgrestException error,
+    StackTrace stackTrace, {
+    required String operation,
+  }) {
+    final CompanyFailureType type = _classifyPostgrest(error);
+
+    AppLogger.warning(
+      'PostgREST error during "$operation" mapped to ${type.name} '
+      '(code: ${error.code ?? 'n/a'}).',
+    );
+
+    return CompanyException(
+      type: type,
+      cause: error,
+      stackTrace: stackTrace,
+    );
   }
-  if (message.contains('permission denied') ||
-      message.contains('row level security') ||
-      message.contains('jwt')) {
-    return CompanyFailureType.unauthorized;
+
+  static CompanyException _mapAuth(
+    supabase.AuthException error,
+    StackTrace stackTrace, {
+    required String operation,
+  }) {
+    AppLogger.warning(
+      'Auth error during "$operation" mapped to unauthorized '
+      '(code: ${error.code ?? 'n/a'}).',
+    );
+
+    return CompanyException(
+      type: CompanyFailureType.unauthorized,
+      cause: error,
+      stackTrace: stackTrace,
+    );
   }
-  return CompanyFailureType.unknown;
+
+  static CompanyException _mapUnknown(
+    Object error,
+    StackTrace stackTrace, {
+    required String operation,
+  }) {
+    final CompanyFailureType type = _looksLikeNetworkFailure(error)
+        ? CompanyFailureType.network
+        : CompanyFailureType.unknown;
+
+    AppLogger.error(
+      'Unhandled error during "$operation" '
+      '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
+      error,
+      stackTrace,
+    );
+
+    return CompanyException(
+      type: type,
+      cause: error,
+      stackTrace: stackTrace,
+    );
+  }
+
+  static CompanyFailureType _classifyPostgrest(
+    supabase.PostgrestException error,
+  ) {
+    final String code = (error.code ?? '').toLowerCase();
+    final String message = error.message.toLowerCase();
+
+    if (code.startsWith('42501')) {
+      return CompanyFailureType.unauthorized;
+    }
+    if (code.startsWith('28')) {
+      return CompanyFailureType.unauthorized;
+    }
+    if (code.startsWith('23')) {
+      return CompanyFailureType.invalidResponse;
+    }
+    if (code.startsWith('42')) {
+      return CompanyFailureType.invalidResponse;
+    }
+
+    if (message.contains('permission denied') ||
+        message.contains('row level security') ||
+        message.contains('jwt')) {
+      return CompanyFailureType.unauthorized;
+    }
+
+    if (_messageLooksLikeNetwork(message)) {
+      return CompanyFailureType.network;
+    }
+
+    return CompanyFailureType.unknown;
+  }
+
+  static bool _looksLikeNetworkFailure(Object error) {
+    final String description = error.toString().toLowerCase();
+    return _messageLooksLikeNetwork(description);
+  }
+
+  static bool _messageLooksLikeNetwork(String value) {
+    return value.contains('socket') ||
+        value.contains('network') ||
+        value.contains('connection') ||
+        value.contains('timeout') ||
+        value.contains('timed out') ||
+        value.contains('unreachable') ||
+        value.contains('failed host lookup') ||
+        value.contains('clientexception');
+  }
 }
