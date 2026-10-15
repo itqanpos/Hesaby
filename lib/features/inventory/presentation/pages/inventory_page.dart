@@ -34,13 +34,7 @@ import '../providers/inventory_providers.dart';
 /// * Manual adjustments are reached only from the per-card overflow menu
 ///   **and** only when the current member holds
 ///   [MemberPermission.inventoryAdjust].
-///
-/// Unit handling:
-/// `inventory_balances.quantity_on_hand` is always expressed in the
-/// product's **base** unit. When the operator records a manual movement
-/// in a non-base unit (e.g. "بلته"), the dialog multiplies the entered
-/// quantity by the unit's conversion factor before persisting it. The
-/// original `unit_id` is stored on the row for reporting only.
+/// * The AppBar action opens the stock-count sessions list.
 class InventoryPage extends ConsumerStatefulWidget {
   const InventoryPage({super.key});
 
@@ -101,6 +95,11 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
       appBar: AppBar(
         title: const Text('المخزون'),
         actions: <Widget>[
+          IconButton(
+            tooltip: 'جلسات الجرد',
+            onPressed: () => _openStockCount(context),
+            icon: const Icon(Icons.fact_check_outlined),
+          ),
           IconButton(
             tooltip: 'سجل الحركات',
             onPressed: anyLoading || firstError != null
@@ -300,6 +299,10 @@ class _InventoryPageState extends ConsumerState<InventoryPage> {
       },
     );
   }
+
+  void _openStockCount(BuildContext context) {
+    context.pushNamed(AppRouter.stockCountSessionsName);
+  }
 }
 
 // -----------------------------------------------------------------------------
@@ -455,10 +458,7 @@ class _BalanceCard extends StatelessWidget {
   final InventoryBalance balance;
   final String productName;
   final String? sku;
-
-  /// Whether the current member is allowed to record manual adjustments.
   final bool canAdjust;
-
   final VoidCallback onOpenMovements;
   final VoidCallback onAdjust;
 
@@ -475,9 +475,6 @@ class _BalanceCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        // Tapping the card opens the movement history — the natural
-        // "details" view. Adjustments are reachable only from the
-        // overflow menu so an accidental tap never opens the dialog.
         onTap: onOpenMovements,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -566,8 +563,6 @@ class _BalanceCard extends StatelessWidget {
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
-                  // Adjust is only offered when the current member holds
-                  // the `inventory.adjust` permission.
                   if (canAdjust)
                     const PopupMenuItem<_BalanceAction>(
                       value: _BalanceAction.adjust,
@@ -623,8 +618,6 @@ class _StockAdjustmentDialog extends ConsumerStatefulWidget {
   final String branchId;
   final String productId;
   final String productName;
-
-  /// Current balance in **base units**.
   final double currentQuantity;
 
   @override
@@ -639,15 +632,7 @@ class _StockAdjustmentDialogState
   final TextEditingController _unitCostController = TextEditingController();
   final TextEditingController _notesController = TextEditingController();
 
-  /// One of:
-  /// * [StockMovementType.openingBalance] — first-ever movement, only
-  ///   offered when the current balance is zero.
-  /// * [StockMovementType.adjustmentIn]   — add stock.
-  /// * [StockMovementType.adjustmentOut]  — remove stock.
   String _movementType = StockMovementType.adjustmentIn;
-
-  /// Currently selected unit option. Resolved on first build when the
-  /// base unit is available.
   String? _selectedUnitId;
 
   bool _isSubmitting = false;
@@ -664,10 +649,6 @@ class _StockAdjustmentDialogState
     _notesController.dispose();
     super.dispose();
   }
-
-  // ---------------------------------------------------------------------------
-  // Unit option resolution
-  // ---------------------------------------------------------------------------
 
   List<_UnitOption> _buildUnitOptions(
     List<ProductUnit> productUnits,
@@ -713,13 +694,8 @@ class _StockAdjustmentDialogState
         if (o.id == id) return o;
       }
     }
-    // Fall back to the base unit (first element).
     return options.first;
   }
-
-  // ---------------------------------------------------------------------------
-  // Submit
-  // ---------------------------------------------------------------------------
 
   Future<void> _submit(List<_UnitOption> options) async {
     FocusScope.of(context).unfocus();
@@ -744,13 +720,10 @@ class _StockAdjustmentDialogState
       return;
     }
 
-    // Convert to base units before persisting.
     final double baseQuantity = enteredQuantity * unit.conversionFactor;
     final double signedBaseQuantity =
         _isIncoming ? baseQuantity : -baseQuantity;
 
-    // Unit cost: user enters cost per the *selected* unit; we store the
-    // per-base-unit cost.
     final String costText = _unitCostController.text.trim();
     final double? enteredUnitCost = costText.isEmpty
         ? null
@@ -794,10 +767,6 @@ class _StockAdjustmentDialogState
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
@@ -810,7 +779,6 @@ class _StockAdjustmentDialogState
     final AsyncValue<List<Product>> productsAsync =
         ref.watch(productsProvider);
 
-    // Resolve base unit id from the products list.
     String? baseUnitId;
     productsAsync.whenData((List<Product> products) {
       for (final Product p in products) {
@@ -845,7 +813,6 @@ class _StockAdjustmentDialogState
         widget.currentQuantity <= 0 &&
             _movementType != StockMovementType.adjustmentOut;
 
-    // Live preview: entered × conversion.
     final double? entered = double.tryParse(_quantityController.text.trim());
     final double? basePreview =
         (entered == null || selected == null)
@@ -864,7 +831,6 @@ class _StockAdjustmentDialogState
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                // ---- Current balance ----
                 Text(
                   'الرصيد الحالي: '
                   '${AppFormatters.quantity(widget.currentQuantity)} '
@@ -873,7 +839,6 @@ class _StockAdjustmentDialogState
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Movement type ----
                 SegmentedButton<String>(
                   segments: <ButtonSegment<String>>[
                     if (showOpening)
@@ -905,7 +870,6 @@ class _StockAdjustmentDialogState
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Unit selector ----
                 if (options.length > 1)
                   DropdownButtonFormField<String>(
                     initialValue: selected?.id,
@@ -935,7 +899,6 @@ class _StockAdjustmentDialogState
                   ),
                 if (options.length > 1) const SizedBox(height: 12),
 
-                // ---- Quantity ----
                 AppTextField(
                   controller: _quantityController,
                   label: 'الكمية (${selected?.name ?? "وحدة"})',
@@ -953,7 +916,6 @@ class _StockAdjustmentDialogState
                     if (parsed == null) return 'الرجاء إدخال رقم صحيح';
                     if (parsed <= 0) return 'يجب أن تكون الكمية أكبر من صفر';
 
-                    // Early validation for outgoing movements.
                     if (_movementType ==
                             StockMovementType.adjustmentOut &&
                         selected != null) {
@@ -971,7 +933,6 @@ class _StockAdjustmentDialogState
                   },
                 ),
 
-                // ---- Conversion preview ----
                 if (basePreview != null &&
                     selected != null &&
                     !selected.isBase) ...<Widget>[
@@ -1013,7 +974,6 @@ class _StockAdjustmentDialogState
                   ),
                 ],
 
-                // ---- Unit cost (incoming only) ----
                 if (_isIncoming) ...<Widget>[
                   const SizedBox(height: 12),
                   AppTextField(
@@ -1038,7 +998,6 @@ class _StockAdjustmentDialogState
 
                 const SizedBox(height: 12),
 
-                // ---- Notes ----
                 AppTextField(
                   controller: _notesController,
                   label: 'ملاحظات — اختياري',
