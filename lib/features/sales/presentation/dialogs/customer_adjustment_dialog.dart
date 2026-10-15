@@ -7,22 +7,30 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../domain/entities/customer_adjustment.dart';
+import '../../domain/entities/customer_payment.dart';
 import '../../domain/entities/sale_entities.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../providers/sales_providers.dart';
 
+/// The three operations the adjustment sheet can perform.
+enum _AdjustmentMode {
+  /// Increase the customer's balance (e.g. opening balance, penalty).
+  increase,
+
+  /// Decrease the balance without recording a payment — pure correction.
+  decrease,
+
+  /// Decrease the balance AND record a `customer_payments` row.
+  collect,
+}
+
 /// Opens the customer balance adjustment dialog.
 ///
-/// Returns the updated [Customer] when the adjustment was successfully
-/// recorded, or `null` when the operator cancelled. The caller is expected
-/// to keep any in-memory copy of the customer in sync with the returned
-/// value.
-///
-/// An adjustment is a **signed** delta:
-/// * a positive amount increases what the customer owes (e.g. opening
-///   balance, penalty),
-/// * a negative amount decreases it (e.g. goodwill discount, correction).
+/// Returns the updated [Customer] when the operation was successfully
+/// recorded, or `null` when the operator cancelled.
 Future<Customer?> showCustomerAdjustmentDialog({
   required BuildContext context,
   required String customerId,
@@ -67,9 +75,12 @@ class _CustomerAdjustmentSheetState
     extends ConsumerState<_CustomerAdjustmentSheet> {
   late final TextEditingController _amountController;
   late final TextEditingController _notesController;
+  late final TextEditingController _referenceController;
 
-  bool _isIncrease = true;
+  _AdjustmentMode _mode = _AdjustmentMode.increase;
   String _reason = AdjustmentReason.openingBalance;
+  String _paymentMethod = PaymentMethod.cash;
+
   bool _isSubmitting = false;
   CustomerFailureType? _serverFailure;
 
@@ -78,6 +89,7 @@ class _CustomerAdjustmentSheetState
     super.initState();
     _amountController = TextEditingController();
     _notesController = TextEditingController();
+    _referenceController = TextEditingController();
     _amountController.addListener(_onAmountChanged);
   }
 
@@ -86,6 +98,7 @@ class _CustomerAdjustmentSheetState
     _amountController.removeListener(_onAmountChanged);
     _amountController.dispose();
     _notesController.dispose();
+    _referenceController.dispose();
     super.dispose();
   }
 
@@ -103,7 +116,20 @@ class _CustomerAdjustmentSheetState
   double get _inputAmount =>
       double.tryParse(_amountController.text.trim()) ?? 0;
 
-  double get _signedAmount => _isIncrease ? _inputAmount : -_inputAmount;
+  /// The amount that gets applied to the balance, signed.
+  ///
+  /// * increase → +input
+  /// * decrease → -input
+  /// * collect  → -input
+  double get _signedAmount {
+    switch (_mode) {
+      case _AdjustmentMode.increase:
+        return _inputAmount;
+      case _AdjustmentMode.decrease:
+      case _AdjustmentMode.collect:
+        return -_inputAmount;
+    }
+  }
 
   double get _resultingBalance => widget.currentBalance + _signedAmount;
 
@@ -115,7 +141,7 @@ class _CustomerAdjustmentSheetState
     if (_inputAmount <= 0) {
       return 'المبلغ يجب أن يكون أكبر من صفر.';
     }
-    if (!_isIncrease && _resultingBalance < 0) {
+    if (_mode != _AdjustmentMode.increase && _resultingBalance < 0) {
       return 'التخفيض يتجاوز الرصيد الحالي.';
     }
     return null;
@@ -142,12 +168,11 @@ class _CustomerAdjustmentSheetState
         : _notesController.text.trim();
 
     try {
-      await ref.read(customersProvider.notifier).addAdjustment(
-            customerId: widget.customerId,
-            amount: _signedAmount,
-            reason: _reason,
-            notes: notes,
-          );
+      if (_mode == _AdjustmentMode.collect) {
+        await _submitCollect(notes: notes);
+      } else {
+        await _submitAdjustment(notes: notes);
+      }
 
       // Fetch the fresh customer directly from the repository so the
       // returned balance is guaranteed to reflect the DB trigger's
@@ -179,16 +204,65 @@ class _CustomerAdjustmentSheetState
     }
   }
 
-  void _selectDirection({required bool increase}) {
+  Future<void> _submitAdjustment({required String? notes}) async {
+    await ref.read(customersProvider.notifier).addAdjustment(
+          customerId: widget.customerId,
+          amount: _signedAmount,
+          reason: _reason,
+          notes: notes,
+        );
+  }
+
+  Future<void> _submitCollect({required String? notes}) async {
+    // The company id is required by `recordPayment`. It is resolved
+    // from the active company context.
+    final CompanyContextState ctx = ref.read(companyContextProvider);
+    final String? companyId = ctx.currentCompany?.id;
+    if (companyId == null) {
+      throw const CustomerException(
+        type: CustomerFailureType.unauthorized,
+        cause: 'No company is currently selected.',
+      );
+    }
+
+    final String? reference = _referenceController.text.trim().isEmpty
+        ? null
+        : _referenceController.text.trim();
+
+    await ref.read(customersProvider.notifier).recordPayment(
+          companyId: companyId,
+          customerId: widget.customerId,
+          amount: _inputAmount,
+          method: _paymentMethod,
+          reference: reference,
+          notes: notes,
+        );
+  }
+
+  void _selectMode(_AdjustmentMode mode) {
     setState(() {
-      _isIncrease = increase;
+      _mode = mode;
       _serverFailure = null;
+
+      // Default reason for increase/decrease: opening balance / correction.
+      if (mode == _AdjustmentMode.increase) {
+        _reason = AdjustmentReason.openingBalance;
+      } else if (mode == _AdjustmentMode.decrease) {
+        _reason = AdjustmentReason.correction;
+      }
     });
   }
 
   void _selectReason(String reason) {
     setState(() {
       _reason = reason;
+      _serverFailure = null;
+    });
+  }
+
+  void _selectPaymentMethod(String method) {
+    setState(() {
+      _paymentMethod = method;
       _serverFailure = null;
     });
   }
@@ -212,6 +286,7 @@ class _CustomerAdjustmentSheetState
 
     final double resulting = _resultingBalance;
     final bool resultingIsValid = resulting >= 0;
+    final bool isCollect = _mode == _AdjustmentMode.collect;
 
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
@@ -266,32 +341,57 @@ class _CustomerAdjustmentSheetState
 
                   const SizedBox(height: 16),
 
-                  Text('نوع التعديل', style: theme.textTheme.labelLarge),
+                  Text('نوع العملية', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 8),
+
+                  // Three tiles, arranged in one row.
                   Row(
                     children: <Widget>[
                       Expanded(
                         child: _DirectionTile(
-                          label: 'زيادة الرصيد',
+                          label: 'زيادة',
                           icon: Icons.arrow_upward,
-                          selected: _isIncrease,
+                          selected: _mode == _AdjustmentMode.increase,
                           enabled: !_isSubmitting,
                           color: scheme.error,
-                          onTap: () => _selectDirection(increase: true),
+                          onTap: () =>
+                              _selectMode(_AdjustmentMode.increase),
                         ),
                       ),
                       const SizedBox(width: 6),
                       Expanded(
                         child: _DirectionTile(
-                          label: 'تخفيض الرصيد',
+                          label: 'تخفيض',
                           icon: Icons.arrow_downward,
-                          selected: !_isIncrease,
+                          selected: _mode == _AdjustmentMode.decrease,
+                          enabled: !_isSubmitting,
+                          color: const Color(0xFFE65100),
+                          onTap: () =>
+                              _selectMode(_AdjustmentMode.decrease),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _DirectionTile(
+                          label: 'تحصيل',
+                          icon: Icons.payments_outlined,
+                          selected: isCollect,
                           enabled: !_isSubmitting,
                           color: scheme.primary,
-                          onTap: () => _selectDirection(increase: false),
+                          onTap: () =>
+                              _selectMode(_AdjustmentMode.collect),
                         ),
                       ),
                     ],
+                  ),
+
+                  // Contextual hint.
+                  const SizedBox(height: 6),
+                  Text(
+                    _modeDescription(_mode),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
                   ),
 
                   const SizedBox(height: 16),
@@ -304,15 +404,37 @@ class _CustomerAdjustmentSheetState
                     hasError: displayError != null,
                   ),
 
-                  const SizedBox(height: 16),
+                  // Payment-method selector — only for "تحصيل".
+                  if (isCollect) ...<Widget>[
+                    const SizedBox(height: 16),
+                    Text('طريقة الدفع',
+                        style: theme.textTheme.labelLarge),
+                    const SizedBox(height: 8),
+                    _PaymentMethodSelector(
+                      selected: _paymentMethod,
+                      enabled: !_isSubmitting,
+                      onChanged: _selectPaymentMethod,
+                    ),
+                    const SizedBox(height: 12),
+                    AppTextField(
+                      controller: _referenceController,
+                      label: 'المرجع — اختياري',
+                      hint: 'رقم إيصال أو معرّف عملية',
+                      enabled: !_isSubmitting,
+                    ),
+                  ],
 
-                  Text('السبب', style: theme.textTheme.labelLarge),
-                  const SizedBox(height: 8),
-                  _ReasonDropdown(
-                    value: _reason,
-                    enabled: !_isSubmitting,
-                    onChanged: _selectReason,
-                  ),
+                  // Reason selector — for increase/decrease only.
+                  if (!isCollect) ...<Widget>[
+                    const SizedBox(height: 16),
+                    Text('السبب', style: theme.textTheme.labelLarge),
+                    const SizedBox(height: 8),
+                    _ReasonDropdown(
+                      value: _reason,
+                      enabled: !_isSubmitting,
+                      onChanged: _selectReason,
+                    ),
+                  ],
 
                   const SizedBox(height: 12),
 
@@ -335,15 +457,21 @@ class _CustomerAdjustmentSheetState
                     value: AppFormatters.money(widget.currentBalance),
                   ),
                   _SummaryLine(
-                    label: _isIncrease ? 'الزيادة' : 'التخفيض',
+                    label: _mode == _AdjustmentMode.increase
+                        ? 'الزيادة'
+                        : (isCollect ? 'المُحصَّل' : 'التخفيض'),
                     value: AppFormatters.money(
                       _inputAmount < 0 ? 0 : _inputAmount,
                     ),
-                    color: _isIncrease ? scheme.error : scheme.primary,
+                    color: _mode == _AdjustmentMode.increase
+                        ? scheme.error
+                        : scheme.primary,
                   ),
                   _SummaryLine(
-                    label: 'الرصيد بعد التعديل',
-                    value: AppFormatters.money(resulting < 0 ? 0 : resulting),
+                    label: 'الرصيد بعد العملية',
+                    value: AppFormatters.money(
+                      resulting < 0 ? 0 : resulting,
+                    ),
                     emphasized: true,
                     color: resultingIsValid ? null : scheme.error,
                   ),
@@ -351,8 +479,10 @@ class _CustomerAdjustmentSheetState
                   const SizedBox(height: 20),
 
                   AppButton(
-                    label: 'تسجيل التعديل',
-                    icon: Icons.save_outlined,
+                    label: isCollect ? 'تسجيل التحصيل' : 'تسجيل التعديل',
+                    icon: isCollect
+                        ? Icons.payments_outlined
+                        : Icons.save_outlined,
                     expanded: true,
                     size: AppButtonSize.large,
                     isLoading: _isSubmitting,
@@ -543,6 +673,105 @@ class _AmountField extends StatelessWidget {
   }
 }
 
+class _PaymentMethodSelector extends StatelessWidget {
+  const _PaymentMethodSelector({
+    required this.selected,
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final String selected;
+  final bool enabled;
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Row(
+      children: <Widget>[
+        for (int i = 0; i < PaymentMethod.all.length; i++) ...<Widget>[
+          if (i > 0) const SizedBox(width: 6),
+          Expanded(
+            child: _MethodTile(
+              method: PaymentMethod.all[i],
+              selected: selected == PaymentMethod.all[i],
+              enabled: enabled,
+              onTap: () => onChanged(PaymentMethod.all[i]),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _MethodTile extends StatelessWidget {
+  const _MethodTile({
+    required this.method,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String method;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    final IconData icon;
+    final String label;
+    switch (method) {
+      case PaymentMethod.cash:
+        icon = Icons.payments_outlined;
+        label = 'نقدي';
+      case PaymentMethod.card:
+        icon = Icons.credit_card;
+        label = 'بطاقة';
+      case PaymentMethod.transfer:
+        icon = Icons.account_balance_outlined;
+        label = 'تحويل';
+      default:
+        icon = Icons.help_outline;
+        label = method;
+    }
+
+    return Material(
+      color: selected ? scheme.primary : scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: enabled ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 12),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                icon,
+                size: 20,
+                color: selected ? scheme.onPrimary : scheme.onSurface,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: theme.textTheme.labelMedium?.copyWith(
+                  color: selected ? scheme.onPrimary : scheme.onSurface,
+                  fontWeight:
+                      selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ReasonDropdown extends StatelessWidget {
   const _ReasonDropdown({
     required this.value,
@@ -681,6 +910,17 @@ class _ErrorBanner extends StatelessWidget {
 // Localization
 // ============================================================================
 
+String _modeDescription(_AdjustmentMode mode) {
+  switch (mode) {
+    case _AdjustmentMode.increase:
+      return 'زيادة المديونية — بلا تسجيل دفعة.';
+    case _AdjustmentMode.decrease:
+      return 'تخفيض يدوي — بلا تسجيل دفعة (تصحيح).';
+    case _AdjustmentMode.collect:
+      return 'تحصيل دفعة من العميل — يُسجَّل في كشف الحساب.';
+  }
+}
+
 String _reasonLabel(String reason) {
   switch (reason) {
     case AdjustmentReason.openingBalance:
@@ -721,6 +961,6 @@ String _failureMessageFor(CustomerFailureType type) {
     case CustomerFailureType.invalidResponse:
       return 'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.';
     case CustomerFailureType.unknown:
-      return 'تعذّر تسجيل التعديل. يرجى المحاولة مرة أخرى.';
+      return 'تعذّر تسجيل العملية. يرجى المحاولة مرة أخرى.';
   }
 }
