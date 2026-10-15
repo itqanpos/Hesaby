@@ -184,7 +184,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
     required Map<String, String> customerNames,
   }) async {
     try {
-      // Fetch sales AND standalone customer payments in parallel.
       final List<Object> results = await Future.wait<Object>(<Future<Object>>[
         _remoteDataSource.fetchSales(
           companyId: companyId,
@@ -203,7 +202,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
       final List<Map<String, dynamic>> payments =
           (results[1] as List<Map<String, dynamic>>);
 
-      // Aggregate sales per customer.
       final Map<String, _CustomerAgg> byCustomer =
           <String, _CustomerAgg>{};
 
@@ -220,9 +218,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
             .add(total, paid);
       }
 
-      // Fold standalone customer payments into the paid totals.
-      // These payments are not attached to a specific sale; they reduce
-      // the customer's running balance directly.
       for (final Map<String, dynamic> row in payments) {
         final String? customerId = row['customer_id'] is String
             ? row['customer_id'] as String
@@ -692,7 +687,6 @@ class ReportsRepositoryImpl implements ReportsRepository {
         }
       }
 
-      // Signed cost per product, using movement_type (see P&L above).
       for (final Map<String, dynamic> row in movements) {
         final String productId = _asString(row['product_id']);
         if (productId.isEmpty) continue;
@@ -819,6 +813,11 @@ class ReportsRepositoryImpl implements ReportsRepository {
   }) async {
     try {
       // Fetch purchases AND standalone supplier payments in parallel.
+      //
+      // NOTE: `purchases` does NOT have a `paid_amount` column. Every
+      // payment (whether tied to a purchase via `purchase_id` or
+      // standalone) lives in `supplier_payments`. The invoice count comes
+      // from `purchases`; the paid amount comes from `supplier_payments`.
       final List<Object> results = await Future.wait<Object>(<Future<Object>>[
         _remoteDataSource.fetchPurchases(
           companyId: companyId,
@@ -834,16 +833,18 @@ class ReportsRepositoryImpl implements ReportsRepository {
 
       final List<Map<String, dynamic>> rows =
           (results[0] as List<Map<String, dynamic>>);
-      final List<Map<String, dynamic>> standalonePayments =
+      final List<Map<String, dynamic>> payments =
           (results[1] as List<Map<String, dynamic>>);
 
-      if (rows.isEmpty && standalonePayments.isEmpty) {
+      if (rows.isEmpty && payments.isEmpty) {
         return PayablesReport.empty(period);
       }
 
       final Map<String, _SupplierAgg> bySupplier =
           <String, _SupplierAgg>{};
 
+      // Purchases: bump invoice count + add total.
+      // Paid = 0 here; payment rows add the money separately.
       for (final Map<String, dynamic> row in rows) {
         final String? sid = row['supplier_id'] is String
             ? row['supplier_id'] as String
@@ -852,14 +853,11 @@ class ReportsRepositoryImpl implements ReportsRepository {
 
         bySupplier
             .putIfAbsent(sid, () => _SupplierAgg())
-            .add(
-              _asDouble(row['total']),
-              _asDouble(row['paid_amount']),
-            );
+            .add(_asDouble(row['total']), 0);
       }
 
-      // Fold standalone supplier payments into the paid totals.
-      for (final Map<String, dynamic> row in standalonePayments) {
+      // Payments: only add to the paid bucket.
+      for (final Map<String, dynamic> row in payments) {
         final String? sid = row['supplier_id'] is String
             ? row['supplier_id'] as String
             : null;
@@ -1317,18 +1315,12 @@ class _CustomerAgg {
   double spent = 0;
   double paid = 0;
 
-  /// Adds a sale: bumps invoice count, and adds to spent + paid.
   void add(double total, double paidAmount) {
     count++;
     spent += total;
     paid += paidAmount;
   }
 
-  /// Adds a standalone customer payment (not tied to a sale).
-  ///
-  /// Increases `paid` only. The invoice count is NOT bumped, and `spent`
-  /// is NOT affected — the debt was already recorded when the sale was
-  /// created; this payment just reduces it.
   void addStandalonePayment(double amount) {
     paid += amount;
   }
@@ -1361,17 +1353,12 @@ class _SupplierAgg {
   double purchases = 0;
   double paid = 0;
 
-  /// Adds a purchase: bumps invoice count, adds to purchases + paid.
   void add(double total, double paidAmount) {
     count++;
     purchases += total;
     paid += paidAmount;
   }
 
-  /// Adds a standalone supplier payment (not tied to a purchase).
-  ///
-  /// Increases `paid` only. The invoice count is NOT bumped, and
-  /// `purchases` is NOT affected.
   void addStandalonePayment(double amount) {
     paid += amount;
   }
