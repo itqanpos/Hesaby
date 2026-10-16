@@ -16,6 +16,26 @@ class ReportsRemoteDataSource {
   static const int saleItemsSafetyLimit = 50000;
   static const int inFilterChunkSize = 150;
 
+  /// PostgREST returns at most one page per request (server max rows, often
+  /// 1000). Requesting a bare `limit` silently truncates results. This pages
+  /// through all rows; the caller must supply a deterministic `order`.
+  static const int _pageSize = 1000;
+
+  static Future<List<Map<String, dynamic>>> _pageAll(
+    Future<List<Map<String, dynamic>>> Function(int from, int to) fetchPage,
+  ) async {
+    final List<Map<String, dynamic>> all = <Map<String, dynamic>>[];
+    int from = 0;
+    while (true) {
+      final List<Map<String, dynamic>> rows =
+          await fetchPage(from, from + _pageSize - 1);
+      all.addAll(rows);
+      if (rows.length < _pageSize) break;
+      from += _pageSize;
+    }
+    return all;
+  }
+
   /// The movement types that contribute to the *cost* side of a sale.
   ///
   /// `sale_out` moves stock out with a **negative** quantity.
@@ -52,10 +72,27 @@ class ReportsRemoteDataSource {
       query = query.lte('sale_date', _formatTimestamp(toDate));
     }
 
-    final int effectiveLimit =
-        (limit == null || limit <= 0) ? safetyLimit : limit;
+    if (limit != null && limit > 0) {
+      return await query.limit(limit);
+    }
 
-    return await query.limit(effectiveLimit);
+    // بلا حد: ترقيم كامل كي تكون المجاميع كاملة (لا اقتطاع صامت).
+    return _pageAll((int from, int to) {
+      var paged = client
+          .from('sales')
+          .select(
+            'id, status, total, paid_amount, discount, tax_amount, '
+            'customer_id, created_by, sale_date',
+          )
+          .eq('company_id', companyId);
+      if (fromDate != null) {
+        paged = paged.gte('sale_date', _formatTimestamp(fromDate));
+      }
+      if (toDate != null) {
+        paged = paged.lte('sale_date', _formatTimestamp(toDate));
+      }
+      return paged.order('id').range(from, to);
+    });
   }
 
   Future<List<String>> fetchConfirmedSaleIds({
@@ -65,20 +102,22 @@ class ReportsRemoteDataSource {
   }) async {
     final SupabaseClient client = _requireClient();
 
-    var query = client
-        .from('sales')
-        .select('id')
-        .eq('company_id', companyId)
-        .eq('status', 'confirmed');
-
-    if (fromDate != null) {
-      query = query.gte('sale_date', _formatTimestamp(fromDate));
-    }
-    if (toDate != null) {
-      query = query.lte('sale_date', _formatTimestamp(toDate));
-    }
-
-    final List<Map<String, dynamic>> rows = await query.limit(safetyLimit);
+    final List<Map<String, dynamic>> rows = await _pageAll(
+      (int from, int to) {
+        var paged = client
+            .from('sales')
+            .select('id')
+            .eq('company_id', companyId)
+            .eq('status', 'confirmed');
+        if (fromDate != null) {
+          paged = paged.gte('sale_date', _formatTimestamp(fromDate));
+        }
+        if (toDate != null) {
+          paged = paged.lte('sale_date', _formatTimestamp(toDate));
+        }
+        return paged.order('id').range(from, to);
+      },
+    );
 
     return rows
         .map((Map<String, dynamic> r) => r['id'])
@@ -102,10 +141,14 @@ class ReportsRemoteDataSource {
           : saleIds.length;
       final List<String> chunk = saleIds.sublist(i, end);
 
-      final List<Map<String, dynamic>> rows = await client
-          .from('sale_items')
-          .select('product_id, quantity, unit_price, line_total, sale_id')
-          .inFilter('sale_id', chunk);
+      final List<Map<String, dynamic>> rows = await _pageAll(
+        (int from, int to) => client
+            .from('sale_items')
+            .select('product_id, quantity, unit_price, line_total, sale_id')
+            .inFilter('sale_id', chunk)
+            .order('id')
+            .range(from, to),
+      );
 
       allRows.addAll(rows);
     }
@@ -130,13 +173,16 @@ class ReportsRemoteDataSource {
           : customerIds.length;
       final List<String> chunk = customerIds.sublist(i, end);
 
-      final List<Map<String, dynamic>> rows = await client
-          .from('sales')
-          .select('customer_id, sale_date, total')
-          .eq('company_id', companyId)
-          .eq('status', 'confirmed')
-          .inFilter('customer_id', chunk)
-          .limit(safetyLimit);
+      final List<Map<String, dynamic>> rows = await _pageAll(
+        (int from, int to) => client
+            .from('sales')
+            .select('customer_id, sale_date, total')
+            .eq('company_id', companyId)
+            .eq('status', 'confirmed')
+            .inFilter('customer_id', chunk)
+            .order('id')
+            .range(from, to),
+      );
 
       allRows.addAll(rows);
     }
@@ -181,20 +227,20 @@ class ReportsRemoteDataSource {
   }) async {
     final SupabaseClient client = _requireClient();
 
-    var query = client
-        .from('sale_returns')
-        .select('id, total, status, return_date')
-        .eq('company_id', companyId)
-        .eq('status', 'confirmed');
-
-    if (fromDate != null) {
-      query = query.gte('return_date', _formatDateOnly(fromDate));
-    }
-    if (toDate != null) {
-      query = query.lte('return_date', _formatDateOnly(toDate));
-    }
-
-    return await query.limit(safetyLimit);
+    return _pageAll((int from, int to) {
+      var paged = client
+          .from('sale_returns')
+          .select('id, total, status, return_date')
+          .eq('company_id', companyId)
+          .eq('status', 'confirmed');
+      if (fromDate != null) {
+        paged = paged.gte('return_date', _formatDateOnly(fromDate));
+      }
+      if (toDate != null) {
+        paged = paged.lte('return_date', _formatDateOnly(toDate));
+      }
+      return paged.order('id').range(from, to);
+    });
   }
 
   // ===========================================================================
