@@ -4,7 +4,7 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
-import 'package:flutter/services.dart' show rootBundle;
+import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../settings/domain/entities/company_settings.dart';
@@ -98,9 +98,9 @@ abstract final class EscPosReceiptBuilder {
       final ByteData bold =
           await rootBundle.load('assets/fonts/Cairo-Bold.ttf');
 
-      final ui.FontLoader regularLoader = ui.FontLoader(_bundledRegular)
+      final FontLoader regularLoader = FontLoader(_bundledRegular)
         ..addFont(Future<ByteData>.value(regular));
-      final ui.FontLoader boldLoader = ui.FontLoader(_bundledBold)
+      final FontLoader boldLoader = FontLoader(_bundledBold)
         ..addFont(Future<ByteData>.value(bold));
       await regularLoader.load();
       await boldLoader.load();
