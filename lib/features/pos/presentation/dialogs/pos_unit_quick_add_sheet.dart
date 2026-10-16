@@ -9,7 +9,9 @@ import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
+import '../../domain/entities/pos_cart_line.dart';
 import '../state/pos_providers.dart';
+import 'pos_duplicate_line_dialog.dart';
 
 Future<bool?> showPosUnitQuickAddSheet({
   required BuildContext context,
@@ -168,7 +170,7 @@ class _UnitsList extends ConsumerWidget {
           _UnitCard(
             choice: choices[i],
             isFirst: i == 0,
-            onTap: () => _addUnit(ref, choices[i]),
+            onTap: () => _addUnit(context, ref, choices[i]),
           ),
           if (i < choices.length - 1) const SizedBox(height: 8),
         ],
@@ -191,7 +193,27 @@ class _UnitsList extends ConsumerWidget {
     return 'عدد $factorLabel $baseUnitName';
   }
 
-  void _addUnit(WidgetRef ref, _UnitChoice choice) {
+  Future<void> _addUnit(
+    BuildContext context,
+    WidgetRef ref,
+    _UnitChoice choice,
+  ) async {
+    final PosCartLine? existing = findExistingCartLine(
+      ref.read(posCartProvider),
+      product.id,
+      choice.unitId,
+    );
+    if (existing != null) {
+      final bool confirmed = await confirmIncreaseExistingLine(
+        context,
+        productName: product.name,
+        currentQuantity: existing.quantity,
+      );
+      if (!context.mounted || !confirmed) {
+        return;
+      }
+    }
+
     final bool added = ref.read(posCartProvider.notifier).addLine(
           productId: product.id,
           productName: product.name,
