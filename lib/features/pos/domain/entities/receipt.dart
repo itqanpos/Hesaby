@@ -95,6 +95,12 @@ class Receipt extends Equatable {
           companyTaxNumber != null &&
           companyTaxNumber!.trim().isNotEmpty;
 
+  /// A discount row is printed only when there is a discount.
+  bool get hasDiscountToPrint => discount > 0;
+
+  /// A tax row is printed only when tax was applied.
+  bool get hasTaxToPrint => taxAmount > 0;
+
   bool get hasCommercialRegisterToPrint =>
       showCommercialRegisterOnPrint &&
           companyCommercialRegister != null &&
