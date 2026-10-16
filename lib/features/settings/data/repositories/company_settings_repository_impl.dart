@@ -64,6 +64,8 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
     PrintFontWeight? printFontWeight,
     double? printFontScaleA4,
     bool? printDirectEnabled,
+    bool? showTaxNumberOnPrint,
+    bool? showCommercialRegisterOnPrint,
   }) async {
     try {
       final supabase.SupabaseClient client = _requireClient();
@@ -100,6 +102,13 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
       }
       if (printDirectEnabled != null) {
         payload['print_direct_enabled'] = printDirectEnabled;
+      }
+      if (showTaxNumberOnPrint != null) {
+        payload['show_tax_number_on_print'] = showTaxNumberOnPrint;
+      }
+      if (showCommercialRegisterOnPrint != null) {
+        payload['show_commercial_register_on_print'] =
+            showCommercialRegisterOnPrint;
       }
 
       if (payload.isEmpty) {
@@ -145,6 +154,10 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
       printFontScaleA4: _optionalDouble(map, 'print_font_scale_a4') ?? 1.0,
       printDirectEnabled:
           _optionalBool(map, 'print_direct_enabled') ?? false,
+      showTaxNumberOnPrint:
+          _optionalBool(map, 'show_tax_number_on_print') ?? false,
+      showCommercialRegisterOnPrint:
+          _optionalBool(map, 'show_commercial_register_on_print') ?? false,
       createdAt: _requireTimestamp(map, 'created_at'),
       updatedAt: _requireTimestamp(map, 'updated_at'),
     );
