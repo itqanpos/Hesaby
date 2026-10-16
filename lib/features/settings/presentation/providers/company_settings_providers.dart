@@ -68,6 +68,8 @@ class CompanySettingsNotifier extends AsyncNotifier<CompanySettings> {
     PrintFontWeight? printFontWeight,
     double? printFontScaleA4,
     bool? printDirectEnabled,
+    bool? showTaxNumberOnPrint,
+    bool? showCommercialRegisterOnPrint,
   }) async {
     final String? companyId = _companyId;
     if (companyId == null || companyId.isEmpty) {
@@ -93,6 +95,8 @@ class CompanySettingsNotifier extends AsyncNotifier<CompanySettings> {
           printFontWeight: printFontWeight,
           printFontScaleA4: printFontScaleA4,
           printDirectEnabled: printDirectEnabled,
+          showTaxNumberOnPrint: showTaxNumberOnPrint,
+          showCommercialRegisterOnPrint: showCommercialRegisterOnPrint,
           updatedAt: DateTime.now().toUtc(),
         ),
       );
@@ -114,6 +118,8 @@ class CompanySettingsNotifier extends AsyncNotifier<CompanySettings> {
             printFontWeight: printFontWeight,
             printFontScaleA4: printFontScaleA4,
             printDirectEnabled: printDirectEnabled,
+            showTaxNumberOnPrint: showTaxNumberOnPrint,
+            showCommercialRegisterOnPrint: showCommercialRegisterOnPrint,
           );
 
       if (!_isDisposed) {
@@ -223,4 +229,21 @@ final Provider<bool> printDirectEnabledProvider = Provider<bool>((ref) {
       ref.watch(companySettingsProvider).valueOrNull ??
           CompanySettings.defaults('');
   return settings.printDirectEnabled;
+});
+
+/// Whether the company tax number is printed on receipts.
+final Provider<bool> showTaxNumberOnPrintProvider = Provider<bool>((ref) {
+  final CompanySettings settings =
+      ref.watch(companySettingsProvider).valueOrNull ??
+          CompanySettings.defaults('');
+  return settings.showTaxNumberOnPrint;
+});
+
+/// Whether the company commercial register is printed on receipts.
+final Provider<bool> showCommercialRegisterOnPrintProvider =
+    Provider<bool>((ref) {
+  final CompanySettings settings =
+      ref.watch(companySettingsProvider).valueOrNull ??
+          CompanySettings.defaults('');
+  return settings.showCommercialRegisterOnPrint;
 });
