@@ -7,7 +7,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/invalidation/data_invalidation.dart';
 import '../../../../core/network/network_status_provider.dart';
 import '../../../../core/network/offline_writer.dart';
-import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../cash/domain/entities/cash_entities.dart';
 import '../../../cash/presentation/providers/cash_providers.dart';
@@ -27,6 +26,15 @@ abstract final class PosPaymentMethod {
   static const String cash = 'cash';
   static const String card = 'card';
   static const String credit = 'credit';
+}
+
+/// How to handle the excess when the customer pays more than the total owed.
+enum ExcessAction {
+  /// Return the excess to the customer as cash change.
+  cash,
+
+  /// Keep the excess as a credit on the customer's balance.
+  balance,
 }
 
 Future<bool?> showPosPaymentDialog({required BuildContext context}) {
@@ -56,6 +64,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   late final TextEditingController _amountController;
 
   String _method = PosPaymentMethod.cash;
+  ExcessAction _excessAction = ExcessAction.cash;
   bool _isSubmitting = false;
   SalesFailureType? _serverFailure;
 
@@ -63,8 +72,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   void initState() {
     super.initState();
     _cart = ref.read(posCartProvider);
+    // Default: pay the exact amount owed (sale + old balance).
     _amountController = TextEditingController(
-      text: _formatAmount(_effectiveTotal),
+      text: _formatAmount(_settlementTotal),
     );
     _amountController.addListener(_onAmountChanged);
   }
@@ -88,79 +98,108 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return value.toStringAsFixed(2);
   }
 
-  double get _inputAmount =>
-      double.tryParse(_amountController.text.trim()) ?? 0;
+  // ---------------------------------------------------------------------------
+  // Core math — the only source of truth for this dialog
+  // ---------------------------------------------------------------------------
 
-  double get _defaultTaxRate => ref.read(defaultTaxRateProvider);
+  double get _input => double.tryParse(_amountController.text.trim()) ?? 0;
 
-  double get _effectiveTax {
-    if (_cart.taxAmount > 0) return _cart.taxAmount;
-    final double base = _cart.subtotal - _cart.discount;
-    return base * _defaultTaxRate / 100;
-  }
+  /// Sale total = invoice value only.
+  double get _saleTotal => _cart.total;
 
-  double get _effectiveTotal =>
-      _cart.subtotal - _cart.discount + _effectiveTax;
+  /// Total owed by the customer = old balance + sale total.
+  double get _settlementTotal => _cart.customerBalance + _saleTotal;
 
-  double _appliedToSale() {
+  /// Amount applied to the invoice (capped at [_saleTotal]).
+  double get _paidOnSale {
     if (_method == PosPaymentMethod.credit) return 0;
-    if (_inputAmount <= 0) return 0;
-    final double total = _effectiveTotal;
-    return _inputAmount >= total ? total : _inputAmount;
+    if (_input <= 0) return 0;
+    return _input >= _saleTotal ? _saleTotal : _input;
   }
 
-  double _appliedToBalance() {
-    if (_method == PosPaymentMethod.credit) return 0;
-    if (!_cart.hasCustomer) return 0;
-    final double excess = _inputAmount - _effectiveTotal;
-    if (excess <= 0) return 0;
-    final double balance = _cart.customerBalance;
-    return excess >= balance ? balance : excess;
-  }
-
-  double _changeToCustomer() {
+  /// Amount applied to the old balance (only for cash).
+  double get _paidOnBalance {
     if (_method != PosPaymentMethod.cash) return 0;
-    final double excess = _inputAmount - _effectiveTotal;
-    if (excess <= 0) return 0;
-    final double remaining = excess - _appliedToBalance();
-    return remaining > 0 ? remaining : 0;
+    if (!_cart.hasCustomer) return 0;
+    final double afterSale = _input - _paidOnSale;
+    if (afterSale <= 0) return 0;
+    final double balance = _cart.customerBalance;
+    return afterSale >= balance ? balance : afterSale;
   }
 
-  double _addedToBalance() => _effectiveTotal - _appliedToSale();
+  /// Cash to refund — nonzero only when the operator chose [ExcessAction.cash].
+  double get _change {
+    if (_method != PosPaymentMethod.cash) return 0;
+    if (_excessAction != ExcessAction.cash) return 0;
+    final double afterSale = _input - _paidOnSale;
+    final double afterBalance = afterSale - _paidOnBalance;
+    return afterBalance > 0 ? afterBalance : 0;
+  }
 
-  double _resultingBalance() =>
-      _cart.customerBalance + _addedToBalance() - _appliedToBalance();
+  /// Amount added to the customer's balance — nonzero only when the
+  /// operator chose [ExcessAction.balance], OR when the invoice is underpaid.
+  double get _addedToBalance {
+    // Part 1: unpaid remainder of the invoice.
+    final double unpaidInvoice = _saleTotal - _paidOnSale;
 
-  /// Payment method string accepted by the offline RPC (`cash` / `card`).
-  /// Returns `null` for credit sales (nothing to pay at the register).
+    // Part 2: excess chosen to stay on the balance.
+    double extraOnBalance = 0;
+    if (_method == PosPaymentMethod.cash &&
+        _excessAction == ExcessAction.balance) {
+      final double afterSale = _input - _paidOnSale;
+      final double afterBalance = afterSale - _paidOnBalance;
+      if (afterBalance > 0) extraOnBalance = afterBalance;
+    }
+
+    return unpaidInvoice - extraOnBalance;
+  }
+
+  /// Customer's balance after the sale.
+  /// Positive = customer owes us; negative = we owe the customer.
+  double get _newBalance => _cart.customerBalance + _addedToBalance;
+
+  bool get _hasBalanceChange =>
+      _cart.hasCustomer && _newBalance != _cart.customerBalance;
+
+  /// Whether the operator must decide where the excess goes.
+  bool get _hasExcess => _method == PosPaymentMethod.cash &&
+      _input > _settlementTotal;
+
   String? _paymentMethodForOffline() {
     if (_method == PosPaymentMethod.credit) return null;
     if (_method == PosPaymentMethod.card) return 'card';
     return 'cash';
   }
 
+  // ---------------------------------------------------------------------------
+  // Validation
+  // ---------------------------------------------------------------------------
+
   String? _validationError() {
     if (_cart.isEmpty) return 'السلة فارغة. أضف منتجاً قبل الدفع.';
+
     if (_method == PosPaymentMethod.credit) {
       if (!_cart.hasCustomer) {
         return 'البيع الآجل يتطلب اختيار عميل مسجل.';
       }
       return null;
     }
+
     if (_method == PosPaymentMethod.card) {
-      if (_inputAmount < _effectiveTotal) {
+      if (_input < _saleTotal) {
         return 'الدفع بالبطاقة يجب أن يغطي كامل قيمة الفاتورة.';
       }
-      final double maxAllowed = _effectiveTotal +
-          (_cart.hasCustomer ? _cart.customerBalance : 0);
-      if (_inputAmount > maxAllowed) {
-        return 'المبلغ يتجاوز قيمة الفاتورة + الرصيد المستحق.';
+      if (_input > _saleTotal) {
+        return 'الدفع بالبطاقة لا يُعيد باقياً ولا يُضاف للرصيد.';
       }
       return null;
     }
-    if (_addedToBalance() > 0 && !_cart.hasCustomer) {
-      return 'الدفع الجزئي يتطلب اختيار عميل مسجل.';
+
+    // Cash: partial payment requires a registered customer.
+    if (_addedToBalance > 0 && !_cart.hasCustomer) {
+      return 'الدفع الجزئي أو الزائد يتطلب اختيار عميل مسجل.';
     }
+
     return null;
   }
 
@@ -185,21 +224,15 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       _serverFailure = null;
     });
 
-    // ---- Offline short-circuit ----
     final bool isOnline = ref.read(isOnlineProvider);
     if (!isOnline) {
       await _submitOffline(contextState: contextState, branchId: branchId);
       return;
     }
 
-    // ---- Online path (existing behaviour) ----
     await _submitOnline(contextState: contextState, branchId: branchId);
   }
 
-  /// Direct online submission. Falls back to the offline queue when the
-  /// failure is a network error — this preserves the "sale is not lost"
-  /// guarantee even when the OS reports the device online but a specific
-  /// request times out.
   Future<void> _submitOnline({
     required CompanyContextState contextState,
     required String branchId,
@@ -207,8 +240,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     final SalesNotifier notifier = ref.read(salesProvider.notifier);
 
     try {
-      final double appliedToSale = _appliedToSale();
-      final double appliedToBalance = _appliedToBalance();
+      final double paidOnSale = _paidOnSale;
+      final double paidOnBalance = _paidOnBalance;
 
       final Sale sale = await notifier.createSale(
         branchId: branchId,
@@ -224,29 +257,28 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
             ),
         ],
         discount: _cart.discount,
-        taxAmount: _effectiveTax,
-        paidAmount: appliedToSale,
+        taxAmount: _cart.taxAmount,
+        paidAmount: paidOnSale,
       );
 
       final Sale confirmed = await notifier.confirmSale(sale.id);
 
-      if (appliedToSale > 0) {
-        final String method = _method == PosPaymentMethod.card
-            ? 'card'
-            : 'cash';
+      if (paidOnSale > 0) {
+        final String method =
+            _method == PosPaymentMethod.card ? 'card' : 'cash';
         await ref.read(cashRepositoryProvider).recordSalePayments(
               companyId: contextState.currentCompany?.id ?? '',
               saleId: confirmed.id,
               payments: <SalePaymentDraft>[
-                SalePaymentDraft(amount: appliedToSale, method: method),
+                SalePaymentDraft(amount: paidOnSale, method: method),
               ],
             );
       }
 
-      if (appliedToBalance > 0 && _cart.customerId != null) {
+      if (paidOnBalance > 0 && _cart.customerId != null) {
         await ref.read(customersProvider.notifier).recordPayment(
               customerId: _cart.customerId!,
-              amount: appliedToBalance,
+              amount: paidOnBalance,
               method: _method == PosPaymentMethod.card ? 'card' : 'cash',
               notes: 'دفعة زيادة من فاتورة '
                   '${confirmed.invoiceNumber ?? confirmed.id}',
@@ -276,7 +308,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on SaleException catch (error) {
-      // Network error → try to queue instead of showing a hard failure.
       if (error.type == SalesFailureType.network) {
         if (!mounted) return;
         await _submitOffline(
@@ -291,7 +322,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         _serverFailure = error.type;
       });
     } on Object {
-      // Unknown error → try to queue, so the sale is not lost.
       if (!mounted) return;
       await _submitOffline(
         contextState: contextState,
@@ -300,10 +330,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     }
   }
 
-  /// Offline submission — serialises the cart into an offline queue entry.
-  ///
-  /// The customer-balance portion (if any) is enqueued as a separate
-  /// customer payment so that both effects survive independently.
   Future<void> _submitOffline({
     required CompanyContextState contextState,
     required String branchId,
@@ -319,8 +345,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         },
     ];
 
-    final double appliedToSale = _appliedToSale();
-    final double appliedToBalance = _appliedToBalance();
+    final double paidOnSale = _paidOnSale;
+    final double paidOnBalance = _paidOnBalance;
     final String? paymentMethod = _paymentMethodForOffline();
 
     final String? saleUuid = await OfflineWriter.enqueueSale(
@@ -330,8 +356,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       saleDate: DateTime.now(),
       items: items,
       discount: _cart.discount,
-      taxAmount: _effectiveTax,
-      paidAmount: appliedToSale,
+      taxAmount: _cart.taxAmount,
+      paidAmount: paidOnSale,
       paymentMethod: paymentMethod,
       notes: null,
     );
@@ -345,11 +371,11 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       return;
     }
 
-    if (appliedToBalance > 0 && _cart.customerId != null) {
+    if (paidOnBalance > 0 && _cart.customerId != null) {
       await OfflineWriter.enqueueCustomerPayment(
         ref: ref,
         customerId: _cart.customerId!,
-        amount: appliedToBalance,
+        amount: paidOnBalance,
         method: paymentMethod ?? 'cash',
         notes: 'دفعة زيادة من فاتورة أوفلاين',
       );
@@ -385,10 +411,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     required DateTime saleDate,
     required CompanyContextState contextState,
   }) {
-    final double newBalance = _resultingBalance();
-    final bool hasBalanceChange = _cart.hasCustomer &&
-        newBalance != _cart.customerBalance;
-
     return Receipt(
       saleId: saleId,
       invoiceNumber: invoiceNumber,
@@ -407,14 +429,15 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       ],
       subtotal: _cart.subtotal,
       discount: _cart.discount,
-      taxAmount: _effectiveTax,
-      total: _effectiveTotal,
-      paidAmount: _appliedToSale(),
-      change: _changeToCustomer(),
-      paidOnBalance: _appliedToBalance(),
+      taxAmount: _cart.taxAmount,
+      total: _saleTotal,
+      paidAmount: _paidOnSale,
+      change: _change,
+      paidOnBalance: _paidOnBalance,
       customerName: _cart.customerName,
-      previousBalance: hasBalanceChange ? _cart.customerBalance : null,
-      newBalance: hasBalanceChange ? newBalance : null,
+      previousBalance:
+          _cart.hasCustomer ? _cart.customerBalance : null,
+      newBalance: _cart.hasCustomer ? _newBalance : null,
       footer: ref.read(receiptFooterProvider),
     );
   }
@@ -426,13 +449,24 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (method == PosPaymentMethod.credit) {
         _amountController.text = '0';
       } else if (method == PosPaymentMethod.card) {
-        _amountController.text = _formatAmount(_effectiveTotal);
-      } else if (_amountController.text.trim() == '0' ||
-          _amountController.text.trim().isEmpty) {
-        _amountController.text = _formatAmount(_effectiveTotal);
+        _amountController.text = _formatAmount(_saleTotal);
+      } else {
+        // Cash: default to full settlement.
+        _amountController.text = _formatAmount(_settlementTotal);
       }
     });
   }
+
+  void _selectExcessAction(ExcessAction action) {
+    setState(() {
+      _excessAction = action;
+      _serverFailure = null;
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -446,11 +480,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         : null;
     final String? displayError = failureMessage ?? validationError;
     final bool canSubmit = !_isSubmitting && validationError == null;
-
-    final double change = _changeToCustomer();
-    final double addedToBalance = _addedToBalance();
-    final double appliedToBalance = _appliedToBalance();
-    final double resultingBalance = _resultingBalance();
 
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
@@ -495,15 +524,11 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   ),
                   _CustomerRow(customerName: _cart.customerName),
                   const SizedBox(height: 12),
-                  if (_cart.hasCustomer && _cart.customerBalance > 0) ...<Widget>[
-                    _BalanceDetails(
-                      previousBalance: _cart.customerBalance,
-                      currentInvoice: _effectiveTotal,
-                      totalOwed: _cart.customerBalance + _effectiveTotal,
-                    ),
-                  ] else ...<Widget>[
-                    _TotalBanner(total: _effectiveTotal),
-                  ],
+                  _TotalsCard(
+                    saleTotal: _saleTotal,
+                    customerBalance: _cart.customerBalance,
+                    hasCustomer: _cart.hasCustomer,
+                  ),
                   const SizedBox(height: 16),
                   Text('طريقة الدفع', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 8),
@@ -543,10 +568,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   ),
                   if (_method != PosPaymentMethod.credit) ...<Widget>[
                     const SizedBox(height: 16),
-                    Text(
-                      'المبلغ المدفوع',
-                      style: theme.textTheme.labelLarge,
-                    ),
+                    Text('المبلغ المدفوع',
+                        style: theme.textTheme.labelLarge),
                     const SizedBox(height: 8),
                     _AmountField(
                       controller: _amountController,
@@ -554,53 +577,33 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                       hasError: displayError != null,
                     ),
                   ],
+                  if (_hasExcess) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _ExcessChooser(
+                      excess: _input - _settlementTotal,
+                      action: _excessAction,
+                      onChanged: _selectExcessAction,
+                      enabled: !_isSubmitting,
+                    ),
+                  ],
                   if (displayError != null) ...<Widget>[
                     const SizedBox(height: 12),
                     _ErrorBanner(message: displayError),
                   ],
                   const SizedBox(height: 16),
-                  if (change > 0)
-                    _SummaryLine(
-                      label: 'الباقي للعميل',
-                      value: AppFormatters.money(change),
-                      emphasized: true,
-                      color: scheme.primary,
-                    ),
-                  if (appliedToBalance > 0) ...<Widget>[
-                    _SummaryLine(
-                      label: 'مدفوع على الرصيد',
-                      value: AppFormatters.money(appliedToBalance),
-                      color: scheme.primary,
-                    ),
-                    _SummaryLine(
-                      label: 'الرصيد الجديد للعميل',
-                      value: AppFormatters.money(resultingBalance),
-                      emphasized: true,
-                      color: scheme.primary,
-                    ),
-                  ],
-                  if (addedToBalance > 0) ...<Widget>[
-                    _SummaryLine(
-                      label: 'سيُضاف للرصيد',
-                      value: AppFormatters.money(addedToBalance),
-                      color: scheme.error,
-                    ),
-                    _SummaryLine(
-                      label: 'الرصيد الجديد للعميل',
-                      value: AppFormatters.money(resultingBalance),
-                      emphasized: true,
-                      color: scheme.error,
-                    ),
-                  ],
-                  if (change == 0 &&
-                      addedToBalance == 0 &&
-                      appliedToBalance == 0)
-                    _SummaryLine(
-                      label: 'الحالة',
-                      value: 'مدفوع بالكامل',
-                      emphasized: true,
-                      color: scheme.primary,
-                    ),
+                  _SummaryBlock(
+                    saleTotal: _saleTotal,
+                    input: _input,
+                    method: _method,
+                    hasCustomer: _cart.hasCustomer,
+                    customerBalance: _cart.customerBalance,
+                    paidOnSale: _paidOnSale,
+                    paidOnBalance: _paidOnBalance,
+                    change: _change,
+                    addedToBalance: _addedToBalance,
+                    newBalance: _newBalance,
+                    excessAction: _excessAction,
+                  ),
                   const SizedBox(height: 20),
                   AppButton(
                     label: 'إتمام البيع',
@@ -663,62 +666,85 @@ class _CustomerRow extends StatelessWidget {
   }
 }
 
-class _BalanceDetails extends StatelessWidget {
-  const _BalanceDetails({
-    required this.previousBalance,
-    required this.currentInvoice,
-    required this.totalOwed,
+/// Shows the invoice total, the old balance (if any), and the total owed.
+class _TotalsCard extends StatelessWidget {
+  const _TotalsCard({
+    required this.saleTotal,
+    required this.customerBalance,
+    required this.hasCustomer,
   });
 
-  final double previousBalance;
-  final double currentInvoice;
-  final double totalOwed;
+  final double saleTotal;
+  final double customerBalance;
+  final bool hasCustomer;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final bool showBalance = hasCustomer && customerBalance > 0;
+    final double total = showBalance ? customerBalance + saleTotal : saleTotal;
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
+        color: showBalance
+            ? scheme.surfaceContainerHighest
+            : scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(14),
       ),
       child: Padding(
-        padding: const EdgeInsets.all(12),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _row(context,
-                label: 'الرصيد السابق',
-                value: AppFormatters.money(previousBalance),
-                color: scheme.error),
-            const SizedBox(height: 6),
-            _row(context,
-                label: 'قيمة الفاتورة',
-                value: AppFormatters.money(currentInvoice)),
-            const Divider(height: 16),
-            _row(context,
-                label: 'الإجمالي المطلوب',
-                value: AppFormatters.money(totalOwed),
-                emphasized: true,
-                color: scheme.primary),
-          ],
-        ),
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        child: showBalance
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  _row(context, 'الرصيد السابق',
+                      AppFormatters.money(customerBalance),
+                      color: scheme.error),
+                  const SizedBox(height: 6),
+                  _row(context, 'قيمة الفاتورة',
+                      AppFormatters.money(saleTotal)),
+                  const Divider(height: 16),
+                  _row(context, 'الإجمالي المطلوب',
+                      AppFormatters.money(total),
+                      emphasized: true,
+                      color: scheme.primary),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    'الإجمالي المطلوب',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onPrimaryContainer,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    AppFormatters.money(total),
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      color: scheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
       ),
     );
   }
 
   Widget _row(
-    BuildContext context, {
-    required String label,
-    required String value,
+    BuildContext context,
+    String label,
+    String value, {
     bool emphasized = false,
     Color? color,
   }) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     return Row(
       children: <Widget>[
         Expanded(
@@ -744,10 +770,19 @@ class _BalanceDetails extends StatelessWidget {
   }
 }
 
-class _TotalBanner extends StatelessWidget {
-  const _TotalBanner({required this.total});
+/// Let the operator choose where the excess goes.
+class _ExcessChooser extends StatelessWidget {
+  const _ExcessChooser({
+    required this.excess,
+    required this.action,
+    required this.onChanged,
+    required this.enabled,
+  });
 
-  final double total;
+  final double excess;
+  final ExcessAction action;
+  final ValueChanged<ExcessAction> onChanged;
+  final bool enabled;
 
   @override
   Widget build(BuildContext context) {
@@ -756,29 +791,55 @@ class _TotalBanner extends StatelessWidget {
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(14),
+        color: scheme.tertiaryContainer,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.tertiary.withValues(alpha: 0.4)),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Text(
-              'الإجمالي المطلوب',
-              style: theme.textTheme.labelMedium?.copyWith(
-                color: scheme.onPrimaryContainer,
-              ),
-              textAlign: TextAlign.center,
+            Row(
+              children: <Widget>[
+                Icon(Icons.info_outline,
+                    size: 18, color: scheme.onTertiaryContainer),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'الزائد: ${AppFormatters.money(excess)}',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      color: scheme.onTertiaryContainer,
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                ),
+              ],
             ),
-            const SizedBox(height: 4),
-            Text(
-              AppFormatters.money(total),
-              style: theme.textTheme.headlineMedium?.copyWith(
-                color: scheme.onPrimaryContainer,
-                fontWeight: FontWeight.w800,
-              ),
-              textAlign: TextAlign.center,
+            const SizedBox(height: 8),
+            RadioListTile<ExcessAction>(
+              value: ExcessAction.cash,
+              groupValue: action,
+              onChanged: enabled
+                  ? (ExcessAction? v) {
+                      if (v != null) onChanged(v);
+                    }
+                  : null,
+              title: const Text('إرجاع نقدي للعميل'),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
+            ),
+            RadioListTile<ExcessAction>(
+              value: ExcessAction.balance,
+              groupValue: action,
+              onChanged: enabled
+                  ? (ExcessAction? v) {
+                      if (v != null) onChanged(v);
+                    }
+                  : null,
+              title: const Text('إضافته إلى رصيد العميل'),
+              dense: true,
+              contentPadding: EdgeInsets.zero,
             ),
           ],
         ),
@@ -894,6 +955,111 @@ class _AmountField extends StatelessWidget {
   }
 }
 
+/// Summary shown before the user presses "إتمام البيع".
+class _SummaryBlock extends StatelessWidget {
+  const _SummaryBlock({
+    required this.saleTotal,
+    required this.input,
+    required this.method,
+    required this.hasCustomer,
+    required this.customerBalance,
+    required this.paidOnSale,
+    required this.paidOnBalance,
+    required this.change,
+    required this.addedToBalance,
+    required this.newBalance,
+    required this.excessAction,
+  });
+
+  final double saleTotal;
+  final double input;
+  final String method;
+  final bool hasCustomer;
+  final double customerBalance;
+  final double paidOnSale;
+  final double paidOnBalance;
+  final double change;
+  final double addedToBalance;
+  final double newBalance;
+  final ExcessAction excessAction;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool showBalance = hasCustomer;
+    final List<Widget> rows = <Widget>[];
+
+    // Cash + card: show paid + change.
+    if (method != PosPaymentMethod.credit) {
+      rows.add(_SummaryLine(
+        label: 'المدفوع',
+        value: AppFormatters.money(input),
+      ));
+    }
+
+    if (change > 0) {
+      rows.add(_SummaryLine(
+        label: 'الباقي للعميل (نقدي)',
+        value: AppFormatters.money(change),
+        emphasized: true,
+        color: scheme.primary,
+      ));
+    }
+
+    if (showBalance && paidOnBalance > 0) {
+      rows.add(_SummaryLine(
+        label: 'مسدد من الرصيد السابق',
+        value: AppFormatters.money(paidOnBalance),
+        color: scheme.primary,
+      ));
+    }
+
+    if (showBalance) {
+      rows.add(const Divider(height: 16));
+      rows.add(_SummaryLine(
+        label: 'الرصيد السابق',
+        value: AppFormatters.money(customerBalance),
+        color: scheme.error,
+      ));
+
+      final String balanceLabel;
+      final Color balanceColor;
+      if (newBalance > 0) {
+        balanceLabel = 'الرصيد الجديد (مدين)';
+        balanceColor = scheme.error;
+      } else if (newBalance < 0) {
+        balanceLabel = 'الرصيد الجديد (دائن)';
+        balanceColor = scheme.primary;
+      } else {
+        balanceLabel = 'الرصيد الجديد';
+        balanceColor = scheme.primary;
+      }
+
+      rows.add(_SummaryLine(
+        label: balanceLabel,
+        value: AppFormatters.money(newBalance.abs()),
+        emphasized: true,
+        color: balanceColor,
+      ));
+    }
+
+    if (rows.isEmpty) {
+      rows.add(_SummaryLine(
+        label: 'الحالة',
+        value: 'مدفوع بالكامل',
+        emphasized: true,
+        color: scheme.primary,
+      ));
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: rows,
+    );
+  }
+}
+
 class _SummaryLine extends StatelessWidget {
   const _SummaryLine({
     required this.label,
@@ -988,282 +1154,4 @@ class _ErrorBanner extends StatelessWidget {
 // Receipt dialog
 // ============================================================================
 
-class _PosReceiptDialog extends ConsumerWidget {
-  const _PosReceiptDialog({
-    required this.receipt,
-    this.isOffline = false,
-  });
-
-  final Receipt receipt;
-
-  /// When `true`, the dialog shows a "saved locally" banner and hides the
-  /// invoice number, which the server assigns only after delivery.
-  final bool isOffline;
-
-  /// Always shows the print preview dialog first — the user needs to see
-  /// the actual thermal shape (WYSIWYG) before choosing a print method.
-  Future<void> _handlePrint(BuildContext context, WidgetRef ref) async {
-    if (!context.mounted) return;
-    await showPosPrintPreviewDialog(
-      context: context,
-      receipt: receipt,
-    );
-  }
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return Dialog(
-      insetPadding:
-          const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
-      backgroundColor: scheme.surface,
-      shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(20),
-      ),
-      child: ConstrainedBox(
-        constraints: const BoxConstraints(maxWidth: 480),
-        child: SingleChildScrollView(
-          child: Padding(
-            padding: const EdgeInsets.all(16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Icon(
-                      isOffline
-                          ? Icons.cloud_off_outlined
-                          : Icons.check_circle,
-                      color: scheme.primary,
-                      size: 32,
-                    ),
-                    const SizedBox(width: 10),
-                    Expanded(
-                      child: Text(
-                        isOffline
-                            ? 'تم حفظ البيع محليًا'
-                            : 'تم إتمام البيع',
-                        style: theme.textTheme.titleLarge,
-                      ),
-                    ),
-                  ],
-                ),
-
-                if (isOffline) ...<Widget>[
-                  const SizedBox(height: 10),
-                  DecoratedBox(
-                    decoration: BoxDecoration(
-                      color: scheme.tertiaryContainer,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 12,
-                        vertical: 10,
-                      ),
-                      child: Row(
-                        children: <Widget>[
-                          Icon(
-                            Icons.schedule,
-                            size: 18,
-                            color: scheme.onTertiaryContainer,
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              'سيُرسل تلقائيًا عند عودة الاتصال. '
-                              'رقم الفاتورة سيُحدَّد على الخادم.',
-                              style: theme.textTheme.bodySmall?.copyWith(
-                                color: scheme.onTertiaryContainer,
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ),
-                ],
-
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-
-                if (!isOffline && receipt.invoiceNumber != null)
-                  Text(
-                    'الإيصال: ${receipt.invoiceNumber}',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                Text(
-                  AppFormatters.dateTime(receipt.dateTime),
-                  style: theme.textTheme.bodySmall,
-                ),
-                Text(
-                  receipt.customerName ?? 'عميل نقدي',
-                  style: theme.textTheme.bodyMedium,
-                ),
-
-                const SizedBox(height: 12),
-                const Divider(height: 1),
-                const SizedBox(height: 12),
-
-                for (final ReceiptLine line in receipt.lines)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            line.productName,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                        Text(
-                          '${AppFormatters.quantity(line.quantity)} × '
-                          '${AppFormatters.money(line.unitPrice)}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          AppFormatters.money(line.lineTotal),
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                const SizedBox(height: 8),
-                const Divider(height: 1),
-                const SizedBox(height: 8),
-
-                _row(theme, 'المجموع الفرعي',
-                    AppFormatters.money(receipt.subtotal)),
-                if (receipt.discount > 0)
-                  _row(theme, 'الخصم',
-                      AppFormatters.money(receipt.discount)),
-                if (receipt.taxAmount > 0)
-                  _row(theme, 'الضريبة',
-                      AppFormatters.money(receipt.taxAmount)),
-                _row(theme, 'الإجمالي',
-                    AppFormatters.money(receipt.total),
-                    emphasized: true),
-                _row(theme, 'المدفوع',
-                    AppFormatters.money(receipt.paidAmount)),
-                if (receipt.hasChange)
-                  _row(theme, 'الباقي',
-                      AppFormatters.money(receipt.change),
-                      color: scheme.primary),
-
-                if (receipt.hasBalanceChange) ...<Widget>[
-                  const SizedBox(height: 6),
-                  _row(theme, 'الرصيد السابق',
-                      AppFormatters.money(receipt.previousBalance!),
-                      color: scheme.error),
-                  if (receipt.hasBalancePayment)
-                    _row(
-                      theme,
-                      'مدفوع على الرصيد السابق',
-                      AppFormatters.money(receipt.paidOnBalance),
-                      color: scheme.primary,
-                    ),
-                  _row(theme, 'الرصيد الجديد',
-                      AppFormatters.money(receipt.newBalance!),
-                      color: scheme.error,
-                      emphasized: true),
-                ],
-
-                const SizedBox(height: 16),
-
-                Row(
-                  children: <Widget>[
-                    Expanded(
-                      child: AppButton(
-                        label: 'طباعة',
-                        icon: Icons.print_outlined,
-                        onPressed: () => _handlePrint(context, ref),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: AppButton(
-                        label: 'فاتورة جديدة',
-                        icon: Icons.add,
-                        variant: AppButtonVariant.outline,
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _row(
-    ThemeData theme,
-    String label,
-    String value, {
-    bool emphasized = false,
-    Color? color,
-  }) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 2),
-      child: Row(
-        children: <Widget>[
-          Expanded(
-            child: Text(label, style: theme.textTheme.bodyMedium),
-          ),
-          Text(
-            value,
-            style: (emphasized
-                    ? theme.textTheme.titleMedium
-                    : theme.textTheme.bodyMedium)
-                ?.copyWith(
-              color: color ??
-                  (emphasized ? theme.colorScheme.primary : null),
-              fontWeight: emphasized ? FontWeight.w700 : null,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Localization
-// ============================================================================
-
-String _failureMessageFor(SalesFailureType type) => switch (type) {
-      SalesFailureType.network =>
-        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
-      SalesFailureType.unauthorized =>
-        'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجددًا.',
-      SalesFailureType.notFound => 'الفاتورة غير موجودة.',
-      SalesFailureType.invalidStatusTransition =>
-        'لا يمكن إتمام العملية في الحالة الحالية.',
-      SalesFailureType.emptySale => 'لا يمكن إتمام بيع بدون بنود.',
-      SalesFailureType.invoiceNumberConflict =>
-        'رقم الفاتورة مستخدم بالفعل.',
-      SalesFailureType.customerNotFound =>
-        'البيع الآجل يتطلب اختيار عميل مسجل.',
-      SalesFailureType.branchNotFound =>
-        'الفرع غير متاح. يرجى إعادة اختياره.',
-      SalesFailureType.productNotFound =>
-        'أحد المنتجات غير متاح. يرجى إزالته وإعادة المحاولة.',
-      SalesFailureType.unitNotFound => 'إحدى الوحدات غير متاحة.',
-      SalesFailureType.insufficientStock =>
-        'الرصيد غير كافٍ. يرجى تقليل الكمية أو تحديث المخزون.',
-      SalesFailureType.invalidPayment =>
-        'قيمة الدفع غير صحيحة. يرجى مراجعة المبلغ والطريقة.',
-      SalesFailureType.invalidResponse =>
-        'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.',
-      SalesFailureType.unknown =>
-        'تعذّر إتمام البيع. يرجى المحاولة مرة أخرى.',
-    };
+class _PosReceipt
