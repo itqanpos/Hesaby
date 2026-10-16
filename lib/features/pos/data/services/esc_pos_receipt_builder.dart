@@ -472,28 +472,53 @@ class _Painter {
     _y += boxH;
   }
 
+  /// Payment block — shows the method, the paid amount, and (when
+  /// applicable) the cash change returned to the customer.
+  ///
+  /// **Removed:** the legacy "المتبقي على العميل" line, which was computed
+  /// from `total - paidAmount` and ignored the previous balance. The
+  /// resulting balance is now reported in [_balanceBlock] only.
   void _paymentBlock(Receipt r) {
-    final double remaining = r.total - r.paidAmount;
-    final double amountRemaining = remaining > 0 ? remaining : 0;
-
     _kvRow('طريقة الدفع', _paymentMethodLabel(r));
     _kvRow('المدفوع', _money(r.paidAmount));
-    if (amountRemaining > 0) {
-      _kvRow('المتبقي على العميل', _money(amountRemaining),
-          emphasized: true);
-    }
+
     if (r.hasChange) {
-      _kvRow('الباقي للعميل', _money(r.change));
+      _kvRow(
+        'الباقي للعميل (نقدي)',
+        _money(r.change),
+        emphasized: true,
+      );
     }
   }
 
+  /// Balance block — shown when the customer's balance changed during the
+  /// sale. Reports the previous balance, the portion of the payment that
+  /// was applied to that balance (if any), and the resulting balance.
+  ///
+  /// A negative resulting balance means the customer now has a credit
+  /// with the shop; it is labelled accordingly and its absolute value is
+  /// printed.
   void _balanceBlock(Receipt r) {
     _kvRow('الرصيد السابق', _money(r.previousBalance ?? 0));
+
     if (r.hasBalancePayment) {
-      _kvRow('مدفوع على الرصيد السابق', _money(r.paidOnBalance));
+      _kvRow('مسدد من الرصيد السابق', _money(r.paidOnBalance));
     }
-    _kvRow('الرصيد الحالي', _money(r.newBalance ?? 0),
-        emphasized: true);
+
+    final double newBalance = r.newBalance ?? 0;
+    if (newBalance < 0) {
+      _kvRow(
+        'الرصيد الجديد (دائن للعميل)',
+        _money(newBalance.abs()),
+        emphasized: true,
+      );
+    } else {
+      _kvRow(
+        'الرصيد الجديد',
+        _money(newBalance),
+        emphasized: true,
+      );
+    }
   }
 
   void _footer(Receipt r) {
