@@ -5,8 +5,6 @@ import 'package:flutter/foundation.dart';
 
 import '../entities/company_settings.dart';
 
-/// Categories of company-settings failures that the presentation layer can
-/// safely translate into localized user messages.
 enum CompanySettingsFailureType {
   network,
   unauthorized,
@@ -39,7 +37,6 @@ class CompanySettingsException extends Equatable implements Exception {
 
 /// Contract for reading and updating per-company business settings.
 abstract interface class CompanySettingsRepository {
-  /// Reads the settings row of [companyId].
   Future<CompanySettings> getSettings(String companyId);
 
   /// Applies a partial update.
@@ -50,6 +47,10 @@ abstract interface class CompanySettingsRepository {
   /// * Pass [logoUrl] to set a new value.
   /// * Pass [clearLogo] = `true` to remove the current logo.
   /// * Leave both untouched (default) to keep whatever is stored.
+  ///
+  /// [showTaxNumberOnPrint] and [showCommercialRegisterOnPrint] control
+  /// whether the company tax number and commercial register are rendered
+  /// on printed receipts and A4 invoices.
   Future<CompanySettings> updateSettings({
     required String companyId,
     double? defaultTaxRate,
@@ -63,5 +64,7 @@ abstract interface class CompanySettingsRepository {
     PrintFontWeight? printFontWeight,
     double? printFontScaleA4,
     bool? printDirectEnabled,
+    bool? showTaxNumberOnPrint,
+    bool? showCommercialRegisterOnPrint,
   });
 }
