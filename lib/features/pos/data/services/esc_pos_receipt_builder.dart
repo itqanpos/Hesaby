@@ -11,56 +11,20 @@ import '../../domain/entities/receipt.dart';
 
 /// Builds an ESC/POS byte stream from a [Receipt] by rendering the whole
 /// document as a 1-bit bitmap and sending it as a `GS v 0` raster command.
-///
-/// Rationale: most budget thermal printers (Xprinter, Goojprt, etc.) do
-/// not implement an Arabic code page, so sending Arabic text as ESC/POS
-/// bytes prints garbage. Rasterising the receipt guarantees the output
-/// matches what the user sees, at the cost of a slightly slower transfer.
-///
-/// **Phase P-1a:** an optional [logoBytes] image is drawn centered at the
-/// top of the receipt.
-///
-/// **Phase P-1b:** [fontScale] (0.8 – 1.6) and [fontWeight] are applied to
-/// every text element. The scale multiplies the base font size; the weight
-/// selects between the regular and bold font families.
-///
-/// **Phase O-2 (RTL fix + preview support):**
-/// * Columns of the items table are laid out in natural RTL reading
-///   order (م → الصنف → الكمية → السعر → الإجمالي from right to left).
-/// * [renderToImage] exposes the raw canvas bitmap used by the in-app
-///   thermal preview dialog, so the preview matches the print 1:1.
-/// * A solid white background is painted across the entire canvas so the
-///   exported PNG never contains transparent regions (which render as
-///   black in some preview surfaces).
 abstract final class EscPosReceiptBuilder {
-  // ---- ESC/POS control sequences ----
-  static const List<int> _init = <int>[0x1B, 0x40]; // ESC @ (initialize)
+  static const List<int> _init = <int>[0x1B, 0x40];
   static const List<int> _feedAndCut = <int>[
-    0x1B, 0x64, 0x04, // ESC d 4  (feed 4 lines)
-    0x1D, 0x56, 0x42, 0x00, // GS V B 0 (partial cut)
+    0x1B, 0x64, 0x04,
+    0x1D, 0x56, 0x42, 0x00,
   ];
 
-  // ---- Paper widths, in dots at 203 DPI ----
-  /// 80 mm roll — 576 dots wide (72 mm printable).
   static const int widthMm80 = 576;
-
-  /// 58 mm roll — 384 dots wide (48 mm printable).
   static const int widthMm58 = 384;
 
-  // ---- Font family names, resolved once from google_fonts ----
   static String? _regularFamily;
   static String? _boldFamily;
   static String? _mediumFamily;
 
-  /// Builds the full ESC/POS byte stream for [receipt].
-  ///
-  /// [paperWidthDots] must be [widthMm80] or [widthMm58].
-  ///
-  /// [logoBytes] is an optional PNG / JPG / WEBP image drawn at the top,
-  /// centered. Pass `null` when no logo is configured.
-  ///
-  /// [fontScale] multiplies every font size (default 1.0). [fontWeight]
-  /// selects the base weight (default: normal).
   static Future<List<int>> build({
     required Receipt receipt,
     int paperWidthDots = widthMm80,
@@ -86,12 +50,6 @@ abstract final class EscPosReceiptBuilder {
     ];
   }
 
-  /// Renders the receipt to a [ui.Image] identical to what [build] sends
-  /// to the printer.
-  ///
-  /// Used by the in-app thermal preview dialog so the preview matches the
-  /// printed output pixel-for-pixel. The caller is responsible for
-  /// disposing the returned image.
   static Future<ui.Image> renderToImage({
     required Receipt receipt,
     int paperWidthDots = widthMm80,
@@ -126,12 +84,6 @@ abstract final class EscPosReceiptBuilder {
     return image;
   }
 
-  // ---------------------------------------------------------------------------
-  // Fonts
-  // ---------------------------------------------------------------------------
-
-  /// Loads Cairo (Regular + Medium + Bold) into the engine so the canvas can
-  /// render Arabic glyphs. Idempotent.
   static Future<void> _ensureFonts() async {
     if (_regularFamily != null && _boldFamily != null) return;
 
@@ -147,10 +99,6 @@ abstract final class EscPosReceiptBuilder {
     _mediumFamily = medium.fontFamily ?? 'Cairo';
     _boldFamily = bold.fontFamily ?? 'Cairo';
   }
-
-  // ---------------------------------------------------------------------------
-  // Raster encoding
-  // ---------------------------------------------------------------------------
 
   static Future<List<int>> _encodeRaster(ui.Image image) async {
     final ByteData? byteData = await image.toByteData(
@@ -222,11 +170,7 @@ class _Painter {
   final String regularFamily;
   final String boldFamily;
   final String mediumFamily;
-
-  /// Multiplier applied to every font size (0.8 – 1.6).
   final double fontScale;
-
-  /// Base weight selected by the user. Bold items get an extra boost.
   final PrintFontWeight baseWeight;
 
   final double _scale;
@@ -236,10 +180,8 @@ class _Painter {
   static const Color _black = Color(0xFF000000);
   static const Color _grey = Color(0xFF444444);
 
-  // Font size × scale factor helpers.
   double _font(double base) => base * fontScale;
 
-  // Resolves the (family, weight) pair for a given emphasis level.
   ({String family, FontWeight weight}) _fontFor({bool emphasized = false}) {
     if (emphasized) {
       return (family: boldFamily, weight: FontWeight.w700);
@@ -261,20 +203,7 @@ class _Painter {
   double get _contentWidth => paperWidthDots - 2 * _paddingH;
   double get totalHeight => _y + _paddingBottom;
 
-  // ---------------------------------------------------------------------------
-  // Entry
-  // ---------------------------------------------------------------------------
-
   Future<void> paint(Receipt r, Uint8List? logoBytes) async {
-    // Paint a solid white background across the entire canvas. The final
-    // image is clipped by `picture.toImage(width, height)` to the exact
-    // height computed by [totalHeight], so a very tall rect here is safe.
-    //
-    // Rationale: PNG-encoded pictures on some platforms are exported with
-    // a fully transparent background. In the in-app preview this shows as
-    // the underlying surface color — often a solid black — which hides
-    // any transparent areas of a logo. Painting white guarantees the
-    // receipt looks like paper regardless of theme.
     canvas.drawRect(
       Rect.fromLTWH(
         0,
@@ -287,7 +216,6 @@ class _Painter {
 
     _y = _paddingTop;
 
-    // Logo first — company name follows immediately below it.
     if (logoBytes != null && logoBytes.isNotEmpty) {
       final ui.Image? logo = await _decodeImage(logoBytes);
       if (logo != null) {
@@ -319,10 +247,6 @@ class _Painter {
     _gap(_sectionGap);
     _footer(r);
   }
-
-  // ---------------------------------------------------------------------------
-  // Logo
-  // ---------------------------------------------------------------------------
 
   Future<ui.Image?> _decodeImage(Uint8List bytes) async {
     try {
@@ -371,6 +295,27 @@ class _Painter {
       emphasized: true,
       align: TextAlign.center,
     );
+
+    if (r.hasCompanyAddress) {
+      _gap(2 * _scale);
+      _text(
+        r.companyAddress!,
+        fontSize: _font(13),
+        color: _grey,
+        align: TextAlign.center,
+      );
+    }
+
+    if (r.hasCompanyPhone) {
+      _gap(2 * _scale);
+      _text(
+        r.companyPhone!,
+        fontSize: _font(13),
+        color: _grey,
+        align: TextAlign.center,
+      );
+    }
+
     _gap(2 * _scale);
     _text(
       r.branchName,
@@ -378,6 +323,27 @@ class _Painter {
       color: _grey,
       align: TextAlign.center,
     );
+
+    if (r.hasTaxNumberToPrint) {
+      _gap(2 * _scale);
+      _text(
+        'الرقم الضريبي: ${r.companyTaxNumber}',
+        fontSize: _font(12),
+        color: _grey,
+        align: TextAlign.center,
+      );
+    }
+
+    if (r.hasCommercialRegisterToPrint) {
+      _gap(2 * _scale);
+      _text(
+        'السجل التجاري: ${r.companyCommercialRegister}',
+        fontSize: _font(12),
+        color: _grey,
+        align: TextAlign.center,
+      );
+    }
+
     _gap(_sectionGap);
     _chip('فاتورة مبيعات', fontSize: _font(17));
   }
@@ -385,9 +351,19 @@ class _Painter {
   void _meta(Receipt r) {
     _metaRow('رقم الفاتورة', r.invoiceNumber ?? '—', bold: true);
     _metaRow('التاريخ', _formatDayAndDate(r.dateTime));
+
     if (r.hasCustomer) {
       _metaRow('العميل', r.customerName!);
+
+      if (r.hasCustomerAddress) {
+        _metaRow('عنوان العميل', r.customerAddress!);
+      }
+
+      if (r.hasCustomerPhone) {
+        _metaRow('هاتف العميل', r.customerPhone!);
+      }
     }
+
     if (r.cashierName != null && r.cashierName!.trim().isNotEmpty) {
       _metaRow('الكاشير', r.cashierName!);
     }
@@ -401,14 +377,6 @@ class _Painter {
     final double colTotalW = w * 0.24;
     final double colNameW = w - colNumW - colQtyW - colPriceW - colTotalW;
 
-    // -----------------------------------------------------------------------
-    // RTL layout: cells are painted right-to-left by [_row], starting from
-    // the right edge. To get the natural Arabic reading order
-    //   م  →  الصنف  →  الكمية  →  السعر  →  الإجمالي
-    // we list them in that exact order.
-    // -----------------------------------------------------------------------
-
-    // Header row.
     _row(
       cells: <_Cell>[
         _Cell('م',
@@ -428,7 +396,6 @@ class _Painter {
       backgroundColor: const Color(0xFFDDDDDD),
     );
 
-    // Data rows.
     for (int i = 0; i < r.lines.length; i++) {
       final ReceiptLine line = r.lines[i];
       final Color? bg = i.isOdd ? const Color(0xFFF2F2F2) : null;
@@ -452,7 +419,6 @@ class _Painter {
       );
     }
 
-    // Subtotal row.
     _row(
       cells: <_Cell>[
         _Cell('', width: colNumW, align: TextAlign.center),
@@ -497,7 +463,6 @@ class _Painter {
         ..color = _black,
     );
 
-    // Label on the right (RTL reading start), value on the left.
     label.paint(
       canvas,
       Offset(_paddingH + _contentWidth - boxPad - label.width, _y + boxPad),
@@ -540,10 +505,6 @@ class _Painter {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Building blocks
-  // ---------------------------------------------------------------------------
-
   void _metaRow(String label, String value, {bool bold = false}) {
     final double labelW = 92 * _scale;
     final double fontSize = _font(14);
@@ -562,7 +523,6 @@ class _Painter {
         ? labelPainter.height
         : valuePainter.height;
 
-    // RTL: label on the right, value on the left.
     labelPainter.paint(
       canvas,
       Offset(_paddingH + _contentWidth - labelW, _y),
@@ -590,7 +550,6 @@ class _Painter {
         ? labelPainter.height
         : valuePainter.height;
 
-    // RTL: label on the right, value on the left.
     labelPainter.paint(
       canvas,
       Offset(_paddingH + _contentWidth - labelPainter.width, _y),
@@ -650,11 +609,6 @@ class _Painter {
     _y += chipH;
   }
 
-  /// Paints a single row of cells **right-to-left**, starting from the
-  /// right edge of the content area.
-  ///
-  /// `cells[0]` lands on the **rightmost** position; `cells[last]` lands on
-  /// the **leftmost**. This is the natural order for RTL tables.
   void _row({
     required List<_Cell> cells,
     required double fontSize,
@@ -685,167 +639,4 @@ class _Painter {
       );
     }
 
-    double x = _paddingH + _contentWidth;
-    for (int i = 0; i < cells.length; i++) {
-      final _Cell cell = cells[i];
-      x -= cell.width;
-      final TextPainter painter = painters[i];
-      final double contentY = _y + topPad + (maxH - painter.height) / 2;
-      painter.paint(canvas, Offset(x + 2 * _scale, contentY));
-    }
-
-    canvas.drawRect(
-      Rect.fromLTWH(
-        _paddingH,
-        _y + rowH - 0.5 * _scale,
-        _contentWidth,
-        0.5 * _scale,
-      ),
-      Paint()..color = const Color(0xFF888888),
-    );
-
-    _y += rowH;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Dividers & gaps
-  // ---------------------------------------------------------------------------
-
-  void _divider() {
-    canvas.drawRect(
-      Rect.fromLTWH(_paddingH, _y, _contentWidth, 0.7 * _scale),
-      Paint()..color = const Color(0xFF666666),
-    );
-    _y += 1 * _scale;
-  }
-
-  void _doubleDivider() {
-    _divider();
-    _gap(2 * _scale);
-    _divider();
-  }
-
-  void _gap(double pixels) {
-    _y += pixels;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Measurement
-  // ---------------------------------------------------------------------------
-
-  TextPainter _measure(
-    String text, {
-    required double fontSize,
-    bool bold = false,
-    bool emphasized = false,
-    Color color = _black,
-    TextAlign align = TextAlign.right,
-    double? maxWidth,
-  }) {
-    // `bold` is retained for backward compatibility within this file; the
-    // actual weight is resolved through [_fontFor].
-    final bool useBold = bold || emphasized;
-    final ({String family, FontWeight weight}) style =
-        _fontFor(emphasized: useBold);
-
-    final TextPainter painter = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          fontSize: fontSize * _scale,
-          color: color,
-          fontFamily: style.family,
-          fontWeight: style.weight,
-          height: 1.15,
-        ),
-      ),
-      textDirection: TextDirection.rtl,
-      textAlign: align,
-    );
-    painter.layout(maxWidth: maxWidth ?? _contentWidth);
-    return painter;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Formatting
-  // ---------------------------------------------------------------------------
-
-  static String _money(double value) {
-    final String number;
-    if (value == value.roundToDouble()) {
-      number = _thousands(value.toInt().toString());
-    } else {
-      number = value.toStringAsFixed(2);
-    }
-    return '$number ج.م';
-  }
-
-  static String _qty(double value) {
-    if (value == value.roundToDouble()) {
-      return value.toInt().toString();
-    }
-    return value.toStringAsFixed(2);
-  }
-
-  static String _thousands(String intStr) {
-    final bool neg = intStr.startsWith('-');
-    final String digits = neg ? intStr.substring(1) : intStr;
-    final StringBuffer buf = StringBuffer();
-    if (neg) buf.write('-');
-    for (int i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) buf.write(',');
-      buf.write(digits[i]);
-    }
-    return buf.toString();
-  }
-
-  static const List<String> _days = <String>[
-    'الإثنين',
-    'الثلاثاء',
-    'الأربعاء',
-    'الخميس',
-    'الجمعة',
-    'السبت',
-    'الأحد',
-  ];
-
-  static String _formatDayAndDate(DateTime value) {
-    final DateTime l = value.toLocal();
-    final String day = _days[(l.weekday - 1).clamp(0, 6)];
-    final String y = l.year.toString().padLeft(4, '0');
-    final String m = l.month.toString().padLeft(2, '0');
-    final String d = l.day.toString().padLeft(2, '0');
-    final int h24 = l.hour;
-    final int h12 = h24 == 0 ? 12 : (h24 > 12 ? h24 - 12 : h24);
-    final String ampm = h24 >= 12 ? 'م' : 'ص';
-    final String hh = h12.toString().padLeft(2, '0');
-    final String mm = l.minute.toString().padLeft(2, '0');
-    return '$day  $y/$m/$d  $hh:$mm $ampm';
-  }
-
-  static String _paymentMethodLabel(Receipt r) {
-    if (r.paidAmount <= 0) return 'آجل';
-    if (r.paidAmount >= r.total) return 'نقدي';
-    return 'نقدي (جزئي)';
-  }
-
-  static String _footerText(Receipt r) {
-    final String? custom = r.footer;
-    if (custom != null && custom.trim().isNotEmpty) return custom.trim();
-    return 'شكرًا لتعاملكم معنا';
-  }
-}
-
-class _Cell {
-  const _Cell(
-    this.text, {
-    required this.width,
-    this.bold = false,
-    this.align = TextAlign.right,
-  });
-
-  final String text;
-  final double width;
-  final bool bold;
-  final TextAlign align;
-}
+    double x = _paddingH +
