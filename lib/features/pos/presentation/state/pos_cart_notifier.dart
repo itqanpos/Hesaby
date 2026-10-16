@@ -135,8 +135,15 @@ class PosCartNotifier extends Notifier<PosCart> {
       if (line.key != key || !line.canIncrease) {
         return line;
       }
+      // canIncrease يتحقق من (quantity < stock) قبل الزيادة، وهذا لا يكفي
+      // للكميات الكسرية (3 من 3.5 تصبح 4). نتحقق من القيمة الناتجة.
+      final double candidate = line.quantity + 1;
+      final double? available = line.availableStock;
+      if (available != null && candidate > available) {
+        return line;
+      }
       applied = true;
-      return line.copyWith(quantity: line.quantity + 1);
+      return line.copyWith(quantity: candidate);
     }).toList(growable: false);
 
     if (applied) {
@@ -314,7 +321,11 @@ class PosCartNotifier extends Notifier<PosCart> {
 
   /// Sets the header-level discount. Negative values are clamped to zero.
   void setDiscount(double discount) {
-    state = state.copyWith(discount: discount < 0 ? 0 : discount);
+    // الخصم لا يكون سالباً، ولا يتجاوز المجموع الفرعي (وإلا يصبح الإجمالي سالباً).
+    final double subtotal = state.subtotal;
+    final double clamped =
+        discount < 0 ? 0 : (discount > subtotal ? subtotal : discount);
+    state = state.copyWith(discount: clamped);
   }
 
   /// Sets the header-level tax amount. Negative values are clamped to zero.
