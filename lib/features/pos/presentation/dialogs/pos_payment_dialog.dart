@@ -54,6 +54,7 @@ class _PosPaymentSheet extends ConsumerStatefulWidget {
 
 class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   late final PosCart _cart;
+  late final PosTotals _totals;
   late final TextEditingController _amountController;
 
   String _method = PosPaymentMethod.cash;
@@ -64,6 +65,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   void initState() {
     super.initState();
     _cart = ref.read(posCartProvider);
+    _totals = ref.read(posTotalsProvider);
     // Default: exact settlement amount (previous balance + sale).
     _amountController = TextEditingController(
       text: _formatAmount(_settlementTotal),
@@ -97,7 +99,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   double get _input => double.tryParse(_amountController.text.trim()) ?? 0;
 
   /// Sale total = invoice value only.
-  double get _saleTotal => _cart.total;
+  double get _saleTotal => _totals.total;
 
   /// Total owed by the customer = old balance + sale total.
   double get _settlementTotal => _cart.customerBalance + _saleTotal;
@@ -213,7 +215,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
             ),
         ],
         discount: _cart.discount,
-        taxAmount: _cart.taxAmount,
+        taxAmount: _totals.taxAmount,
         paidAmount: appliedToSale,
       );
       createdSale = sale;
@@ -327,7 +329,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       saleDate: DateTime.now(),
       items: items,
       discount: _cart.discount,
-      taxAmount: _cart.taxAmount,
+      taxAmount: _totals.taxAmount,
       paidAmount: appliedToSale,
       paymentMethod: paymentMethod,
       notes: null,
@@ -409,7 +411,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       ],
       subtotal: _cart.subtotal,
       discount: _cart.discount,
-      taxAmount: _cart.taxAmount,
+      taxAmount: _totals.taxAmount,
       total: _saleTotal,
       paidAmount: _input,
       customerName: _cart.customerName,
