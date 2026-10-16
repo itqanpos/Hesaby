@@ -20,10 +20,8 @@ enum PrintFontWeight {
     }
   }
 
-  /// String stored in the database.
   String get value => name;
 
-  /// Arabic label for the UI.
   String get label => switch (this) {
         PrintFontWeight.normal => 'عادي',
         PrintFontWeight.medium => 'متوسط',
@@ -32,10 +30,6 @@ enum PrintFontWeight {
 }
 
 /// Per-company business defaults + print preferences.
-///
-/// One row exists for every company (created automatically by a DB trigger
-/// when a company is inserted). All values are business rules that the POS,
-/// sales, and receipt printer consult before performing their work.
 @immutable
 class CompanySettings extends Equatable {
   const CompanySettings({
@@ -49,13 +43,13 @@ class CompanySettings extends Equatable {
     required this.printFontWeight,
     required this.printFontScaleA4,
     required this.printDirectEnabled,
+    required this.showTaxNumberOnPrint,
+    required this.showCommercialRegisterOnPrint,
     required this.createdAt,
     required this.updatedAt,
     this.logoUrl,
   });
 
-  /// Fallback used by the UI while the real row is loading, or when the
-  /// caller has no company selected.
   factory CompanySettings.defaults(String companyId) => CompanySettings(
         companyId: companyId,
         defaultTaxRate: 0,
@@ -67,46 +61,32 @@ class CompanySettings extends Equatable {
         printFontWeight: PrintFontWeight.normal,
         printFontScaleA4: 1.0,
         printDirectEnabled: false,
+        showTaxNumberOnPrint: false,
+        showCommercialRegisterOnPrint: false,
         createdAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
 
   final String companyId;
 
-  /// Default tax rate applied to new invoices, in percent (`0`..`100`).
   final double defaultTaxRate;
-
-  /// Highest discount a cashier may apply, in percent (`0`..`100`).
   final double maxDiscountPercent;
-
-  /// Whether the POS may add a line whose quantity exceeds the current
-  /// available stock.
   final bool allowSaleWithoutStock;
-
-  /// Whether credit (آجل) sales are permitted.
   final bool allowCreditSale;
-
-  /// Free-form text printed at the bottom of every receipt.
   final String receiptFooter;
 
-  // ---------------------------------------------------------------------------
-  // Printing preferences
-  // ---------------------------------------------------------------------------
-
-  /// Public URL of the company logo, or `null` when none uploaded.
   final String? logoUrl;
-
-  /// Font size multiplier for thermal receipts (0.8 – 1.6).
   final double printFontScale;
-
-  /// Font weight for printed documents.
   final PrintFontWeight printFontWeight;
-
-  /// Font size multiplier for A4 / PDF documents (0.8 – 1.6).
   final double printFontScaleA4;
-
-  /// Whether to skip the print preview dialog and print immediately.
   final bool printDirectEnabled;
+
+  /// Whether the company tax number is printed on receipts/invoices.
+  final bool showTaxNumberOnPrint;
+
+  /// Whether the company commercial register is printed on
+  /// receipts/invoices.
+  final bool showCommercialRegisterOnPrint;
 
   final DateTime createdAt;
   final DateTime updatedAt;
@@ -132,6 +112,8 @@ class CompanySettings extends Equatable {
         printFontWeight,
         printFontScaleA4,
         printDirectEnabled,
+        showTaxNumberOnPrint,
+        showCommercialRegisterOnPrint,
         createdAt,
         updatedAt,
       ];
@@ -148,6 +130,8 @@ class CompanySettings extends Equatable {
     PrintFontWeight? printFontWeight,
     double? printFontScaleA4,
     bool? printDirectEnabled,
+    bool? showTaxNumberOnPrint,
+    bool? showCommercialRegisterOnPrint,
     DateTime? updatedAt,
   }) {
     return CompanySettings(
@@ -163,6 +147,10 @@ class CompanySettings extends Equatable {
       printFontWeight: printFontWeight ?? this.printFontWeight,
       printFontScaleA4: printFontScaleA4 ?? this.printFontScaleA4,
       printDirectEnabled: printDirectEnabled ?? this.printDirectEnabled,
+      showTaxNumberOnPrint:
+          showTaxNumberOnPrint ?? this.showTaxNumberOnPrint,
+      showCommercialRegisterOnPrint: showCommercialRegisterOnPrint ??
+          this.showCommercialRegisterOnPrint,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -175,5 +163,7 @@ class CompanySettings extends Equatable {
       'maxDiscount: $maxDiscountPercent, '
       'hasLogo: $hasLogo, '
       'fontScale: $printFontScale, '
-      'fontWeight: ${printFontWeight.name})';
+      'fontWeight: ${printFontWeight.name}, '
+      'showTaxNumberOnPrint: $showTaxNumberOnPrint, '
+      'showCommercialRegisterOnPrint: $showCommercialRegisterOnPrint)';
 }
