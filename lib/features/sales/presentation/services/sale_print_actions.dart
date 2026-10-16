@@ -29,7 +29,8 @@ enum DirectSalePrintResult {
   sendFailed,
 }
 
-/// Prints [sale] directly to the saved thermal printer.
+/// Prints [sale] directly to the saved thermal printer — no preview
+/// dialog, no PDF, no share sheet.
 Future<DirectSalePrintResult> printSaleDirect({
   required WidgetRef ref,
   required Sale sale,
@@ -154,14 +155,6 @@ Future<bool> shareSalePdf({
 }
 
 /// Builds a [Receipt] snapshot from a stored [Sale] and its related data.
-///
-/// **Company identity fields** (`companyAddress`, `companyPhone`,
-/// `companyTaxNumber`, `companyCommercialRegister`) are read from the
-/// current [CompanyContextState]. **Print flags** (`showTaxNumberOnPrint`,
-/// `showCommercialRegisterOnPrint`) are read from [CompanySettings].
-///
-/// The historical balance fields (`previousBalance` / `newBalance`) are
-/// not available from the sale row alone, so they are left `null`.
 Receipt buildReceiptFromSale({
   required WidgetRef ref,
   required Sale sale,
