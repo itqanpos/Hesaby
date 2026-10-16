@@ -639,4 +639,153 @@ class _Painter {
       );
     }
 
-    double x = _paddingH +
+    double x = _paddingH + _contentWidth;
+    for (int i = 0; i < cells.length; i++) {
+      final _Cell cell = cells[i];
+      x -= cell.width;
+      final TextPainter painter = painters[i];
+      final double contentY = _y + topPad + (maxH - painter.height) / 2;
+      painter.paint(canvas, Offset(x + 2 * _scale, contentY));
+    }
+
+    canvas.drawRect(
+      Rect.fromLTWH(
+        _paddingH,
+        _y + rowH - 0.5 * _scale,
+        _contentWidth,
+        0.5 * _scale,
+      ),
+      Paint()..color = const Color(0xFF888888),
+    );
+
+    _y += rowH;
+  }
+
+  void _divider() {
+    canvas.drawRect(
+      Rect.fromLTWH(_paddingH, _y, _contentWidth, 0.7 * _scale),
+      Paint()..color = const Color(0xFF666666),
+    );
+    _y += 1 * _scale;
+  }
+
+  void _doubleDivider() {
+    _divider();
+    _gap(2 * _scale);
+    _divider();
+  }
+
+  void _gap(double pixels) {
+    _y += pixels;
+  }
+
+  TextPainter _measure(
+    String text, {
+    required double fontSize,
+    bool bold = false,
+    bool emphasized = false,
+    Color color = _black,
+    TextAlign align = TextAlign.right,
+    double? maxWidth,
+  }) {
+    final bool useBold = bold || emphasized;
+    final ({String family, FontWeight weight}) style =
+        _fontFor(emphasized: useBold);
+
+    final TextPainter painter = TextPainter(
+      text: TextSpan(
+        text: text,
+        style: TextStyle(
+          fontSize: fontSize * _scale,
+          color: color,
+          fontFamily: style.family,
+          fontWeight: style.weight,
+          height: 1.15,
+        ),
+      ),
+      textDirection: TextDirection.rtl,
+      textAlign: align,
+    );
+    painter.layout(maxWidth: maxWidth ?? _contentWidth);
+    return painter;
+  }
+
+  static String _money(double value) {
+    final String number;
+    if (value == value.roundToDouble()) {
+      number = _thousands(value.toInt().toString());
+    } else {
+      number = value.toStringAsFixed(2);
+    }
+    return '$number ج.م';
+  }
+
+  static String _qty(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toStringAsFixed(2);
+  }
+
+  static String _thousands(String intStr) {
+    final bool neg = intStr.startsWith('-');
+    final String digits = neg ? intStr.substring(1) : intStr;
+    final StringBuffer buf = StringBuffer();
+    if (neg) buf.write('-');
+    for (int i = 0; i < digits.length; i++) {
+      if (i > 0 && (digits.length - i) % 3 == 0) buf.write(',');
+      buf.write(digits[i]);
+    }
+    return buf.toString();
+  }
+
+  static const List<String> _days = <String>[
+    'الإثنين',
+    'الثلاثاء',
+    'الأربعاء',
+    'الخميس',
+    'الجمعة',
+    'السبت',
+    'الأحد',
+  ];
+
+  static String _formatDayAndDate(DateTime value) {
+    final DateTime l = value.toLocal();
+    final String day = _days[(l.weekday - 1).clamp(0, 6)];
+    final String y = l.year.toString().padLeft(4, '0');
+    final String m = l.month.toString().padLeft(2, '0');
+    final String d = l.day.toString().padLeft(2, '0');
+    final int h24 = l.hour;
+    final int h12 = h24 == 0 ? 12 : (h24 > 12 ? h24 - 12 : h24);
+    final String ampm = h24 >= 12 ? 'م' : 'ص';
+    final String hh = h12.toString().padLeft(2, '0');
+    final String mm = l.minute.toString().padLeft(2, '0');
+    return '$day  $y/$m/$d  $hh:$mm $ampm';
+  }
+
+  static String _paymentMethodLabel(Receipt r) {
+    if (r.paidAmount <= 0) return 'آجل';
+    if (r.paidAmount >= r.total) return 'نقدي';
+    return 'نقدي (جزئي)';
+  }
+
+  static String _footerText(Receipt r) {
+    final String? custom = r.footer;
+    if (custom != null && custom.trim().isNotEmpty) return custom.trim();
+    return 'شكرًا لتعاملكم معنا';
+  }
+}
+
+class _Cell {
+  const _Cell(
+    this.text, {
+    required this.width,
+    this.bold = false,
+    this.align = TextAlign.right,
+  });
+
+  final String text;
+  final double width;
+  final bool bold;
+  final TextAlign align;
+}
