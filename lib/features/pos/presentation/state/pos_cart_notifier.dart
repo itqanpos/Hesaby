@@ -321,11 +321,7 @@ class PosCartNotifier extends Notifier<PosCart> {
 
   /// Sets the header-level discount. Negative values are clamped to zero.
   void setDiscount(double discount) {
-    // الخصم لا يكون سالباً، ولا يتجاوز المجموع الفرعي (وإلا يصبح الإجمالي سالباً).
-    final double subtotal = state.subtotal;
-    final double clamped =
-        discount < 0 ? 0 : (discount > subtotal ? subtotal : discount);
-    state = state.copyWith(discount: clamped);
+    state = state.copyWith(discount: discount < 0 ? 0 : discount);
   }
 
   /// Sets the header-level tax amount. Negative values are clamped to zero.
