@@ -19,6 +19,7 @@ class Receipt extends Equatable {
     required this.paidAmount,
     required this.change,
     this.paidOnBalance = 0,
+    this.addedToBalance = 0,
     this.invoiceNumber,
     this.companyAddress,
     this.companyPhone,
@@ -46,40 +47,32 @@ class Receipt extends Equatable {
   final double taxAmount;
   final double total;
 
-  /// Amount of the received cash that was applied to this invoice.
+  /// Amount of the input that was applied to this invoice.
   final double paidAmount;
 
-  /// Cash returned to the customer (0 for card and credit).
+  /// Cash returned to the customer (0 unless the operator chose to
+  /// return the excess as cash).
   final double change;
 
-  /// Amount of the received cash that was applied to the customer's
-  /// previous balance.
+  /// Amount of the input that was applied to the customer's previous
+  /// balance. Zero for card and credit sales, and for cash sales with no
+  /// prior balance.
   final double paidOnBalance;
 
-  // ---- Company identity (printed on the receipt) ----
+  /// Amount added to the customer's balance beyond the invoice total.
+  /// Positive = customer still owes; negative = customer has a credit.
+  /// This is the balance **delta**, not the resulting balance.
+  final double addedToBalance;
 
-  /// Street address of the company — printed below the company name.
+  // ---- Company identity ----
   final String? companyAddress;
-
-  /// Contact phone of the company — printed below the address.
   final String? companyPhone;
-
-  /// Tax registration number (الرقم الضريبي). Only printed when
-  /// [showTaxNumberOnPrint] is `true`.
   final String? companyTaxNumber;
-
-  /// Commercial register number (السجل التجاري). Only printed when
-  /// [showCommercialRegisterOnPrint] is `true`.
   final String? companyCommercialRegister;
-
-  /// Whether the tax number should appear on the printed receipt.
   final bool showTaxNumberOnPrint;
-
-  /// Whether the commercial register should appear on the printed receipt.
   final bool showCommercialRegisterOnPrint;
 
   // ---- Parties ----
-
   final String? customerName;
   final String? customerAddress;
   final String? customerPhone;
@@ -89,8 +82,14 @@ class Receipt extends Equatable {
   final String? footer;
 
   // ---------------------------------------------------------------------------
-  // Convenience
+  // Derived
   // ---------------------------------------------------------------------------
+
+  /// Total amount the customer owed at the start of this sale
+  /// (previous balance + invoice total). Falls back to [total] when no
+  /// previous balance exists.
+  double get settlementTotal =>
+      (previousBalance ?? 0) + total;
 
   bool get hasCustomer => customerName != null;
 
@@ -123,6 +122,9 @@ class Receipt extends Equatable {
 
   bool get hasBalancePayment => paidOnBalance > 0;
 
+  /// Whether the resulting balance is negative (customer has a credit).
+  bool get hasCreditBalance => (newBalance ?? 0) < 0;
+
   bool get hasFooter => footer != null && footer!.trim().isNotEmpty;
 
   int get lineCount => lines.length;
@@ -151,6 +153,7 @@ class Receipt extends Equatable {
         paidAmount,
         change,
         paidOnBalance,
+        addedToBalance,
         customerName,
         customerAddress,
         customerPhone,
