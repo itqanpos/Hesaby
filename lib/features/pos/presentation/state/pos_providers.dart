@@ -9,7 +9,9 @@ import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../../products/domain/repositories/product_repository.dart';
 import '../../../products/presentation/providers/product_providers.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../domain/entities/pos_cart.dart';
+import '../../domain/services/pos_tax_calculator.dart';
 import 'pos_cart_notifier.dart';
 import 'pos_search_notifier.dart';
 
@@ -186,11 +188,20 @@ class PosTotals extends Equatable {
 /// recomputed by [PosCart]'s getters.
 final Provider<PosTotals> posTotalsProvider = Provider<PosTotals>((ref) {
   final PosCart cart = ref.watch(posCartProvider);
+  final double defaultTaxRate = ref.watch(defaultTaxRateProvider);
+
+  final double afterDiscount = cart.subtotal - cart.discount;
+  final double tax = PosTaxCalculator.taxFor(
+    afterDiscount: afterDiscount,
+    manualTax: cart.taxAmount,
+    defaultTaxRate: defaultTaxRate,
+  );
+
   return PosTotals(
     lineCount: cart.lineCount,
     subtotal: cart.subtotal,
     discount: cart.discount,
-    taxAmount: cart.taxAmount,
-    total: cart.total,
+    taxAmount: tax,
+    total: PosTaxCalculator.totalFor(afterDiscount: afterDiscount, tax: tax),
   );
 });
