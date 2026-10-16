@@ -4,10 +4,12 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/painting.dart';
+import 'package:flutter/services.dart' show rootBundle;
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../domain/entities/receipt.dart';
+import '../../domain/services/receipt_number_format.dart';
 
 /// Builds an ESC/POS byte stream from a [Receipt] by rendering the whole
 /// document as a 1-bit bitmap and sending it as a `GS v 0` raster command.
@@ -84,8 +86,39 @@ abstract final class EscPosReceiptBuilder {
     return image;
   }
 
+  static const String _bundledRegular = 'CairoReceipt';
+  static const String _bundledBold = 'CairoReceiptBold';
+
+  /// Loads Cairo from `assets/fonts/`. Returns `false` when the files are not
+  /// bundled, so the caller falls back to google_fonts (needs internet once).
+  static Future<bool> _loadBundledFonts() async {
+    try {
+      final ByteData regular =
+          await rootBundle.load('assets/fonts/Cairo-Regular.ttf');
+      final ByteData bold =
+          await rootBundle.load('assets/fonts/Cairo-Bold.ttf');
+
+      final ui.FontLoader regularLoader = ui.FontLoader(_bundledRegular)
+        ..addFont(Future<ByteData>.value(regular));
+      final ui.FontLoader boldLoader = ui.FontLoader(_bundledBold)
+        ..addFont(Future<ByteData>.value(bold));
+      await regularLoader.load();
+      await boldLoader.load();
+
+      _regularFamily = _bundledRegular;
+      _mediumFamily = _bundledRegular;
+      _boldFamily = _bundledBold;
+      return true;
+    } on Object {
+      return false;
+    }
+  }
+
   static Future<void> _ensureFonts() async {
     if (_regularFamily != null && _boldFamily != null) return;
+
+    // Prefer Cairo bundled with the app: printing must work without internet.
+    if (await _loadBundledFonts()) return;
 
     final TextStyle regular = GoogleFonts.cairo();
     final TextStyle medium =
@@ -232,6 +265,8 @@ class _Painter {
     _doubleDivider();
     _gap(_sectionGap);
     _itemsTable(r);
+    _gap(_sectionGap);
+    _summaryRows(r);
     _gap(_sectionGap);
     _grandTotal(r);
     _gap(_sectionGap);
@@ -435,6 +470,16 @@ class _Painter {
       bottomPad: 6 * _scale,
       backgroundColor: const Color(0xFFE8E8E8),
     );
+  }
+
+  void _summaryRows(Receipt r) {
+    _kvRow('المجموع الفرعي', _money(r.subtotal));
+    if (r.hasDiscountToPrint) {
+      _kvRow('الخصم', '- ${_money(r.discount)}');
+    }
+    if (r.hasTaxToPrint) {
+      _kvRow('الضريبة', _money(r.taxAmount));
+    }
   }
 
   void _grandTotal(Receipt r) {
@@ -727,34 +772,10 @@ class _Painter {
     return painter;
   }
 
-  static String _money(double value) {
-    final String number;
-    if (value == value.roundToDouble()) {
-      number = _thousands(value.toInt().toString());
-    } else {
-      number = value.toStringAsFixed(2);
-    }
-    return '$number ج.م';
-  }
+  static String _money(double value) =>
+      ReceiptNumberFormat.money(value, currency: 'ج.م');
 
-  static String _qty(double value) {
-    if (value == value.roundToDouble()) {
-      return value.toInt().toString();
-    }
-    return value.toStringAsFixed(2);
-  }
-
-  static String _thousands(String intStr) {
-    final bool neg = intStr.startsWith('-');
-    final String digits = neg ? intStr.substring(1) : intStr;
-    final StringBuffer buf = StringBuffer();
-    if (neg) buf.write('-');
-    for (int i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) buf.write(',');
-      buf.write(digits[i]);
-    }
-    return buf.toString();
-  }
+  static String _qty(double value) => ReceiptNumberFormat.quantity(value);
 
   static const List<String> _days = <String>[
     'الإثنين',
