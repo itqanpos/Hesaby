@@ -1,362 +1,917 @@
-// lib/features/settings/data/repositories/company_settings_repository_impl.dart
+// lib/features/settings/presentation/pages/company_settings_page.dart
 
-import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
+import 'dart:typed_data';
+
+import 'package:flutter/material.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:image_picker/image_picker.dart';
 
 import '../../../../core/utils/logger.dart';
+import '../../../../shared/layouts/app_shell.dart';
+import '../../../../shared/widgets/app_button.dart';
+import '../../../../shared/widgets/app_error.dart';
+import '../../../../shared/widgets/app_loader.dart';
+import '../../../../shared/widgets/app_text_field.dart';
+import '../../data/services/logo_cache_service.dart';
+import '../../data/services/logo_storage_service.dart';
 import '../../domain/entities/company_settings.dart';
 import '../../domain/repositories/company_settings_repository.dart';
+import '../providers/company_settings_providers.dart';
 
-/// Concrete implementation of [CompanySettingsRepository] backed by Supabase.
-class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
-  const CompanySettingsRepositoryImpl(this._client);
-
-  final supabase.SupabaseClient? _client;
-
-  // ---------------------------------------------------------------------------
-  // Read
-  // ---------------------------------------------------------------------------
+/// Company settings page — business defaults + print preferences.
+///
+/// Sections (top → bottom):
+/// 1. **الشعار** — upload / preview / delete the company logo.
+/// 2. **البيع والضرائب** — tax rate, max discount.
+/// 3. **قواعد البيع** — allow-sale-without-stock, allow-credit-sale.
+/// 4. **تذييل الإيصال** — receipt footer text.
+/// 5. **الطباعة الرسمية** — whether the tax number and commercial
+///    register are printed on receipts / invoices.
+class CompanySettingsPage extends ConsumerStatefulWidget {
+  const CompanySettingsPage({super.key});
 
   @override
-  Future<CompanySettings> getSettings(String companyId) async {
+  ConsumerState<CompanySettingsPage> createState() =>
+      _CompanySettingsPageState();
+}
+
+class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+
+  late final TextEditingController _taxRateController;
+  late final TextEditingController _maxDiscountController;
+  late final TextEditingController _footerController;
+
+  bool _allowSaleWithoutStock = false;
+  bool _allowCreditSale = true;
+  bool _showTaxNumberOnPrint = false;
+  bool _showCommercialRegisterOnPrint = false;
+
+  bool _initialized = false;
+  bool _isSaving = false;
+  CompanySettingsFailureType? _saveFailure;
+
+  @override
+  void initState() {
+    super.initState();
+    _taxRateController = TextEditingController();
+    _maxDiscountController = TextEditingController();
+    _footerController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _taxRateController.dispose();
+    _maxDiscountController.dispose();
+    _footerController.dispose();
+    super.dispose();
+  }
+
+  // ---------------------------------------------------------------------------
+  // Hydration
+  // ---------------------------------------------------------------------------
+
+  void _hydrate(CompanySettings settings) {
+    if (_initialized) return;
+    _initialized = true;
+    _taxRateController.text = _formatNumber(settings.defaultTaxRate);
+    _maxDiscountController.text = _formatNumber(settings.maxDiscountPercent);
+    _footerController.text = settings.receiptFooter;
+    _allowSaleWithoutStock = settings.allowSaleWithoutStock;
+    _allowCreditSale = settings.allowCreditSale;
+    _showTaxNumberOnPrint = settings.showTaxNumberOnPrint;
+    _showCommercialRegisterOnPrint =
+        settings.showCommercialRegisterOnPrint;
+  }
+
+  static String _formatNumber(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toStringAsFixed(2);
+  }
+
+  // ---------------------------------------------------------------------------
+  // Save
+  // ---------------------------------------------------------------------------
+
+  Future<void> _save() async {
+    FocusScope.of(context).unfocus();
+
+    if (_saveFailure != null) {
+      setState(() => _saveFailure = null);
+    }
+
+    final bool valid = _formKey.currentState?.validate() ?? false;
+    if (!valid) return;
+
+    final double taxRate =
+        double.tryParse(_taxRateController.text.trim()) ?? 0;
+    final double maxDiscount =
+        double.tryParse(_maxDiscountController.text.trim()) ?? 0;
+    final String footer = _footerController.text.trim();
+
+    setState(() => _isSaving = true);
+
     try {
-      final supabase.SupabaseClient client = _requireClient();
+      await ref.read(companySettingsProvider.notifier).updateSettings(
+            defaultTaxRate: taxRate,
+            maxDiscountPercent: maxDiscount,
+            allowSaleWithoutStock: _allowSaleWithoutStock,
+            allowCreditSale: _allowCreditSale,
+            receiptFooter: footer,
+            showTaxNumberOnPrint: _showTaxNumberOnPrint,
+            showCommercialRegisterOnPrint: _showCommercialRegisterOnPrint,
+          );
 
-      final Map<String, dynamic>? row = await client
-          .from('company_settings')
-          .select()
-          .eq('company_id', companyId)
-          .maybeSingle();
-
-      if (row == null) {
-        throw const CompanySettingsException(
-          type: CompanySettingsFailureType.notFound,
-          cause: 'No company_settings row for this company.',
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('تم حفظ الإعدادات.')),
         );
+    } on CompanySettingsException catch (error) {
+      if (!mounted) return;
+      setState(() => _saveFailure = error.type);
+    } on Object {
+      if (!mounted) return;
+      setState(() => _saveFailure = CompanySettingsFailureType.unknown);
+    } finally {
+      if (mounted) {
+        setState(() => _isSaving = false);
       }
-
-      return _fromMap(row);
-    } on CompanySettingsException {
-      rethrow;
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'getSettings');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'getSettings');
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'getSettings');
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Update
+  // Build
   // ---------------------------------------------------------------------------
 
   @override
-  Future<CompanySettings> updateSettings({
-    required String companyId,
-    double? defaultTaxRate,
-    double? maxDiscountPercent,
-    bool? allowSaleWithoutStock,
-    bool? allowCreditSale,
-    String? receiptFooter,
-    String? logoUrl,
-    bool clearLogo = false,
-    double? printFontScale,
-    PrintFontWeight? printFontWeight,
-    double? printFontScaleA4,
-    bool? printDirectEnabled,
-    bool? showTaxNumberOnPrint,
-    bool? showCommercialRegisterOnPrint,
-  }) async {
+  Widget build(BuildContext context) {
+    final AsyncValue<CompanySettings> settingsAsync =
+        ref.watch(companySettingsProvider);
+
+    return AppShell(
+      appBar: AppBar(title: const Text('إعدادات الشركة')),
+      body: settingsAsync.when(
+        loading: () => const AppLoader(),
+        error: (Object error, StackTrace _) => AppErrorView(
+          title: 'تعذّر تحميل الإعدادات',
+          message: _errorMessage(error),
+          retryLabel: 'إعادة المحاولة',
+          onRetry: () =>
+              ref.read(companySettingsProvider.notifier).refresh(),
+        ),
+        data: (CompanySettings settings) {
+          _hydrate(settings);
+
+          return Form(
+            key: _formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: ListView(
+              padding: const EdgeInsets.only(top: 12, bottom: 24),
+              children: <Widget>[
+                // ---- Logo ----
+                const _SectionHeader(
+                  title: 'شعار الشركة',
+                  icon: Icons.image_outlined,
+                ),
+                const SizedBox(height: 10),
+                const _LogoSection(),
+                const SizedBox(height: 6),
+                const _HelperText(
+                  'يظهر الشعار أعلى كل الإيصالات الحرارية والتقارير A4. '
+                  'الحجم الأقصى 500 كيلوبايت (PNG أو JPG).',
+                ),
+
+                const SizedBox(height: 16),
+
+                // ---- Sales rules ----
+                const _SectionHeader(
+                  title: 'البيع والضرائب',
+                  icon: Icons.receipt_long_outlined,
+                ),
+                const SizedBox(height: 10),
+                _Card(
+                  children: <Widget>[
+                    AppTextField(
+                      controller: _taxRateController,
+                      label: 'نسبة الضريبة الافتراضية %',
+                      hint: 'مثال: 14',
+                      enabled: !_isSaving,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: _validatePercent,
+                    ),
+                    const SizedBox(height: 6),
+                    const _HelperText(
+                      'تُطبَّق تلقائيًا على كل فاتورة بيع جديدة. اتركها 0 لتعطيل الضريبة.',
+                    ),
+                    const SizedBox(height: 14),
+                    AppTextField(
+                      controller: _maxDiscountController,
+                      label: 'الحد الأقصى للخصم %',
+                      hint: 'مثال: 20',
+                      enabled: !_isSaving,
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
+                      validator: _validatePercent,
+                    ),
+                    const SizedBox(height: 6),
+                    const _HelperText(
+                      'أعلى نسبة خصم يمكن للكاشير تطبيقها على فاتورة. 0 = لا خصومات مسموحة.',
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // ---- Business rules ----
+                const _SectionHeader(
+                  title: 'قواعد البيع',
+                  icon: Icons.rule_outlined,
+                ),
+                const SizedBox(height: 10),
+                _Card(
+                  padding: EdgeInsets.zero,
+                  children: <Widget>[
+                    SwitchListTile(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 16),
+                      title: const Text('السماح بالبيع بدون رصيد'),
+                      subtitle: const Text(
+                        'يتيح للكاشير بيع منتج حتى لو كان رصيده صفرًا أو أقل من الكمية المطلوبة.',
+                      ),
+                      value: _allowSaleWithoutStock,
+                      onChanged: _isSaving
+                          ? null
+                          : (bool value) {
+                              setState(
+                                  () => _allowSaleWithoutStock = value);
+                            },
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 16),
+                      title: const Text('السماح بالبيع الآجل'),
+                      subtitle: const Text(
+                        'يتيح إتمام البيع مع ترك المبلغ مستحقًا على رصيد العميل.',
+                      ),
+                      value: _allowCreditSale,
+                      onChanged: _isSaving
+                          ? null
+                          : (bool value) {
+                              setState(() => _allowCreditSale = value);
+                            },
+                    ),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // ---- Receipt ----
+                const _SectionHeader(
+                  title: 'تذييل الإيصال',
+                  icon: Icons.text_fields_outlined,
+                ),
+                const SizedBox(height: 10),
+                _Card(
+                  children: <Widget>[
+                    AppTextField(
+                      controller: _footerController,
+                      label: 'النص أسفل الإيصال',
+                      hint: 'شكرًا لتعاملكم معنا',
+                      enabled: !_isSaving,
+                      maxLines: 3,
+                      validator: _validateFooter,
+                    ),
+                    const SizedBox(height: 6),
+                    const _HelperText(
+                      'يظهر في نهاية كل إيصال PDF أو حراري (حتى 200 حرف).',
+                    ),
+                    const SizedBox(height: 10),
+                    _PreviewFooter(controller: _footerController),
+                  ],
+                ),
+
+                const SizedBox(height: 16),
+
+                // ---- Official print flags ----
+                const _SectionHeader(
+                  title: 'الطباعة الرسمية',
+                  icon: Icons.print_outlined,
+                ),
+                const SizedBox(height: 10),
+                _Card(
+                  padding: EdgeInsets.zero,
+                  children: <Widget>[
+                    SwitchListTile(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 16),
+                      title: const Text('إظهار الرقم الضريبي'),
+                      subtitle: const Text(
+                        'يُطبع الرقم الضريبي للشركة أسفل بيانات الشركة في كل '
+                        'إيصال/فاتورة. يُدخل من "بيانات الشركة".',
+                      ),
+                      value: _showTaxNumberOnPrint,
+                      onChanged: _isSaving
+                          ? null
+                          : (bool value) {
+                              setState(
+                                  () => _showTaxNumberOnPrint = value);
+                            },
+                    ),
+                    const Divider(height: 1),
+                    SwitchListTile(
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 16),
+                      title: const Text('إظهار السجل التجاري'),
+                      subtitle: const Text(
+                        'يُطبع السجل التجاري للشركة أسفل بيانات الشركة في كل '
+                        'إيصال/فاتورة. يُدخل من "بيانات الشركة".',
+                      ),
+                      value: _showCommercialRegisterOnPrint,
+                      onChanged: _isSaving
+                          ? null
+                          : (bool value) {
+                              setState(() =>
+                                  _showCommercialRegisterOnPrint = value);
+                            },
+                    ),
+                  ],
+                ),
+
+                if (_saveFailure != null) ...<Widget>[
+                  const SizedBox(height: 16),
+                  _ErrorBanner(message: _saveFailureMessage(_saveFailure!)),
+                ],
+
+                const SizedBox(height: 24),
+
+                AppButton(
+                  label: 'حفظ التعديلات',
+                  icon: Icons.save_outlined,
+                  expanded: true,
+                  size: AppButtonSize.large,
+                  isLoading: _isSaving,
+                  onPressed: _isSaving ? null : _save,
+                ),
+              ],
+            ),
+          );
+        },
+      ),
+    );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Validators
+  // ---------------------------------------------------------------------------
+
+  String? _validatePercent(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return 'الرجاء إدخال قيمة';
+    final double? parsed = double.tryParse(trimmed);
+    if (parsed == null) return 'الرجاء إدخال رقم صحيح';
+    if (parsed < 0) return 'لا يمكن أن تكون القيمة سالبة';
+    if (parsed > 100) return 'القيمة يجب ألا تتجاوز 100';
+    return null;
+  }
+
+  String? _validateFooter(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return 'الرجاء إدخال نص التذييل';
+    if (trimmed.length > 200) {
+      return 'النص طويل جدًا (الحد الأقصى 200 حرف)';
+    }
+    return null;
+  }
+
+  // ---------------------------------------------------------------------------
+  // Localization
+  // ---------------------------------------------------------------------------
+
+  static String _errorMessage(Object error) {
+    if (error is CompanySettingsException) {
+      return _failureMessage(error.type);
+    }
+    return 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.';
+  }
+
+  static String _saveFailureMessage(CompanySettingsFailureType type) =>
+      _failureMessage(type);
+
+  static String _failureMessage(CompanySettingsFailureType type) {
+    switch (type) {
+      case CompanySettingsFailureType.network:
+        return 'تعذّر الاتصال بالخادم. تحقق من اتصالك بالإنترنت.';
+      case CompanySettingsFailureType.unauthorized:
+        return 'ليس لديك صلاحية لتعديل الإعدادات. تواصل مع مدير الشركة.';
+      case CompanySettingsFailureType.notFound:
+        return 'لم يتم العثور على إعدادات هذه الشركة.';
+      case CompanySettingsFailureType.invalidTaxRate:
+        return 'نسبة الضريبة يجب أن تكون بين 0 و 100.';
+      case CompanySettingsFailureType.invalidDiscountLimit:
+        return 'حد الخصم يجب أن يكون بين 0 و 100.';
+      case CompanySettingsFailureType.invalidFooter:
+        return 'نص التذييل غير صالح (فارغ أو يتجاوز 200 حرف).';
+      case CompanySettingsFailureType.invalidResponse:
+        return 'تعذّر قراءة البيانات من الخادم.';
+      case CompanySettingsFailureType.unknown:
+        return 'تعذّر حفظ الإعدادات. حاول مرة أخرى.';
+    }
+  }
+}
+
+// ============================================================================
+// Logo section
+// ============================================================================
+
+class _LogoSection extends ConsumerStatefulWidget {
+  const _LogoSection();
+
+  @override
+  ConsumerState<_LogoSection> createState() => _LogoSectionState();
+}
+
+class _LogoSectionState extends ConsumerState<_LogoSection> {
+  static const int _maxBytes = 500 * 1024; // 500 KB
+
+  bool _isUploading = false;
+  bool _isDeleting = false;
+  String? _errorMessage;
+
+  // ---------------------------------------------------------------------------
+  // Upload
+  // ---------------------------------------------------------------------------
+
+  Future<void> _pickAndUpload() async {
+    if (_isUploading || _isDeleting) return;
+
+    setState(() {
+      _errorMessage = null;
+    });
+
+    final ImagePicker picker = ImagePicker();
+    XFile? file;
     try {
-      final supabase.SupabaseClient client = _requireClient();
-
-      final Map<String, dynamic> payload = <String, dynamic>{};
-      if (defaultTaxRate != null) {
-        payload['default_tax_rate'] = defaultTaxRate;
-      }
-      if (maxDiscountPercent != null) {
-        payload['max_discount_percent'] = maxDiscountPercent;
-      }
-      if (allowSaleWithoutStock != null) {
-        payload['allow_sale_without_stock'] = allowSaleWithoutStock;
-      }
-      if (allowCreditSale != null) {
-        payload['allow_credit_sale'] = allowCreditSale;
-      }
-      if (receiptFooter != null) {
-        payload['receipt_footer'] = receiptFooter;
-      }
-      if (clearLogo) {
-        payload['logo_url'] = null;
-      } else if (logoUrl != null) {
-        payload['logo_url'] = logoUrl;
-      }
-      if (printFontScale != null) {
-        payload['print_font_scale'] = printFontScale;
-      }
-      if (printFontWeight != null) {
-        payload['print_font_weight'] = printFontWeight.value;
-      }
-      if (printFontScaleA4 != null) {
-        payload['print_font_scale_a4'] = printFontScaleA4;
-      }
-      if (printDirectEnabled != null) {
-        payload['print_direct_enabled'] = printDirectEnabled;
-      }
-      if (showTaxNumberOnPrint != null) {
-        payload['show_tax_number_on_print'] = showTaxNumberOnPrint;
-      }
-      if (showCommercialRegisterOnPrint != null) {
-        payload['show_commercial_register_on_print'] =
-            showCommercialRegisterOnPrint;
-      }
-
-      if (payload.isEmpty) {
-        return await getSettings(companyId);
-      }
-
-      final Map<String, dynamic> row = await client
-          .from('company_settings')
-          .update(payload)
-          .eq('company_id', companyId)
-          .select()
-          .single();
-
-      return _fromMap(row);
-    } on CompanySettingsException {
-      rethrow;
-    } on supabase.PostgrestException catch (error, stackTrace) {
-      throw _mapPostgrest(error, stackTrace, operation: 'updateSettings');
-    } on supabase.AuthException catch (error, stackTrace) {
-      throw _mapAuth(error, stackTrace, operation: 'updateSettings');
-    } on Object catch (error, stackTrace) {
-      throw _mapUnknown(error, stackTrace, operation: 'updateSettings');
-    }
-  }
-
-  // ---------------------------------------------------------------------------
-  // Mapping
-  // ---------------------------------------------------------------------------
-
-  static CompanySettings _fromMap(Map<String, dynamic> map) {
-    return CompanySettings(
-      companyId: _requireString(map, 'company_id'),
-      defaultTaxRate: _requireDouble(map, 'default_tax_rate'),
-      maxDiscountPercent: _requireDouble(map, 'max_discount_percent'),
-      allowSaleWithoutStock:
-          _requireBool(map, 'allow_sale_without_stock'),
-      allowCreditSale: _requireBool(map, 'allow_credit_sale'),
-      receiptFooter: _requireString(map, 'receipt_footer'),
-      logoUrl: _optionalString(map, 'logo_url'),
-      printFontScale: _optionalDouble(map, 'print_font_scale') ?? 1.0,
-      printFontWeight:
-          PrintFontWeight.fromString(_optionalString(map, 'print_font_weight')),
-      printFontScaleA4: _optionalDouble(map, 'print_font_scale_a4') ?? 1.0,
-      printDirectEnabled:
-          _optionalBool(map, 'print_direct_enabled') ?? false,
-      showTaxNumberOnPrint:
-          _optionalBool(map, 'show_tax_number_on_print') ?? false,
-      showCommercialRegisterOnPrint:
-          _optionalBool(map, 'show_commercial_register_on_print') ?? false,
-      createdAt: _requireTimestamp(map, 'created_at'),
-      updatedAt: _requireTimestamp(map, 'updated_at'),
-    );
-  }
-
-  static String _requireString(Map<String, dynamic> map, String key) {
-    final Object? value = map[key];
-    if (value is String) return value;
-    throw FormatException('CompanySettings: missing or invalid "$key".');
-  }
-
-  static String? _optionalString(Map<String, dynamic> map, String key) {
-    final Object? value = map[key];
-    if (value == null) return null;
-    if (value is String) {
-      final String t = value.trim();
-      return t.isEmpty ? null : t;
-    }
-    return value.toString();
-  }
-
-  static double _requireDouble(Map<String, dynamic> map, String key) {
-    final double? v = _optionalDouble(map, key);
-    if (v != null) return v;
-    throw FormatException('CompanySettings: "$key" is not numeric.');
-  }
-
-  static double? _optionalDouble(Map<String, dynamic> map, String key) {
-    final Object? value = map[key];
-    if (value == null) return null;
-    if (value is double) return value;
-    if (value is num) return value.toDouble();
-    if (value is String) return double.tryParse(value);
-    return null;
-  }
-
-  static bool _requireBool(Map<String, dynamic> map, String key) {
-    final bool? v = _optionalBool(map, key);
-    if (v != null) return v;
-    throw FormatException('CompanySettings: "$key" is not boolean.');
-  }
-
-  static bool? _optionalBool(Map<String, dynamic> map, String key) {
-    final Object? value = map[key];
-    if (value == null) return null;
-    if (value is bool) return value;
-    if (value is num) return value != 0;
-    if (value is String) {
-      final String lower = value.toLowerCase();
-      if (lower == 'true' || lower == 't' || lower == '1') return true;
-      if (lower == 'false' || lower == 'f' || lower == '0') return false;
-    }
-    return null;
-  }
-
-  static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
-    final Object? value = map[key];
-    if (value is DateTime) return value.toUtc();
-    if (value is String && value.isNotEmpty) {
-      final DateTime? parsed = DateTime.tryParse(value);
-      if (parsed != null) return parsed.toUtc();
-    }
-    throw FormatException(
-      'CompanySettings: "$key" is not a valid timestamp.',
-    );
-  }
-
-  supabase.SupabaseClient _requireClient() {
-    final supabase.SupabaseClient? client = _client;
-    if (client == null) {
-      throw const CompanySettingsException(
-        type: CompanySettingsFailureType.unknown,
-        cause: 'Supabase client is not initialised.',
+      file = await picker.pickImage(
+        source: ImageSource.gallery,
+        maxWidth: 512,
+        maxHeight: 512,
+        imageQuality: 90,
       );
+    } on Object catch (e, s) {
+      AppLogger.error('Image picker failed', e, s);
+      if (mounted) {
+        setState(() => _errorMessage = 'تعذّر فتح الصور. تحقق من الصلاحيات.');
+      }
+      return;
     }
-    return client;
+
+    if (file == null) return; // User cancelled.
+
+    final Uint8List bytes = await file.readAsBytes();
+    if (bytes.length > _maxBytes) {
+      if (mounted) {
+        setState(() => _errorMessage =
+            'حجم الصورة يتجاوز 500 كيلوبايت. اختر صورة أصغر.');
+      }
+      return;
+    }
+
+    final String? companyId = _currentCompanyId();
+    if (companyId == null) {
+      if (mounted) {
+        setState(() => _errorMessage = 'لم يتم اختيار شركة.');
+      }
+      return;
+    }
+
+    setState(() => _isUploading = true);
+
+    try {
+      final String extension = _extensionOf(file.name);
+      final String url = await logoStorageServiceFromSupabase.upload(
+        companyId: companyId,
+        bytes: bytes,
+        fileExtension: extension,
+      );
+
+      await ref
+          .read(companySettingsProvider.notifier)
+          .updateSettings(logoUrl: url);
+
+      await const LogoCacheService().save(companyId, bytes);
+
+      if (!mounted) return;
+      setState(() => _isUploading = false);
+      _snack('تم رفع الشعار.');
+    } on LogoStorageException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isUploading = false;
+        _errorMessage = e.message;
+      });
+    } on Object catch (e, s) {
+      AppLogger.error('Logo upload flow failed', e, s);
+      if (!mounted) return;
+      setState(() {
+        _isUploading = false;
+        _errorMessage = 'تعذّر رفع الشعار. حاول مرة أخرى.';
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Delete
+  // ---------------------------------------------------------------------------
+
+  Future<void> _delete() async {
+    if (_isUploading || _isDeleting) return;
+
+    final String? companyId = _currentCompanyId();
+    if (companyId == null) return;
+
+    setState(() {
+      _isDeleting = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await logoStorageServiceFromSupabase.delete(companyId);
+      await ref
+          .read(companySettingsProvider.notifier)
+          .updateSettings(clearLogo: true);
+      await const LogoCacheService().clear(companyId);
+
+      if (!mounted) return;
+      setState(() => _isDeleting = false);
+      _snack('تم حذف الشعار.');
+    } on Object catch (e, s) {
+      AppLogger.error('Logo delete flow failed', e, s);
+      if (!mounted) return;
+      setState(() {
+        _isDeleting = false;
+        _errorMessage = 'تعذّر حذف الشعار.';
+      });
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  String? _currentCompanyId() {
+    final CompanySettings? s =
+        ref.read(companySettingsProvider).valueOrNull;
+    if (s == null || s.companyId.isEmpty) return null;
+    return s.companyId;
+  }
+
+  static String _extensionOf(String fileName) {
+    final int dot = fileName.lastIndexOf('.');
+    if (dot < 0 || dot == fileName.length - 1) return 'png';
+    return fileName.substring(dot + 1).toLowerCase();
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final AsyncValue<CompanySettings> async =
+        ref.watch(companySettingsProvider);
+    final CompanySettings? settings = async.valueOrNull;
+    final String? logoUrl = settings?.logoUrl;
+    final bool hasLogo = logoUrl != null && logoUrl.isNotEmpty;
+    final bool busy = _isUploading || _isDeleting;
+
+    return _Card(
+      children: <Widget>[
+        Center(
+          child: SizedBox(
+            width: 140,
+            height: 140,
+            child: DecoratedBox(
+              decoration: BoxDecoration(
+                color: scheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(16),
+                border: Border.all(color: scheme.outlineVariant),
+              ),
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(16),
+                child: hasLogo
+                    ? Image.network(
+                        logoUrl,
+                        fit: BoxFit.contain,
+                        loadingBuilder: (
+                          BuildContext _,
+                          Widget child,
+                          ImageChunkEvent? progress,
+                        ) {
+                          if (progress == null) return child;
+                          return const Center(
+                            child: CircularProgressIndicator(),
+                          );
+                        },
+                        errorBuilder: (
+                          BuildContext _,
+                          Object error,
+                          StackTrace? __,
+                        ) {
+                          return Center(
+                            child: Icon(
+                              Icons.broken_image_outlined,
+                              size: 36,
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          );
+                        },
+                      )
+                    : Center(
+                        child: Icon(
+                          Icons.image_outlined,
+                          size: 40,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      ),
+              ),
+            ),
+          ),
+        ),
+
+        if (busy) ...<Widget>[
+          const SizedBox(height: 12),
+          const Center(
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            ),
+          ),
+        ],
+
+        if (_errorMessage != null) ...<Widget>[
+          const SizedBox(height: 12),
+          _ErrorBanner(message: _errorMessage!),
+        ],
+
+        const SizedBox(height: 16),
+
+        AppButton(
+          label: hasLogo ? 'تغيير الشعار' : 'رفع الشعار',
+          icon: hasLogo ? Icons.swap_horiz : Icons.upload_outlined,
+          expanded: true,
+          isLoading: _isUploading,
+          onPressed: busy ? null : _pickAndUpload,
+        ),
+        if (hasLogo) ...<Widget>[
+          const SizedBox(height: 8),
+          AppButton(
+            label: 'حذف الشعار',
+            icon: Icons.delete_outline,
+            variant: AppButtonVariant.danger,
+            expanded: true,
+            isLoading: _isDeleting,
+            onPressed: busy ? null : _delete,
+          ),
+        ],
+      ],
+    );
   }
 }
 
 // ============================================================================
-// Error mapping
+// Section header
 // ============================================================================
 
-CompanySettingsException _mapPostgrest(
-  supabase.PostgrestException error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  final CompanySettingsFailureType type = _classifyPostgrest(error);
-  AppLogger.warning(
-    'CompanySettings PostgREST error during "$operation" '
-    'mapped to ${type.name} (code: ${error.code ?? 'n/a'}).',
-  );
-  return CompanySettingsException(
-    type: type,
-    cause: error,
-    stackTrace: stackTrace,
-  );
+class _SectionHeader extends StatelessWidget {
+  const _SectionHeader({required this.title, required this.icon});
+
+  final String title;
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Row(
+      children: <Widget>[
+        Container(
+          width: 32,
+          height: 32,
+          decoration: BoxDecoration(
+            color: scheme.primary.withValues(alpha: 0.12),
+            borderRadius: BorderRadius.circular(10),
+          ),
+          child: Icon(icon, size: 18, color: scheme.primary),
+        ),
+        const SizedBox(width: 10),
+        Text(
+          title,
+          style: theme.textTheme.titleMedium?.copyWith(
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+      ],
+    );
+  }
 }
 
-CompanySettingsException _mapAuth(
-  supabase.AuthException error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  AppLogger.warning(
-    'CompanySettings auth error during "$operation" mapped to unauthorized.',
-  );
-  return CompanySettingsException(
-    type: CompanySettingsFailureType.unauthorized,
-    cause: error,
-    stackTrace: stackTrace,
-  );
+// ============================================================================
+// Card
+// ============================================================================
+
+class _Card extends StatelessWidget {
+  const _Card({required this.children, this.padding});
+
+  final List<Widget> children;
+  final EdgeInsetsGeometry? padding;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: padding ?? const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: children,
+        ),
+      ),
+    );
+  }
 }
 
-CompanySettingsException _mapUnknown(
-  Object error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  final CompanySettingsFailureType type = _looksLikeNetwork(error)
-      ? CompanySettingsFailureType.network
-      : CompanySettingsFailureType.unknown;
-  AppLogger.error(
-    'Unhandled company-settings error during "$operation".',
-    error,
-    stackTrace,
-  );
-  return CompanySettingsException(
-    type: type,
-    cause: error,
-    stackTrace: stackTrace,
-  );
+// ============================================================================
+// Helper text
+// ============================================================================
+
+class _HelperText extends StatelessWidget {
+  const _HelperText(this.text);
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Text(
+        text,
+        style: theme.textTheme.bodySmall?.copyWith(
+          color: scheme.onSurfaceVariant,
+        ),
+      ),
+    );
+  }
 }
 
-CompanySettingsFailureType _classifyPostgrest(
-  supabase.PostgrestException error,
-) {
-  final String code = (error.code ?? '').toUpperCase();
-  final String message = error.message.toLowerCase();
-  final String full = error.toString().toLowerCase();
+// ============================================================================
+// Footer preview
+// ============================================================================
 
-  if (code == '23514') {
-    if (full.contains('company_settings_font_scale_range') ||
-        full.contains('print_font_scale')) {
-      return CompanySettingsFailureType.invalidResponse;
-    }
-    if (full.contains('company_settings_font_weight_valid')) {
-      return CompanySettingsFailureType.invalidResponse;
-    }
-    if (full.contains('company_settings_logo_url_length')) {
-      return CompanySettingsFailureType.invalidResponse;
-    }
-    if (full.contains('company_settings_tax_rate_valid') ||
-        message.contains('default_tax_rate')) {
-      return CompanySettingsFailureType.invalidTaxRate;
-    }
-    if (full.contains('company_settings_max_discount_valid') ||
-        message.contains('max_discount_percent')) {
-      return CompanySettingsFailureType.invalidDiscountLimit;
-    }
-    if (full.contains('company_settings_footer_length') ||
-        message.contains('receipt_footer')) {
-      return CompanySettingsFailureType.invalidFooter;
-    }
-    return CompanySettingsFailureType.invalidResponse;
-  }
+class _PreviewFooter extends StatelessWidget {
+  const _PreviewFooter({required this.controller});
 
-  if (code == 'PGRST116') return CompanySettingsFailureType.notFound;
-  if (code.startsWith('42501') || code.startsWith('28')) {
-    return CompanySettingsFailureType.unauthorized;
-  }
-  if (code.startsWith('42')) {
-    return CompanySettingsFailureType.invalidResponse;
-  }
+  final TextEditingController controller;
 
-  if (message.contains('permission denied') ||
-      message.contains('row level security') ||
-      message.contains('jwt')) {
-    return CompanySettingsFailureType.unauthorized;
-  }
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
 
-  if (_messageLooksLikeNetwork(message)) {
-    return CompanySettingsFailureType.network;
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (
+        BuildContext context,
+        TextEditingValue value,
+        Widget? _,
+      ) {
+        final String text = value.text.trim();
+        final String display = text.isEmpty ? '—' : text;
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 10,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.visibility_outlined,
+                      size: 14,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'معاينة',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Center(
+                  child: Text(
+                    display,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: text.isEmpty
+                          ? scheme.onSurfaceVariant
+                          : scheme.onSurface,
+                      fontStyle: text.isEmpty
+                          ? FontStyle.italic
+                          : FontStyle.normal,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
   }
-
-  return CompanySettingsFailureType.unknown;
 }
 
-bool _looksLikeNetwork(Object error) =>
-    _messageLooksLikeNetwork(error.toString().toLowerCase());
+// ============================================================================
+// Error banner
+// ============================================================================
 
-bool _messageLooksLikeNetwork(String value) {
-  return value.contains('socket') ||
-      value.contains('network') ||
-      value.contains('connection') ||
-      value.contains('timeout') ||
-      value.contains('timed out') ||
-      value.contains('unreachable') ||
-      value.contains('failed host lookup') ||
-      value.contains('clientexception');
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(
+          color: scheme.error.withValues(alpha: 0.35),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(
+          horizontal: 14,
+          vertical: 12,
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(
+              Icons.error_outline,
+              color: scheme.onErrorContainer,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: scheme.onErrorContainer),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
