@@ -121,6 +121,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
   String? _validationError() {
     if (_cart.isEmpty) return 'السلة فارغة. أضف منتجاً قبل الدفع.';
+    if (_cart.discount > _cart.subtotal) {
+      return 'الخصم أكبر من المجموع الفرعي للفاتورة.';
+    }
     if (_saleTotal <= 0) {
       return 'إجمالي الفاتورة يجب أن يكون أكبر من صفر.';
     }
