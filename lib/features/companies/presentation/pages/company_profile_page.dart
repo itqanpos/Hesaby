@@ -165,9 +165,32 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
     } on CompanyException catch (error) {
       if (!mounted) return;
       setState(() => _saveFailure = error.type);
-    } on Object {
+      // TEMP DIAGNOSTIC — remove after fixing.
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text(
+              'DEBUG: type=${error.type.name}\n'
+              'cause=${error.cause}',
+            ),
+            duration: const Duration(seconds: 20),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
+    } on Object catch (error) {
       if (!mounted) return;
       setState(() => _saveFailure = CompanyFailureType.unknown);
+      // TEMP DIAGNOSTIC — remove after fixing.
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          SnackBar(
+            content: Text('DEBUG unknown: $error'),
+            duration: const Duration(seconds: 20),
+            backgroundColor: Colors.red.shade700,
+          ),
+        );
     } finally {
       if (mounted) {
         setState(() => _isSaving = false);
@@ -208,9 +231,6 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
     return null;
   }
 
-  /// Tax registration numbers contain digits only in most MENA countries.
-  /// We do not enforce a strict format (some countries allow letters),
-  /// only length and character whitelist: digits, letters, dash.
   String? _validateTaxNumber(String? value) {
     final String trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) return null;
@@ -299,10 +319,8 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
       child: ListView(
         padding: const EdgeInsets.only(top: 12, bottom: 24),
         children: <Widget>[
-          // ---- Subscription (contextual) ----
           const _SubscriptionContextCard(),
 
-          // ---- Basic data ----
           const _SectionHeader(
             title: 'البيانات الأساسية',
             icon: Icons.badge_outlined,
@@ -331,7 +349,6 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
 
           const SizedBox(height: 16),
 
-          // ---- Tax identification ----
           const _SectionHeader(
             title: 'البيانات الضريبية',
             icon: Icons.receipt_outlined,
@@ -367,7 +384,6 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
 
           const SizedBox(height: 16),
 
-          // ---- Contact ----
           const _SectionHeader(
             title: 'معلومات الاتصال',
             icon: Icons.contact_phone_outlined,
@@ -408,7 +424,6 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
 
           const SizedBox(height: 16),
 
-          // ---- Regional ----
           const _SectionHeader(
             title: 'الإعدادات الإقليمية',
             icon: Icons.public_outlined,
