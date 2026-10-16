@@ -18,9 +18,6 @@ enum ReceiptPaperSize {
 }
 
 /// Builds a PDF document from a [Receipt].
-///
-/// **Phase P-1b:** accepts a [PrintStyleSettings] that scales every font.
-/// **Phase U-5:** accepts optional [logoBytes] drawn centered at the top.
 abstract final class PdfReceiptBuilder {
   static Future<pw.Font>? _regularFontFuture;
   static Future<pw.Font>? _boldFontFuture;
@@ -191,6 +188,7 @@ abstract final class PdfReceiptBuilder {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
+        // ---- Company name ----
         pw.Center(
           child: pw.Text(
             receipt.companyName,
@@ -205,6 +203,46 @@ abstract final class PdfReceiptBuilder {
             textAlign: pw.TextAlign.center,
           ),
         ),
+
+        // ---- Company address ----
+        if (receipt.hasCompanyAddress) ...<pw.Widget>[
+          pw.SizedBox(height: 3),
+          pw.Center(
+            child: pw.Text(
+              receipt.companyAddress!,
+              style: pw.TextStyle(
+                fontSize: s.branchName,
+                color: PdfColors.grey700,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: false,
+                ),
+              ),
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+        ],
+
+        // ---- Company phone ----
+        if (receipt.hasCompanyPhone) ...<pw.Widget>[
+          pw.SizedBox(height: 2),
+          pw.Center(
+            child: pw.Text(
+              receipt.companyPhone!,
+              style: pw.TextStyle(
+                fontSize: s.branchName,
+                color: PdfColors.grey700,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: false,
+                ),
+              ),
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+        ],
+
+        // ---- Branch name ----
         pw.SizedBox(height: 3),
         pw.Center(
           child: pw.Text(
@@ -220,7 +258,48 @@ abstract final class PdfReceiptBuilder {
             textAlign: pw.TextAlign.center,
           ),
         ),
+
+        // ---- Tax number (opt-in) ----
+        if (receipt.hasTaxNumberToPrint) ...<pw.Widget>[
+          pw.SizedBox(height: 2),
+          pw.Center(
+            child: pw.Text(
+              'الرقم الضريبي: ${receipt.companyTaxNumber}',
+              style: pw.TextStyle(
+                fontSize: s.branchName,
+                color: PdfColors.grey700,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: false,
+                ),
+              ),
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+        ],
+
+        // ---- Commercial register (opt-in) ----
+        if (receipt.hasCommercialRegisterToPrint) ...<pw.Widget>[
+          pw.SizedBox(height: 2),
+          pw.Center(
+            child: pw.Text(
+              'السجل التجاري: ${receipt.companyCommercialRegister}',
+              style: pw.TextStyle(
+                fontSize: s.branchName,
+                color: PdfColors.grey700,
+                fontWeight: _weight(
+                  userWeight: style.fontWeight,
+                  emphasized: false,
+                ),
+              ),
+              textAlign: pw.TextAlign.center,
+            ),
+          ),
+        ],
+
         pw.SizedBox(height: s.sectionGap),
+
+        // ---- Title chip ----
         pw.Center(
           child: pw.Container(
             padding: const pw.EdgeInsets.symmetric(
@@ -275,8 +354,23 @@ abstract final class PdfReceiptBuilder {
           s,
           style,
         ),
-        if (receipt.hasCustomer)
+        if (receipt.hasCustomer) ...<pw.Widget>[
           _metaRow('العميل', receipt.customerName!, s, style),
+          if (receipt.hasCustomerAddress)
+            _metaRow(
+              'عنوان العميل',
+              receipt.customerAddress!,
+              s,
+              style,
+            ),
+          if (receipt.hasCustomerPhone)
+            _metaRow(
+              'هاتف العميل',
+              receipt.customerPhone!,
+              s,
+              style,
+            ),
+        ],
         if (receipt.cashierName != null &&
             receipt.cashierName!.trim().isNotEmpty)
           _metaRow('الكاشير', receipt.cashierName!, s, style),
@@ -854,6 +948,5 @@ class _Sizes {
   final double footer;
   final double sectionGap;
 
-  /// Logo width in PDF points.
   final double logoWidth;
 }
