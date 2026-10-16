@@ -18,23 +18,10 @@ import 'pos_tablet_layout.dart';
 
 /// POS main page — responsive shell + keyboard shortcuts.
 ///
-/// Layout selection is delegated to one of three concrete widgets based on
-/// available width. Business logic lives entirely in the notifier layer.
-///
 /// Keyboard shortcuts (desktop / web):
 /// * **F2**  — focus the search field.
 /// * **F9**  — open the payment dialog (no-op on an empty cart).
 /// * **Esc** — clear the search query.
-///
-/// The page is rendered with `resizeToAvoidBottomInset: false` so that the
-/// bottom pay panel stays pinned at the bottom of the screen and is simply
-/// covered by the on-screen keyboard. This matches how POS apps behave:
-/// the cashier types into the search field while the pay panel stays out
-/// of the way.
-///
-/// **Phase T-1:** the payment entry point is guarded by
-/// [SubscriptionGuard.ensureCanWrite] — an expired account can browse the
-/// catalog and build a cart, but cannot complete a sale.
 class PosPage extends ConsumerWidget {
   const PosPage({super.key});
 
@@ -89,8 +76,7 @@ class PosPage extends ConsumerWidget {
   }
 
   /// Opens the payment dialog when the cart is non-empty and the current
-  /// account is allowed to write. When the subscription is expired the
-  /// guard surfaces an informative dialog and the payment flow is aborted.
+  /// account is allowed to write.
   Future<void> _handlePay(BuildContext context, WidgetRef ref) async {
     final PosCart cart = ref.read(posCartProvider);
     if (cart.isEmpty) {
