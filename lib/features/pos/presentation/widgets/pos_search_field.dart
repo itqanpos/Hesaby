@@ -133,7 +133,7 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
       return;
     }
 
-    await _quickAddIfSingleMatch();
+    await _quickAddIfSingleMatch(scannedValue: value);
   }
 
   Future<void> _handleSubmitted(String value) async {
@@ -147,11 +147,28 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     await _quickAddIfSingleMatch();
   }
 
-  Future<void> _quickAddIfSingleMatch() async {
-    final AsyncValue<List<Product>> results =
-        ref.read(posSearchResultsProvider);
-    final List<Product>? products = results.valueOrNull;
-    if (products == null || products.length != 1) {
+  Future<void> _quickAddIfSingleMatch({String? scannedValue}) async {
+    final List<Product>? products =
+        ref.read(posSearchResultsProvider).valueOrNull;
+    if (products == null) {
+      // Results still loading: nothing to decide yet.
+      return;
+    }
+
+    if (products.isEmpty) {
+      if (ref.read(posSearchProvider).normalizedQuery.isEmpty) {
+        return;
+      }
+      _showMessage(
+        scannedValue != null
+            ? 'الباركود $scannedValue غير موجود في الكتالوج.'
+            : 'لا يوجد منتج مطابق للبحث.',
+      );
+      return;
+    }
+
+    if (products.length > 1) {
+      _showMessage('يوجد أكثر من منتج مطابق. اختر المنتج من القائمة.');
       return;
     }
 
@@ -177,12 +194,32 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
       }
     }
 
-    final bool added = posQuickAddProduct(ref, product);
-    if (!added) {
+    switch (posQuickAddProduct(ref, product)) {
+      case PosQuickAddResult.success:
+        _finishQuickAdd();
+      case PosQuickAddResult.noBranch:
+        _showMessage('اختر الفرع أولاً قبل إضافة المنتجات.');
+      case PosQuickAddResult.unitsNotLoaded:
+        _showMessage('جاري تحميل بيانات الوحدات، حاول مرة أخرى.');
+      case PosQuickAddResult.noDefaultUnit:
+        _showMessage('تعذّر تحديد الوحدة الافتراضية لهذا المنتج.');
+      case PosQuickAddResult.rejected:
+        _showMessage('تعذّرت إضافة «${product.name}» إلى السلة.');
+    }
+  }
+
+  void _showMessage(String message) {
+    if (!mounted) {
       return;
     }
-
-    _finishQuickAdd();
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(message),
+          duration: const Duration(seconds: 3),
+        ),
+      );
   }
 
   void _finishQuickAdd() {
