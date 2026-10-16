@@ -1,808 +1,1242 @@
-// lib/features/pos/data/services/esc_pos_receipt_builder.dart
+// lib/features/pos/presentation/dialogs/pos_payment_dialog.dart
 
-import 'dart:typed_data';
-import 'dart:ui' as ui;
+import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import 'package:flutter/painting.dart';
-import 'package:google_fonts/google_fonts.dart';
-
-import '../../../settings/domain/entities/company_settings.dart';
+import '../../../../core/invalidation/data_invalidation.dart';
+import '../../../../core/network/network_status_provider.dart';
+import '../../../../core/network/offline_writer.dart';
+import '../../../../core/utils/formatters.dart';
+import '../../../../shared/widgets/app_button.dart';
+import '../../../cash/domain/entities/cash_entities.dart';
+import '../../../cash/presentation/providers/cash_providers.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../sales/domain/entities/sale_entities.dart';
+import '../../../sales/domain/repositories/sales_repository.dart';
+import '../../../sales/presentation/providers/sales_providers.dart';
+import '../../../settings/presentation/providers/company_settings_providers.dart';
+import '../../domain/entities/pos_cart.dart';
+import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/entities/receipt.dart';
+import '../state/pos_providers.dart';
+import 'pos_print_preview_dialog.dart';
 
-/// Builds an ESC/POS byte stream from a [Receipt] by rendering the whole
-/// document as a 1-bit bitmap and sending it as a `GS v 0` raster command.
-abstract final class EscPosReceiptBuilder {
-  static const List<int> _init = <int>[0x1B, 0x40];
-  static const List<int> _feedAndCut = <int>[
-    0x1B, 0x64, 0x04,
-    0x1D, 0x56, 0x42, 0x00,
-  ];
+abstract final class PosPaymentMethod {
+  static const String cash = 'cash';
+  static const String card = 'card';
+  static const String credit = 'credit';
+}
 
-  static const int widthMm80 = 576;
-  static const int widthMm58 = 384;
-
-  static String? _regularFamily;
-  static String? _boldFamily;
-  static String? _mediumFamily;
-
-  static Future<List<int>> build({
-    required Receipt receipt,
-    int paperWidthDots = widthMm80,
-    Uint8List? logoBytes,
-    double fontScale = 1.0,
-    PrintFontWeight fontWeight = PrintFontWeight.normal,
-  }) async {
-    final ui.Image image = await renderToImage(
-      receipt: receipt,
-      paperWidthDots: paperWidthDots,
-      logoBytes: logoBytes,
-      fontScale: fontScale,
-      fontWeight: fontWeight,
-    );
-
-    final List<int> raster = await _encodeRaster(image);
-    image.dispose();
-
-    return <int>[
-      ..._init,
-      ...raster,
-      ..._feedAndCut,
-    ];
-  }
-
-  static Future<ui.Image> renderToImage({
-    required Receipt receipt,
-    int paperWidthDots = widthMm80,
-    Uint8List? logoBytes,
-    double fontScale = 1.0,
-    PrintFontWeight fontWeight = PrintFontWeight.normal,
-  }) async {
-    await _ensureFonts();
-
-    final double clampedScale = fontScale.clamp(0.8, 1.6);
-
-    final ui.PictureRecorder recorder = ui.PictureRecorder();
-    final ui.Canvas canvas = ui.Canvas(recorder);
-
-    final _Painter painter = _Painter(
-      canvas: canvas,
-      paperWidthDots: paperWidthDots,
-      regularFamily: _regularFamily!,
-      boldFamily: _boldFamily!,
-      mediumFamily: _mediumFamily ?? _regularFamily!,
-      fontScale: clampedScale,
-      baseWeight: fontWeight,
-    );
-    await painter.paint(receipt, logoBytes);
-
-    final ui.Picture picture = recorder.endRecording();
-    final ui.Image image = await picture.toImage(
-      paperWidthDots,
-      painter.totalHeight.ceil(),
-    );
-    picture.dispose();
-    return image;
-  }
-
-  static Future<void> _ensureFonts() async {
-    if (_regularFamily != null && _boldFamily != null) return;
-
-    final TextStyle regular = GoogleFonts.cairo();
-    final TextStyle medium =
-        GoogleFonts.cairo(fontWeight: FontWeight.w600);
-    final TextStyle bold =
-        GoogleFonts.cairo(fontWeight: FontWeight.w700);
-
-    await GoogleFonts.pendingFonts(<TextStyle>[regular, medium, bold]);
-
-    _regularFamily = regular.fontFamily ?? 'Cairo';
-    _mediumFamily = medium.fontFamily ?? 'Cairo';
-    _boldFamily = bold.fontFamily ?? 'Cairo';
-  }
-
-  static Future<List<int>> _encodeRaster(ui.Image image) async {
-    final ByteData? byteData = await image.toByteData(
-      format: ui.ImageByteFormat.rawRgba,
-    );
-    if (byteData == null) {
-      throw StateError('Failed to read pixel data from the receipt image.');
-    }
-
-    final Uint8List pixels = byteData.buffer.asUint8List();
-    final int width = image.width;
-    final int height = image.height;
-    final int widthBytes = (width + 7) ~/ 8;
-
-    const int threshold = 160;
-
-    final Uint8List raster = Uint8List(widthBytes * height);
-    int offset = 0;
-    for (int y = 0; y < height; y++) {
-      final int rowStart = y * width * 4;
-      for (int bx = 0; bx < widthBytes; bx++) {
-        int byte = 0;
-        for (int bit = 0; bit < 8; bit++) {
-          final int x = bx * 8 + bit;
-          if (x >= width) break;
-          final int idx = rowStart + x * 4;
-          final int a = pixels[idx + 3];
-          if (a < 128) continue;
-          final int r = pixels[idx];
-          final int g = pixels[idx + 1];
-          final int b = pixels[idx + 2];
-          final int lum = (r * 299 + g * 587 + b * 114) ~/ 1000;
-          if (lum < threshold) {
-            byte |= 0x80 >> bit;
-          }
-        }
-        raster[offset++] = byte;
-      }
-    }
-
-    return <int>[
-      0x1D, 0x76, 0x30, 0x00,
-      widthBytes & 0xFF,
-      (widthBytes >> 8) & 0xFF,
-      height & 0xFF,
-      (height >> 8) & 0xFF,
-      ...raster,
-    ];
-  }
+/// Opens the POS payment dialog.
+Future<bool?> showPosPaymentDialog({required BuildContext context}) {
+  return showModalBottomSheet<bool>(
+    context: context,
+    isScrollControlled: true,
+    useSafeArea: true,
+    enableDrag: false,
+    backgroundColor: Colors.transparent,
+    builder: (BuildContext sheetContext) => const _PosPaymentSheet(),
+  );
 }
 
 // ============================================================================
-// Painter
+// Payment sheet
 // ============================================================================
 
-class _Painter {
-  _Painter({
-    required this.canvas,
-    required this.paperWidthDots,
-    required this.regularFamily,
-    required this.boldFamily,
-    required this.mediumFamily,
-    required this.fontScale,
-    required this.baseWeight,
-  }) : _scale = paperWidthDots / 576.0;
+class _PosPaymentSheet extends ConsumerStatefulWidget {
+  const _PosPaymentSheet();
 
-  final ui.Canvas canvas;
-  final int paperWidthDots;
-  final String regularFamily;
-  final String boldFamily;
-  final String mediumFamily;
-  final double fontScale;
-  final PrintFontWeight baseWeight;
+  @override
+  ConsumerState<_PosPaymentSheet> createState() => _PosPaymentSheetState();
+}
 
-  final double _scale;
+class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
+  late final PosCart _cart;
+  late final TextEditingController _amountController;
 
-  double _y = 0;
+  String _method = PosPaymentMethod.cash;
+  bool _isSubmitting = false;
+  SalesFailureType? _serverFailure;
 
-  static const Color _black = Color(0xFF000000);
-  static const Color _grey = Color(0xFF444444);
-
-  double _font(double base) => base * fontScale;
-
-  ({String family, FontWeight weight}) _fontFor({bool emphasized = false}) {
-    if (emphasized) {
-      return (family: boldFamily, weight: FontWeight.w700);
-    }
-    switch (baseWeight) {
-      case PrintFontWeight.normal:
-        return (family: regularFamily, weight: FontWeight.w400);
-      case PrintFontWeight.medium:
-        return (family: mediumFamily, weight: FontWeight.w600);
-      case PrintFontWeight.bold:
-        return (family: boldFamily, weight: FontWeight.w700);
-    }
+  @override
+  void initState() {
+    super.initState();
+    _cart = ref.read(posCartProvider);
+    // Default: exact settlement amount (previous balance + sale).
+    _amountController = TextEditingController(
+      text: _formatAmount(_settlementTotal),
+    );
+    _amountController.addListener(_onAmountChanged);
   }
 
-  double get _paddingTop => 12 * _scale;
-  double get _paddingBottom => 16 * _scale;
-  double get _paddingH => 14 * _scale;
-  double get _sectionGap => 8 * _scale;
-  double get _contentWidth => paperWidthDots - 2 * _paddingH;
-  double get totalHeight => _y + _paddingBottom;
-
-  Future<void> paint(Receipt r, Uint8List? logoBytes) async {
-    canvas.drawRect(
-      Rect.fromLTWH(
-        0,
-        0,
-        paperWidthDots.toDouble(),
-        100000,
-      ),
-      Paint()..color = const Color(0xFFFFFFFF),
-    );
-
-    _y = _paddingTop;
-
-    if (logoBytes != null && logoBytes.isNotEmpty) {
-      final ui.Image? logo = await _decodeImage(logoBytes);
-      if (logo != null) {
-        _drawLogo(logo);
-        logo.dispose();
-        _gap(_sectionGap * 0.5);
-      }
-    }
-
-    _header(r);
-    _gap(_sectionGap);
-    _meta(r);
-    _gap(_sectionGap);
-    _doubleDivider();
-    _gap(_sectionGap);
-    _itemsTable(r);
-    _gap(_sectionGap);
-    _grandTotal(r);
-    _gap(_sectionGap);
-    _paymentBlock(r);
-    if (r.hasBalanceChange) {
-      _gap(_sectionGap);
-      _divider();
-      _gap(_sectionGap);
-      _balanceBlock(r);
-    }
-    _gap(_sectionGap * 1.5);
-    _divider();
-    _gap(_sectionGap);
-    _footer(r);
+  @override
+  void dispose() {
+    _amountController.removeListener(_onAmountChanged);
+    _amountController.dispose();
+    super.dispose();
   }
 
-  Future<ui.Image?> _decodeImage(Uint8List bytes) async {
-    try {
-      final ui.Codec codec = await ui.instantiateImageCodec(bytes);
-      final ui.FrameInfo info = await codec.getNextFrame();
-      return info.image;
-    } on Object {
-      return null;
-    }
+  void _onAmountChanged() {
+    if (!mounted) return;
+    setState(() => _serverFailure = null);
   }
 
-  void _drawLogo(ui.Image logo) {
-    final double targetW = _contentWidth * 0.55;
-    final double ratio = logo.height / logo.width;
-    final double naturalH = targetW * ratio;
-
-    final double maxH = 140 * _scale;
-    final double targetH = naturalH > maxH ? maxH : naturalH;
-    final double finalW = targetH / ratio;
-
-    final double x = _paddingH + (_contentWidth - finalW) / 2;
-
-    canvas.drawImageRect(
-      logo,
-      Rect.fromLTWH(
-        0,
-        0,
-        logo.width.toDouble(),
-        logo.height.toDouble(),
-      ),
-      Rect.fromLTWH(x, _y, finalW, targetH),
-      Paint()..filterQuality = FilterQuality.high,
-    );
-
-    _y += targetH;
-  }
-
-  // ---------------------------------------------------------------------------
-  // Sections
-  // ---------------------------------------------------------------------------
-
-  void _header(Receipt r) {
-    _text(
-      r.companyName,
-      fontSize: _font(24),
-      emphasized: true,
-      align: TextAlign.center,
-    );
-
-    if (r.hasCompanyAddress) {
-      _gap(2 * _scale);
-      _text(
-        r.companyAddress!,
-        fontSize: _font(13),
-        color: _grey,
-        align: TextAlign.center,
-      );
-    }
-
-    if (r.hasCompanyPhone) {
-      _gap(2 * _scale);
-      _text(
-        r.companyPhone!,
-        fontSize: _font(13),
-        color: _grey,
-        align: TextAlign.center,
-      );
-    }
-
-    _gap(2 * _scale);
-    _text(
-      r.branchName,
-      fontSize: _font(15),
-      color: _grey,
-      align: TextAlign.center,
-    );
-
-    if (r.hasTaxNumberToPrint) {
-      _gap(2 * _scale);
-      _text(
-        'الرقم الضريبي: ${r.companyTaxNumber}',
-        fontSize: _font(12),
-        color: _grey,
-        align: TextAlign.center,
-      );
-    }
-
-    if (r.hasCommercialRegisterToPrint) {
-      _gap(2 * _scale);
-      _text(
-        'السجل التجاري: ${r.companyCommercialRegister}',
-        fontSize: _font(12),
-        color: _grey,
-        align: TextAlign.center,
-      );
-    }
-
-    _gap(_sectionGap);
-    _chip('فاتورة مبيعات', fontSize: _font(17));
-  }
-
-  void _meta(Receipt r) {
-    _metaRow('رقم الفاتورة', r.invoiceNumber ?? '—', bold: true);
-    _metaRow('التاريخ', _formatDayAndDate(r.dateTime));
-
-    if (r.hasCustomer) {
-      _metaRow('العميل', r.customerName!);
-
-      if (r.hasCustomerAddress) {
-        _metaRow('عنوان العميل', r.customerAddress!);
-      }
-
-      if (r.hasCustomerPhone) {
-        _metaRow('هاتف العميل', r.customerPhone!);
-      }
-    }
-
-    if (r.cashierName != null && r.cashierName!.trim().isNotEmpty) {
-      _metaRow('الكاشير', r.cashierName!);
-    }
-  }
-
-  void _itemsTable(Receipt r) {
-    final double w = _contentWidth;
-    final double colNumW = 24 * _scale;
-    final double colQtyW = w * 0.20;
-    final double colPriceW = w * 0.20;
-    final double colTotalW = w * 0.24;
-    final double colNameW = w - colNumW - colQtyW - colPriceW - colTotalW;
-
-    _row(
-      cells: <_Cell>[
-        _Cell('م',
-            width: colNumW, bold: true, align: TextAlign.center),
-        _Cell('الصنف',
-            width: colNameW, bold: true, align: TextAlign.right),
-        _Cell('الكمية',
-            width: colQtyW, bold: true, align: TextAlign.center),
-        _Cell('السعر',
-            width: colPriceW, bold: true, align: TextAlign.center),
-        _Cell('الإجمالي',
-            width: colTotalW, bold: true, align: TextAlign.center),
-      ],
-      fontSize: _font(13),
-      topPad: 6 * _scale,
-      bottomPad: 6 * _scale,
-      backgroundColor: const Color(0xFFDDDDDD),
-    );
-
-    for (int i = 0; i < r.lines.length; i++) {
-      final ReceiptLine line = r.lines[i];
-      final Color? bg = i.isOdd ? const Color(0xFFF2F2F2) : null;
-      _row(
-        cells: <_Cell>[
-          _Cell('${i + 1}',
-              width: colNumW, align: TextAlign.center),
-          _Cell(line.productName,
-              width: colNameW, align: TextAlign.right),
-          _Cell('${_qty(line.quantity)} ${line.unitName}',
-              width: colQtyW, align: TextAlign.center),
-          _Cell(_money(line.unitPrice),
-              width: colPriceW, align: TextAlign.center),
-          _Cell(_money(line.lineTotal),
-              width: colTotalW, bold: true, align: TextAlign.center),
-        ],
-        fontSize: _font(13),
-        topPad: 5 * _scale,
-        bottomPad: 5 * _scale,
-        backgroundColor: bg,
-      );
-    }
-
-    _row(
-      cells: <_Cell>[
-        _Cell('', width: colNumW, align: TextAlign.center),
-        _Cell('المجموع الفرعي',
-            width: colNameW, bold: true, align: TextAlign.right),
-        _Cell('${r.lines.length}',
-            width: colQtyW, align: TextAlign.center),
-        _Cell('', width: colPriceW, align: TextAlign.center),
-        _Cell(_money(r.subtotal),
-            width: colTotalW, bold: true, align: TextAlign.center),
-      ],
-      fontSize: _font(13),
-      topPad: 6 * _scale,
-      bottomPad: 6 * _scale,
-      backgroundColor: const Color(0xFFE8E8E8),
-    );
-  }
-
-  void _grandTotal(Receipt r) {
-    final double fontSize = _font(20);
-    final double boxPad = 8 * _scale;
-
-    final TextPainter label = _measure(
-      'إجمالي الفاتورة',
-      fontSize: fontSize,
-      emphasized: true,
-    );
-    final TextPainter value = _measure(
-      _money(r.total),
-      fontSize: fontSize,
-      emphasized: true,
-    );
-    final double lineH =
-        label.height > value.height ? label.height : value.height;
-    final double boxH = lineH + boxPad * 2;
-
-    canvas.drawRect(
-      Rect.fromLTWH(_paddingH, _y, _contentWidth, boxH),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5 * _scale
-        ..color = _black,
-    );
-
-    label.paint(
-      canvas,
-      Offset(_paddingH + _contentWidth - boxPad - label.width, _y + boxPad),
-    );
-    value.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
-
-    _y += boxH;
-  }
-
-  /// Payment block — method and paid amount only.
-  ///
-  /// The resulting balance is reported in [_balanceBlock] separately; no
-  /// change / excess / "الباقي للعميل" is computed here because the
-  /// simplified model treats `paidAmount` as one lump sum that is applied
-  /// to (invoice + old balance) as a whole.
-  void _paymentBlock(Receipt r) {
-    _kvRow('طريقة الدفع', _paymentMethodLabel(r));
-    _kvRow('المدفوع', _money(r.paidAmount));
-  }
-
-  /// Balance block — reports the previous balance and the resulting one.
-  ///
-  /// * `newBalance > 0` → customer owes us (مدين).
-  /// * `newBalance < 0` → we owe the customer (له عندنا).
-  /// * `newBalance = 0` → settled.
-  void _balanceBlock(Receipt r) {
-    _kvRow('الرصيد السابق', _money(r.previousBalance ?? 0));
-
-    final double newBalance = r.newBalance ?? 0;
-    if (newBalance > 0) {
-      _kvRow(
-        'الرصيد الجديد على العميل',
-        _money(newBalance),
-        emphasized: true,
-      );
-    } else if (newBalance < 0) {
-      _kvRow(
-        'الرصيد الجديد (له عندنا)',
-        _money(newBalance.abs()),
-        emphasized: true,
-      );
-    } else {
-      _kvRow(
-        'الرصيد الجديد',
-        _money(0),
-        emphasized: true,
-      );
-    }
-  }
-
-  void _footer(Receipt r) {
-    _text(
-      _footerText(r),
-      fontSize: _font(14),
-      color: _grey,
-      align: TextAlign.center,
-    );
-  }
-
-  void _metaRow(String label, String value, {bool bold = false}) {
-    final double labelW = 92 * _scale;
-    final double fontSize = _font(14);
-
-    final TextPainter labelPainter = _measure(
-      '$label:',
-      fontSize: fontSize,
-      bold: true,
-    );
-    final TextPainter valuePainter = _measure(
-      value,
-      fontSize: fontSize,
-      bold: bold,
-    );
-    final double rowH = labelPainter.height > valuePainter.height
-        ? labelPainter.height
-        : valuePainter.height;
-
-    labelPainter.paint(
-      canvas,
-      Offset(_paddingH + _contentWidth - labelW, _y),
-    );
-    valuePainter.paint(canvas, Offset(_paddingH, _y));
-
-    _y += rowH + 2 * _scale;
-  }
-
-  void _kvRow(String label, String value, {bool emphasized = false}) {
-    final double labelFont = _font(14);
-    final double valueFont = emphasized ? _font(17) : _font(14);
-
-    final TextPainter labelPainter = _measure(
-      label,
-      fontSize: labelFont,
-      bold: true,
-    );
-    final TextPainter valuePainter = _measure(
-      value,
-      fontSize: valueFont,
-      bold: emphasized,
-    );
-    final double rowH = labelPainter.height > valuePainter.height
-        ? labelPainter.height
-        : valuePainter.height;
-
-    labelPainter.paint(
-      canvas,
-      Offset(_paddingH + _contentWidth - labelPainter.width, _y),
-    );
-    valuePainter.paint(canvas, Offset(_paddingH, _y));
-
-    _y += rowH + 3 * _scale;
-  }
-
-  void _text(
-    String text, {
-    required double fontSize,
-    bool bold = false,
-    bool emphasized = false,
-    Color color = _black,
-    TextAlign align = TextAlign.right,
-  }) {
-    final TextPainter painter = _measure(
-      text,
-      fontSize: fontSize,
-      bold: bold,
-      emphasized: emphasized,
-      color: color,
-      align: align,
-    );
-    painter.paint(canvas, Offset(_paddingH, _y));
-    _y += painter.height;
-  }
-
-  void _chip(String text, {required double fontSize}) {
-    final TextPainter painter = _measure(
-      text,
-      fontSize: fontSize,
-      emphasized: true,
-      align: TextAlign.center,
-    );
-
-    final double padH = 22 * _scale;
-    final double padV = 6 * _scale;
-    final double chipW = painter.width + padH * 2;
-    final double chipH = painter.height + padV * 2;
-    final double chipX = (_contentWidth - chipW) / 2 + _paddingH;
-
-    final RRect rrect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(chipX, _y, chipW, chipH),
-      Radius.circular(3 * _scale),
-    );
-    canvas.drawRRect(
-      rrect,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2 * _scale
-        ..color = _black,
-    );
-    painter.paint(canvas, Offset(chipX + padH, _y + padV));
-
-    _y += chipH;
-  }
-
-  void _row({
-    required List<_Cell> cells,
-    required double fontSize,
-    required double topPad,
-    required double bottomPad,
-    Color? backgroundColor,
-  }) {
-    final List<TextPainter> painters = <TextPainter>[];
-    double maxH = 0;
-    for (final _Cell cell in cells) {
-      final TextPainter painter = _measure(
-        cell.text,
-        fontSize: fontSize,
-        bold: cell.bold,
-        align: cell.align,
-        maxWidth: cell.width - 4 * _scale,
-      );
-      painters.add(painter);
-      if (painter.height > maxH) maxH = painter.height;
-    }
-
-    final double rowH = maxH + topPad + bottomPad;
-
-    if (backgroundColor != null) {
-      canvas.drawRect(
-        Rect.fromLTWH(_paddingH, _y, _contentWidth, rowH),
-        Paint()..color = backgroundColor,
-      );
-    }
-
-    double x = _paddingH + _contentWidth;
-    for (int i = 0; i < cells.length; i++) {
-      final _Cell cell = cells[i];
-      x -= cell.width;
-      final TextPainter painter = painters[i];
-      final double contentY = _y + topPad + (maxH - painter.height) / 2;
-      painter.paint(canvas, Offset(x + 2 * _scale, contentY));
-    }
-
-    canvas.drawRect(
-      Rect.fromLTWH(
-        _paddingH,
-        _y + rowH - 0.5 * _scale,
-        _contentWidth,
-        0.5 * _scale,
-      ),
-      Paint()..color = const Color(0xFF888888),
-    );
-
-    _y += rowH;
-  }
-
-  void _divider() {
-    canvas.drawRect(
-      Rect.fromLTWH(_paddingH, _y, _contentWidth, 0.7 * _scale),
-      Paint()..color = const Color(0xFF666666),
-    );
-    _y += 1 * _scale;
-  }
-
-  void _doubleDivider() {
-    _divider();
-    _gap(2 * _scale);
-    _divider();
-  }
-
-  void _gap(double pixels) {
-    _y += pixels;
-  }
-
-  TextPainter _measure(
-    String text, {
-    required double fontSize,
-    bool bold = false,
-    bool emphasized = false,
-    Color color = _black,
-    TextAlign align = TextAlign.right,
-    double? maxWidth,
-  }) {
-    final bool useBold = bold || emphasized;
-    final ({String family, FontWeight weight}) style =
-        _fontFor(emphasized: useBold);
-
-    final TextPainter painter = TextPainter(
-      text: TextSpan(
-        text: text,
-        style: TextStyle(
-          fontSize: fontSize * _scale,
-          color: color,
-          fontFamily: style.family,
-          fontWeight: style.weight,
-          height: 1.15,
-        ),
-      ),
-      textDirection: TextDirection.rtl,
-      textAlign: align,
-    );
-    painter.layout(maxWidth: maxWidth ?? _contentWidth);
-    return painter;
-  }
-
-  static String _money(double value) {
-    final String number;
-    if (value == value.roundToDouble()) {
-      number = _thousands(value.toInt().toString());
-    } else {
-      number = value.toStringAsFixed(2);
-    }
-    return '$number ج.م';
-  }
-
-  static String _qty(double value) {
+  static String _formatAmount(double value) {
     if (value == value.roundToDouble()) {
       return value.toInt().toString();
     }
     return value.toStringAsFixed(2);
   }
 
-  static String _thousands(String intStr) {
-    final bool neg = intStr.startsWith('-');
-    final String digits = neg ? intStr.substring(1) : intStr;
-    final StringBuffer buf = StringBuffer();
-    if (neg) buf.write('-');
-    for (int i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) buf.write(',');
-      buf.write(digits[i]);
+  // ---------------------------------------------------------------------------
+  // Core math — single source of truth
+  // ---------------------------------------------------------------------------
+
+  double get _input => double.tryParse(_amountController.text.trim()) ?? 0;
+
+  /// Sale total = invoice value only.
+  double get _saleTotal => _cart.total;
+
+  /// Total owed by the customer = old balance + sale total.
+  double get _settlementTotal => _cart.customerBalance + _saleTotal;
+
+  /// Resulting balance = owed − paid.
+  /// Positive = owes us; negative = we owe them.
+  double get _newBalance => _settlementTotal - _input;
+
+  bool get _hasBalanceChange =>
+      _cart.hasCustomer && _newBalance != _cart.customerBalance;
+
+  String? _paymentMethodForOffline() {
+    if (_method == PosPaymentMethod.credit) return null;
+    if (_method == PosPaymentMethod.card) return 'card';
+    return 'cash';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Validation
+  // ---------------------------------------------------------------------------
+
+  String? _validationError() {
+    if (_cart.isEmpty) return 'السلة فارغة. أضف منتجاً قبل الدفع.';
+
+    if (_method == PosPaymentMethod.credit) {
+      if (!_cart.hasCustomer) {
+        return 'البيع الآجل يتطلب اختيار عميل مسجل.';
+      }
+      if (_input != 0) {
+        return 'البيع الآجل لا يتطلب دفع أي مبلغ.';
+      }
+      return null;
     }
-    return buf.toString();
+
+    if (_input < 0) {
+      return 'المبلغ لا يمكن أن يكون سالبًا.';
+    }
+
+    if (_method == PosPaymentMethod.card) {
+      if (_input < _saleTotal) {
+        return 'الدفع بالبطاقة يجب أن يغطي كامل قيمة الفاتورة.';
+      }
+    }
+
+    return null;
   }
 
-  static const List<String> _days = <String>[
-    'الإثنين',
-    'الثلاثاء',
-    'الأربعاء',
-    'الخميس',
-    'الجمعة',
-    'السبت',
-    'الأحد',
-  ];
+  // ---------------------------------------------------------------------------
+  // Submission
+  // ---------------------------------------------------------------------------
 
-  static String _formatDayAndDate(DateTime value) {
-    final DateTime l = value.toLocal();
-    final String day = _days[(l.weekday - 1).clamp(0, 6)];
-    final String y = l.year.toString().padLeft(4, '0');
-    final String m = l.month.toString().padLeft(2, '0');
-    final String d = l.day.toString().padLeft(2, '0');
-    final int h24 = l.hour;
-    final int h12 = h24 == 0 ? 12 : (h24 > 12 ? h24 - 12 : h24);
-    final String ampm = h24 >= 12 ? 'م' : 'ص';
-    final String hh = h12.toString().padLeft(2, '0');
-    final String mm = l.minute.toString().padLeft(2, '0');
-    return '$day  $y/$m/$d  $hh:$mm $ampm';
+  Future<void> _submit() async {
+    FocusScope.of(context).unfocus();
+    if (_validationError() != null) return;
+
+    final CompanyContextState contextState =
+        ref.read(companyContextProvider);
+    final String? branchId = contextState.currentBranch?.id;
+    if (branchId == null) {
+      setState(() => _serverFailure = SalesFailureType.branchNotFound);
+      return;
+    }
+
+    setState(() {
+      _isSubmitting = true;
+      _serverFailure = null;
+    });
+
+    final bool isOnline = ref.read(isOnlineProvider);
+    if (!isOnline) {
+      await _submitOffline(contextState: contextState, branchId: branchId);
+      return;
+    }
+
+    await _submitOnline(contextState: contextState, branchId: branchId);
   }
 
-  static String _paymentMethodLabel(Receipt r) {
-    if (r.paidAmount <= 0) return 'آجل';
-    if (r.paidAmount >= r.total) return 'نقدي';
-    return 'نقدي (جزئي)';
+  Future<void> _submitOnline({
+    required CompanyContextState contextState,
+    required String branchId,
+  }) async {
+    final SalesNotifier notifier = ref.read(salesProvider.notifier);
+
+    try {
+      // Split input: part for the invoice, part for the old balance.
+      final double saleTotal = _saleTotal;
+      final double input = _input;
+      final double appliedToSale = input < saleTotal ? input : saleTotal;
+      final double appliedToBalance =
+          input > saleTotal ? (input - saleTotal) : 0;
+
+      final Sale sale = await notifier.createSale(
+        branchId: branchId,
+        customerId: _cart.customerId,
+        saleDate: DateTime.now(),
+        items: <SaleItemDraft>[
+          for (final PosCartLine line in _cart.lines)
+            SaleItemDraft(
+              productId: line.productId,
+              unitId: line.unitId,
+              quantity: line.quantity,
+              unitPrice: line.unitPrice,
+            ),
+        ],
+        discount: _cart.discount,
+        taxAmount: _cart.taxAmount,
+        paidAmount: appliedToSale,
+      );
+
+      final Sale confirmed = await notifier.confirmSale(sale.id);
+
+      if (appliedToSale > 0) {
+        final String method =
+            _method == PosPaymentMethod.card ? 'card' : 'cash';
+        await ref.read(cashRepositoryProvider).recordSalePayments(
+              companyId: contextState.currentCompany?.id ?? '',
+              saleId: confirmed.id,
+              payments: <SalePaymentDraft>[
+                SalePaymentDraft(amount: appliedToSale, method: method),
+              ],
+            );
+      }
+
+      if (appliedToBalance > 0 && _cart.customerId != null) {
+        await ref.read(customersProvider.notifier).recordPayment(
+              customerId: _cart.customerId!,
+              amount: appliedToBalance,
+              method: _method == PosPaymentMethod.card ? 'card' : 'cash',
+              notes: 'دفعة زيادة من فاتورة '
+                  '${confirmed.invoiceNumber ?? confirmed.id}',
+            );
+      }
+
+      DataInvalidation.afterSale(ref);
+
+      if (!mounted) return;
+
+      final Receipt receipt = _buildReceipt(
+        saleId: confirmed.id,
+        invoiceNumber: confirmed.invoiceNumber,
+        saleDate: confirmed.saleDate,
+        contextState: contextState,
+      );
+
+      ref.read(posCartProvider.notifier).reset();
+
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) =>
+            _PosReceiptDialog(receipt: receipt),
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } on SaleException catch (error) {
+      if (error.type == SalesFailureType.network) {
+        if (!mounted) return;
+        await _submitOffline(
+          contextState: contextState,
+          branchId: branchId,
+        );
+        return;
+      }
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _serverFailure = error.type;
+      });
+    } on Object {
+      if (!mounted) return;
+      await _submitOffline(
+        contextState: contextState,
+        branchId: branchId,
+      );
+    }
   }
 
-  static String _footerText(Receipt r) {
-    final String? custom = r.footer;
-    if (custom != null && custom.trim().isNotEmpty) return custom.trim();
-    return 'شكرًا لتعاملكم معنا';
+  Future<void> _submitOffline({
+    required CompanyContextState contextState,
+    required String branchId,
+  }) async {
+    final List<Map<String, Object?>> items = <Map<String, Object?>>[
+      for (final PosCartLine line in _cart.lines)
+        <String, Object?>{
+          'product_id': line.productId,
+          'unit_id': line.unitId,
+          'quantity': line.quantity,
+          'unit_price': line.unitPrice,
+          'notes': null,
+        },
+    ];
+
+    final double saleTotal = _saleTotal;
+    final double input = _input;
+    final double appliedToSale = input < saleTotal ? input : saleTotal;
+    final double appliedToBalance =
+        input > saleTotal ? (input - saleTotal) : 0;
+    final String? paymentMethod = _paymentMethodForOffline();
+
+    final String? saleUuid = await OfflineWriter.enqueueSale(
+      ref: ref,
+      branchId: branchId,
+      customerId: _cart.customerId,
+      saleDate: DateTime.now(),
+      items: items,
+      discount: _cart.discount,
+      taxAmount: _cart.taxAmount,
+      paidAmount: appliedToSale,
+      paymentMethod: paymentMethod,
+      notes: null,
+    );
+
+    if (saleUuid == null) {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _serverFailure = SalesFailureType.unknown;
+      });
+      return;
+    }
+
+    if (appliedToBalance > 0 && _cart.customerId != null) {
+      await OfflineWriter.enqueueCustomerPayment(
+        ref: ref,
+        customerId: _cart.customerId!,
+        amount: appliedToBalance,
+        method: paymentMethod ?? 'cash',
+        notes: 'دفعة زيادة من فاتورة أوفلاين',
+      );
+    }
+
+    if (!mounted) return;
+
+    final Receipt receipt = _buildReceipt(
+      saleId: saleUuid,
+      invoiceNumber: null,
+      saleDate: DateTime.now(),
+      contextState: contextState,
+    );
+
+    ref.read(posCartProvider.notifier).reset();
+
+    await showDialog<void>(
+      context: context,
+      barrierDismissible: false,
+      builder: (BuildContext dialogContext) => _PosReceiptDialog(
+        receipt: receipt,
+        isOffline: true,
+      ),
+    );
+
+    if (!mounted) return;
+    Navigator.of(context).pop(true);
+  }
+
+  Receipt _buildReceipt({
+    required String saleId,
+    required String? invoiceNumber,
+    required DateTime saleDate,
+    required CompanyContextState contextState,
+  }) {
+    return Receipt(
+      saleId: saleId,
+      invoiceNumber: invoiceNumber,
+      dateTime: saleDate,
+      companyName: contextState.currentCompany?.name ?? '—',
+      branchName: contextState.currentBranch?.name ?? '—',
+      companyAddress: contextState.currentCompany?.address,
+      companyPhone: contextState.currentCompany?.phone,
+      companyTaxNumber: contextState.currentCompany?.taxNumber,
+      companyCommercialRegister:
+          contextState.currentCompany?.commercialRegister,
+      showTaxNumberOnPrint:
+          ref.read(showTaxNumberOnPrintProvider),
+      showCommercialRegisterOnPrint:
+          ref.read(showCommercialRegisterOnPrintProvider),
+      lines: <ReceiptLine>[
+        for (final PosCartLine line in _cart.lines)
+          ReceiptLine(
+            productName: line.productName,
+            unitName: line.unitName,
+            quantity: line.quantity,
+            unitPrice: line.unitPrice,
+            lineTotal: line.lineTotal,
+          ),
+      ],
+      subtotal: _cart.subtotal,
+      discount: _cart.discount,
+      taxAmount: _cart.taxAmount,
+      total: _saleTotal,
+      paidAmount: _input,
+      customerName: _cart.customerName,
+      previousBalance:
+          _cart.hasCustomer ? _cart.customerBalance : null,
+      newBalance: _cart.hasCustomer ? _newBalance : null,
+      footer: ref.read(receiptFooterProvider),
+    );
+  }
+
+  void _selectMethod(String method) {
+    setState(() {
+      _method = method;
+      _serverFailure = null;
+      if (method == PosPaymentMethod.credit) {
+        _amountController.text = '0';
+      } else if (method == PosPaymentMethod.card) {
+        _amountController.text = _formatAmount(_saleTotal);
+      } else {
+        _amountController.text = _formatAmount(_settlementTotal);
+      }
+    });
+  }
+
+  // ---------------------------------------------------------------------------
+  // UI
+  // ---------------------------------------------------------------------------
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
+
+    final String? validationError = _validationError();
+    final String? failureMessage = _serverFailure != null
+        ? _failureMessageFor(_serverFailure!)
+        : null;
+    final String? displayError = failureMessage ?? validationError;
+    final bool canSubmit = !_isSubmitting && validationError == null;
+
+    return Padding(
+      padding: EdgeInsets.only(bottom: keyboardInset),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          borderRadius: const BorderRadius.vertical(
+            top: Radius.circular(20),
+          ),
+        ),
+        child: SafeArea(
+          top: false,
+          child: SingleChildScrollView(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Center(
+                    child: Container(
+                      width: 40,
+                      height: 4,
+                      decoration: BoxDecoration(
+                        color: scheme.outlineVariant,
+                        borderRadius: BorderRadius.circular(2),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Row(
+                    children: <Widget>[
+                      Text('الدفع', style: theme.textTheme.titleLarge),
+                      const Spacer(),
+                      IconButton(
+                        onPressed: _isSubmitting
+                            ? null
+                            : () => Navigator.of(context).pop(false),
+                        icon: const Icon(Icons.close),
+                      ),
+                    ],
+                  ),
+                  _CustomerRow(customerName: _cart.customerName),
+                  const SizedBox(height: 12),
+                  _TotalsCard(
+                    saleTotal: _saleTotal,
+                    customerBalance: _cart.customerBalance,
+                    hasCustomer: _cart.hasCustomer,
+                  ),
+                  const SizedBox(height: 16),
+                  Text('طريقة الدفع', style: theme.textTheme.labelLarge),
+                  const SizedBox(height: 8),
+                  Row(
+                    children: <Widget>[
+                      Expanded(
+                        child: _MethodTile(
+                          label: 'نقدي',
+                          icon: Icons.payments_outlined,
+                          selected: _method == PosPaymentMethod.cash,
+                          enabled: !_isSubmitting,
+                          onTap: () => _selectMethod(PosPaymentMethod.cash),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _MethodTile(
+                          label: 'بطاقة',
+                          icon: Icons.credit_card,
+                          selected: _method == PosPaymentMethod.card,
+                          enabled: !_isSubmitting,
+                          onTap: () => _selectMethod(PosPaymentMethod.card),
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Expanded(
+                        child: _MethodTile(
+                          label: 'آجل',
+                          icon: Icons.schedule,
+                          selected: _method == PosPaymentMethod.credit,
+                          enabled: !_isSubmitting,
+                          onTap: () =>
+                              _selectMethod(PosPaymentMethod.credit),
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (_method != PosPaymentMethod.credit) ...<Widget>[
+                    const SizedBox(height: 16),
+                    Text('المبلغ المدفوع',
+                        style: theme.textTheme.labelLarge),
+                    const SizedBox(height: 8),
+                    _AmountField(
+                      controller: _amountController,
+                      enabled: !_isSubmitting,
+                      hasError: displayError != null,
+                    ),
+                  ],
+                  if (displayError != null) ...<Widget>[
+                    const SizedBox(height: 12),
+                    _ErrorBanner(message: displayError),
+                  ],
+                  const SizedBox(height: 16),
+                  _BalanceResult(
+                    hasCustomer: _cart.hasCustomer,
+                    previousBalance: _cart.customerBalance,
+                    newBalance: _newBalance,
+                    hasBalanceChange: _hasBalanceChange,
+                  ),
+                  const SizedBox(height: 20),
+                  AppButton(
+                    label: 'إتمام البيع',
+                    icon: Icons.check_circle_outline,
+                    expanded: true,
+                    size: AppButtonSize.large,
+                    isLoading: _isSubmitting,
+                    onPressed: canSubmit ? _submit : null,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
-class _Cell {
-  const _Cell(
-    this.text, {
-    required this.width,
-    this.bold = false,
-    this.align = TextAlign.right,
+// ============================================================================
+// Sub-widgets
+// ============================================================================
+
+class _CustomerRow extends StatelessWidget {
+  const _CustomerRow({required this.customerName});
+
+  final String? customerName;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool hasCustomer = customerName != null;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(12),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              hasCustomer ? Icons.person : Icons.person_outline,
+              color: scheme.primary,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                hasCustomer ? customerName! : 'عميل نقدي',
+                style: theme.textTheme.titleMedium,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _TotalsCard extends StatelessWidget {
+  const _TotalsCard({
+    required this.saleTotal,
+    required this.customerBalance,
+    required this.hasCustomer,
   });
 
-  final String text;
-  final double width;
-  final bool bold;
-  final TextAlign align;
+  final double saleTotal;
+  final double customerBalance;
+  final bool hasCustomer;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool showBalance = hasCustomer && customerBalance != 0;
+    final double total =
+        showBalance ? customerBalance + saleTotal : saleTotal;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: showBalance
+            ? scheme.surfaceContainerHighest
+            : scheme.primaryContainer,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+        child: showBalance
+            ? Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  _row(context, 'الرصيد السابق',
+                      AppFormatters.money(customerBalance.abs()),
+                      color: customerBalance > 0
+                          ? scheme.error
+                          : scheme.primary),
+                  const SizedBox(height: 6),
+                  _row(context, 'قيمة الفاتورة',
+                      AppFormatters.money(saleTotal)),
+                  const Divider(height: 16),
+                  _row(context, 'الإجمالي المطلوب',
+                      AppFormatters.money(total),
+                      emphasized: true,
+                      color: scheme.primary),
+                ],
+              )
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: <Widget>[
+                  Text(
+                    'الإجمالي المطلوب',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      color: scheme.onPrimaryContainer,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    AppFormatters.money(total),
+                    style: theme.textTheme.headlineMedium?.copyWith(
+                      color: scheme.onPrimaryContainer,
+                      fontWeight: FontWeight.w800,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+      ),
+    );
+  }
+
+  Widget _row(
+    BuildContext context,
+    String label,
+    String value, {
+    bool emphasized = false,
+    Color? color,
+  }) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            label,
+            style: emphasized
+                ? theme.textTheme.titleMedium
+                : theme.textTheme.bodyMedium,
+          ),
+        ),
+        Text(
+          value,
+          style: (emphasized
+                  ? theme.textTheme.headlineSmall
+                  : theme.textTheme.bodyLarge)
+              ?.copyWith(
+            color: color ?? scheme.onSurface,
+            fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
 }
+
+/// Shows the resulting balance after this sale.
+class _BalanceResult extends StatelessWidget {
+  const _BalanceResult({
+    required this.hasCustomer,
+    required this.previousBalance,
+    required this.newBalance,
+    required this.hasBalanceChange,
+  });
+
+  final bool hasCustomer;
+  final double previousBalance;
+  final double newBalance;
+  final bool hasBalanceChange;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    if (!hasCustomer) {
+      return const SizedBox.shrink();
+    }
+
+    String label;
+    Color color;
+    double displayed;
+    if (newBalance > 0) {
+      label = 'الرصيد الجديد على العميل';
+      color = scheme.error;
+      displayed = newBalance;
+    } else if (newBalance < 0) {
+      label = 'الرصيد الجديد للعميل (له عندنا)';
+      color = scheme.primary;
+      displayed = newBalance.abs();
+    } else {
+      label = 'الرصيد الجديد';
+      color = scheme.primary;
+      displayed = 0;
+    }
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(14),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            if (hasBalanceChange) ...<Widget>[
+              _row(
+                theme,
+                scheme,
+                'الرصيد السابق',
+                AppFormatters.money(previousBalance.abs()),
+              ),
+              const Divider(height: 16),
+            ],
+            _row(
+              theme,
+              scheme,
+              label,
+              AppFormatters.money(displayed),
+              emphasized: true,
+              color: color,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(
+    ThemeData theme,
+    ColorScheme scheme,
+    String label,
+    String value, {
+    bool emphasized = false,
+    Color? color,
+  }) {
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: Text(
+            label,
+            style: emphasized
+                ? theme.textTheme.titleMedium
+                : theme.textTheme.bodyMedium,
+          ),
+        ),
+        Text(
+          value,
+          style: (emphasized
+                  ? theme.textTheme.headlineSmall
+                  : theme.textTheme.bodyLarge)
+              ?.copyWith(
+            color: color ?? scheme.onSurface,
+            fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _MethodTile extends StatelessWidget {
+  const _MethodTile({
+    required this.label,
+    required this.icon,
+    required this.selected,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final IconData icon;
+  final bool selected;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Material(
+      color: selected ? scheme.primary : scheme.surfaceContainerHighest,
+      borderRadius: BorderRadius.circular(12),
+      child: InkWell(
+        borderRadius: BorderRadius.circular(12),
+        onTap: enabled ? onTap : null,
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 14),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              Icon(
+                icon,
+                color: selected ? scheme.onPrimary : scheme.onSurface,
+              ),
+              const SizedBox(height: 4),
+              Text(
+                label,
+                style: theme.textTheme.labelLarge?.copyWith(
+                  color: selected ? scheme.onPrimary : scheme.onSurface,
+                  fontWeight:
+                      selected ? FontWeight.w700 : FontWeight.w500,
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _AmountField extends StatelessWidget {
+  const _AmountField({
+    required this.controller,
+    required this.enabled,
+    required this.hasError,
+  });
+
+  final TextEditingController controller;
+  final bool enabled;
+  final bool hasError;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return TextField(
+      controller: controller,
+      enabled: enabled,
+      textAlign: TextAlign.center,
+      style: theme.textTheme.headlineMedium?.copyWith(
+        fontWeight: FontWeight.w700,
+      ),
+      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+      inputFormatters: <TextInputFormatter>[
+        FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+      ],
+      decoration: InputDecoration(
+        hintText: '0',
+        contentPadding: const EdgeInsets.symmetric(
+          horizontal: 16,
+          vertical: 18,
+        ),
+        border: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+        ),
+        enabledBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: hasError ? scheme.error : scheme.outline,
+            width: hasError ? 2 : 1,
+          ),
+        ),
+        focusedBorder: OutlineInputBorder(
+          borderRadius: BorderRadius.circular(12),
+          borderSide: BorderSide(
+            color: hasError ? scheme.error : scheme.primary,
+            width: 2,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _ErrorBanner extends StatelessWidget {
+  const _ErrorBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.error_outline,
+              color: scheme.onErrorContainer,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                  color: scheme.onErrorContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Receipt dialog
+// ============================================================================
+
+class _PosReceiptDialog extends ConsumerWidget {
+  const _PosReceiptDialog({
+    required this.receipt,
+    this.isOffline = false,
+  });
+
+  final Receipt receipt;
+  final bool isOffline;
+
+  Future<void> _handlePrint(BuildContext context, WidgetRef ref) async {
+    if (!context.mounted) return;
+    await showPosPrintPreviewDialog(
+      context: context,
+      receipt: receipt,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Dialog(
+      insetPadding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      backgroundColor: scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(
+                      isOffline
+                          ? Icons.cloud_off_outlined
+                          : Icons.check_circle,
+                      color: scheme.primary,
+                      size: 32,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        isOffline
+                            ? 'تم حفظ البيع محليًا'
+                            : 'تم إتمام البيع',
+                        style: theme.textTheme.titleLarge,
+                      ),
+                    ),
+                  ],
+                ),
+
+                if (isOffline) ...<Widget>[
+                  const SizedBox(height: 10),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.schedule,
+                            size: 18,
+                            color: scheme.onTertiaryContainer,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'سيُرسل تلقائيًا عند عودة الاتصال. '
+                              'رقم الفاتورة سيُحدَّد على الخادم.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onTertiaryContainer,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                if (!isOffline && receipt.invoiceNumber != null)
+                  Text(
+                    'الإيصال: ${receipt.invoiceNumber}',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                Text(
+                  AppFormatters.dateTime(receipt.dateTime),
+                  style: theme.textTheme.bodySmall,
+                ),
+                Text(
+                  receipt.customerName ?? 'عميل نقدي',
+                  style: theme.textTheme.bodyMedium,
+                ),
+
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                for (final ReceiptLine line in receipt.lines)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            line.productName,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                        Text(
+                          '${AppFormatters.quantity(line.quantity)} × '
+                          '${AppFormatters.money(line.unitPrice)}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          AppFormatters.money(line.lineTotal),
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
+
+                _row(theme, 'المجموع الفرعي',
+                    AppFormatters.money(receipt.subtotal)),
+                if (receipt.discount > 0)
+                  _row(theme, 'الخصم',
+                      AppFormatters.money(receipt.discount)),
+                if (receipt.taxAmount > 0)
+                  _row(theme, 'الضريبة',
+                      AppFormatters.money(receipt.taxAmount)),
+                _row(theme, 'الإجمالي',
+                    AppFormatters.money(receipt.total),
+                    emphasized: true),
+                _row(theme, 'المدفوع',
+                    AppFormatters.money(receipt.paidAmount)),
+
+                if (receipt.hasBalanceChange) ...<Widget>[
+                  const SizedBox(height: 6),
+                  _row(theme, 'الرصيد السابق',
+                      AppFormatters.money(receipt.previousBalance!.abs()),
+                      color: (receipt.previousBalance ?? 0) > 0
+                          ? scheme.error
+                          : scheme.primary),
+                  if (receipt.hasCreditBalance)
+                    _row(
+                      theme,
+                      'الرصيد الجديد (له عندنا)',
+                      AppFormatters.money(receipt.newBalanceAbsolute),
+                      color: scheme.primary,
+                      emphasized: true,
+                    )
+                  else
+                    _row(
+                      theme,
+                      'الرصيد الجديد على العميل',
+                      AppFormatters.money(receipt.newBalanceAbsolute),
+                      color: receipt.newBalanceAbsolute == 0
+                          ? scheme.primary
+                          : scheme.error,
+                      emphasized: true,
+                    ),
+                ],
+
+                const SizedBox(height: 16),
+
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: AppButton(
+                        label: 'طباعة',
+                        icon: Icons.print_outlined,
+                        onPressed: () => _handlePrint(context, ref),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AppButton(
+                        label: 'فاتورة جديدة',
+                        icon: Icons.add,
+                        variant: AppButtonVariant.outline,
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _row(
+    ThemeData theme,
+    String label,
+    String value, {
+    bool emphasized = false,
+    Color? color,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(label, style: theme.textTheme.bodyMedium),
+          ),
+          Text(
+            value,
+            style: (emphasized
+                    ? theme.textTheme.titleMedium
+                    : theme.textTheme.bodyMedium)
+                ?.copyWith(
+              color: color ??
+                  (emphasized ? theme.colorScheme.primary : null),
+              fontWeight: emphasized ? FontWeight.w700 : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Localization
+// ============================================================================
+
+String _failureMessageFor(SalesFailureType type) => switch (type) {
+      SalesFailureType.network =>
+        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+      SalesFailureType.unauthorized =>
+        'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجددًا.',
+      SalesFailureType.notFound => 'الفاتورة غير موجودة.',
+      SalesFailureType.invalidStatusTransition =>
+        'لا يمكن إتمام العملية في الحالة الحالية.',
+      SalesFailureType.emptySale => 'لا يمكن إتمام بيع بدون بنود.',
+      SalesFailureType.invoiceNumberConflict =>
+        'رقم الفاتورة مستخدم بالفعل.',
+      SalesFailureType.customerNotFound =>
+        'البيع الآجل يتطلب اختيار عميل مسجل.',
+      SalesFailureType.branchNotFound =>
+        'الفرع غير متاح. يرجى إعادة اختياره.',
+      SalesFailureType.productNotFound =>
+        'أحد المنتجات غير متاح. يرجى إزالته وإعادة المحاولة.',
+      SalesFailureType.unitNotFound => 'إحدى الوحدات غير متاحة.',
+      SalesFailureType.insufficientStock =>
+        'الرصيد غير كافٍ. يرجى تقليل الكمية أو تحديث المخزون.',
+      SalesFailureType.invalidPayment =>
+        'قيمة الدفع غير صحيحة. يرجى مراجعة المبلغ والطريقة.',
+      SalesFailureType.invalidResponse =>
+        'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.',
+      SalesFailureType.unknown =>
+        'تعذّر إتمام البيع. يرجى المحاولة مرة أخرى.',
+    };
