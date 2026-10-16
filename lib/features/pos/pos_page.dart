@@ -18,7 +18,7 @@ import '../products/presentation/providers/unit_providers.dart';
 import '../sales/domain/entities/sale_entities.dart';
 import '../sales/presentation/providers/sales_providers.dart';
 import 'pos_cart.dart';
-import 'pos_payment_dialog.dart';
+import 'presentation/dialogs/pos_payment_dialog.dart';
 
 /// POS main page — search-first, cart-first.
 ///
