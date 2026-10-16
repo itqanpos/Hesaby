@@ -472,50 +472,42 @@ class _Painter {
     _y += boxH;
   }
 
-  /// Payment block — shows the method, the paid amount, and (when
-  /// applicable) the cash change returned to the customer.
+  /// Payment block — method and paid amount only.
   ///
-  /// **Removed:** the legacy "المتبقي على العميل" line, which was computed
-  /// from `total - paidAmount` and ignored the previous balance. The
-  /// resulting balance is now reported in [_balanceBlock] only.
+  /// The resulting balance is reported in [_balanceBlock] separately; no
+  /// change / excess / "الباقي للعميل" is computed here because the
+  /// simplified model treats `paidAmount` as one lump sum that is applied
+  /// to (invoice + old balance) as a whole.
   void _paymentBlock(Receipt r) {
     _kvRow('طريقة الدفع', _paymentMethodLabel(r));
     _kvRow('المدفوع', _money(r.paidAmount));
-
-    if (r.hasChange) {
-      _kvRow(
-        'الباقي للعميل (نقدي)',
-        _money(r.change),
-        emphasized: true,
-      );
-    }
   }
 
-  /// Balance block — shown when the customer's balance changed during the
-  /// sale. Reports the previous balance, the portion of the payment that
-  /// was applied to that balance (if any), and the resulting balance.
+  /// Balance block — reports the previous balance and the resulting one.
   ///
-  /// A negative resulting balance means the customer now has a credit
-  /// with the shop; it is labelled accordingly and its absolute value is
-  /// printed.
+  /// * `newBalance > 0` → customer owes us (مدين).
+  /// * `newBalance < 0` → we owe the customer (له عندنا).
+  /// * `newBalance = 0` → settled.
   void _balanceBlock(Receipt r) {
     _kvRow('الرصيد السابق', _money(r.previousBalance ?? 0));
 
-    if (r.hasBalancePayment) {
-      _kvRow('مسدد من الرصيد السابق', _money(r.paidOnBalance));
-    }
-
     final double newBalance = r.newBalance ?? 0;
-    if (newBalance < 0) {
+    if (newBalance > 0) {
       _kvRow(
-        'الرصيد الجديد (دائن للعميل)',
+        'الرصيد الجديد على العميل',
+        _money(newBalance),
+        emphasized: true,
+      );
+    } else if (newBalance < 0) {
+      _kvRow(
+        'الرصيد الجديد (له عندنا)',
         _money(newBalance.abs()),
         emphasized: true,
       );
     } else {
       _kvRow(
         'الرصيد الجديد',
-        _money(newBalance),
+        _money(0),
         emphasized: true,
       );
     }
