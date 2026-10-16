@@ -17,9 +17,6 @@ class Receipt extends Equatable {
     required this.taxAmount,
     required this.total,
     required this.paidAmount,
-    required this.change,
-    this.paidOnBalance = 0,
-    this.addedToBalance = 0,
     this.invoiceNumber,
     this.companyAddress,
     this.companyPhone,
@@ -47,22 +44,8 @@ class Receipt extends Equatable {
   final double taxAmount;
   final double total;
 
-  /// Amount of the input that was applied to this invoice.
+  /// Amount the customer paid toward the invoice + old balance.
   final double paidAmount;
-
-  /// Cash returned to the customer (0 unless the operator chose to
-  /// return the excess as cash).
-  final double change;
-
-  /// Amount of the input that was applied to the customer's previous
-  /// balance. Zero for card and credit sales, and for cash sales with no
-  /// prior balance.
-  final double paidOnBalance;
-
-  /// Amount added to the customer's balance beyond the invoice total.
-  /// Positive = customer still owes; negative = customer has a credit.
-  /// This is the balance **delta**, not the resulting balance.
-  final double addedToBalance;
 
   // ---- Company identity ----
   final String? companyAddress;
@@ -77,19 +60,21 @@ class Receipt extends Equatable {
   final String? customerAddress;
   final String? customerPhone;
   final String? cashierName;
+
+  /// Customer's balance before this sale (positive = owes us).
   final double? previousBalance;
+
+  /// Customer's balance after this sale.
+  /// * `> 0` → customer owes us (debit).
+  /// * `< 0` → we owe the customer (credit).
+  /// * `= 0` → settled.
   final double? newBalance;
+
   final String? footer;
 
   // ---------------------------------------------------------------------------
   // Derived
   // ---------------------------------------------------------------------------
-
-  /// Total amount the customer owed at the start of this sale
-  /// (previous balance + invoice total). Falls back to [total] when no
-  /// previous balance exists.
-  double get settlementTotal =>
-      (previousBalance ?? 0) + total;
 
   bool get hasCustomer => customerName != null;
 
@@ -118,19 +103,18 @@ class Receipt extends Equatable {
   bool get hasBalanceChange =>
       previousBalance != null && newBalance != null;
 
-  bool get hasChange => change > 0;
-
-  bool get hasBalancePayment => paidOnBalance > 0;
-
-  /// Whether the resulting balance is negative (customer has a credit).
+  /// Whether the resulting balance is negative (customer credit).
   bool get hasCreditBalance => (newBalance ?? 0) < 0;
+
+  /// Whether the resulting balance is positive (customer debt).
+  bool get hasDebitBalance => (newBalance ?? 0) > 0;
+
+  /// Absolute new-balance amount, safe for display.
+  double get newBalanceAbsolute => (newBalance ?? 0).abs();
 
   bool get hasFooter => footer != null && footer!.trim().isNotEmpty;
 
   int get lineCount => lines.length;
-
-  /// Total cash the customer physically handed over.
-  double get cashReceived => paidAmount + paidOnBalance + change;
 
   @override
   List<Object?> get props => <Object?>[
@@ -151,9 +135,6 @@ class Receipt extends Equatable {
         taxAmount,
         total,
         paidAmount,
-        change,
-        paidOnBalance,
-        addedToBalance,
         customerName,
         customerAddress,
         customerPhone,
@@ -166,7 +147,8 @@ class Receipt extends Equatable {
   @override
   String toString() =>
       'Receipt(saleId: $saleId, invoiceNumber: $invoiceNumber, '
-      'lines: ${lines.length}, total: $total)';
+      'lines: ${lines.length}, total: $total, paidAmount: $paidAmount, '
+      'newBalance: $newBalance)';
 }
 
 /// Immutable, self-contained representation of a single receipt line.
