@@ -200,7 +200,6 @@ Receipt buildReceiptFromSale({
     taxAmount: sale.taxAmount,
     total: sale.total,
     paidAmount: sale.paidAmount,
-    change: 0,
     customerName: sale.customerId != null ? customerName : null,
     customerAddress: sale.customerId != null ? customerAddress : null,
     customerPhone: sale.customerId != null ? customerPhone : null,
