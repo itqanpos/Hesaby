@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hesabi/features/pos/presentation/state/pos_cart_notifier.dart';
 import 'package:hesabi/features/pos/presentation/state/pos_providers.dart';
+import 'package:hesabi/features/settings/presentation/providers/company_settings_providers.dart';
 void main() {
   // ---------------------------------------------------------------------------
   // Value object
@@ -72,7 +73,9 @@ void main() {
     late ProviderContainer container;
 
     setUp(() {
-      container = ProviderContainer();
+      container = ProviderContainer(
+        overrides: [defaultTaxRateProvider.overrideWith((ref) => 0)],
+      );
     });
 
     tearDown(() {
