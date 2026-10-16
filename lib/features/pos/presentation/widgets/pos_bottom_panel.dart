@@ -31,14 +31,12 @@ class PosBottomPanel extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     final PosCart cart = ref.watch(posCartProvider);
-    final double defaultTaxRate = ref.watch(defaultTaxRateProvider);
+    final PosTotals totals = ref.watch(posTotalsProvider);
     final double maxDiscountPercent = ref.watch(maxDiscountPercentProvider);
 
-    final double afterDiscount = cart.subtotal - cart.discount;
-    final double effectiveTax = cart.taxAmount > 0
-        ? cart.taxAmount
-        : afterDiscount * defaultTaxRate / 100;
-    final double effectiveTotal = afterDiscount + effectiveTax;
+    // Same tax and total as the payment dialog and the receipt.
+    final double effectiveTax = totals.taxAmount;
+    final double effectiveTotal = totals.total;
     final double maxDiscountValue = cart.subtotal * maxDiscountPercent / 100;
 
     return DecoratedBox(
