@@ -112,30 +112,31 @@ class PosResultsList extends ConsumerWidget {
 ///
 /// Used by the barcode-scanning flow when exactly one product matches the
 /// scanned value.
-bool posQuickAddProduct(WidgetRef ref, Product product) {
+PosQuickAddResult posQuickAddProduct(WidgetRef ref, Product product) {
   final CompanyContextState state = ref.read(companyContextProvider);
   final String? branchId = state.currentBranch?.id;
   if (branchId == null) {
-    return false;
+    return PosQuickAddResult.noBranch;
   }
 
   final AsyncValue<List<Unit>> unitsAsync = ref.read(unitsProvider);
-  final String? unitName = unitsAsync.maybeWhen(
-    data: (List<Unit> units) {
-      for (final Unit unit in units) {
-        if (unit.id == product.defaultUnitId) {
-          return unit.name;
-        }
-      }
-      return null;
-    },
-    orElse: () => null,
-  );
-  if (unitName == null) {
-    return false;
+  final List<Unit>? units = unitsAsync.valueOrNull;
+  if (units == null) {
+    return PosQuickAddResult.unitsNotLoaded;
   }
 
-  return ref.read(posCartProvider.notifier).addLine(
+  String? unitName;
+  for (final Unit unit in units) {
+    if (unit.id == product.defaultUnitId) {
+      unitName = unit.name;
+      break;
+    }
+  }
+  if (unitName == null) {
+    return PosQuickAddResult.noDefaultUnit;
+  }
+
+  final bool added = ref.read(posCartProvider.notifier).addLine(
         productId: product.id,
         productName: product.name,
         unitId: product.defaultUnitId,
@@ -146,4 +147,14 @@ bool posQuickAddProduct(WidgetRef ref, Product product) {
         minSellingPrice: product.minSellingPrice,
         maxSellingPrice: product.maxSellingPrice,
       );
+  return added ? PosQuickAddResult.success : PosQuickAddResult.rejected;
+}
+
+/// Why a quick-add did or did not happen. Lets the UI tell the cashier.
+enum PosQuickAddResult {
+  success,
+  noBranch,
+  unitsNotLoaded,
+  noDefaultUnit,
+  rejected,
 }
