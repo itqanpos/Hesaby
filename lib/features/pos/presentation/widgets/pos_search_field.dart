@@ -7,7 +7,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../../products/domain/entities/product.dart';
+import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/services/barcode_scanner_service.dart';
+import '../dialogs/pos_duplicate_line_dialog.dart';
 import '../services/mobile_scanner_service.dart';
 import '../state/pos_focus_providers.dart';
 import '../state/pos_providers.dart';
@@ -131,7 +133,7 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
       return;
     }
 
-    _quickAddIfSingleMatch();
+    await _quickAddIfSingleMatch();
   }
 
   Future<void> _handleSubmitted(String value) async {
@@ -142,10 +144,10 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
       return;
     }
 
-    _quickAddIfSingleMatch();
+    await _quickAddIfSingleMatch();
   }
 
-  void _quickAddIfSingleMatch() {
+  Future<void> _quickAddIfSingleMatch() async {
     final AsyncValue<List<Product>> results =
         ref.read(posSearchResultsProvider);
     final List<Product>? products = results.valueOrNull;
@@ -153,11 +155,37 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
       return;
     }
 
-    final bool added = posQuickAddProduct(ref, products.first);
+    final Product product = products.first;
+    final PosCartLine? existing = findExistingCartLine(
+      ref.read(posCartProvider),
+      product.id,
+      product.defaultUnitId,
+    );
+
+    if (existing != null) {
+      final bool confirmed = await confirmIncreaseExistingLine(
+        context,
+        productName: product.name,
+        currentQuantity: existing.quantity,
+      );
+      if (!mounted) {
+        return;
+      }
+      if (!confirmed) {
+        _finishQuickAdd();
+        return;
+      }
+    }
+
+    final bool added = posQuickAddProduct(ref, product);
     if (!added) {
       return;
     }
 
+    _finishQuickAdd();
+  }
+
+  void _finishQuickAdd() {
     _debounce?.cancel();
     _debounce = null;
     _controller.clear();
