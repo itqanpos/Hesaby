@@ -1049,13 +1049,6 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
   double get _unitPrice =>
       double.tryParse(_priceController.text.trim()) ?? 0;
 
-  // ---------------------------------------------------------------------------
-  // Unit / price resolution
-  // ---------------------------------------------------------------------------
-
-  /// Builds the ordered list of units selectable for the current product:
-  /// its default unit first, then any additional units registered through
-  /// `product_units`.
   static List<Unit> _availableUnits(
     Product product,
     List<Unit> allUnits,
@@ -1135,10 +1128,6 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
     return widget.product.sellingPrice * extra.conversionFactor;
   }
 
-  // ---------------------------------------------------------------------------
-  // Submit
-  // ---------------------------------------------------------------------------
-
   void _submit({
     required List<ProductUnit> extras,
     required List<Unit> availableUnits,
@@ -1160,7 +1149,6 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
       return;
     }
 
-    // Resolve the selected unit from the available list.
     Unit? selectedUnit;
     for (final Unit unit in availableUnits) {
       if (unit.id == unitId) {
@@ -1187,10 +1175,6 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
 
     Navigator.of(context).pop(true);
   }
-
-  // ---------------------------------------------------------------------------
-  // UI
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -1235,8 +1219,6 @@ class _AddLineSheetState extends ConsumerState<_AddLineSheet> {
                 extras,
               );
 
-              // Resolve the currently selected unit. If the stored id is no
-              // longer available, fall back to the first entry.
               Unit? currentUnit;
               for (final Unit unit in available) {
                 if (unit.id == _selectedUnitId) {
