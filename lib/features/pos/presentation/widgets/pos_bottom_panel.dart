@@ -34,9 +34,7 @@ class PosBottomPanel extends ConsumerWidget {
     final PosTotals totals = ref.watch(posTotalsProvider);
     final double maxDiscountPercent = ref.watch(maxDiscountPercentProvider);
 
-    // Same tax and total as the payment dialog and the receipt.
-    final double effectiveTax = totals.taxAmount;
-    final double effectiveTotal = totals.total;
+    // Same total as the payment dialog and the receipt.
     final double maxDiscountValue = cart.subtotal * maxDiscountPercent / 100;
 
     return DecoratedBox(
@@ -60,7 +58,11 @@ class PosBottomPanel extends ConsumerWidget {
                 maxDiscountValue: maxDiscountValue,
               ),
               const SizedBox(height: 6),
-              _TotalRow(total: effectiveTotal),
+              if (totals.taxAmount > 0) ...<Widget>[
+                _TaxRow(tax: totals.taxAmount),
+                const SizedBox(height: 2),
+              ],
+              _TotalRow(total: totals.total),
               const SizedBox(height: 8),
               _PayButton(isEmpty: cart.isEmpty),
             ],
@@ -121,6 +123,44 @@ class _TopRow extends ConsumerWidget {
           'ج.م',
           style: theme.textTheme.bodySmall?.copyWith(
             color: scheme.onSurfaceVariant,
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// Tax line shown above the net total. Only rendered when tax applies.
+class _TaxRow extends StatelessWidget {
+  const _TaxRow({required this.tax});
+
+  final double tax;
+
+  static final NumberFormat _money = NumberFormat.currency(
+    locale: 'en_US',
+    symbol: 'ج.م ',
+    decimalDigits: 2,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Row(
+      children: <Widget>[
+        Text(
+          'الضريبة',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+          ),
+        ),
+        const Spacer(),
+        Text(
+          _money.format(tax),
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: scheme.onSurfaceVariant,
+            fontWeight: FontWeight.w600,
           ),
         ),
       ],
