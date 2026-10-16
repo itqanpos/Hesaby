@@ -23,36 +23,21 @@ import '../../domain/entities/sale_entities.dart';
 
 /// Outcome of a direct thermal print attempt.
 enum DirectSalePrintResult {
-  /// Bytes were sent to the printer successfully.
   success,
-
-  /// No saved Bluetooth printer is configured.
   noPrinter,
-
-  /// Connecting to the saved printer failed.
   connectFailed,
-
-  /// Sending bytes failed, or the print job raised an unexpected error.
   sendFailed,
 }
 
-/// Prints [sale] directly to the saved thermal printer — no preview
-/// dialog, no PDF, no share sheet.
-///
-/// Flow:
-/// 1. Read the saved Bluetooth printer.
-/// 2. Connect if not already connected.
-/// 3. Load logo + font style from company settings.
-/// 4. Build the ESC/POS byte stream via [EscPosReceiptBuilder].
-/// 5. Send the bytes.
-///
-/// The caller is responsible for translating the returned
-/// [DirectSalePrintResult] into user-facing feedback.
+/// Prints [sale] directly to the saved thermal printer.
 Future<DirectSalePrintResult> printSaleDirect({
   required WidgetRef ref,
   required Sale sale,
   required List<SaleItem> items,
   required String customerName,
+  String? customerAddress,
+  String? customerPhone,
+  String? cashierName,
   required Map<String, String> productNames,
   required Map<String, String> unitNames,
 }) async {
@@ -80,6 +65,9 @@ Future<DirectSalePrintResult> printSaleDirect({
       sale: sale,
       items: items,
       customerName: customerName,
+      customerAddress: customerAddress,
+      customerPhone: customerPhone,
+      cashierName: cashierName,
       productNames: productNames,
       unitNames: unitNames,
     );
@@ -108,14 +96,14 @@ Future<DirectSalePrintResult> printSaleDirect({
 }
 
 /// Builds a PDF for [sale] and opens the platform share sheet.
-///
-/// Returns `true` when the share sheet completed successfully, `false`
-/// otherwise.
 Future<bool> shareSalePdf({
   required WidgetRef ref,
   required Sale sale,
   required List<SaleItem> items,
   required String customerName,
+  String? customerAddress,
+  String? customerPhone,
+  String? cashierName,
   required Map<String, String> productNames,
   required Map<String, String> unitNames,
 }) async {
@@ -129,6 +117,9 @@ Future<bool> shareSalePdf({
       sale: sale,
       items: items,
       customerName: customerName,
+      customerAddress: customerAddress,
+      customerPhone: customerPhone,
+      cashierName: cashierName,
       productNames: productNames,
       unitNames: unitNames,
     );
@@ -164,20 +155,28 @@ Future<bool> shareSalePdf({
 
 /// Builds a [Receipt] snapshot from a stored [Sale] and its related data.
 ///
+/// **Company identity fields** (`companyAddress`, `companyPhone`,
+/// `companyTaxNumber`, `companyCommercialRegister`) are read from the
+/// current [CompanyContextState]. **Print flags** (`showTaxNumberOnPrint`,
+/// `showCommercialRegisterOnPrint`) are read from [CompanySettings].
+///
 /// The historical balance fields (`previousBalance` / `newBalance`) are
-/// not available from the sale row alone, so they are left `null`. This
-/// means reprints do not show the "الرصيد السابق / الرصيد الحالي" block
-/// — which is correct, because we cannot reconstruct them reliably.
+/// not available from the sale row alone, so they are left `null`.
 Receipt buildReceiptFromSale({
   required WidgetRef ref,
   required Sale sale,
   required List<SaleItem> items,
   required String customerName,
+  String? customerAddress,
+  String? customerPhone,
+  String? cashierName,
   required Map<String, String> productNames,
   required Map<String, String> unitNames,
 }) {
   final CompanyContextState contextState =
       ref.read(companyContextProvider);
+  final CompanySettings? settings =
+      ref.read(companySettingsProvider).valueOrNull;
 
   return Receipt(
     saleId: sale.id,
@@ -185,6 +184,14 @@ Receipt buildReceiptFromSale({
     dateTime: sale.saleDate,
     companyName: contextState.currentCompany?.name ?? '—',
     branchName: contextState.currentBranch?.name ?? '—',
+    companyAddress: contextState.currentCompany?.address,
+    companyPhone: contextState.currentCompany?.phone,
+    companyTaxNumber: contextState.currentCompany?.taxNumber,
+    companyCommercialRegister:
+        contextState.currentCompany?.commercialRegister,
+    showTaxNumberOnPrint: settings?.showTaxNumberOnPrint ?? false,
+    showCommercialRegisterOnPrint:
+        settings?.showCommercialRegisterOnPrint ?? false,
     lines: <ReceiptLine>[
       for (final SaleItem item in items)
         ReceiptLine(
@@ -202,6 +209,9 @@ Receipt buildReceiptFromSale({
     paidAmount: sale.paidAmount,
     change: 0,
     customerName: sale.customerId != null ? customerName : null,
+    customerAddress: sale.customerId != null ? customerAddress : null,
+    customerPhone: sale.customerId != null ? customerPhone : null,
+    cashierName: cashierName,
   );
 }
 
