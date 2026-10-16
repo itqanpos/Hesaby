@@ -121,6 +121,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
   String? _validationError() {
     if (_cart.isEmpty) return 'السلة فارغة. أضف منتجاً قبل الدفع.';
+    if (_saleTotal <= 0) {
+      return 'إجمالي الفاتورة يجب أن يكون أكبر من صفر.';
+    }
 
     if (_method == PosPaymentMethod.credit) {
       if (!_cart.hasCustomer) {
@@ -181,6 +184,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   }) async {
     final SalesNotifier notifier = ref.read(salesProvider.notifier);
 
+    // الفاتورة التي أُنشئت فعلاً في هذه المحاولة. بمجرد وجودها لا يجوز حفظ
+    // نسخة أوفلاين ثانية، لأن ذلك يكرر الفاتورة ويكرر خصم المخزون والخزينة.
+    Sale? createdSale;
+
     try {
       // Split input: part for the invoice, part for the old balance.
       final double saleTotal = _saleTotal;
@@ -206,6 +213,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         taxAmount: _cart.taxAmount,
         paidAmount: appliedToSale,
       );
+      createdSale = sale;
 
       final Sale confirmed = await notifier.confirmSale(sale.id);
 
@@ -254,7 +262,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on SaleException catch (error) {
-      if (error.type == SalesFailureType.network) {
+      // انقطاع الشبكة قبل إنشاء أي فاتورة فقط يُحفظ أوفلاين.
+      // إذا أُنشئت الفاتورة ثم انقطع الاتصال، فالحفظ الأوفلاين يكرر الفاتورة.
+      if (error.type == SalesFailureType.network && createdSale == null) {
         if (!mounted) return;
         await _submitOffline(
           contextState: contextState,
@@ -265,10 +275,19 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (!mounted) return;
       setState(() {
         _isSubmitting = false;
-        _serverFailure = error.type;
+        _serverFailure =
+            createdSale == null ? error.type : SalesFailureType.unknown;
       });
     } on Object {
       if (!mounted) return;
+      if (createdSale != null) {
+        // الفاتورة موجودة على الخادم بالفعل: لا نعيد الحفظ، بل نُظهر الخطأ.
+        setState(() {
+          _isSubmitting = false;
+          _serverFailure = SalesFailureType.unknown;
+        });
+        return;
+      }
       await _submitOffline(
         contextState: contextState,
         branchId: branchId,
