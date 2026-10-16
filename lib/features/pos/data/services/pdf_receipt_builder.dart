@@ -2,6 +2,7 @@
 
 import 'dart:typed_data';
 
+import 'package:flutter/services.dart' show ByteData, rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 import 'package:printing/printing.dart';
@@ -9,6 +10,7 @@ import 'package:printing/printing.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/receipt.dart';
+import '../../domain/services/receipt_number_format.dart';
 
 /// Supported paper sizes for a printed receipt.
 enum ReceiptPaperSize {
@@ -22,11 +24,25 @@ abstract final class PdfReceiptBuilder {
   static Future<pw.Font>? _regularFontFuture;
   static Future<pw.Font>? _boldFontFuture;
 
-  static Future<pw.Font> _regularFont() =>
-      _regularFontFuture ??= PdfGoogleFonts.cairoRegular();
+  static Future<pw.Font> _regularFont() => _regularFontFuture ??=
+      _loadBundledOr('Cairo-Regular.ttf', PdfGoogleFonts.cairoRegular);
 
-  static Future<pw.Font> _boldFont() =>
-      _boldFontFuture ??= PdfGoogleFonts.cairoBold();
+  static Future<pw.Font> _boldFont() => _boldFontFuture ??=
+      _loadBundledOr('Cairo-Bold.ttf', PdfGoogleFonts.cairoBold);
+
+  /// Uses Cairo bundled in `assets/fonts/` when present (works offline),
+  /// otherwise downloads it through google_fonts.
+  static Future<pw.Font> _loadBundledOr(
+    String fileName,
+    Future<pw.Font> Function() fallback,
+  ) async {
+    try {
+      final ByteData data = await rootBundle.load('assets/fonts/$fileName');
+      return pw.Font.ttf(data);
+    } on Object {
+      return fallback();
+    }
+  }
 
   static const List<String> _arabicDays = <String>[
     'الإثنين',
@@ -528,6 +544,23 @@ abstract final class PdfReceiptBuilder {
       ),
     );
 
+    if (receipt.hasDiscountToPrint) {
+      rows.add(_summaryRow(
+        'الخصم',
+        '- ${_money(receipt.discount)}',
+        s,
+        style,
+      ));
+    }
+    if (receipt.hasTaxToPrint) {
+      rows.add(_summaryRow(
+        'الضريبة',
+        _money(receipt.taxAmount),
+        s,
+        style,
+      ));
+    }
+
     return pw.Table(
       border: pw.TableBorder.all(
         color: PdfColors.grey700,
@@ -536,6 +569,29 @@ abstract final class PdfReceiptBuilder {
       defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
       columnWidths: columnWidths,
       children: rows,
+    );
+  }
+
+  static pw.TableRow _summaryRow(
+    String label,
+    String value,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
+    return pw.TableRow(
+      children: <pw.Widget>[
+        _cell(value,
+            fontSize: s.tableRow,
+            emphasized: true,
+            center: true,
+            s: s,
+            style: style),
+        _cell('', fontSize: s.tableRow, s: s, style: style),
+        _cell('', fontSize: s.tableRow, s: s, style: style),
+        _cell(label,
+            fontSize: s.tableRow, emphasized: true, s: s, style: style),
+        _cell('', fontSize: s.tableRow, s: s, style: style),
+      ],
     );
   }
 
@@ -791,36 +847,10 @@ abstract final class PdfReceiptBuilder {
   // Formatting
   // ---------------------------------------------------------------------------
 
-  static String _money(double value) {
-    final String number;
-    if (value == value.roundToDouble()) {
-      number = _addThousandsSeparator(value.toInt().toString());
-    } else {
-      number = value.toStringAsFixed(2);
-    }
-    return '$number $_currency';
-  }
+  static String _money(double value) =>
+      ReceiptNumberFormat.money(value, currency: _currency);
 
-  static String _qty(double value) {
-    if (value == value.roundToDouble()) {
-      return value.toInt().toString();
-    }
-    return value.toStringAsFixed(2);
-  }
-
-  static String _addThousandsSeparator(String intStr) {
-    final bool negative = intStr.startsWith('-');
-    final String digits = negative ? intStr.substring(1) : intStr;
-    final StringBuffer buf = StringBuffer();
-    if (negative) buf.write('-');
-    for (int i = 0; i < digits.length; i++) {
-      if (i > 0 && (digits.length - i) % 3 == 0) {
-        buf.write(',');
-      }
-      buf.write(digits[i]);
-    }
-    return buf.toString();
-  }
+  static String _qty(double value) => ReceiptNumberFormat.quantity(value);
 
   static String _formatDayAndDate(DateTime value) {
     final DateTime local = value.toLocal();
