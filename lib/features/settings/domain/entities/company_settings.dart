@@ -91,10 +91,6 @@ class CompanySettings extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  // ---------------------------------------------------------------------------
-  // Convenience
-  // ---------------------------------------------------------------------------
-
   bool get hasTax => defaultTaxRate > 0;
   bool get allowsDiscount => maxDiscountPercent > 0;
   bool get hasLogo => logoUrl != null && logoUrl!.trim().isNotEmpty;
@@ -162,8 +158,6 @@ class CompanySettings extends Equatable {
       'tax: $defaultTaxRate, '
       'maxDiscount: $maxDiscountPercent, '
       'hasLogo: $hasLogo, '
-      'fontScale: $printFontScale, '
-      'fontWeight: ${printFontWeight.name}, '
       'showTaxNumberOnPrint: $showTaxNumberOnPrint, '
       'showCommercialRegisterOnPrint: $showCommercialRegisterOnPrint)';
 }
