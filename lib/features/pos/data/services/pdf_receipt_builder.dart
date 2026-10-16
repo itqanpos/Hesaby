@@ -620,29 +620,30 @@ abstract final class PdfReceiptBuilder {
   // Payment block
   // ---------------------------------------------------------------------------
 
+  /// Payment block — shows the method, the paid amount, and (when
+  /// applicable) the cash change returned to the customer.
+  ///
+  /// **Removed:** the legacy "المتبقي على العميل" line, which was computed
+  /// from `total - paidAmount` and ignored the previous balance. The
+  /// resulting balance is now reported in [_balanceBlock] only.
   static pw.Widget _paymentBlock(
     Receipt receipt,
     _Sizes s,
     PrintStyleSettings style,
   ) {
-    final double remaining = receipt.total - receipt.paidAmount;
-    final double amountRemaining = remaining > 0 ? remaining : 0;
-
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
         _kvRow('طريقة الدفع', _paymentMethodLabel(receipt), s, style),
         _kvRow('المدفوع', _money(receipt.paidAmount), s, style),
-        if (amountRemaining > 0)
+        if (receipt.hasChange)
           _kvRow(
-            'المتبقي على العميل',
-            _money(amountRemaining),
+            'الباقي للعميل (نقدي)',
+            _money(receipt.change),
             s,
             style,
             emphasized: true,
           ),
-        if (receipt.hasChange)
-          _kvRow('الباقي للعميل', _money(receipt.change), s, style),
       ],
     );
   }
@@ -651,11 +652,20 @@ abstract final class PdfReceiptBuilder {
   // Balance block
   // ---------------------------------------------------------------------------
 
+  /// Balance block — shown when the customer's balance changed during the
+  /// sale. Reports the previous balance, the portion of the payment that
+  /// was applied to that balance (if any), and the resulting balance.
+  ///
+  /// A negative resulting balance means the customer now has a credit
+  /// with the shop; it is labelled accordingly and its absolute value is
+  /// printed.
   static pw.Widget _balanceBlock(
     Receipt receipt,
     _Sizes s,
     PrintStyleSettings style,
   ) {
+    final double newBalance = receipt.newBalance ?? 0;
+
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
@@ -667,18 +677,27 @@ abstract final class PdfReceiptBuilder {
         ),
         if (receipt.hasBalancePayment)
           _kvRow(
-            'مدفوع على الرصيد السابق',
+            'مسدد من الرصيد السابق',
             _money(receipt.paidOnBalance),
             s,
             style,
           ),
-        _kvRow(
-          'الرصيد الحالي',
-          _money(receipt.newBalance ?? 0),
-          s,
-          style,
-          emphasized: true,
-        ),
+        if (newBalance < 0)
+          _kvRow(
+            'الرصيد الجديد (دائن للعميل)',
+            _money(newBalance.abs()),
+            s,
+            style,
+            emphasized: true,
+          )
+        else
+          _kvRow(
+            'الرصيد الجديد',
+            _money(newBalance),
+            s,
+            style,
+            emphasized: true,
+          ),
       ],
     );
   }
@@ -948,5 +967,6 @@ class _Sizes {
   final double footer;
   final double sectionGap;
 
+  /// Logo width in PDF points.
   final double logoWidth;
 }
