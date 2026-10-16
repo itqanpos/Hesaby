@@ -1154,4 +1154,286 @@ class _ErrorBanner extends StatelessWidget {
 // Receipt dialog
 // ============================================================================
 
-class _PosReceipt
+class _PosReceiptDialog extends ConsumerWidget {
+  const _PosReceiptDialog({
+    required this.receipt,
+    this.isOffline = false,
+  });
+
+  final Receipt receipt;
+  final bool isOffline;
+
+  Future<void> _handlePrint(BuildContext context, WidgetRef ref) async {
+    if (!context.mounted) return;
+    await showPosPrintPreviewDialog(
+      context: context,
+      receipt: receipt,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Dialog(
+      insetPadding:
+          const EdgeInsets.symmetric(horizontal: 12, vertical: 24),
+      backgroundColor: scheme.surface,
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 480),
+        child: SingleChildScrollView(
+          child: Padding(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(
+                      isOffline
+                          ? Icons.cloud_off_outlined
+                          : Icons.check_circle,
+                      color: scheme.primary,
+                      size: 32,
+                    ),
+                    const SizedBox(width: 10),
+                    Expanded(
+                      child: Text(
+                        isOffline
+                            ? 'تم حفظ البيع محليًا'
+                            : 'تم إتمام البيع',
+                        style: theme.textTheme.titleLarge,
+                      ),
+                    ),
+                  ],
+                ),
+
+                if (isOffline) ...<Widget>[
+                  const SizedBox(height: 10),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.tertiaryContainer,
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 10,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.schedule,
+                            size: 18,
+                            color: scheme.onTertiaryContainer,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'سيُرسل تلقائيًا عند عودة الاتصال. '
+                              'رقم الفاتورة سيُحدَّد على الخادم.',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onTertiaryContainer,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                if (!isOffline && receipt.invoiceNumber != null)
+                  Text(
+                    'الإيصال: ${receipt.invoiceNumber}',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                Text(
+                  AppFormatters.dateTime(receipt.dateTime),
+                  style: theme.textTheme.bodySmall,
+                ),
+                Text(
+                  receipt.customerName ?? 'عميل نقدي',
+                  style: theme.textTheme.bodyMedium,
+                ),
+
+                const SizedBox(height: 12),
+                const Divider(height: 1),
+                const SizedBox(height: 12),
+
+                for (final ReceiptLine line in receipt.lines)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(vertical: 4),
+                    child: Row(
+                      children: <Widget>[
+                        Expanded(
+                          child: Text(
+                            line.productName,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                        Text(
+                          '${AppFormatters.quantity(line.quantity)} × '
+                          '${AppFormatters.money(line.unitPrice)}',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          AppFormatters.money(line.lineTotal),
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ],
+                    ),
+                  ),
+
+                const SizedBox(height: 8),
+                const Divider(height: 1),
+                const SizedBox(height: 8),
+
+                _row(theme, 'المجموع الفرعي',
+                    AppFormatters.money(receipt.subtotal)),
+                if (receipt.discount > 0)
+                  _row(theme, 'الخصم',
+                      AppFormatters.money(receipt.discount)),
+                if (receipt.taxAmount > 0)
+                  _row(theme, 'الضريبة',
+                      AppFormatters.money(receipt.taxAmount)),
+                _row(theme, 'الإجمالي',
+                    AppFormatters.money(receipt.total),
+                    emphasized: true),
+                _row(theme, 'المدفوع',
+                    AppFormatters.money(receipt.paidAmount)),
+                if (receipt.hasChange)
+                  _row(theme, 'الباقي للعميل',
+                      AppFormatters.money(receipt.change),
+                      color: scheme.primary),
+
+                if (receipt.hasBalanceChange) ...<Widget>[
+                  const SizedBox(height: 6),
+                  _row(theme, 'الرصيد السابق',
+                      AppFormatters.money(receipt.previousBalance!),
+                      color: scheme.error),
+                  if (receipt.hasBalancePayment)
+                    _row(
+                      theme,
+                      'مسدد من الرصيد السابق',
+                      AppFormatters.money(receipt.paidOnBalance),
+                      color: scheme.primary,
+                    ),
+                  _row(
+                    theme,
+                    (receipt.newBalance ?? 0) < 0
+                        ? 'الرصيد الجديد (دائن)'
+                        : 'الرصيد الجديد',
+                    AppFormatters.money(
+                      (receipt.newBalance ?? 0).abs(),
+                    ),
+                    color: (receipt.newBalance ?? 0) < 0
+                        ? scheme.primary
+                        : scheme.error,
+                    emphasized: true,
+                  ),
+                ],
+
+                const SizedBox(height: 16),
+
+                Row(
+                  children: <Widget>[
+                    Expanded(
+                      child: AppButton(
+                        label: 'طباعة',
+                        icon: Icons.print_outlined,
+                        onPressed: () => _handlePrint(context, ref),
+                      ),
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: AppButton(
+                        label: 'فاتورة جديدة',
+                        icon: Icons.add,
+                        variant: AppButtonVariant.outline,
+                        onPressed: () => Navigator.of(context).pop(),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _row(
+    ThemeData theme,
+    String label,
+    String value, {
+    bool emphasized = false,
+    Color? color,
+  }) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(label, style: theme.textTheme.bodyMedium),
+          ),
+          Text(
+            value,
+            style: (emphasized
+                    ? theme.textTheme.titleMedium
+                    : theme.textTheme.bodyMedium)
+                ?.copyWith(
+              color: color ??
+                  (emphasized ? theme.colorScheme.primary : null),
+              fontWeight: emphasized ? FontWeight.w700 : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Localization
+// ============================================================================
+
+String _failureMessageFor(SalesFailureType type) => switch (type) {
+      SalesFailureType.network =>
+        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+      SalesFailureType.unauthorized =>
+        'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجددًا.',
+      SalesFailureType.notFound => 'الفاتورة غير موجودة.',
+      SalesFailureType.invalidStatusTransition =>
+        'لا يمكن إتمام العملية في الحالة الحالية.',
+      SalesFailureType.emptySale => 'لا يمكن إتمام بيع بدون بنود.',
+      SalesFailureType.invoiceNumberConflict =>
+        'رقم الفاتورة مستخدم بالفعل.',
+      SalesFailureType.customerNotFound =>
+        'البيع الآجل يتطلب اختيار عميل مسجل.',
+      SalesFailureType.branchNotFound =>
+        'الفرع غير متاح. يرجى إعادة اختياره.',
+      SalesFailureType.productNotFound =>
+        'أحد المنتجات غير متاح. يرجى إزالته وإعادة المحاولة.',
+      SalesFailureType.unitNotFound => 'إحدى الوحدات غير متاحة.',
+      SalesFailureType.insufficientStock =>
+        'الرصيد غير كافٍ. يرجى تقليل الكمية أو تحديث المخزون.',
+      SalesFailureType.invalidPayment =>
+        'قيمة الدفع غير صحيحة. يرجى مراجعة المبلغ والطريقة.',
+      SalesFailureType.invalidResponse =>
+        'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.',
+      SalesFailureType.unknown =>
+        'تعذّر إتمام البيع. يرجى المحاولة مرة أخرى.',
+    };
