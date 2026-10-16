@@ -7,6 +7,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/invalidation/data_invalidation.dart';
 import '../../../../core/network/network_status_provider.dart';
 import '../../../../core/network/offline_writer.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../cash/domain/entities/cash_entities.dart';
 import '../../../cash/presentation/providers/cash_providers.dart';
@@ -72,7 +73,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   void initState() {
     super.initState();
     _cart = ref.read(posCartProvider);
-    // Default: pay the exact amount owed (sale + old balance).
     _amountController = TextEditingController(
       text: _formatAmount(_settlementTotal),
     );
@@ -99,25 +99,21 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   }
 
   // ---------------------------------------------------------------------------
-  // Core math — the only source of truth for this dialog
+  // Core math
   // ---------------------------------------------------------------------------
 
   double get _input => double.tryParse(_amountController.text.trim()) ?? 0;
 
-  /// Sale total = invoice value only.
   double get _saleTotal => _cart.total;
 
-  /// Total owed by the customer = old balance + sale total.
   double get _settlementTotal => _cart.customerBalance + _saleTotal;
 
-  /// Amount applied to the invoice (capped at [_saleTotal]).
   double get _paidOnSale {
     if (_method == PosPaymentMethod.credit) return 0;
     if (_input <= 0) return 0;
     return _input >= _saleTotal ? _saleTotal : _input;
   }
 
-  /// Amount applied to the old balance (only for cash).
   double get _paidOnBalance {
     if (_method != PosPaymentMethod.cash) return 0;
     if (!_cart.hasCustomer) return 0;
@@ -127,7 +123,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return afterSale >= balance ? balance : afterSale;
   }
 
-  /// Cash to refund — nonzero only when the operator chose [ExcessAction.cash].
   double get _change {
     if (_method != PosPaymentMethod.cash) return 0;
     if (_excessAction != ExcessAction.cash) return 0;
@@ -136,13 +131,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return afterBalance > 0 ? afterBalance : 0;
   }
 
-  /// Amount added to the customer's balance — nonzero only when the
-  /// operator chose [ExcessAction.balance], OR when the invoice is underpaid.
   double get _addedToBalance {
-    // Part 1: unpaid remainder of the invoice.
     final double unpaidInvoice = _saleTotal - _paidOnSale;
 
-    // Part 2: excess chosen to stay on the balance.
     double extraOnBalance = 0;
     if (_method == PosPaymentMethod.cash &&
         _excessAction == ExcessAction.balance) {
@@ -154,16 +145,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return unpaidInvoice - extraOnBalance;
   }
 
-  /// Customer's balance after the sale.
-  /// Positive = customer owes us; negative = we owe the customer.
   double get _newBalance => _cart.customerBalance + _addedToBalance;
 
-  bool get _hasBalanceChange =>
-      _cart.hasCustomer && _newBalance != _cart.customerBalance;
-
-  /// Whether the operator must decide where the excess goes.
-  bool get _hasExcess => _method == PosPaymentMethod.cash &&
-      _input > _settlementTotal;
+  bool get _hasExcess =>
+      _method == PosPaymentMethod.cash && _input > _settlementTotal;
 
   String? _paymentMethodForOffline() {
     if (_method == PosPaymentMethod.credit) return null;
@@ -195,7 +180,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       return null;
     }
 
-    // Cash: partial payment requires a registered customer.
     if (_addedToBalance > 0 && !_cart.hasCustomer) {
       return 'الدفع الجزئي أو الزائد يتطلب اختيار عميل مسجل.';
     }
@@ -417,6 +401,15 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       dateTime: saleDate,
       companyName: contextState.currentCompany?.name ?? '—',
       branchName: contextState.currentBranch?.name ?? '—',
+      companyAddress: contextState.currentCompany?.address,
+      companyPhone: contextState.currentCompany?.phone,
+      companyTaxNumber: contextState.currentCompany?.taxNumber,
+      companyCommercialRegister:
+          contextState.currentCompany?.commercialRegister,
+      showTaxNumberOnPrint:
+          ref.read(showTaxNumberOnPrintProvider),
+      showCommercialRegisterOnPrint:
+          ref.read(showCommercialRegisterOnPrintProvider),
       lines: <ReceiptLine>[
         for (final PosCartLine line in _cart.lines)
           ReceiptLine(
@@ -434,6 +427,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       paidAmount: _paidOnSale,
       change: _change,
       paidOnBalance: _paidOnBalance,
+      addedToBalance: _addedToBalance,
       customerName: _cart.customerName,
       previousBalance:
           _cart.hasCustomer ? _cart.customerBalance : null,
@@ -451,7 +445,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       } else if (method == PosPaymentMethod.card) {
         _amountController.text = _formatAmount(_saleTotal);
       } else {
-        // Cash: default to full settlement.
         _amountController.text = _formatAmount(_settlementTotal);
       }
     });
@@ -592,17 +585,13 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   ],
                   const SizedBox(height: 16),
                   _SummaryBlock(
-                    saleTotal: _saleTotal,
                     input: _input,
                     method: _method,
                     hasCustomer: _cart.hasCustomer,
                     customerBalance: _cart.customerBalance,
-                    paidOnSale: _paidOnSale,
                     paidOnBalance: _paidOnBalance,
                     change: _change,
-                    addedToBalance: _addedToBalance,
                     newBalance: _newBalance,
-                    excessAction: _excessAction,
                   ),
                   const SizedBox(height: 20),
                   AppButton(
@@ -666,7 +655,6 @@ class _CustomerRow extends StatelessWidget {
   }
 }
 
-/// Shows the invoice total, the old balance (if any), and the total owed.
 class _TotalsCard extends StatelessWidget {
   const _TotalsCard({
     required this.saleTotal,
@@ -770,7 +758,6 @@ class _TotalsCard extends StatelessWidget {
   }
 }
 
-/// Let the operator choose where the excess goes.
 class _ExcessChooser extends StatelessWidget {
   const _ExcessChooser({
     required this.excess,
@@ -816,30 +803,27 @@ class _ExcessChooser extends StatelessWidget {
                 ),
               ],
             ),
-            const SizedBox(height: 8),
-            RadioListTile<ExcessAction>(
-              value: ExcessAction.cash,
-              groupValue: action,
-              onChanged: enabled
-                  ? (ExcessAction? v) {
-                      if (v != null) onChanged(v);
+            const SizedBox(height: 10),
+            SegmentedButton<ExcessAction>(
+              segments: const <ButtonSegment<ExcessAction>>[
+                ButtonSegment<ExcessAction>(
+                  value: ExcessAction.cash,
+                  label: Text('إرجاع نقدي'),
+                  icon: Icon(Icons.payments_outlined),
+                ),
+                ButtonSegment<ExcessAction>(
+                  value: ExcessAction.balance,
+                  label: Text('إضافته للرصيد'),
+                  icon: Icon(Icons.account_balance_wallet_outlined),
+                ),
+              ],
+              selected: <ExcessAction>{action},
+              onSelectionChanged: enabled
+                  ? (Set<ExcessAction> selection) {
+                      if (selection.isEmpty) return;
+                      onChanged(selection.first);
                     }
                   : null,
-              title: const Text('إرجاع نقدي للعميل'),
-              dense: true,
-              contentPadding: EdgeInsets.zero,
-            ),
-            RadioListTile<ExcessAction>(
-              value: ExcessAction.balance,
-              groupValue: action,
-              onChanged: enabled
-                  ? (ExcessAction? v) {
-                      if (v != null) onChanged(v);
-                    }
-                  : null,
-              title: const Text('إضافته إلى رصيد العميل'),
-              dense: true,
-              contentPadding: EdgeInsets.zero,
             ),
           ],
         ),
@@ -955,42 +939,31 @@ class _AmountField extends StatelessWidget {
   }
 }
 
-/// Summary shown before the user presses "إتمام البيع".
 class _SummaryBlock extends StatelessWidget {
   const _SummaryBlock({
-    required this.saleTotal,
     required this.input,
     required this.method,
     required this.hasCustomer,
     required this.customerBalance,
-    required this.paidOnSale,
     required this.paidOnBalance,
     required this.change,
-    required this.addedToBalance,
     required this.newBalance,
-    required this.excessAction,
   });
 
-  final double saleTotal;
   final double input;
   final String method;
   final bool hasCustomer;
   final double customerBalance;
-  final double paidOnSale;
   final double paidOnBalance;
   final double change;
-  final double addedToBalance;
   final double newBalance;
-  final ExcessAction excessAction;
 
   @override
   Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
+    final ColorScheme scheme = Theme.of(context).colorScheme;
     final bool showBalance = hasCustomer;
     final List<Widget> rows = <Widget>[];
 
-    // Cash + card: show paid + change.
     if (method != PosPaymentMethod.credit) {
       rows.add(_SummaryLine(
         label: 'المدفوع',
