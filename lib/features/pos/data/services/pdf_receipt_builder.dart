@@ -620,12 +620,10 @@ abstract final class PdfReceiptBuilder {
   // Payment block
   // ---------------------------------------------------------------------------
 
-  /// Payment block — shows the method, the paid amount, and (when
-  /// applicable) the cash change returned to the customer.
+  /// Payment block — method and paid amount only.
   ///
-  /// **Removed:** the legacy "المتبقي على العميل" line, which was computed
-  /// from `total - paidAmount` and ignored the previous balance. The
-  /// resulting balance is now reported in [_balanceBlock] only.
+  /// The resulting balance is reported separately in [_balanceBlock]; no
+  /// change / excess / "الباقي للعميل" is computed.
   static pw.Widget _paymentBlock(
     Receipt receipt,
     _Sizes s,
@@ -636,14 +634,6 @@ abstract final class PdfReceiptBuilder {
       children: <pw.Widget>[
         _kvRow('طريقة الدفع', _paymentMethodLabel(receipt), s, style),
         _kvRow('المدفوع', _money(receipt.paidAmount), s, style),
-        if (receipt.hasChange)
-          _kvRow(
-            'الباقي للعميل (نقدي)',
-            _money(receipt.change),
-            s,
-            style,
-            emphasized: true,
-          ),
       ],
     );
   }
@@ -652,13 +642,11 @@ abstract final class PdfReceiptBuilder {
   // Balance block
   // ---------------------------------------------------------------------------
 
-  /// Balance block — shown when the customer's balance changed during the
-  /// sale. Reports the previous balance, the portion of the payment that
-  /// was applied to that balance (if any), and the resulting balance.
+  /// Balance block — reports the previous balance and the resulting one.
   ///
-  /// A negative resulting balance means the customer now has a credit
-  /// with the shop; it is labelled accordingly and its absolute value is
-  /// printed.
+  /// * `newBalance > 0` → customer owes us (مدين).
+  /// * `newBalance < 0` → we owe the customer (له عندنا).
+  /// * `newBalance = 0` → settled.
   static pw.Widget _balanceBlock(
     Receipt receipt,
     _Sizes s,
@@ -675,16 +663,17 @@ abstract final class PdfReceiptBuilder {
           s,
           style,
         ),
-        if (receipt.hasBalancePayment)
+        if (newBalance > 0)
           _kvRow(
-            'مسدد من الرصيد السابق',
-            _money(receipt.paidOnBalance),
+            'الرصيد الجديد على العميل',
+            _money(newBalance),
             s,
             style,
-          ),
-        if (newBalance < 0)
+            emphasized: true,
+          )
+        else if (newBalance < 0)
           _kvRow(
-            'الرصيد الجديد (دائن للعميل)',
+            'الرصيد الجديد (له عندنا)',
             _money(newBalance.abs()),
             s,
             style,
@@ -693,7 +682,7 @@ abstract final class PdfReceiptBuilder {
         else
           _kvRow(
             'الرصيد الجديد',
-            _money(newBalance),
+            _money(0),
             s,
             style,
             emphasized: true,
