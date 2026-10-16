@@ -18,18 +18,8 @@ import '../providers/company_context_provider.dart';
 import '../providers/company_context_state.dart';
 import '../providers/subscription_providers.dart';
 
-/// Company profile page — basic identity, contact info and regional
-/// settings of the currently selected company.
-///
-/// The save action calls `CompanyContextNotifier.updateCurrentCompany`,
-/// which is gated server-side by RLS to the `owner` and `admin` roles.
-/// Callers without those roles receive a translated "unauthorized" message
-/// and the form remains open, so the user can simply navigate back.
-///
-/// Since Phase T-1, a contextual subscription card appears at the top of
-/// the form whenever the account is on trial, about to expire, or already
-/// expired. Healthy active accounts see nothing here (the reminder lives
-/// in the Dashboard banner instead).
+/// Company profile page — basic identity, tax identification, contact
+/// info and regional settings of the currently selected company.
 class CompanyProfilePage extends ConsumerStatefulWidget {
   const CompanyProfilePage({super.key});
 
@@ -39,7 +29,6 @@ class CompanyProfilePage extends ConsumerStatefulWidget {
 }
 
 class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
-  /// Curated list of ISO-4217 currencies supported by the app.
   static const List<String> _currencies = <String>[
     'EGP',
     'SAR',
@@ -53,7 +42,6 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
     'EUR',
   ];
 
-  /// Curated list of IANA timezones relevant to the MENA market.
   static const List<String> _timezones = <String>[
     'Africa/Cairo',
     'Africa/Casablanca',
@@ -76,6 +64,8 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
 
   late final TextEditingController _nameController;
   late final TextEditingController _legalNameController;
+  late final TextEditingController _taxNumberController;
+  late final TextEditingController _commercialRegisterController;
   late final TextEditingController _phoneController;
   late final TextEditingController _emailController;
   late final TextEditingController _addressController;
@@ -92,6 +82,8 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
     super.initState();
     _nameController = TextEditingController();
     _legalNameController = TextEditingController();
+    _taxNumberController = TextEditingController();
+    _commercialRegisterController = TextEditingController();
     _phoneController = TextEditingController();
     _emailController = TextEditingController();
     _addressController = TextEditingController();
@@ -101,6 +93,8 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
   void dispose() {
     _nameController.dispose();
     _legalNameController.dispose();
+    _taxNumberController.dispose();
+    _commercialRegisterController.dispose();
     _phoneController.dispose();
     _emailController.dispose();
     _addressController.dispose();
@@ -117,6 +111,8 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
 
     _nameController.text = company.name;
     _legalNameController.text = company.legalName ?? '';
+    _taxNumberController.text = company.taxNumber ?? '';
+    _commercialRegisterController.text = company.commercialRegister ?? '';
     _phoneController.text = company.phone ?? '';
     _emailController.text = company.email ?? '';
     _addressController.text = company.address ?? '';
@@ -154,6 +150,10 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
             phone: _emptyToNull(_phoneController.text),
             email: _emptyToNull(_emailController.text),
             address: _emptyToNull(_addressController.text),
+            taxNumber: _emptyToNull(_taxNumberController.text),
+            commercialRegister: _emptyToNull(
+              _commercialRegisterController.text,
+            ),
           );
 
       if (!mounted) return;
@@ -208,13 +208,39 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
     return null;
   }
 
+  /// Tax registration numbers contain digits only in most MENA countries.
+  /// We do not enforce a strict format (some countries allow letters),
+  /// only length and character whitelist: digits, letters, dash.
+  String? _validateTaxNumber(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    if (trimmed.length > 50) {
+      return 'الرقم الضريبي طويل جدًا (الحد الأقصى 50 حرف)';
+    }
+    if (!RegExp(r'^[0-9A-Za-z\-\/]+$').hasMatch(trimmed)) {
+      return 'الرقم الضريبي يحتوي على رموز غير مسموحة';
+    }
+    return null;
+  }
+
+  String? _validateCommercialRegister(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return null;
+    if (trimmed.length > 50) {
+      return 'السجل التجاري طويل جدًا (الحد الأقصى 50 حرف)';
+    }
+    if (!RegExp(r'^[0-9A-Za-z\-\/]+$').hasMatch(trimmed)) {
+      return 'السجل التجاري يحتوي على رموز غير مسموحة';
+    }
+    return null;
+  }
+
   String? _validateEmail(String? value) {
     final String trimmed = value?.trim() ?? '';
     if (trimmed.isEmpty) return null;
     if (trimmed.length > 200) {
       return 'البريد الإلكتروني طويل جدًا';
     }
-    // Simple client-side check; the database enforces the real format.
     final RegExp pattern = RegExp(r'^[^@\s]+@[^@\s]+\.[^@\s]+$');
     if (!pattern.hasMatch(trimmed)) {
       return 'صيغة البريد الإلكتروني غير صحيحة';
@@ -273,7 +299,7 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
       child: ListView(
         padding: const EdgeInsets.only(top: 12, bottom: 24),
         children: <Widget>[
-          // ---- Subscription (contextual — only shows when needed) ----
+          // ---- Subscription (contextual) ----
           const _SubscriptionContextCard(),
 
           // ---- Basic data ----
@@ -299,6 +325,42 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
                 enabled: !_isSaving,
                 validator: (String? v) =>
                     _validateOptional(v, 300, 'الاسم القانوني'),
+              ),
+            ],
+          ),
+
+          const SizedBox(height: 16),
+
+          // ---- Tax identification ----
+          const _SectionHeader(
+            title: 'البيانات الضريبية',
+            icon: Icons.receipt_outlined,
+          ),
+          const SizedBox(height: 10),
+          _Card(
+            children: <Widget>[
+              AppTextField(
+                controller: _taxNumberController,
+                label: 'الرقم الضريبي',
+                hint: 'مثال: 123-456-789',
+                enabled: !_isSaving,
+                validator: _validateTaxNumber,
+              ),
+              const SizedBox(height: 6),
+              const _HelperText(
+                'يُطبع على الفواتير عند تفعيله من إعدادات الشركة.',
+              ),
+              const SizedBox(height: 14),
+              AppTextField(
+                controller: _commercialRegisterController,
+                label: 'السجل التجاري',
+                hint: 'مثال: 12345',
+                enabled: !_isSaving,
+                validator: _validateCommercialRegister,
+              ),
+              const SizedBox(height: 6),
+              const _HelperText(
+                'يُطبع على الفواتير عند تفعيله من إعدادات الشركة.',
               ),
             ],
           ),
@@ -434,14 +496,6 @@ class _CompanyProfilePageState extends ConsumerState<CompanyProfilePage> {
 // ============================================================================
 // Subscription contextual card
 // ============================================================================
-//
-// Shows only when the account is NOT in a healthy active state:
-//   * trial (any day)              → yellow
-//   * active within 3 days         → orange
-//   * expired / cancelled          → red
-//
-// Healthy active accounts see [SizedBox.shrink] (the Dashboard banner is
-// the single reminder surface for them).
 
 class _SubscriptionContextCard extends ConsumerWidget {
   const _SubscriptionContextCard();
@@ -451,7 +505,6 @@ class _SubscriptionContextCard extends ConsumerWidget {
     final CompanySubscription? sub = ref.watch(subscriptionProvider);
     if (sub == null) return const SizedBox.shrink();
 
-    // Healthy active accounts — silent here.
     if (sub.isActive && !sub.isExpiringSoon) {
       return const SizedBox.shrink();
     }
@@ -562,7 +615,6 @@ class _SubscriptionContextCard extends ConsumerWidget {
       );
     }
 
-    // Active but expiring soon.
     final int? days = sub.daysRemaining;
     return _CardStyle(
       background: const Color(0xFFFFF8E1),
@@ -663,7 +715,7 @@ class _Card extends StatelessWidget {
 }
 
 // ============================================================================
-// Dropdown field (themed, no deprecation)
+// Dropdown field
 // ============================================================================
 
 class _DropdownField<T> extends StatelessWidget {
