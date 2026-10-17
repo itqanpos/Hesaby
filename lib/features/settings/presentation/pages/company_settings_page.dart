@@ -18,15 +18,15 @@ import '../../domain/entities/company_settings.dart';
 import '../../domain/repositories/company_settings_repository.dart';
 import '../providers/company_settings_providers.dart';
 
-/// Company settings page — business defaults + print preferences.
+/// Company settings page — business defaults + logo.
 ///
 /// Sections (top → bottom):
 /// 1. **الشعار** — upload / preview / delete the company logo.
 /// 2. **البيع والضرائب** — tax rate, max discount.
 /// 3. **قواعد البيع** — allow-sale-without-stock, allow-credit-sale.
-/// 4. **تذييل الإيصال** — receipt footer text.
-/// 5. **الطباعة الرسمية** — whether the tax number and commercial
-///    register are printed on receipts / invoices.
+///
+/// Print-related settings (footer text, tax number, commercial register,
+/// currency symbol, font size/weight) have moved to "إعدادات الطابعة".
 class CompanySettingsPage extends ConsumerStatefulWidget {
   const CompanySettingsPage({super.key});
 
@@ -40,12 +40,9 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
 
   late final TextEditingController _taxRateController;
   late final TextEditingController _maxDiscountController;
-  late final TextEditingController _footerController;
 
   bool _allowSaleWithoutStock = false;
   bool _allowCreditSale = true;
-  bool _showTaxNumberOnPrint = false;
-  bool _showCommercialRegisterOnPrint = false;
 
   bool _initialized = false;
   bool _isSaving = false;
@@ -56,14 +53,12 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
     super.initState();
     _taxRateController = TextEditingController();
     _maxDiscountController = TextEditingController();
-    _footerController = TextEditingController();
   }
 
   @override
   void dispose() {
     _taxRateController.dispose();
     _maxDiscountController.dispose();
-    _footerController.dispose();
     super.dispose();
   }
 
@@ -76,12 +71,8 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
     _initialized = true;
     _taxRateController.text = _formatNumber(settings.defaultTaxRate);
     _maxDiscountController.text = _formatNumber(settings.maxDiscountPercent);
-    _footerController.text = settings.receiptFooter;
     _allowSaleWithoutStock = settings.allowSaleWithoutStock;
     _allowCreditSale = settings.allowCreditSale;
-    _showTaxNumberOnPrint = settings.showTaxNumberOnPrint;
-    _showCommercialRegisterOnPrint =
-        settings.showCommercialRegisterOnPrint;
   }
 
   static String _formatNumber(double value) {
@@ -109,7 +100,6 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
         double.tryParse(_taxRateController.text.trim()) ?? 0;
     final double maxDiscount =
         double.tryParse(_maxDiscountController.text.trim()) ?? 0;
-    final String footer = _footerController.text.trim();
 
     setState(() => _isSaving = true);
 
@@ -119,9 +109,6 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
             maxDiscountPercent: maxDiscount,
             allowSaleWithoutStock: _allowSaleWithoutStock,
             allowCreditSale: _allowCreditSale,
-            receiptFooter: footer,
-            showTaxNumberOnPrint: _showTaxNumberOnPrint,
-            showCommercialRegisterOnPrint: _showCommercialRegisterOnPrint,
           );
 
       if (!mounted) return;
@@ -153,7 +140,14 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
         ref.watch(companySettingsProvider);
 
     return AppShell(
-      appBar: AppBar(title: const Text('إعدادات الشركة')),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'رجوع',
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        title: const Text('إعدادات الشركة'),
+      ),
       body: settingsAsync.when(
         loading: () => const AppLoader(),
         error: (Object error, StackTrace _) => AppErrorView(
@@ -271,80 +265,6 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
                   ],
                 ),
 
-                const SizedBox(height: 16),
-
-                // ---- Receipt ----
-                const _SectionHeader(
-                  title: 'تذييل الإيصال',
-                  icon: Icons.text_fields_outlined,
-                ),
-                const SizedBox(height: 10),
-                _Card(
-                  children: <Widget>[
-                    AppTextField(
-                      controller: _footerController,
-                      label: 'النص أسفل الإيصال',
-                      hint: 'شكرًا لتعاملكم معنا',
-                      enabled: !_isSaving,
-                      maxLines: 3,
-                      validator: _validateFooter,
-                    ),
-                    const SizedBox(height: 6),
-                    const _HelperText(
-                      'يظهر في نهاية كل إيصال PDF أو حراري (حتى 200 حرف).',
-                    ),
-                    const SizedBox(height: 10),
-                    _PreviewFooter(controller: _footerController),
-                  ],
-                ),
-
-                const SizedBox(height: 16),
-
-                // ---- Official print flags ----
-                const _SectionHeader(
-                  title: 'الطباعة الرسمية',
-                  icon: Icons.print_outlined,
-                ),
-                const SizedBox(height: 10),
-                _Card(
-                  padding: EdgeInsets.zero,
-                  children: <Widget>[
-                    SwitchListTile(
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 16),
-                      title: const Text('إظهار الرقم الضريبي'),
-                      subtitle: const Text(
-                        'يُطبع الرقم الضريبي للشركة أسفل بيانات الشركة في كل '
-                        'إيصال/فاتورة. يُدخل من "بيانات الشركة".',
-                      ),
-                      value: _showTaxNumberOnPrint,
-                      onChanged: _isSaving
-                          ? null
-                          : (bool value) {
-                              setState(
-                                  () => _showTaxNumberOnPrint = value);
-                            },
-                    ),
-                    const Divider(height: 1),
-                    SwitchListTile(
-                      contentPadding:
-                          const EdgeInsets.symmetric(horizontal: 16),
-                      title: const Text('إظهار السجل التجاري'),
-                      subtitle: const Text(
-                        'يُطبع السجل التجاري للشركة أسفل بيانات الشركة في كل '
-                        'إيصال/فاتورة. يُدخل من "بيانات الشركة".',
-                      ),
-                      value: _showCommercialRegisterOnPrint,
-                      onChanged: _isSaving
-                          ? null
-                          : (bool value) {
-                              setState(() =>
-                                  _showCommercialRegisterOnPrint = value);
-                            },
-                    ),
-                  ],
-                ),
-
                 if (_saveFailure != null) ...<Widget>[
                   const SizedBox(height: 16),
                   _ErrorBanner(message: _saveFailureMessage(_saveFailure!)),
@@ -379,15 +299,6 @@ class _CompanySettingsPageState extends ConsumerState<CompanySettingsPage> {
     if (parsed == null) return 'الرجاء إدخال رقم صحيح';
     if (parsed < 0) return 'لا يمكن أن تكون القيمة سالبة';
     if (parsed > 100) return 'القيمة يجب ألا تتجاوز 100';
-    return null;
-  }
-
-  String? _validateFooter(String? value) {
-    final String trimmed = value?.trim() ?? '';
-    if (trimmed.isEmpty) return 'الرجاء إدخال نص التذييل';
-    if (trimmed.length > 200) {
-      return 'النص طويل جدًا (الحد الأقصى 200 حرف)';
-    }
     return null;
   }
 
@@ -444,10 +355,6 @@ class _LogoSectionState extends ConsumerState<_LogoSection> {
   bool _isUploading = false;
   bool _isDeleting = false;
   String? _errorMessage;
-
-  // ---------------------------------------------------------------------------
-  // Upload
-  // ---------------------------------------------------------------------------
 
   Future<void> _pickAndUpload() async {
     if (_isUploading || _isDeleting) return;
@@ -527,10 +434,6 @@ class _LogoSectionState extends ConsumerState<_LogoSection> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Delete
-  // ---------------------------------------------------------------------------
-
   Future<void> _delete() async {
     if (_isUploading || _isDeleting) return;
 
@@ -562,10 +465,6 @@ class _LogoSectionState extends ConsumerState<_LogoSection> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
   String? _currentCompanyId() {
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
@@ -584,10 +483,6 @@ class _LogoSectionState extends ConsumerState<_LogoSection> {
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -784,86 +679,6 @@ class _HelperText extends StatelessWidget {
           color: scheme.onSurfaceVariant,
         ),
       ),
-    );
-  }
-}
-
-// ============================================================================
-// Footer preview
-// ============================================================================
-
-class _PreviewFooter extends StatelessWidget {
-  const _PreviewFooter({required this.controller});
-
-  final TextEditingController controller;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return ValueListenableBuilder<TextEditingValue>(
-      valueListenable: controller,
-      builder: (
-        BuildContext context,
-        TextEditingValue value,
-        Widget? _,
-      ) {
-        final String text = value.text.trim();
-        final String display = text.isEmpty ? '—' : text;
-        return DecoratedBox(
-          decoration: BoxDecoration(
-            color: scheme.surfaceContainerHighest,
-            borderRadius: BorderRadius.circular(10),
-            border: Border.all(color: scheme.outlineVariant),
-          ),
-          child: Padding(
-            padding: const EdgeInsets.symmetric(
-              horizontal: 14,
-              vertical: 10,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: <Widget>[
-                Row(
-                  children: <Widget>[
-                    Icon(
-                      Icons.visibility_outlined,
-                      size: 14,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 6),
-                    Text(
-                      'معاينة',
-                      style: theme.textTheme.labelSmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                        fontWeight: FontWeight.w700,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Center(
-                  child: Text(
-                    display,
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: text.isEmpty
-                          ? scheme.onSurfaceVariant
-                          : scheme.onSurface,
-                      fontStyle: text.isEmpty
-                          ? FontStyle.italic
-                          : FontStyle.normal,
-                    ),
-                    textAlign: TextAlign.center,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                ),
-              ],
-            ),
-          ),
-        );
-      },
     );
   }
 }
