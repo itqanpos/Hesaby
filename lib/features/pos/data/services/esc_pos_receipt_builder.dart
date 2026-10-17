@@ -12,8 +12,6 @@ import '../../domain/entities/receipt.dart';
 import '../../domain/services/receipt_number_format.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 
-/// Builds an ESC/POS byte stream from a [Receipt] by rendering the whole
-/// document as a 1-bit bitmap and sending it as a `GS v 0` raster command.
 abstract final class EscPosReceiptBuilder {
   static const List<int> _init = <int>[0x1B, 0x40];
   static const List<int> _feedAndCut = <int>[
@@ -91,8 +89,6 @@ abstract final class EscPosReceiptBuilder {
   static const String _bundledRegular = 'CairoReceipt';
   static const String _bundledBold = 'CairoReceiptBold';
 
-  /// Loads Cairo from `assets/fonts/`. Returns `false` when the files are not
-  /// bundled, so the caller falls back to google_fonts (needs internet once).
   static Future<bool> _loadBundledFonts() async {
     try {
       final ByteData regular =
@@ -119,7 +115,6 @@ abstract final class EscPosReceiptBuilder {
   static Future<void> _ensureFonts() async {
     if (_regularFamily != null && _boldFamily != null) return;
 
-    // Prefer Cairo bundled with the app: printing must work without internet.
     if (await _loadBundledFonts()) return;
 
     final TextStyle regular = GoogleFonts.cairo();
@@ -152,7 +147,6 @@ abstract final class EscPosReceiptBuilder {
     final int height = image.height;
     final int widthBytes = (width + 7) ~/ 8;
 
-    // Convert to grayscale luminance buffer (0 = black, 255 = white).
     final List<double> gray = List<double>.filled(width * height, 255);
     for (int y = 0; y < height; y++) {
       final int rowStart = y * width * 4;
@@ -167,7 +161,6 @@ abstract final class EscPosReceiptBuilder {
       }
     }
 
-    // Floyd–Steinberg error diffusion in place.
     for (int y = 0; y < height; y++) {
       for (int x = 0; x < width; x++) {
         final int i = y * width + x;
@@ -188,7 +181,6 @@ abstract final class EscPosReceiptBuilder {
       }
     }
 
-    // Pack thresholded bits MSB-first per byte.
     final Uint8List raster = Uint8List(widthBytes * height);
     int offset = 0;
     for (int y = 0; y < height; y++) {
@@ -232,7 +224,6 @@ class _Painter {
     required this.baseWeight,
   }) : _scale = paperWidthDots / 576.0;
 
-  /// Currency label printed next to amounts; empty when the symbol is off.
   String _currencyLabel = 'ج.م';
 
   final ui.Canvas canvas;
@@ -355,10 +346,6 @@ class _Painter {
     _y += targetH;
   }
 
-  // ---------------------------------------------------------------------------
-  // Sections
-  // ---------------------------------------------------------------------------
-
   void _header(Receipt r) {
     _text(
       r.companyName,
@@ -448,7 +435,12 @@ class _Painter {
     final double colTotalW = w * 0.24;
     final double colNameW = w - colNumW - colQtyW - colPriceW - colTotalW;
 
-    // Header row — no shading.
+    // Sum total quantities instead of line count.
+    double totalQuantity = 0;
+    for (final line in r.lines) {
+      totalQuantity += line.quantity;
+    }
+
     _row(
       cells: <_Cell>[
         _Cell('م',
@@ -469,7 +461,6 @@ class _Painter {
 
     for (int i = 0; i < r.lines.length; i++) {
       final ReceiptLine line = r.lines[i];
-      // No zebra shading.
       _row(
         cells: <_Cell>[
           _Cell('${i + 1}',
@@ -489,13 +480,13 @@ class _Painter {
       );
     }
 
-    // Summary row — no shading.
+    // Summary row now shows the SUM of quantities.
     _row(
       cells: <_Cell>[
         _Cell('', width: colNumW, align: TextAlign.center),
         _Cell('المجموع الفرعي',
             width: colNameW, bold: true, align: TextAlign.right),
-        _Cell('${r.lines.length}',
+        _Cell(_qty(totalQuantity),
             width: colQtyW, align: TextAlign.center),
         _Cell('', width: colPriceW, align: TextAlign.center),
         _Cell(_money(r.subtotal),
@@ -576,17 +567,11 @@ class _Painter {
     _y += boxH;
   }
 
-  /// Payment block — method and paid amount only.
   void _paymentBlock(Receipt r) {
     _kvRow('طريقة الدفع', _paymentMethodLabel(r));
     _kvRow('المدفوع', _money(r.paidAmount));
   }
 
-  /// Balance block — reports the previous balance and the resulting one.
-  ///
-  /// * `newBalance > 0` → customer owes us (مدين).
-  /// * `newBalance < 0` → we owe the customer (له عندنا).
-  /// * `newBalance = 0` → settled.
   void _balanceBlock(Receipt r) {
     _kvRow('الرصيد السابق', _money(r.previousBalance ?? 0));
 
@@ -652,9 +637,7 @@ class _Painter {
   }
 
   // ---------------------------------------------------------------------------
-  // Meta row — label on the right, value on the left.
-  // The label column width is now dynamic: it measures the actual label
-  // width, so long Arabic labels (e.g. "عنوان العميل") are not clipped.
+  // Meta row — label on the far right, value on the far left.
   // ---------------------------------------------------------------------------
 
   void _metaRow(String label, String value, {bool bold = false}) {
@@ -667,13 +650,11 @@ class _Painter {
       align: TextAlign.right,
       maxWidth: double.infinity,
     );
-    // Use the natural measured width, plus a small gap so the label and the
-    // value do not touch, capped so the value always has at least ~30% room.
-    final double gap = 6 * _scale;
+    
+    final double gap = 8 * _scale;
     final double naturalLabelW = labelPainter.width + gap;
-    final double maxLabelW = _contentWidth * 0.65;
-    final double labelW =
-        naturalLabelW < maxLabelW ? naturalLabelW : maxLabelW;
+    final double maxLabelW = _contentWidth * 0.6;
+    final double labelW = naturalLabelW < maxLabelW ? naturalLabelW : maxLabelW;
     final double valueMaxW = _contentWidth - labelW;
 
     final TextPainter valuePainter = _measure(
@@ -687,16 +668,15 @@ class _Painter {
         ? labelPainter.height
         : valuePainter.height;
 
-    // Label on the right.
+    // Label on the far right.
     labelPainter.paint(
       canvas,
       Offset(_paddingH + _contentWidth - labelPainter.width, _y),
     );
-    // Value on the left (right-aligned inside its own box that ends where
-    // the label begins).
+    // Value on the far left.
     valuePainter.paint(
       canvas,
-      Offset(_paddingH + valueMaxW - valuePainter.width, _y),
+      Offset(_paddingH, _y),
     );
 
     _y += rowH + 2 * _scale;
@@ -798,8 +778,6 @@ class _Painter {
     _y += chipH;
   }
 
-  /// Draws a table row. No background fill anymore — the border is the only
-  /// separator, matching the PDF receipt (no zebra, no grey header).
   void _row({
     required List<_Cell> cells,
     required double fontSize,
@@ -836,11 +814,9 @@ class _Painter {
       final TextPainter painter = painters[i];
       final double contentY = _y + topPad + (maxH - painter.height) / 2;
       painter.paint(canvas, Offset(x + cellInsetH, contentY));
-      // Cell border: draws the vertical grid lines of the table.
       canvas.drawRect(Rect.fromLTWH(x, _y, cell.width, rowH), gridPaint);
     }
 
-    // Bottom hairline under the row.
     canvas.drawRect(
       Rect.fromLTWH(
         _paddingH,
