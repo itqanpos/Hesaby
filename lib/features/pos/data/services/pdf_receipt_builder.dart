@@ -370,6 +370,9 @@ abstract final class PdfReceiptBuilder {
           s,
           style,
         ),
+        if (receipt.cashierName != null &&
+            receipt.cashierName!.trim().isNotEmpty)
+          _metaRow('الكاشير', receipt.cashierName!, s, style),
         if (receipt.hasCustomer) ...<pw.Widget>[
           _metaRow('العميل', receipt.customerName!, s, style),
           if (receipt.hasCustomerAddress)
@@ -387,9 +390,6 @@ abstract final class PdfReceiptBuilder {
               style,
             ),
         ],
-        if (receipt.cashierName != null &&
-            receipt.cashierName!.trim().isNotEmpty)
-          _metaRow('الكاشير', receipt.cashierName!, s, style),
       ],
     );
   }
