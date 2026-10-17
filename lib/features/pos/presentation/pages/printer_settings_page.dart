@@ -6,10 +6,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/repositories/company_settings_repository.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../../settings/presentation/widgets/print_font_settings_section.dart';
 import '../../data/services/esc_pos_test_ticket.dart';
+import '../../data/services/pos_preferences.dart';
 import '../../data/services/printer_service.dart';
 import '../../domain/entities/printer_device.dart';
 import '../providers/printer_providers.dart';
@@ -20,7 +22,9 @@ import '../widgets/printer_scan_sheet.dart';
 /// Sections (top → bottom):
 /// 1. **الطابعة** — pick a default thermal printer, test it, or forget it.
 /// 2. **الطباعة المباشرة** — toggle to skip the preview dialog.
-/// 3. **حجم وثقل الخط** — font size + weight for both thermal and A4.
+/// 3. **حجم الورق** — 58mm vs 80mm (local to this device).
+/// 4. **خيارات الطباعة** — tax number, commercial register, currency symbol.
+/// 5. **حجم وثقل الخط** — font size + weight for thermal and A4.
 class PrinterSettingsPage extends ConsumerStatefulWidget {
   const PrinterSettingsPage({super.key});
 
@@ -35,6 +39,7 @@ class _PrinterSettingsPageState
   bool _isConnected = false;
   bool _isTesting = false;
   bool _isSavingToggle = false;
+  bool _isSavingPrintOption = false;
 
   @override
   void initState() {
@@ -148,6 +153,41 @@ class _PrinterSettingsPageState
     }
   }
 
+  Future<void> _savePrintOption({
+    bool? showTaxNumberOnPrint,
+    bool? showCommercialRegisterOnPrint,
+    bool? showCurrencySymbol,
+  }) async {
+    if (_isSavingPrintOption) return;
+    setState(() => _isSavingPrintOption = true);
+
+    try {
+      await ref.read(companySettingsProvider.notifier).updateSettings(
+            showTaxNumberOnPrint: showTaxNumberOnPrint,
+            showCommercialRegisterOnPrint: showCommercialRegisterOnPrint,
+            showCurrencySymbol: showCurrencySymbol,
+          );
+    } on CompanySettingsException catch (e) {
+      if (!mounted) return;
+      _snack(_settingsMessage(e.type));
+    } on Object {
+      if (!mounted) return;
+      _snack('تعذّر حفظ الإعداد. حاول مرة أخرى.');
+    } finally {
+      if (mounted) setState(() => _isSavingPrintOption = false);
+    }
+  }
+
+  Future<void> _setPaperSize(ReceiptPaperSize size) async {
+    try {
+      await ref.read(posPaperSizeProvider.notifier).set(size);
+    } on Object catch (error, stackTrace) {
+      AppLogger.error('Failed to save paper size', error, stackTrace);
+      if (!mounted) return;
+      _snack('تعذّر حفظ حجم الورق.');
+    }
+  }
+
   void _snack(String message) {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -238,12 +278,234 @@ class _PrinterSettingsPageState
 
         const SizedBox(height: 24),
 
+        // ---- Paper size ----
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: _PaperSizeSection(
+            enabled: !_isSavingPrintOption,
+            onChanged: _setPaperSize,
+          ),
+        ),
+
+        const SizedBox(height: 24),
+
+        // ---- Print options ----
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 4),
+          child: _PrintOptionsSection(
+            isSaving: _isSavingPrintOption,
+            onChanged: _savePrintOption,
+          ),
+        ),
+
+        const SizedBox(height: 24),
+
         // ---- Font settings ----
         const Padding(
           padding: EdgeInsets.symmetric(horizontal: 4),
           child: PrintFontSettingsSection(),
         ),
       ],
+    );
+  }
+}
+
+// ============================================================================
+// Paper size section
+// ============================================================================
+
+class _PaperSizeSection extends ConsumerWidget {
+  const _PaperSizeSection({
+    required this.enabled,
+    required this.onChanged,
+  });
+
+  final bool enabled;
+  final ValueChanged<ReceiptPaperSize> onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final ReceiptPaperSize current =
+        ref.watch(posPaperSizeProvider).valueOrNull ??
+            PosPreferences.defaultPaperSize;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.straighten_outlined, color: scheme.primary),
+                const SizedBox(width: 10),
+                Text(
+                  'حجم الورق',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'يُستخدم عند الطباعة الحرارية على هذا الجهاز.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            SegmentedButton<ReceiptPaperSize>(
+              segments: const <ButtonSegment<ReceiptPaperSize>>[
+                ButtonSegment<ReceiptPaperSize>(
+                  value: ReceiptPaperSize.mm58,
+                  label: Text('58 mm'),
+                  icon: Icon(Icons.print_outlined, size: 18),
+                ),
+                ButtonSegment<ReceiptPaperSize>(
+                  value: ReceiptPaperSize.mm80,
+                  label: Text('80 mm'),
+                  icon: Icon(Icons.print_outlined, size: 18),
+                ),
+              ],
+              selected: <ReceiptPaperSize>{current},
+              onSelectionChanged: enabled
+                  ? (Set<ReceiptPaperSize> s) => onChanged(s.first)
+                  : null,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              'يُحفظ على هذا الجهاز فقط — يمكنك تغييره على جهاز آخر.',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Print options section
+// ============================================================================
+
+class _PrintOptionsSection extends ConsumerWidget {
+  const _PrintOptionsSection({
+    required this.isSaving,
+    required this.onChanged,
+  });
+
+  final bool isSaving;
+  final void Function({
+    bool? showTaxNumberOnPrint,
+    bool? showCommercialRegisterOnPrint,
+    bool? showCurrencySymbol,
+  }) onChanged;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final CompanySettings settings =
+        ref.watch(companySettingsProvider).valueOrNull ??
+            CompanySettings.defaults('');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 14, 14, 6),
+            child: Row(
+              children: <Widget>[
+                Icon(Icons.tune, color: scheme.primary),
+                const SizedBox(width: 10),
+                Text(
+                  'خيارات الطباعة',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+            title: const Text('الرقم الضريبي في الفاتورة'),
+            subtitle: const Text(
+              'يُطبع الرقم الضريبي للشركة أسفل اسم الفرع.',
+            ),
+            value: settings.showTaxNumberOnPrint,
+            onChanged: isSaving
+                ? null
+                : (bool v) =>
+                    onChanged(showTaxNumberOnPrint: v),
+            secondary: Icon(
+              settings.showTaxNumberOnPrint
+                  ? Icons.check_circle_outline
+                  : Icons.circle_outlined,
+              color: settings.showTaxNumberOnPrint
+                  ? scheme.primary
+                  : scheme.onSurfaceVariant,
+            ),
+          ),
+          const Divider(height: 1),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+            title: const Text('السجل التجاري في الفاتورة'),
+            subtitle: const Text(
+              'يُطبع السجل التجاري للشركة أسفل اسم الفرع.',
+            ),
+            value: settings.showCommercialRegisterOnPrint,
+            onChanged: isSaving
+                ? null
+                : (bool v) =>
+                    onChanged(showCommercialRegisterOnPrint: v),
+            secondary: Icon(
+              settings.showCommercialRegisterOnPrint
+                  ? Icons.check_circle_outline
+                  : Icons.circle_outlined,
+              color: settings.showCommercialRegisterOnPrint
+                  ? scheme.primary
+                  : scheme.onSurfaceVariant,
+            ),
+          ),
+          const Divider(height: 1),
+          SwitchListTile(
+            contentPadding: const EdgeInsets.symmetric(horizontal: 14),
+            title: const Text('إظهار رمز العملة (ج.م)'),
+            subtitle: const Text(
+              'عند التعطيل تُطبع المبالغ أرقامًا فقط بدون رمز العملة.',
+            ),
+            value: settings.showCurrencySymbol,
+            onChanged: isSaving
+                ? null
+                : (bool v) => onChanged(showCurrencySymbol: v),
+            secondary: Icon(
+              settings.showCurrencySymbol
+                  ? Icons.check_circle_outline
+                  : Icons.circle_outlined,
+              color: settings.showCurrencySymbol
+                  ? scheme.primary
+                  : scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
     );
   }
 }
