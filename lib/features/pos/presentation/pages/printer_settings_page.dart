@@ -180,7 +180,7 @@ class _PrinterSettingsPageState
 
   Future<void> _setPaperSize(ReceiptPaperSize size) async {
     try {
-      await ref.read(posPaperSizeProvider.notifier).set(size);
+      await ref.read(posPaperSizeProvider.notifier).setPaperSize(size);
     } on Object catch (error, stackTrace) {
       AppLogger.error('Failed to save paper size', error, stackTrace);
       if (!mounted) return;
