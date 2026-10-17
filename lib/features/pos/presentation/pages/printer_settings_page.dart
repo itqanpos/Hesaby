@@ -6,12 +6,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/utils/logger.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
+import '../../../../shared/widgets/app_text_field.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/repositories/company_settings_repository.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../../settings/presentation/widgets/print_font_settings_section.dart';
 import '../../data/services/esc_pos_test_ticket.dart';
-import '../../data/services/pdf_receipt_builder.dart';   // ⬅️ ReceiptPaperSize
+import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
 import '../../data/services/printer_service.dart';
 import '../../domain/entities/printer_device.dart';
@@ -25,7 +26,8 @@ import '../widgets/printer_scan_sheet.dart';
 /// 2. **الطباعة المباشرة** — toggle to skip the preview dialog.
 /// 3. **حجم الورق** — 58mm vs 80mm (local to this device).
 /// 4. **خيارات الطباعة** — tax number, commercial register, currency symbol.
-/// 5. **حجم وثقل الخط** — font size + weight for thermal and A4.
+/// 5. **تذييل الإيصال** — receipt footer text + preview.
+/// 6. **حجم وثقل الخط** — font size + weight for thermal and A4.
 class PrinterSettingsPage extends ConsumerStatefulWidget {
   const PrinterSettingsPage({super.key});
 
@@ -235,7 +237,14 @@ class _PrinterSettingsPageState
         ref.watch(savedPrinterProvider);
 
     return AppShell(
-      appBar: AppBar(title: const Text('إعدادات الطابعة')),
+      appBar: AppBar(
+        leading: IconButton(
+          icon: const Icon(Icons.arrow_back),
+          tooltip: 'رجوع',
+          onPressed: () => Navigator.of(context).maybePop(),
+        ),
+        title: const Text('إعدادات الطابعة'),
+      ),
       body: savedAsync.when(
         loading: () => const Center(child: CircularProgressIndicator()),
         error: (Object error, StackTrace _) => _ErrorBody(
@@ -297,6 +306,14 @@ class _PrinterSettingsPageState
             isSaving: _isSavingPrintOption,
             onChanged: _savePrintOption,
           ),
+        ),
+
+        const SizedBox(height: 24),
+
+        // ---- Receipt footer ----
+        const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 4),
+          child: _ReceiptFooterSection(),
         ),
 
         const SizedBox(height: 24),
@@ -506,6 +523,330 @@ class _PrintOptionsSection extends ConsumerWidget {
             ),
           ),
         ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Receipt footer section
+// ============================================================================
+
+class _ReceiptFooterSection extends ConsumerStatefulWidget {
+  const _ReceiptFooterSection();
+
+  @override
+  ConsumerState<_ReceiptFooterSection> createState() =>
+      _ReceiptFooterSectionState();
+}
+
+class _ReceiptFooterSectionState
+    extends ConsumerState<_ReceiptFooterSection> {
+  static const int _maxFooterLength = 200;
+
+  late final TextEditingController _controller;
+
+  bool _initialized = false;
+  bool _isSaving = false;
+  String? _errorMessage;
+  String _savedValue = '';
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = TextEditingController();
+    _controller.addListener(_onTextChanged);
+  }
+
+  @override
+  void dispose() {
+    _controller.removeListener(_onTextChanged);
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _onTextChanged() {
+    if (!mounted) return;
+    setState(() {
+      _errorMessage = null;
+    });
+  }
+
+  void _hydrate(CompanySettings settings) {
+    if (_initialized) return;
+    _initialized = true;
+    _controller.text = settings.receiptFooter;
+    _savedValue = settings.receiptFooter;
+  }
+
+  String? _validateFooter(String? value) {
+    final String trimmed = value?.trim() ?? '';
+    if (trimmed.isEmpty) return 'الرجاء إدخال نص التذييل';
+    if (trimmed.length > _maxFooterLength) {
+      return 'النص طويل جدًا (الحد الأقصى $_maxFooterLength حرف)';
+    }
+    return null;
+  }
+
+  bool get _hasChanges => _controller.text.trim() != _savedValue.trim();
+
+  Future<void> _save() async {
+    if (_isSaving) return;
+    final String? error = _validateFooter(_controller.text);
+    if (error != null) {
+      setState(() => _errorMessage = error);
+      return;
+    }
+
+    final String trimmed = _controller.text.trim();
+    setState(() {
+      _isSaving = true;
+      _errorMessage = null;
+    });
+
+    try {
+      await ref.read(companySettingsProvider.notifier).updateSettings(
+            receiptFooter: trimmed,
+          );
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        _savedValue = trimmed;
+      });
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('تم حفظ التذييل.')),
+        );
+    } on CompanySettingsException catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        _errorMessage = _footerFailureMessage(e.type);
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _isSaving = false;
+        _errorMessage = 'تعذّر حفظ التذييل. حاول مرة أخرى.';
+      });
+    }
+  }
+
+  static String _footerFailureMessage(CompanySettingsFailureType t) =>
+      switch (t) {
+        CompanySettingsFailureType.network =>
+          'تعذّر الاتصال بالخادم. تحقق من اتصالك.',
+        CompanySettingsFailureType.unauthorized =>
+          'لا تملك صلاحية تعديل الإعدادات.',
+        CompanySettingsFailureType.notFound =>
+          'لم يتم العثور على إعدادات الشركة.',
+        CompanySettingsFailureType.invalidFooter =>
+          'نص التذييل غير صالح (فارغ أو يتجاوز $_maxFooterLength حرف).',
+        CompanySettingsFailureType.invalidTaxRate => 'قيمة غير صحيحة.',
+        CompanySettingsFailureType.invalidDiscountLimit =>
+          'قيمة غير صحيحة.',
+        CompanySettingsFailureType.invalidResponse =>
+          'تعذّر قراءة البيانات.',
+        CompanySettingsFailureType.unknown =>
+          'حدث خطأ غير متوقع. حاول مرة أخرى.',
+      };
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final CompanySettings? settings =
+        ref.watch(companySettingsProvider).valueOrNull;
+    if (settings != null) _hydrate(settings);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.text_fields_outlined, color: scheme.primary),
+                const SizedBox(width: 10),
+                Text(
+                  'تذييل الإيصال',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 2),
+            Text(
+              'يظهر في نهاية كل إيصال حراري أو PDF.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 12),
+            AppTextField(
+              controller: _controller,
+              label: 'النص أسفل الإيصال',
+              hint: 'شكرًا لتعاملكم معنا',
+              enabled: !_isSaving,
+              maxLines: 3,
+              validator: _validateFooter,
+            ),
+            const SizedBox(height: 6),
+            Text(
+              'حتى $_maxFooterLength حرف.',
+              style: theme.textTheme.labelSmall?.copyWith(
+                color: scheme.onSurfaceVariant,
+              ),
+            ),
+            const SizedBox(height: 10),
+            _FooterPreview(controller: _controller),
+            if (_errorMessage != null) ...<Widget>[
+              const SizedBox(height: 10),
+              _InlineError(message: _errorMessage!),
+            ],
+            const SizedBox(height: 12),
+            AppButton(
+              label: 'حفظ التذييل',
+              icon: Icons.save_outlined,
+              expanded: true,
+              isLoading: _isSaving,
+              onPressed:
+                  (!_hasChanges || _isSaving) ? null : _save,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Footer preview
+// ============================================================================
+
+class _FooterPreview extends StatelessWidget {
+  const _FooterPreview({required this.controller});
+
+  final TextEditingController controller;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: controller,
+      builder: (
+        BuildContext context,
+        TextEditingValue value,
+        Widget? _,
+      ) {
+        final String text = value.text.trim();
+        final String display = text.isEmpty ? '—' : text;
+        return DecoratedBox(
+          decoration: BoxDecoration(
+            color: scheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(color: scheme.outlineVariant),
+          ),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(
+              horizontal: 14,
+              vertical: 10,
+            ),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Row(
+                  children: <Widget>[
+                    Icon(
+                      Icons.visibility_outlined,
+                      size: 14,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      'معاينة',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                        fontWeight: FontWeight.w700,
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 8),
+                Center(
+                  child: Text(
+                    display,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: text.isEmpty
+                          ? scheme.onSurfaceVariant
+                          : scheme.onSurface,
+                      fontStyle: text.isEmpty
+                          ? FontStyle.italic
+                          : FontStyle.normal,
+                    ),
+                    textAlign: TextAlign.center,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
+// ============================================================================
+// Inline error banner
+// ============================================================================
+
+class _InlineError extends StatelessWidget {
+  const _InlineError({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Icon(
+              Icons.error_outline,
+              color: scheme.onErrorContainer,
+              size: 20,
+            ),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(
+                  color: scheme.onErrorContainer,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
