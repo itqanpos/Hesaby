@@ -5,17 +5,17 @@ import 'package:flutter/foundation.dart';
 
 import 'company_settings.dart';
 
+/// Supported print font scale range. Shared by the settings slider and every
+/// receipt builder (thermal and PDF), so the limit is defined in one place.
+const double kMinPrintFontScale = 0.8;
+const double kMaxPrintFontScale = 2.5;
+
 /// Compact value object that carries the print-font preferences through
 /// layers that do not otherwise need to know about [CompanySettings].
 ///
 /// Used by the PDF and ESC/POS weight builders so the same settings can be
 /// applied selected consistently from a single source.
 @immutable
-/// Supported print font scale range. Shared by the settings slider and every
-/// receipt builder (thermal and PDF), so the limit is defined in one place.
-const double kMinPrintFontScale = 0.8;
-const double kMaxPrintFontScale = 2.5;
-
 class PrintStyleSettings extends Equatable {
   const PrintStyleSettings({
     required this.fontScale,
