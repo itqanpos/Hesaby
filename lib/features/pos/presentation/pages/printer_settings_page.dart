@@ -11,6 +11,7 @@ import '../../../settings/domain/repositories/company_settings_repository.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../../settings/presentation/widgets/print_font_settings_section.dart';
 import '../../data/services/esc_pos_test_ticket.dart';
+import '../../data/services/pdf_receipt_builder.dart';   // ⬅️ ReceiptPaperSize
 import '../../data/services/pos_preferences.dart';
 import '../../data/services/printer_service.dart';
 import '../../domain/entities/printer_device.dart';
