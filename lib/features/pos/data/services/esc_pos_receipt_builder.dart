@@ -266,8 +266,6 @@ class _Painter {
     _gap(_sectionGap);
     _itemsTable(r);
     _gap(_sectionGap);
-    _summaryRows(r);
-    _gap(_sectionGap);
     _grandTotal(r);
     _gap(_sectionGap);
     _paymentBlock(r);
@@ -470,15 +468,39 @@ class _Painter {
       bottomPad: 6 * _scale,
       backgroundColor: const Color(0xFFE8E8E8),
     );
-  }
 
-  void _summaryRows(Receipt r) {
-    _kvRow('المجموع الفرعي', _money(r.subtotal));
     if (r.hasDiscountToPrint) {
-      _kvRow('الخصم', '- ${_money(r.discount)}');
+      _row(
+        cells: <_Cell>[
+          _Cell('', width: colNumW, align: TextAlign.center),
+          _Cell('الخصم',
+              width: colNameW, bold: true, align: TextAlign.right),
+          _Cell('', width: colQtyW, align: TextAlign.center),
+          _Cell('', width: colPriceW, align: TextAlign.center),
+          _Cell('- ${_money(r.discount)}',
+              width: colTotalW, bold: true, align: TextAlign.center),
+        ],
+        fontSize: _font(13),
+        topPad: 5 * _scale,
+        bottomPad: 5 * _scale,
+      );
     }
+
     if (r.hasTaxToPrint) {
-      _kvRow('الضريبة', _money(r.taxAmount));
+      _row(
+        cells: <_Cell>[
+          _Cell('', width: colNumW, align: TextAlign.center),
+          _Cell('الضريبة',
+              width: colNameW, bold: true, align: TextAlign.right),
+          _Cell('', width: colQtyW, align: TextAlign.center),
+          _Cell('', width: colPriceW, align: TextAlign.center),
+          _Cell(_money(r.taxAmount),
+              width: colTotalW, bold: true, align: TextAlign.center),
+        ],
+        fontSize: _font(13),
+        topPad: 5 * _scale,
+        bottomPad: 5 * _scale,
+      );
     }
   }
 
@@ -701,6 +723,11 @@ class _Painter {
       );
     }
 
+    final Paint gridPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 0.8 * _scale
+      ..color = _black;
+
     double x = _paddingH + _contentWidth;
     for (int i = 0; i < cells.length; i++) {
       final _Cell cell = cells[i];
@@ -708,6 +735,8 @@ class _Painter {
       final TextPainter painter = painters[i];
       final double contentY = _y + topPad + (maxH - painter.height) / 2;
       painter.paint(canvas, Offset(x + 2 * _scale, contentY));
+      // Cell border: draws the vertical grid lines of the table.
+      canvas.drawRect(Rect.fromLTWH(x, _y, cell.width, rowH), gridPaint);
     }
 
     canvas.drawRect(
