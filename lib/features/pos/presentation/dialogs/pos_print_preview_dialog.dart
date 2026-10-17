@@ -273,16 +273,12 @@ class _PosPrintPreviewDialogState
         ],
       ),
       contentPadding: const EdgeInsets.fromLTRB(16, 4, 16, 8),
-      content: SingleChildScrollView(
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            ThermalReceiptPreview(
-              receipt: receipt,
-              maxHeight: 560,
-            ),
-          ],
+      content: SizedBox(
+        width: (MediaQuery.sizeOf(context).width - 96).clamp(260.0, 420.0)
+            .toDouble(),
+        child: ThermalReceiptPreview(
+          receipt: receipt,
+          maxHeight: MediaQuery.sizeOf(context).height * 0.6,
         ),
       ),
       actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
