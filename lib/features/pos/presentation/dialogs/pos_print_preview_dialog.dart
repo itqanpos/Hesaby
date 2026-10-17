@@ -83,6 +83,10 @@ class _PosPrintPreviewDialogState
     final CompanySettings? settings =
         ref.read(companySettingsProvider).valueOrNull;
     if (settings == null || settings.companyId.isEmpty) return null;
+    
+    // Prevent black box: only load if a logo URL is actually present.
+    if (!settings.hasLogo) return null; 
+
     try {
       return await const CompanyLogoLoader().load(
         companyId: settings.companyId,
