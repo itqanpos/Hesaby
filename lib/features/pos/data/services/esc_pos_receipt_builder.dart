@@ -10,6 +10,7 @@ import 'package:google_fonts/google_fonts.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../domain/entities/receipt.dart';
 import '../../domain/services/receipt_number_format.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
 
 /// Builds an ESC/POS byte stream from a [Receipt] by rendering the whole
 /// document as a 1-bit bitmap and sending it as a `GS v 0` raster command.
@@ -61,7 +62,7 @@ abstract final class EscPosReceiptBuilder {
   }) async {
     await _ensureFonts();
 
-    final double clampedScale = fontScale.clamp(0.8, 1.6);
+    final double clampedScale = fontScale.clamp(kMinPrintFontScale, kMaxPrintFontScale);
 
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final ui.Canvas canvas = ui.Canvas(recorder);
