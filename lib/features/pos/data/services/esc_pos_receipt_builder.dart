@@ -62,7 +62,8 @@ abstract final class EscPosReceiptBuilder {
   }) async {
     await _ensureFonts();
 
-    final double clampedScale = fontScale.clamp(kMinPrintFontScale, kMaxPrintFontScale);
+    final double clampedScale =
+        fontScale.clamp(kMinPrintFontScale, kMaxPrintFontScale);
 
     final ui.PictureRecorder recorder = ui.PictureRecorder();
     final ui.Canvas canvas = ui.Canvas(recorder);
@@ -134,6 +135,10 @@ abstract final class EscPosReceiptBuilder {
     _boldFamily = bold.fontFamily ?? 'Cairo';
   }
 
+  // ---------------------------------------------------------------------------
+  // Raster encoding — Floyd-Steinberg dithering for crisper Arabic glyphs.
+  // ---------------------------------------------------------------------------
+
   static Future<List<int>> _encodeRaster(ui.Image image) async {
     final ByteData? byteData = await image.toByteData(
       format: ui.ImageByteFormat.rawRgba,
@@ -147,25 +152,55 @@ abstract final class EscPosReceiptBuilder {
     final int height = image.height;
     final int widthBytes = (width + 7) ~/ 8;
 
-    const int threshold = 160;
+    // Convert to grayscale luminance buffer (0 = black, 255 = white).
+    // Build a Float32List so we can distribute error without overflow.
+    final List<double> gray = List<double>.filled(width * height, 255);
+    for (int y = 0; y < height; y++) {
+      final int rowStart = y * width * 4;
+      for (int x = 0; x < width; x++) {
+        final int idx = rowStart + x * 4;
+        final int a = pixels[idx + 3];
+        final int r = pixels[idx];
+        final int g = pixels[idx + 1];
+        final int b = pixels[idx + 2];
+        final double lum = (r * 299 + g * 587 + b * 114) / 1000.0;
+        // Transparent pixels become white (paper).
+        gray[y * width + x] = a < 128 ? 255.0 : lum;
+      }
+    }
 
+    // Floyd–Steinberg error diffusion in place.
+    for (int y = 0; y < height; y++) {
+      for (int x = 0; x < width; x++) {
+        final int i = y * width + x;
+        final double oldVal = gray[i];
+        final double newVal = oldVal < 128 ? 0.0 : 255.0;
+        gray[i] = newVal;
+        final double err = oldVal - newVal;
+        if (x + 1 < width) {
+          gray[i + 1] += err * 7 / 16;
+        }
+        if (y + 1 < height) {
+          if (x > 0) gray[i + width - 1] += err * 3 / 16;
+          gray[i + width] += err * 5 / 16;
+          if (x + 1 < width) {
+            gray[i + width + 1] += err * 1 / 16;
+          }
+        }
+      }
+    }
+
+    // Pack thresholded bits MSB-first per byte.
     final Uint8List raster = Uint8List(widthBytes * height);
     int offset = 0;
     for (int y = 0; y < height; y++) {
-      final int rowStart = y * width * 4;
+      final int rowStart = y * width;
       for (int bx = 0; bx < widthBytes; bx++) {
         int byte = 0;
         for (int bit = 0; bit < 8; bit++) {
           final int x = bx * 8 + bit;
           if (x >= width) break;
-          final int idx = rowStart + x * 4;
-          final int a = pixels[idx + 3];
-          if (a < 128) continue;
-          final int r = pixels[idx];
-          final int g = pixels[idx + 1];
-          final int b = pixels[idx + 2];
-          final int lum = (r * 299 + g * 587 + b * 114) ~/ 1000;
-          if (lum < threshold) {
+          if (gray[rowStart + x] < 128) {
             byte |= 0x80 >> bit;
           }
         }
@@ -198,6 +233,9 @@ class _Painter {
     required this.fontScale,
     required this.baseWeight,
   }) : _scale = paperWidthDots / 576.0;
+
+  /// Currency label printed next to amounts; empty when the symbol is off.
+  String _currencyLabel = 'ج.م';
 
   final ui.Canvas canvas;
   final int paperWidthDots;
@@ -238,6 +276,7 @@ class _Painter {
   double get totalHeight => _y + _paddingBottom;
 
   Future<void> paint(Receipt r, Uint8List? logoBytes) async {
+    _currencyLabel = r.showCurrencySymbol ? 'ج.م' : '';
     canvas.drawRect(
       Rect.fromLTWH(
         0,
@@ -447,8 +486,8 @@ class _Painter {
               width: colTotalW, bold: true, align: TextAlign.center),
         ],
         fontSize: _font(13),
-        topPad: 5 * _scale,
-        bottomPad: 5 * _scale,
+        topPad: 6 * _scale,
+        bottomPad: 6 * _scale,
         backgroundColor: bg,
       );
     }
@@ -482,8 +521,8 @@ class _Painter {
               width: colTotalW, bold: true, align: TextAlign.center),
         ],
         fontSize: _font(13),
-        topPad: 5 * _scale,
-        bottomPad: 5 * _scale,
+        topPad: 6 * _scale,
+        bottomPad: 6 * _scale,
       );
     }
 
@@ -499,8 +538,8 @@ class _Painter {
               width: colTotalW, bold: true, align: TextAlign.center),
         ],
         fontSize: _font(13),
-        topPad: 5 * _scale,
-        bottomPad: 5 * _scale,
+        topPad: 6 * _scale,
+        bottomPad: 6 * _scale,
       );
     }
   }
@@ -541,11 +580,6 @@ class _Painter {
   }
 
   /// Payment block — method and paid amount only.
-  ///
-  /// The resulting balance is reported in [_balanceBlock] separately; no
-  /// change / excess / "الباقي للعميل" is computed here because the
-  /// simplified model treats `paidAmount` as one lump sum that is applied
-  /// to (invoice + old balance) as a whole.
   void _paymentBlock(Receipt r) {
     _kvRow('طريقة الدفع', _paymentMethodLabel(r));
     _kvRow('المدفوع', _money(r.paidAmount));
@@ -553,32 +587,63 @@ class _Painter {
 
   /// Balance block — reports the previous balance and the resulting one.
   ///
-  /// * `newBalance > 0` → customer owes us (مدين).
-  /// * `newBalance < 0` → we owe the customer (له عندنا).
-  /// * `newBalance = 0` → settled.
+  /// The resulting balance is now drawn inside a framed box (similar to the
+  /// grand-total box) so it stands out on the thermal paper.
   void _balanceBlock(Receipt r) {
     _kvRow('الرصيد السابق', _money(r.previousBalance ?? 0));
 
     final double newBalance = r.newBalance ?? 0;
+    final String label;
+    final String value;
     if (newBalance > 0) {
-      _kvRow(
-        'الرصيد الجديد على العميل',
-        _money(newBalance),
-        emphasized: true,
-      );
+      label = 'الرصيد الجديد على العميل';
+      value = _money(newBalance);
     } else if (newBalance < 0) {
-      _kvRow(
-        'الرصيد الجديد (له عندنا)',
-        _money(newBalance.abs()),
-        emphasized: true,
-      );
+      label = 'الرصيد الجديد (له عندنا)';
+      value = _money(newBalance.abs());
     } else {
-      _kvRow(
-        'الرصيد الجديد',
-        _money(0),
-        emphasized: true,
-      );
+      label = 'الرصيد الجديد';
+      value = _money(0);
     }
+
+    // Draw the resulting balance in a box so it visually matches
+    // the grand-total emphasis without changing the existing layout order.
+    _balanceBox(label, value);
+  }
+
+  void _balanceBox(String label, String value) {
+    final double fontSize = _font(16);
+    final double boxPad = 6 * _scale;
+
+    final TextPainter labelP = _measure(
+      label,
+      fontSize: fontSize,
+      emphasized: true,
+    );
+    final TextPainter valueP = _measure(
+      value,
+      fontSize: fontSize,
+      emphasized: true,
+    );
+    final double lineH =
+        labelP.height > valueP.height ? labelP.height : valueP.height;
+    final double boxH = lineH + boxPad * 2;
+
+    canvas.drawRect(
+      Rect.fromLTWH(_paddingH, _y, _contentWidth, boxH),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.2 * _scale
+        ..color = _black,
+    );
+
+    labelP.paint(
+      canvas,
+      Offset(_paddingH + _contentWidth - boxPad - labelP.width, _y + boxPad),
+    );
+    valueP.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
+
+    _y += boxH;
   }
 
   void _footer(Receipt r) {
@@ -591,28 +656,44 @@ class _Painter {
   }
 
   void _metaRow(String label, String value, {bool bold = false}) {
-    final double labelW = 92 * _scale;
     final double fontSize = _font(14);
 
+    // Measure the label first so we can decide on a dynamic label width
+    // (prevents long Arabic labels from being clipped at the right edge).
     final TextPainter labelPainter = _measure(
       '$label:',
       fontSize: fontSize,
       bold: true,
+      align: TextAlign.right,
+      maxWidth: double.infinity,
     );
+    final double labelW = labelPainter.width;
+    final double valueMaxWidth = _contentWidth - labelW - 4 * _scale;
+
     final TextPainter valuePainter = _measure(
       value,
       fontSize: fontSize,
       bold: bold,
+      align: TextAlign.right,
+      maxWidth: valueMaxWidth > 0 ? valueMaxWidth : _contentWidth,
     );
     final double rowH = labelPainter.height > valuePainter.height
         ? labelPainter.height
         : valuePainter.height;
 
+    // Label on the right, value on the left.
     labelPainter.paint(
       canvas,
       Offset(_paddingH + _contentWidth - labelW, _y),
     );
-    valuePainter.paint(canvas, Offset(_paddingH, _y));
+    // Right-align the value inside its own box (from _paddingH to
+    // _paddingH + valueMaxWidth).
+    final double valueBoxW =
+        valueMaxWidth > 0 ? valueMaxWidth : _contentWidth;
+    valuePainter.paint(
+      canvas,
+      Offset(_paddingH + valueBoxW - valuePainter.width, _y),
+    );
 
     _y += rowH + 2 * _scale;
   }
@@ -653,9 +734,6 @@ class _Painter {
     TextAlign align = TextAlign.right,
   }) {
     if (align == TextAlign.center) {
-      // Measure the natural width and place the line in the middle of the
-      // paper. Relying on TextAlign.center inside the layout box did not
-      // reliably centre the line, so the position is computed here.
       final TextPainter natural = _measure(
         text,
         fontSize: fontSize,
@@ -673,7 +751,6 @@ class _Painter {
         _y += natural.height;
         return;
       }
-      // Too long for one line: wrap it, centred within the content width.
     }
     final TextPainter painter = _measure(
       text,
@@ -724,6 +801,9 @@ class _Painter {
     required double bottomPad,
     Color? backgroundColor,
   }) {
+    // Extra horizontal inset so Arabic glyphs don't touch the cell border.
+    final double cellInsetH = 4 * _scale;
+
     final List<TextPainter> painters = <TextPainter>[];
     double maxH = 0;
     for (final _Cell cell in cells) {
@@ -732,7 +812,7 @@ class _Painter {
         fontSize: fontSize,
         bold: cell.bold,
         align: cell.align,
-        maxWidth: cell.width - 4 * _scale,
+        maxWidth: cell.width - cellInsetH * 2,
       );
       painters.add(painter);
       if (painter.height > maxH) maxH = painter.height;
@@ -758,7 +838,7 @@ class _Painter {
       x -= cell.width;
       final TextPainter painter = painters[i];
       final double contentY = _y + topPad + (maxH - painter.height) / 2;
-      painter.paint(canvas, Offset(x + 2 * _scale, contentY));
+      painter.paint(canvas, Offset(x + cellInsetH, contentY));
       // Cell border: draws the vertical grid lines of the table.
       canvas.drawRect(Rect.fromLTWH(x, _y, cell.width, rowH), gridPaint);
     }
@@ -825,8 +905,8 @@ class _Painter {
     return painter;
   }
 
-  static String _money(double value) =>
-      ReceiptNumberFormat.money(value, currency: 'ج.م');
+  String _money(double value) =>
+      ReceiptNumberFormat.money(value, currency: _currencyLabel);
 
   static String _qty(double value) => ReceiptNumberFormat.quantity(value);
 
@@ -851,7 +931,7 @@ class _Painter {
     final String ampm = h24 >= 12 ? 'م' : 'ص';
     final String hh = h12.toString().padLeft(2, '0');
     final String mm = l.minute.toString().padLeft(2, '0');
-    return '$day  $y/$m/$d  $hh:$mm $ampm';
+    return '$day، $y/$m/$d — $hh:$mm $ampm';
   }
 
   static String _paymentMethodLabel(Receipt r) {
