@@ -386,6 +386,10 @@ class _Painter {
     _metaRow('رقم الفاتورة', r.invoiceNumber ?? '—', bold: true);
     _metaRow('التاريخ', _formatDayAndDate(r.dateTime));
 
+    if (r.cashierName != null && r.cashierName!.trim().isNotEmpty) {
+      _metaRow('الكاشير', r.cashierName!);
+    }
+
     if (r.hasCustomer) {
       _metaRow('العميل', r.customerName!);
 
@@ -396,10 +400,6 @@ class _Painter {
       if (r.hasCustomerPhone) {
         _metaRow('هاتف العميل', r.customerPhone!);
       }
-    }
-
-    if (r.cashierName != null && r.cashierName!.trim().isNotEmpty) {
-      _metaRow('الكاشير', r.cashierName!);
     }
   }
 
@@ -652,6 +652,29 @@ class _Painter {
     Color color = _black,
     TextAlign align = TextAlign.right,
   }) {
+    if (align == TextAlign.center) {
+      // Measure the natural width and place the line in the middle of the
+      // paper. Relying on TextAlign.center inside the layout box did not
+      // reliably centre the line, so the position is computed here.
+      final TextPainter natural = _measure(
+        text,
+        fontSize: fontSize,
+        bold: bold,
+        emphasized: emphasized,
+        color: color,
+        align: TextAlign.left,
+        maxWidth: double.infinity,
+      );
+      if (natural.width <= _contentWidth) {
+        natural.paint(
+          canvas,
+          Offset(_paddingH + (_contentWidth - natural.width) / 2, _y),
+        );
+        _y += natural.height;
+        return;
+      }
+      // Too long for one line: wrap it, centred within the content width.
+    }
     final TextPainter painter = _measure(
       text,
       fontSize: fontSize,
