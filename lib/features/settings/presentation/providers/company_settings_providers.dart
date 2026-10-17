@@ -70,6 +70,7 @@ class CompanySettingsNotifier extends AsyncNotifier<CompanySettings> {
     bool? printDirectEnabled,
     bool? showTaxNumberOnPrint,
     bool? showCommercialRegisterOnPrint,
+    bool? showCurrencySymbol,
   }) async {
     final String? companyId = _companyId;
     if (companyId == null || companyId.isEmpty) {
@@ -97,6 +98,7 @@ class CompanySettingsNotifier extends AsyncNotifier<CompanySettings> {
           printDirectEnabled: printDirectEnabled,
           showTaxNumberOnPrint: showTaxNumberOnPrint,
           showCommercialRegisterOnPrint: showCommercialRegisterOnPrint,
+          showCurrencySymbol: showCurrencySymbol,
           updatedAt: DateTime.now().toUtc(),
         ),
       );
@@ -120,6 +122,7 @@ class CompanySettingsNotifier extends AsyncNotifier<CompanySettings> {
             printDirectEnabled: printDirectEnabled,
             showTaxNumberOnPrint: showTaxNumberOnPrint,
             showCommercialRegisterOnPrint: showCommercialRegisterOnPrint,
+            showCurrencySymbol: showCurrencySymbol,
           );
 
       if (!_isDisposed) {
@@ -246,4 +249,12 @@ final Provider<bool> showCommercialRegisterOnPrintProvider =
       ref.watch(companySettingsProvider).valueOrNull ??
           CompanySettings.defaults('');
   return settings.showCommercialRegisterOnPrint;
+});
+
+/// Whether the currency symbol (ج.م) is printed next to amounts.
+final Provider<bool> showCurrencySymbolProvider = Provider<bool>((ref) {
+  final CompanySettings settings =
+      ref.watch(companySettingsProvider).valueOrNull ??
+          CompanySettings.defaults('');
+  return settings.showCurrencySymbol;
 });
