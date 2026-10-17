@@ -185,6 +185,7 @@ Receipt buildReceiptFromSale({
     showTaxNumberOnPrint: settings?.showTaxNumberOnPrint ?? false,
     showCommercialRegisterOnPrint:
         settings?.showCommercialRegisterOnPrint ?? false,
+    showCurrencySymbol: settings?.showCurrencySymbol ?? true,
     lines: <ReceiptLine>[
       for (final SaleItem item in items)
         ReceiptLine(
