@@ -24,6 +24,7 @@ class Receipt extends Equatable {
     this.companyCommercialRegister,
     this.showTaxNumberOnPrint = false,
     this.showCommercialRegisterOnPrint = false,
+    this.showCurrencySymbol = true,
     this.customerName,
     this.customerAddress,
     this.customerPhone,
@@ -54,6 +55,9 @@ class Receipt extends Equatable {
   final String? companyCommercialRegister;
   final bool showTaxNumberOnPrint;
   final bool showCommercialRegisterOnPrint;
+
+  /// Whether the currency symbol (ج.م) is printed next to amounts.
+  final bool showCurrencySymbol;
 
   // ---- Parties ----
   final String? customerName;
@@ -135,6 +139,7 @@ class Receipt extends Equatable {
         companyCommercialRegister,
         showTaxNumberOnPrint,
         showCommercialRegisterOnPrint,
+        showCurrencySymbol,
         lines,
         subtotal,
         discount,
@@ -154,7 +159,7 @@ class Receipt extends Equatable {
   String toString() =>
       'Receipt(saleId: $saleId, invoiceNumber: $invoiceNumber, '
       'lines: ${lines.length}, total: $total, paidAmount: $paidAmount, '
-      'newBalance: $newBalance)';
+      'newBalance: $newBalance, showCurrencySymbol: $showCurrencySymbol)';
 }
 
 /// Immutable, self-contained representation of a single receipt line.
