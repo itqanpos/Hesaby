@@ -153,7 +153,6 @@ abstract final class EscPosReceiptBuilder {
     final int widthBytes = (width + 7) ~/ 8;
 
     // Convert to grayscale luminance buffer (0 = black, 255 = white).
-    // Build a Float32List so we can distribute error without overflow.
     final List<double> gray = List<double>.filled(width * height, 255);
     for (int y = 0; y < height; y++) {
       final int rowStart = y * width * 4;
@@ -164,7 +163,6 @@ abstract final class EscPosReceiptBuilder {
         final int g = pixels[idx + 1];
         final int b = pixels[idx + 2];
         final double lum = (r * 299 + g * 587 + b * 114) / 1000.0;
-        // Transparent pixels become white (paper).
         gray[y * width + x] = a < 128 ? 255.0 : lum;
       }
     }
@@ -450,6 +448,7 @@ class _Painter {
     final double colTotalW = w * 0.24;
     final double colNameW = w - colNumW - colQtyW - colPriceW - colTotalW;
 
+    // Header row — no shading.
     _row(
       cells: <_Cell>[
         _Cell('م',
@@ -466,12 +465,11 @@ class _Painter {
       fontSize: _font(13),
       topPad: 6 * _scale,
       bottomPad: 6 * _scale,
-      backgroundColor: const Color(0xFFDDDDDD),
     );
 
     for (int i = 0; i < r.lines.length; i++) {
       final ReceiptLine line = r.lines[i];
-      final Color? bg = i.isOdd ? const Color(0xFFF2F2F2) : null;
+      // No zebra shading.
       _row(
         cells: <_Cell>[
           _Cell('${i + 1}',
@@ -488,10 +486,10 @@ class _Painter {
         fontSize: _font(13),
         topPad: 6 * _scale,
         bottomPad: 6 * _scale,
-        backgroundColor: bg,
       );
     }
 
+    // Summary row — no shading.
     _row(
       cells: <_Cell>[
         _Cell('', width: colNumW, align: TextAlign.center),
@@ -506,7 +504,6 @@ class _Painter {
       fontSize: _font(13),
       topPad: 6 * _scale,
       bottomPad: 6 * _scale,
-      backgroundColor: const Color(0xFFE8E8E8),
     );
 
     if (r.hasDiscountToPrint) {
@@ -587,8 +584,9 @@ class _Painter {
 
   /// Balance block — reports the previous balance and the resulting one.
   ///
-  /// The resulting balance is now drawn inside a framed box (similar to the
-  /// grand-total box) so it stands out on the thermal paper.
+  /// * `newBalance > 0` → customer owes us (مدين).
+  /// * `newBalance < 0` → we owe the customer (له عندنا).
+  /// * `newBalance = 0` → settled.
   void _balanceBlock(Receipt r) {
     _kvRow('الرصيد السابق', _money(r.previousBalance ?? 0));
 
@@ -606,8 +604,6 @@ class _Painter {
       value = _money(0);
     }
 
-    // Draw the resulting balance in a box so it visually matches
-    // the grand-total emphasis without changing the existing layout order.
     _balanceBox(label, value);
   }
 
@@ -655,11 +651,15 @@ class _Painter {
     );
   }
 
+  // ---------------------------------------------------------------------------
+  // Meta row — label on the right, value on the left.
+  // The label column width is now dynamic: it measures the actual label
+  // width, so long Arabic labels (e.g. "عنوان العميل") are not clipped.
+  // ---------------------------------------------------------------------------
+
   void _metaRow(String label, String value, {bool bold = false}) {
     final double fontSize = _font(14);
 
-    // Measure the label first so we can decide on a dynamic label width
-    // (prevents long Arabic labels from being clipped at the right edge).
     final TextPainter labelPainter = _measure(
       '$label:',
       fontSize: fontSize,
@@ -667,32 +667,36 @@ class _Painter {
       align: TextAlign.right,
       maxWidth: double.infinity,
     );
-    final double labelW = labelPainter.width;
-    final double valueMaxWidth = _contentWidth - labelW - 4 * _scale;
+    // Use the natural measured width, plus a small gap so the label and the
+    // value do not touch, capped so the value always has at least ~30% room.
+    final double gap = 6 * _scale;
+    final double naturalLabelW = labelPainter.width + gap;
+    final double maxLabelW = _contentWidth * 0.65;
+    final double labelW =
+        naturalLabelW < maxLabelW ? naturalLabelW : maxLabelW;
+    final double valueMaxW = _contentWidth - labelW;
 
     final TextPainter valuePainter = _measure(
       value,
       fontSize: fontSize,
       bold: bold,
-      align: TextAlign.right,
-      maxWidth: valueMaxWidth > 0 ? valueMaxWidth : _contentWidth,
+      align: TextAlign.left,
+      maxWidth: valueMaxW,
     );
     final double rowH = labelPainter.height > valuePainter.height
         ? labelPainter.height
         : valuePainter.height;
 
-    // Label on the right, value on the left.
+    // Label on the right.
     labelPainter.paint(
       canvas,
-      Offset(_paddingH + _contentWidth - labelW, _y),
+      Offset(_paddingH + _contentWidth - labelPainter.width, _y),
     );
-    // Right-align the value inside its own box (from _paddingH to
-    // _paddingH + valueMaxWidth).
-    final double valueBoxW =
-        valueMaxWidth > 0 ? valueMaxWidth : _contentWidth;
+    // Value on the left (right-aligned inside its own box that ends where
+    // the label begins).
     valuePainter.paint(
       canvas,
-      Offset(_paddingH + valueBoxW - valuePainter.width, _y),
+      Offset(_paddingH + valueMaxW - valuePainter.width, _y),
     );
 
     _y += rowH + 2 * _scale;
@@ -794,14 +798,14 @@ class _Painter {
     _y += chipH;
   }
 
+  /// Draws a table row. No background fill anymore — the border is the only
+  /// separator, matching the PDF receipt (no zebra, no grey header).
   void _row({
     required List<_Cell> cells,
     required double fontSize,
     required double topPad,
     required double bottomPad,
-    Color? backgroundColor,
   }) {
-    // Extra horizontal inset so Arabic glyphs don't touch the cell border.
     final double cellInsetH = 4 * _scale;
 
     final List<TextPainter> painters = <TextPainter>[];
@@ -820,13 +824,6 @@ class _Painter {
 
     final double rowH = maxH + topPad + bottomPad;
 
-    if (backgroundColor != null) {
-      canvas.drawRect(
-        Rect.fromLTWH(_paddingH, _y, _contentWidth, rowH),
-        Paint()..color = backgroundColor,
-      );
-    }
-
     final Paint gridPaint = Paint()
       ..style = PaintingStyle.stroke
       ..strokeWidth = 0.8 * _scale
@@ -843,6 +840,7 @@ class _Painter {
       canvas.drawRect(Rect.fromLTWH(x, _y, cell.width, rowH), gridPaint);
     }
 
+    // Bottom hairline under the row.
     canvas.drawRect(
       Rect.fromLTWH(
         _paddingH,
