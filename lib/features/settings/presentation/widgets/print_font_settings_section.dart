@@ -7,6 +7,7 @@ import '../../../../core/utils/logger.dart';
 import '../../domain/entities/company_settings.dart';
 import '../../domain/repositories/company_settings_repository.dart';
 import '../providers/company_settings_providers.dart';
+import '../../domain/entities/print_style_settings.dart';
 
 /// Settings section that lets the user tune font size + weight for both
 /// thermal receipts and A4 / PDF documents.
@@ -207,9 +208,9 @@ class _SliderRow extends StatelessWidget {
         ),
         Slider(
           value: value,
-          min: 0.8,
-          max: 1.6,
-          divisions: 16,
+          min: kMinPrintFontScale,
+          max: kMaxPrintFontScale,
+          divisions: ((kMaxPrintFontScale - kMinPrintFontScale) / 0.1).round(),
           label: '${value.toStringAsFixed(2)}×',
           onChanged: onChanged,
         ),
