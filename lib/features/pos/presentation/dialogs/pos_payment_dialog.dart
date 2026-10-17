@@ -1213,4 +1213,57 @@ class _PosReceiptDialog extends ConsumerWidget {
     Color? color,
   }) {
     return Padding(
-      padding: const EdgeInsets.s
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: <Widget>[
+          Expanded(
+            child: Text(label, style: theme.textTheme.bodyMedium),
+          ),
+          Text(
+            value,
+            style: (emphasized
+                    ? theme.textTheme.titleMedium
+                    : theme.textTheme.bodyMedium)
+                ?.copyWith(
+              color: color ??
+                  (emphasized ? theme.colorScheme.primary : null),
+              fontWeight: emphasized ? FontWeight.w700 : null,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Localization
+// ============================================================================
+
+String _failureMessageFor(SalesFailureType type) => switch (type) {
+      SalesFailureType.network =>
+        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+      SalesFailureType.unauthorized =>
+        'انتهت صلاحية الجلسة. يرجى تسجيل الدخول مجددًا.',
+      SalesFailureType.notFound => 'الفاتورة غير موجودة.',
+      SalesFailureType.invalidStatusTransition =>
+        'لا يمكن إتمام العملية في الحالة الحالية.',
+      SalesFailureType.emptySale => 'لا يمكن إتمام بيع بدون بنود.',
+      SalesFailureType.invoiceNumberConflict =>
+        'رقم الفاتورة مستخدم بالفعل.',
+      SalesFailureType.customerNotFound =>
+        'البيع الآجل يتطلب اختيار عميل مسجل.',
+      SalesFailureType.branchNotFound =>
+        'الفرع غير متاح. يرجى إعادة اختياره.',
+      SalesFailureType.productNotFound =>
+        'أحد المنتجات غير متاح. يرجى إزالته وإعادة المحاولة.',
+      SalesFailureType.unitNotFound => 'إحدى الوحدات غير متاحة.',
+      SalesFailureType.insufficientStock =>
+        'الرصيد غير كافٍ. يرجى تقليل الكمية أو تحديث المخزون.',
+      SalesFailureType.invalidPayment =>
+        'قيمة الدفع غير صحيحة. يرجى مراجعة المبلغ والطريقة.',
+      SalesFailureType.invalidResponse =>
+        'تعذّر قراءة البيانات. يرجى المحاولة مجددًا.',
+      SalesFailureType.unknown =>
+        'تعذّر إتمام البيع. يرجى المحاولة مرة أخرى.',
+    };
