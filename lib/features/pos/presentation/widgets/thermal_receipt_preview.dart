@@ -70,6 +70,13 @@ class _ThermalReceiptPreviewState
   // Rendering
   // ---------------------------------------------------------------------------
 
+  /// Display zoom of the receipt: 100% fits the viewer width, up to 200%.
+  double _zoom = 1.0;
+
+  void _zoomIn() => setState(() => _zoom = (_zoom + 0.25).clamp(1.0, 2.0));
+
+  void _zoomOut() => setState(() => _zoom = (_zoom - 0.25).clamp(1.0, 2.0));
+
   Future<Uint8List?> _renderPng() async {
     try {
       final int widthDots = _resolveWidthDots();
@@ -171,23 +178,87 @@ class _ThermalReceiptPreviewState
               );
             }
 
-            final Widget image = Image.memory(
-              bytes,
-              fit: BoxFit.contain,
-              filterQuality: FilterQuality.high,
-              gaplessPlayback: true,
+            return _ReceiptViewer(
+              bytes: bytes,
+              zoom: _zoom,
+              height: widget.maxHeight ?? 480,
+              onZoomIn: _zoomIn,
+              onZoomOut: _zoomOut,
             );
-
-            if (widget.maxHeight != null) {
-              return ConstrainedBox(
-                constraints: BoxConstraints(maxHeight: widget.maxHeight!),
-                child: image,
-              );
-            }
-            return image;
           },
         ),
       ),
+    );
+  }
+}
+
+/// Scrollable receipt: the full receipt is shown at a readable size and can
+/// be scrolled vertically, and horizontally when zoomed in.
+class _ReceiptViewer extends StatelessWidget {
+  const _ReceiptViewer({
+    required this.bytes,
+    required this.zoom,
+    required this.height,
+    required this.onZoomIn,
+    required this.onZoomOut,
+  });
+
+  final Uint8List bytes;
+  final double zoom;
+  final double height;
+  final VoidCallback onZoomIn;
+  final VoidCallback onZoomOut;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: <Widget>[
+        Row(
+          children: <Widget>[
+            IconButton(
+              tooltip: 'تصغير',
+              onPressed: zoom <= 1.0 ? null : onZoomOut,
+              icon: const Icon(Icons.zoom_out),
+            ),
+            Expanded(
+              child: Text(
+                '${(zoom * 100).round()}%',
+                textAlign: TextAlign.center,
+                style: theme.textTheme.labelLarge,
+              ),
+            ),
+            IconButton(
+              tooltip: 'تكبير',
+              onPressed: zoom >= 2.0 ? null : onZoomIn,
+              icon: const Icon(Icons.zoom_in),
+            ),
+          ],
+        ),
+        SizedBox(
+          height: height,
+          child: SingleChildScrollView(
+            child: LayoutBuilder(
+              builder: (BuildContext context, BoxConstraints constraints) {
+                final Widget image = Image.memory(
+                  bytes,
+                  width: constraints.maxWidth * zoom,
+                  fit: BoxFit.fitWidth,
+                  filterQuality: FilterQuality.high,
+                  gaplessPlayback: true,
+                );
+                return SingleChildScrollView(
+                  scrollDirection: Axis.horizontal,
+                  child: image,
+                );
+              },
+            ),
+          ),
+        ),
+      ],
     );
   }
 }
