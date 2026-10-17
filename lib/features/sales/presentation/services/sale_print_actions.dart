@@ -230,6 +230,10 @@ Future<Uint8List?> _loadLogoBytes(WidgetRef ref) async {
   final CompanySettings? s =
       ref.read(companySettingsProvider).valueOrNull;
   if (s == null || s.companyId.isEmpty) return null;
+
+  // Prevent black box: only load if a logo URL is actually present.
+  if (!s.hasLogo) return null;
+
   try {
     return await const CompanyLogoLoader().load(
       companyId: s.companyId,
