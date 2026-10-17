@@ -904,7 +904,7 @@ class _Sizes {
     ReceiptPaperSize size, {
     double scale = 1.0,
   }) {
-    final double s = scale.clamp(0.8, 1.6);
+    final double s = scale.clamp(kMinPrintFontScale, kMaxPrintFontScale);
     switch (size) {
       case ReceiptPaperSize.mm58:
         return _Sizes(
