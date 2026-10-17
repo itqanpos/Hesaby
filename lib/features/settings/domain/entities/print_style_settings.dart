@@ -11,6 +11,11 @@ import 'company_settings.dart';
 /// Used by the PDF and ESC/POS weight builders so the same settings can be
 /// applied selected consistently from a single source.
 @immutable
+/// Supported print font scale range. Shared by the settings slider and every
+/// receipt builder (thermal and PDF), so the limit is defined in one place.
+const double kMinPrintFontScale = 0.8;
+const double kMaxPrintFontScale = 2.5;
+
 class PrintStyleSettings extends Equatable {
   const PrintStyleSettings({
     required this.fontScale,
@@ -29,14 +34,15 @@ class PrintStyleSettings extends Equatable {
         fontWeight: s.printFontWeight,
       );
 
-  /// Size multiplier (0.8 – 1.6).
+  /// Size multiplier (kMinPrintFontScale – kMaxPrintFontScale).
   final double fontScale;
 
   /// Base by the user.
   final PrintFontWeight fontWeight;
 
   /// Convenience helper: applies the scale, clamped to the supported range.
-  double scale(double base) => base * fontScale.clamp(0.8, 1.6);
+  double scale(double base) =>
+      base * fontScale.clamp(kMinPrintFontScale, kMaxPrintFontScale);
 
   /// Whether the user asked for bold base weight.
   bool get isBoldBase => fontWeight == PrintFontWeight.bold;
