@@ -400,8 +400,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       showCommercialRegisterOnPrint:
           ref.read(showCommercialRegisterOnPrintProvider),
       showCurrencySymbol:
-          ref.read(companySettingsProvider).valueOrNull?.showCurrencySymbol ??
-              true,
+          ref.read(showCurrencySymbolProvider),
       lines: <ReceiptLine>[
         for (final PosCartLine line in _cart.lines)
           ReceiptLine(
