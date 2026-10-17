@@ -346,8 +346,15 @@ abstract final class PdfReceiptBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Meta
+  // Meta — label on the right, value on the left
   // ---------------------------------------------------------------------------
+  //
+  // Because the document is RTL, the first child of a Row is placed on the
+  // right edge. To satisfy "label on the right, value on the left", the
+  // label must come FIRST, and the value SECOND.
+  //
+  // Previous version placed value first (as a wide Expanded) and label
+  // second (as a narrow SizedBox) — which inverted the visual order.
 
   static pw.Widget _metaBlock(
     Receipt receipt,
@@ -406,6 +413,7 @@ abstract final class PdfReceiptBuilder {
       child: pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: <pw.Widget>[
+          // Label — on the right (first child in RTL).
           pw.SizedBox(
             width: s.metaLabelWidth,
             child: pw.Text(
@@ -419,6 +427,7 @@ abstract final class PdfReceiptBuilder {
               ),
             ),
           ),
+          // Value — on the left (second child in RTL).
           pw.Expanded(
             child: pw.Text(
               value,
@@ -439,7 +448,7 @@ abstract final class PdfReceiptBuilder {
   }
 
   // ---------------------------------------------------------------------------
-  // Items table
+  // Items table — no background shading
   // ---------------------------------------------------------------------------
 
   static pw.Widget _itemsTable(
@@ -457,8 +466,8 @@ abstract final class PdfReceiptBuilder {
     };
 
     final List<pw.TableRow> rows = <pw.TableRow>[
+      // Header row — no decoration.
       pw.TableRow(
-        decoration: const pw.BoxDecoration(color: PdfColors.grey300),
         children: <pw.Widget>[
           _cell('الإجمالي',
               fontSize: s.tableHeader,
@@ -494,21 +503,17 @@ abstract final class PdfReceiptBuilder {
     ];
 
     for (int i = 0; i < receipt.lines.length; i++) {
-      final bool zebra = i.isOdd;
       final ReceiptLine line = receipt.lines[i];
       rows.add(
         pw.TableRow(
-          decoration: zebra
-              ? const pw.BoxDecoration(color: PdfColors.grey100)
-              : null,
           children: <pw.Widget>[
-            _cell(_money(line.lineTotal),
+            _cell(_money(line.lineTotal, receipt),
                 fontSize: s.tableRow,
                 emphasized: true,
                 center: true,
                 s: s,
                 style: style),
-            _cell(_money(line.unitPrice),
+            _cell(_money(line.unitPrice, receipt),
                 fontSize: s.tableRow, center: true, s: s, style: style),
             _cell('${_qty(line.quantity)} ${line.unitName}',
                 fontSize: s.tableRow, center: true, s: s, style: style),
@@ -521,11 +526,11 @@ abstract final class PdfReceiptBuilder {
       );
     }
 
+    // Summary row — no decoration.
     rows.add(
       pw.TableRow(
-        decoration: const pw.BoxDecoration(color: PdfColors.grey200),
         children: <pw.Widget>[
-          _cell(_money(receipt.subtotal),
+          _cell(_money(receipt.subtotal, receipt),
               fontSize: s.tableRow,
               emphasized: true,
               center: true,
@@ -547,7 +552,7 @@ abstract final class PdfReceiptBuilder {
     if (receipt.hasDiscountToPrint) {
       rows.add(_summaryRow(
         'الخصم',
-        '- ${_money(receipt.discount)}',
+        '- ${_money(receipt.discount, receipt)}',
         s,
         style,
       ));
@@ -555,7 +560,7 @@ abstract final class PdfReceiptBuilder {
     if (receipt.hasTaxToPrint) {
       rows.add(_summaryRow(
         'الضريبة',
-        _money(receipt.taxAmount),
+        _money(receipt.taxAmount, receipt),
         s,
         style,
       ));
@@ -658,7 +663,7 @@ abstract final class PdfReceiptBuilder {
             ),
           ),
           pw.Text(
-            _money(receipt.total),
+            _money(receipt.total, receipt),
             style: pw.TextStyle(
               fontSize: s.grandTotal,
               fontWeight: _weight(
@@ -689,7 +694,7 @@ abstract final class PdfReceiptBuilder {
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
         _kvRow('طريقة الدفع', _paymentMethodLabel(receipt), s, style),
-        _kvRow('المدفوع', _money(receipt.paidAmount), s, style),
+        _kvRow('المدفوع', _money(receipt.paidAmount, receipt), s, style),
       ],
     );
   }
@@ -715,14 +720,14 @@ abstract final class PdfReceiptBuilder {
       children: <pw.Widget>[
         _kvRow(
           'الرصيد السابق',
-          _money(receipt.previousBalance ?? 0),
+          _money(receipt.previousBalance ?? 0, receipt),
           s,
           style,
         ),
         if (newBalance > 0)
           _kvRow(
             'الرصيد الجديد على العميل',
-            _money(newBalance),
+            _money(newBalance, receipt),
             s,
             style,
             emphasized: true,
@@ -730,7 +735,7 @@ abstract final class PdfReceiptBuilder {
         else if (newBalance < 0)
           _kvRow(
             'الرصيد الجديد (له عندنا)',
-            _money(newBalance.abs()),
+            _money(newBalance.abs(), receipt),
             s,
             style,
             emphasized: true,
@@ -738,7 +743,7 @@ abstract final class PdfReceiptBuilder {
         else
           _kvRow(
             'الرصيد الجديد',
-            _money(0),
+            _money(0, receipt),
             s,
             style,
             emphasized: true,
@@ -847,8 +852,10 @@ abstract final class PdfReceiptBuilder {
   // Formatting
   // ---------------------------------------------------------------------------
 
-  static String _money(double value) =>
-      ReceiptNumberFormat.money(value, currency: _currency);
+  static String _money(double value, Receipt receipt) {
+    final String symbol = receipt.showCurrencySymbol ? _currency : '';
+    return ReceiptNumberFormat.money(value, currency: symbol);
+  }
 
   static String _qty(double value) => ReceiptNumberFormat.quantity(value);
 
