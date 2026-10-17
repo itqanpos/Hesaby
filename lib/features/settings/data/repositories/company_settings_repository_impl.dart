@@ -66,6 +66,7 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
     bool? printDirectEnabled,
     bool? showTaxNumberOnPrint,
     bool? showCommercialRegisterOnPrint,
+    bool? showCurrencySymbol,
   }) async {
     try {
       final supabase.SupabaseClient client = _requireClient();
@@ -109,6 +110,9 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
       if (showCommercialRegisterOnPrint != null) {
         payload['show_commercial_register_on_print'] =
             showCommercialRegisterOnPrint;
+      }
+      if (showCurrencySymbol != null) {
+        payload['show_currency_symbol'] = showCurrencySymbol;
       }
 
       if (payload.isEmpty) {
@@ -158,6 +162,8 @@ class CompanySettingsRepositoryImpl implements CompanySettingsRepository {
           _optionalBool(map, 'show_tax_number_on_print') ?? false,
       showCommercialRegisterOnPrint:
           _optionalBool(map, 'show_commercial_register_on_print') ?? false,
+      showCurrencySymbol:
+          _optionalBool(map, 'show_currency_symbol') ?? true,
       createdAt: _requireTimestamp(map, 'created_at'),
       updatedAt: _requireTimestamp(map, 'updated_at'),
     );
