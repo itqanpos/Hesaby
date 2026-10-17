@@ -51,6 +51,9 @@ abstract interface class CompanySettingsRepository {
   /// [showTaxNumberOnPrint] and [showCommercialRegisterOnPrint] control
   /// whether the company tax number and commercial register are rendered
   /// on printed receipts and A4 invoices.
+  ///
+  /// [showCurrencySymbol] controls whether the currency symbol (ج.م) is
+  /// printed next to amounts on receipts.
   Future<CompanySettings> updateSettings({
     required String companyId,
     double? defaultTaxRate,
@@ -66,5 +69,6 @@ abstract interface class CompanySettingsRepository {
     bool? printDirectEnabled,
     bool? showTaxNumberOnPrint,
     bool? showCommercialRegisterOnPrint,
+    bool? showCurrencySymbol,
   });
 }
