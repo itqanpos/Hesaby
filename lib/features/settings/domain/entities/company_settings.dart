@@ -45,6 +45,7 @@ class CompanySettings extends Equatable {
     required this.printDirectEnabled,
     required this.showTaxNumberOnPrint,
     required this.showCommercialRegisterOnPrint,
+    required this.showCurrencySymbol,
     required this.createdAt,
     required this.updatedAt,
     this.logoUrl,
@@ -63,6 +64,7 @@ class CompanySettings extends Equatable {
         printDirectEnabled: false,
         showTaxNumberOnPrint: false,
         showCommercialRegisterOnPrint: false,
+        showCurrencySymbol: true,
         createdAt: DateTime.now().toUtc(),
         updatedAt: DateTime.now().toUtc(),
       );
@@ -88,6 +90,9 @@ class CompanySettings extends Equatable {
   /// receipts/invoices.
   final bool showCommercialRegisterOnPrint;
 
+  /// Whether the currency symbol (ج.م) is printed next to amounts.
+  final bool showCurrencySymbol;
+
   final DateTime createdAt;
   final DateTime updatedAt;
 
@@ -110,6 +115,7 @@ class CompanySettings extends Equatable {
         printDirectEnabled,
         showTaxNumberOnPrint,
         showCommercialRegisterOnPrint,
+        showCurrencySymbol,
         createdAt,
         updatedAt,
       ];
@@ -128,6 +134,7 @@ class CompanySettings extends Equatable {
     bool? printDirectEnabled,
     bool? showTaxNumberOnPrint,
     bool? showCommercialRegisterOnPrint,
+    bool? showCurrencySymbol,
     DateTime? updatedAt,
   }) {
     return CompanySettings(
@@ -147,6 +154,7 @@ class CompanySettings extends Equatable {
           showTaxNumberOnPrint ?? this.showTaxNumberOnPrint,
       showCommercialRegisterOnPrint: showCommercialRegisterOnPrint ??
           this.showCommercialRegisterOnPrint,
+      showCurrencySymbol: showCurrencySymbol ?? this.showCurrencySymbol,
       createdAt: createdAt,
       updatedAt: updatedAt ?? this.updatedAt,
     );
@@ -159,5 +167,6 @@ class CompanySettings extends Equatable {
       'maxDiscount: $maxDiscountPercent, '
       'hasLogo: $hasLogo, '
       'showTaxNumberOnPrint: $showTaxNumberOnPrint, '
-      'showCommercialRegisterOnPrint: $showCommercialRegisterOnPrint)';
+      'showCommercialRegisterOnPrint: $showCommercialRegisterOnPrint, '
+      'showCurrencySymbol: $showCurrencySymbol)';
 }
