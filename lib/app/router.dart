@@ -5,6 +5,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/admin/presentation/pages/admin_companies_page.dart';
+import '../features/admin/presentation/pages/admin_dashboard_page.dart'; // ⬅️ تمت الإضافة
 import '../features/auth/presentation/pages/create_company_page.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/signup_page.dart';
@@ -168,6 +169,9 @@ abstract final class AppRouter {
   static const String subscriptionName = 'subscription';
 
   // ---- Phase T-2: Platform Admin ----
+  static const String adminDashboardPath = '/admin/dashboard'; // ⬅️ تمت الإضافة
+  static const String adminDashboardName = 'admin-dashboard'; // ⬅️ تمت الإضافة
+
   static const String adminCompaniesPath = '/admin/companies';
   static const String adminCompaniesName = 'admin-companies';
 
@@ -300,6 +304,13 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.subscriptionName,
         builder: (BuildContext context, GoRouterState state) =>
             const SubscriptionPage(),
+      ),
+      // ⬇️ مسار لوحة التحكم الجديدة
+      GoRoute(
+        path: AppRouter.adminDashboardPath,
+        name: AppRouter.adminDashboardName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const AdminDashboardPage(),
       ),
       GoRoute(
         path: AppRouter.adminCompaniesPath,
