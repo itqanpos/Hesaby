@@ -4,10 +4,6 @@ import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
 /// Represents a tenant company inside HESABI.
-///
-/// Subscription fields mirror the columns on `public.companies`. They are
-/// optional in the constructor with sensible defaults so existing call
-/// sites (tests, widget previews) keep compiling without changes.
 @immutable
 class Company extends Equatable {
   const Company({
@@ -30,6 +26,10 @@ class Company extends Equatable {
     this.planId,
     this.billingCycle,
     this.subscribedUntil,
+    this.isSuspended = false,
+    this.suspensionReason,
+    this.maxUsers = 5,
+    this.maxBranches = 1,
   });
 
   final String id;
@@ -39,12 +39,10 @@ class Company extends Equatable {
   final String? email;
   final String? address;
 
-  /// Tax registration number (الرقم الضريبي), printed on invoices when
-  /// enabled in company settings.
+  /// Tax registration number (الرقم الضريبي).
   final String? taxNumber;
 
-  /// Commercial register number (السجل التجاري), printed on invoices when
-  /// enabled in company settings.
+  /// Commercial register number (السجل التجاري).
   final String? commercialRegister;
 
   final String currency;
@@ -61,6 +59,13 @@ class Company extends Equatable {
   final String? planId;
   final String? billingCycle;
   final DateTime? subscribedUntil;
+
+  // ---- Suspension & Limits ----
+
+  final bool isSuspended;
+  final String? suspensionReason;
+  final int maxUsers;
+  final int maxBranches;
 
   // ---------------------------------------------------------------------------
   // Convenience
@@ -94,6 +99,12 @@ class Company extends Equatable {
     String? timezone,
     bool? isActive,
     DateTime? updatedAt,
+    // Suspension & Limits
+    bool? isSuspended,
+    String? suspensionReason,
+    bool clearSuspensionReason = false,
+    int? maxUsers,
+    int? maxBranches,
   }) {
     return Company(
       id: id,
@@ -102,8 +113,7 @@ class Company extends Equatable {
       phone: clearPhone ? null : (phone ?? this.phone),
       email: clearEmail ? null : (email ?? this.email),
       address: clearAddress ? null : (address ?? this.address),
-      taxNumber:
-          clearTaxNumber ? null : (taxNumber ?? this.taxNumber),
+      taxNumber: clearTaxNumber ? null : (taxNumber ?? this.taxNumber),
       commercialRegister: clearCommercialRegister
           ? null
           : (commercialRegister ?? this.commercialRegister),
@@ -118,6 +128,11 @@ class Company extends Equatable {
       planId: planId,
       billingCycle: billingCycle,
       subscribedUntil: subscribedUntil,
+      isSuspended: isSuspended ?? this.isSuspended,
+      suspensionReason:
+          clearSuspensionReason ? null : (suspensionReason ?? this.suspensionReason),
+      maxUsers: maxUsers ?? this.maxUsers,
+      maxBranches: maxBranches ?? this.maxBranches,
     );
   }
 
@@ -142,10 +157,15 @@ class Company extends Equatable {
         planId,
         billingCycle,
         subscribedUntil,
+        isSuspended,
+        suspensionReason,
+        maxUsers,
+        maxBranches,
       ];
 
   @override
   String toString() =>
       'Company(id: $id, name: $name, isActive: $isActive, '
-      'subscriptionStatus: $subscriptionStatus, planId: $planId)';
+      'subscriptionStatus: $subscriptionStatus, planId: $planId, '
+      'isSuspended: $isSuspended, maxUsers: $maxUsers, maxBranches: $maxBranches)';
 }
