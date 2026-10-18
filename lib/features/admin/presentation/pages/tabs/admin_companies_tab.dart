@@ -133,7 +133,8 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
         return;
       }
 
-      ref.read(adminCompaniesProvider.notifier).refresh();
+      // ⬇️ تمت إضافة await هنا
+      await ref.read(adminCompaniesProvider.notifier).refresh();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context)
