@@ -122,7 +122,7 @@ class _AdminAppControlTabState extends ConsumerState<AdminAppControlTab> {
                     title: const Text('تفعيل وضع الصيانة'),
                     subtitle: const Text('إذا تم التفعيل، لن يتمكن المستخدمون العاديون من الدخول للتطبيق.'),
                     value: _maintenanceMode,
-                    activeColor: Colors.red,
+                    activeThumbColor: Colors.red, // ⬅️ تم استبدال activeColor
                     onChanged: _isSaving ? null : (v) => setState(() => _maintenanceMode = v),
                   ),
                   if (_maintenanceMode) ...<Widget>[
