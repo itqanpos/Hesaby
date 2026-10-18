@@ -5,32 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/network/operation_trigger.dart';
 import '../../core/responsive/responsive_helper.dart';
+import '../../features/admin/presentation/providers/admin_app_config_provider.dart';
+import '../../features/admin/presentation/providers/platform_admin_provider.dart';
 import '../widgets/offline_banner.dart';
 import 'app_navigation.dart';
 
 /// Standard page scaffold used across HESABI.
 ///
-/// Adds the app-wide navigation based on screen width:
-///
-/// * **mobile / tablet (< 1024)** — the navigation is a [Drawer] accessible
-///   from the standard hamburger icon in the [AppBar].
-/// * **desktop / wide desktop (>= 1024)** — the navigation is a permanent
-///   [AppSidebar] on the "start" side (right in RTL, left in LTR). No
-///   hamburger is shown because the sidebar is always visible.
-///
-/// Pages that must use the full width (currently only POS) opt out by
-/// passing `includeNavigation: false`.
-///
-/// It also applies safe-area handling, responsive horizontal padding and
-/// the project's maximum content width.
-///
-/// **Phase O-1:** an [OfflineBanner] is automatically rendered at the top
-/// of the content area. It takes zero height while online, so it is safe
-/// on every screen.
-///
-/// **Phase O-2:** the shell is wrapped in an [OperationTriggerScope] so
-/// every screen automatically fires the offline queue when the device
-/// comes back online, the company switches, or the app resumes.
+/// Adds the app-wide navigation based on screen width, an offline banner,
+/// a global announcement banner (controlled by the platform admin), and
+/// a full-screen maintenance mode gate.
 class AppShell extends ConsumerWidget {
   const AppShell({
     super.key,
@@ -52,19 +36,7 @@ class AppShell extends ConsumerWidget {
   final Color? backgroundColor;
   final bool applyHorizontalPadding;
   final bool constrainContentWidth;
-
-  /// Forwarded to [Scaffold.resizeToAvoidBottomInset].
-  ///
-  /// * `true` (default) — the body shrinks when the soft keyboard appears.
-  /// * `false` — the body keeps its full height; the keyboard overlays it.
-  ///   Used by the POS page.
   final bool resizeToAvoidBottomInset;
-
-  /// Whether the app-wide navigation (sidebar on wide screens, drawer on
-  /// narrow ones) should be attached.
-  ///
-  /// Defaults to `true`. Pages with `appBar == null` (login, loading) never
-  /// receive navigation regardless of this flag.
   final bool includeNavigation;
 
   @override
@@ -81,12 +53,42 @@ class AppShell extends ConsumerWidget {
     final bool showSidebar = includeNavigation && hasAppBar && isWide;
     final bool showDrawer = includeNavigation && hasAppBar && !isWide;
 
-    // Offline banner sits at the top of the content area. It collapses to
-    // zero height while online, so it never disturbs existing layouts.
+    // -------------------------------------------------------------------------
+    // Maintenance mode gate
+    // -------------------------------------------------------------------------
+    // If maintenance mode is ON and the current user is NOT a platform admin,
+    // show a full-screen maintenance page instead of the normal content.
+    final AppConfig? appConfig =
+        ref.watch(adminAppConfigProvider).valueOrNull;
+    final bool isAdmin = ref.watch(isPlatformAdminProvider);
+    final bool underMaintenance = (appConfig?.maintenanceMode ?? false) && !isAdmin;
+
+    if (underMaintenance) {
+      return _MaintenanceView(
+        message: appConfig?.maintenanceMessage ?? 'التطبيق تحت الصيانة.',
+      );
+    }
+
+    // -------------------------------------------------------------------------
+    // Announcement banner
+    // -------------------------------------------------------------------------
+    final Widget? announcementBanner =
+        (appConfig?.announcementVisible ?? false) &&
+                (appConfig?.announcementText.isNotEmpty ?? false)
+            ? _AnnouncementBanner(
+                text: appConfig!.announcementText,
+                severity: appConfig.announcementSeverity,
+              )
+            : null;
+
+    // -------------------------------------------------------------------------
+    // Content
+    // -------------------------------------------------------------------------
     final Widget content = SafeArea(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
+          if (announcementBanner != null) announcementBanner,
           const OfflineBanner(),
           Expanded(
             child: Center(
@@ -118,9 +120,6 @@ class AppShell extends ConsumerWidget {
           ? Row(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
-                // First child in a `Row` lands on the "start" side, which
-                // is the right in RTL and the left in LTR — exactly where
-                // we want the sidebar.
                 const AppSidebar(),
                 Expanded(child: content),
               ],
@@ -128,9 +127,143 @@ class AppShell extends ConsumerWidget {
           : content,
     );
 
-    // The trigger scope is mounted once per shell. It observes
-    // connectivity, company switches and app-resume events to drive the
-    // offline queue. Renders `scaffold` unchanged.
     return OperationTriggerScope(child: scaffold);
+  }
+}
+
+// ============================================================================
+// Maintenance View
+// ============================================================================
+
+class _MaintenanceView extends StatelessWidget {
+  const _MaintenanceView({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return Scaffold(
+      backgroundColor: scheme.surface,
+      body: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: ConstrainedBox(
+              constraints: const BoxConstraints(maxWidth: 480),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Container(
+                    width: 96,
+                    height: 96,
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(28),
+                    ),
+                    child: Icon(
+                      Icons.engineering_outlined,
+                      size: 56,
+                      color: scheme.onPrimaryContainer,
+                    ),
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'التطبيق تحت الصيانة',
+                    style: theme.textTheme.headlineSmall?.copyWith(
+                      fontWeight: FontWeight.w800,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    message,
+                    style: theme.textTheme.bodyLarge?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                  const SizedBox(height: 24),
+                  Text(
+                    'سنعود قريباً — شكراً لصبركم.',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                      fontStyle: FontStyle.italic,
+                    ),
+                    textAlign: TextAlign.center,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Announcement Banner
+// ============================================================================
+
+class _AnnouncementBanner extends StatelessWidget {
+  const _AnnouncementBanner({
+    required this.text,
+    required this.severity,
+  });
+
+  final String text;
+  final String severity;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+
+    final Color bg;
+    final Color fg;
+    final IconData icon;
+
+    switch (severity) {
+      case 'critical':
+        bg = const Color(0xFFC62828);
+        fg = Colors.white;
+        icon = Icons.dangerous_outlined;
+        break;
+      case 'warning':
+        bg = const Color(0xFFF9A825);
+        fg = Colors.black87;
+        icon = Icons.warning_amber_outlined;
+        break;
+      case 'info':
+      default:
+        bg = const Color(0xFF0288D1);
+        fg = Colors.white;
+        icon = Icons.info_outline;
+        break;
+    }
+
+    return Material(
+      color: bg,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+        child: Row(
+          children: <Widget>[
+            Icon(icon, color: fg, size: 20),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                text,
+                style: theme.textTheme.bodyMedium?.copyWith(
+                  color: fg,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
   }
 }
