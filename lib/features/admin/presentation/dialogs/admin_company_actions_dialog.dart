@@ -2,7 +2,6 @@
 
 import 'package:flutter/material.dart';
 import '../../../companies/domain/entities/company.dart';
-import '../../../companies/domain/entities/company_subscription.dart';
 
 enum AdminSubscriptionAction {
   renew,
@@ -52,18 +51,20 @@ class _AdminCompanyActionsSheetState
     extends State<_AdminCompanyActionsSheet> {
   String _planId = 'pro';
   String _billingCycle = 'monthly';
-  bool _isSuspended = false;
 
   @override
   void initState() {
     super.initState();
-    final sub = CompanySubscription.fromCompany(widget.company);
-    if (sub.plan != null) {
-      _planId = sub.plan!.id;
+    // Read plan id from company (not from subscription object).
+    final String? currentPlan = widget.company.planId;
+    if (currentPlan == 'basic' || currentPlan == 'pro') {
+      _planId = currentPlan!;
     }
-    // Note: We need to read isSuspended from the company object (assuming it was updated)
-    // For now, we will use a local variable and let the parent handle the actual API call.
-    // _isSuspended = widget.company.isSuspended; 
+    // Read billing cycle from company.
+    final String? currentCycle = widget.company.billingCycle;
+    if (currentCycle == 'monthly' || currentCycle == 'yearly') {
+      _billingCycle = currentCycle!;
+    }
   }
 
   void _submit(AdminSubscriptionAction action) {
@@ -78,8 +79,9 @@ class _AdminCompanyActionsSheetState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool isSuspended = widget.company.isSuspended;
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -88,13 +90,15 @@ class _AdminCompanyActionsSheetState
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           Row(
-            children: [
+            children: <Widget>[
               Icon(Icons.business, color: scheme.primary),
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   widget.company.name,
-                  style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
+                  ),
                 ),
               ),
             ],
@@ -104,33 +108,52 @@ class _AdminCompanyActionsSheetState
           const SizedBox(height: 8),
 
           // 1. Renew / Change Plan
-          Text('تجديد الاشتراك', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+          Text(
+            'تجديد الاشتراك',
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.bold,
+            ),
+          ),
           const SizedBox(height: 8),
           Row(
-            children: [
+            children: <Widget>[
               Expanded(
                 child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'basic', label: Text('أساسي')),
-                    ButtonSegment(value: 'pro', label: Text('احترافي')),
+                  segments: const <ButtonSegment<String>>[
+                    ButtonSegment<String>(
+                      value: 'basic',
+                      label: Text('أساسي'),
+                    ),
+                    ButtonSegment<String>(
+                      value: 'pro',
+                      label: Text('احترافي'),
+                    ),
                   ],
-                  selected: {_planId},
-                  onSelectionChanged: (s) => setState(() => _planId = s.first),
+                  selected: <String>{_planId},
+                  onSelectionChanged: (Set<String> s) =>
+                      setState(() => _planId = s.first),
                 ),
               ),
             ],
           ),
           const SizedBox(height: 8),
           Row(
-            children: [
+            children: <Widget>[
               Expanded(
                 child: SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(value: 'monthly', label: Text('شهري')),
-                    ButtonSegment(value: 'yearly', label: Text('سنوي')),
+                  segments: const <ButtonSegment<String>>[
+                    ButtonSegment<String>(
+                      value: 'monthly',
+                      label: Text('شهري'),
+                    ),
+                    ButtonSegment<String>(
+                      value: 'yearly',
+                      label: Text('سنوي'),
+                    ),
                   ],
-                  selected: {_billingCycle},
-                  onSelectionChanged: (s) => setState(() => _billingCycle = s.first),
+                  selected: <String>{_billingCycle},
+                  onSelectionChanged: (Set<String> s) =>
+                      setState(() => _billingCycle = s.first),
                 ),
               ),
             ],
@@ -141,20 +164,33 @@ class _AdminCompanyActionsSheetState
             icon: const Icon(Icons.check_circle),
             label: const Text('تجديد الآن'),
           ),
-          
+
           const SizedBox(height: 16),
           const Divider(),
           const SizedBox(height: 8),
 
-          // 2. Suspend Company
+          // 2. Suspend / Unsuspend
           ListTile(
             contentPadding: EdgeInsets.zero,
-            leading: Icon(Icons.block, color: scheme.error),
-            title: const Text('تعليق الشركة (حظر)'),
-            subtitle: const Text('إيقاف وصول جميع المستخدمين لهذه الشركة.'),
-            onTap: () => _submit(AdminSubscriptionAction.suspend),
+            leading: Icon(
+              isSuspended ? Icons.lock_open : Icons.block,
+              color: isSuspended ? scheme.primary : scheme.error,
+            ),
+            title: Text(
+              isSuspended ? 'رفع الحظر عن الشركة' : 'تعليق الشركة (حظر)',
+            ),
+            subtitle: Text(
+              isSuspended
+                  ? 'استعادة وصول جميع المستخدمين لهذه الشركة.'
+                  : 'إيقاف وصول جميع المستخدمين لهذه الشركة.',
+            ),
+            onTap: () => _submit(
+              isSuspended
+                  ? AdminSubscriptionAction.unsuspend
+                  : AdminSubscriptionAction.suspend,
+            ),
           ),
-          
+
           // 3. View Payments
           ListTile(
             contentPadding: EdgeInsets.zero,
@@ -172,7 +208,10 @@ class _AdminCompanyActionsSheetState
           OutlinedButton.icon(
             onPressed: () => _submit(AdminSubscriptionAction.cancel),
             icon: Icon(Icons.cancel, color: scheme.error),
-            label: Text('إلغاء الاشتراك', style: TextStyle(color: scheme.error)),
+            label: Text(
+              'إلغاء الاشتراك',
+              style: TextStyle(color: scheme.error),
+            ),
             style: OutlinedButton.styleFrom(
               side: BorderSide(color: scheme.error.withValues(alpha: 0.5)),
             ),
