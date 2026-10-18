@@ -25,7 +25,8 @@ class LoginPage extends ConsumerWidget {
           final double availableWidth = constraints.maxWidth.isFinite
               ? constraints.maxWidth
               : ResponsiveHelper.contentMaxWidth;
-          final double formMaxWidth = availableWidth < 480 ? availableWidth : 480;
+          final double formMaxWidth =
+              availableWidth < 480 ? availableWidth : 480;
 
           return SingleChildScrollView(
             padding: const EdgeInsets.symmetric(vertical: 32),
@@ -85,37 +86,32 @@ class _BrandHeader extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
 
     return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
+      crossAxisAlignment: CrossAxisAlignment.center,
       children: <Widget>[
-        Row(
-          children: <Widget>[
-            DecoratedBox(
-              decoration: BoxDecoration(
-                color: scheme.primaryContainer,
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Padding(
-                padding: const EdgeInsets.all(10),
-                child: Icon(
-                  Icons.receipt_long_outlined,
-                  color: scheme.onPrimaryContainer,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Text(
-              'حسابي',
-              style: titleStyle?.copyWith(fontWeight: FontWeight.w700),
-            ),
-          ],
+        // ⬇️ الصورة الجديدة (تأكد من اسم الملف في مجلد assets/images)
+        Image.asset(
+          'assets/images/splash_image.png', 
+          height: 100,
+          fit: BoxFit.contain,
         ),
-        const SizedBox(height: 12),
+        const SizedBox(height: 16),
+        Text(
+          'حسابي',
+          style: titleStyle?.copyWith(
+            fontWeight: FontWeight.w700,
+            color: theme.colorScheme.primary,
+          ),
+          textAlign: TextAlign.center,
+        ),
+        const SizedBox(height: 8),
         Text(
           'نظام متكامل لإدارة نقاط البيع والمخزون والمبيعات والمحاسبة',
-          style: theme.textTheme.bodyMedium,
+          style: theme.textTheme.bodyMedium?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+          textAlign: TextAlign.center,
         ),
       ],
     );
