@@ -9,6 +9,8 @@ import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../providers/platform_admin_provider.dart';
 import 'tabs/admin_companies_tab.dart';
+import 'tabs/admin_users_tab.dart';
+import 'tabs/admin_app_control_tab.dart';
 
 /// Platform Admin Dashboard.
 class AdminDashboardPage extends ConsumerWidget {
@@ -56,38 +58,12 @@ class AdminDashboardPage extends ConsumerWidget {
         ),
         body: const TabBarView(
           children: <Widget>[
-            AdminCompaniesTab(), // ⬅️ التبويب الأول جاهز الآن
-            _UsersTabPlaceholder(),
-            _AppControlTabPlaceholder(),
+            AdminCompaniesTab(),
+            AdminUsersTab(),
+            AdminAppControlTab(),
           ],
         ),
       ),
-    );
-  }
-}
-
-// ============================================================================
-// Placeholders (سيتم استبدالها بالملفات الفعلية لاحقاً)
-// ============================================================================
-
-class _UsersTabPlaceholder extends StatelessWidget {
-  const _UsersTabPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text('تبويب المشتركين (قيد الإنشاء...)'),
-    );
-  }
-}
-
-class _AppControlTabPlaceholder extends StatelessWidget {
-  const _AppControlTabPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text('تبويب التحكم في التطبيق (قيد الإنشاء...)'),
     );
   }
 }
