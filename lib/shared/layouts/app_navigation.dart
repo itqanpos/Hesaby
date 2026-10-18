@@ -10,6 +10,7 @@ import '../../features/companies/domain/entities/member_permission.dart';
 import '../../features/companies/presentation/providers/company_context_provider.dart';
 import '../../features/companies/presentation/providers/company_context_state.dart';
 import '../../features/companies/presentation/providers/members_providers.dart';
+import '../../features/admin/presentation/providers/platform_admin_provider.dart';
 
 // ============================================================================
 // Destinations
@@ -31,9 +32,6 @@ class _NavDestination {
   final Color color;
 
   /// Permission code required to see this destination.
-  ///
-  /// `null` means "always visible" (e.g. the dashboard and the settings
-  /// entry, which must remain reachable even for restricted members).
   final String? requiredPermission;
 }
 
@@ -54,8 +52,6 @@ const List<_NavSection> _sections = <_NavSection>[
         path: '/',
         icon: Icons.space_dashboard_outlined,
         color: Color(0xFF0288D1),
-        // Always visible — the home dashboard is the entry point for every
-        // member, including cashiers.
       ),
       _NavDestination(
         label: 'نقطة البيع',
@@ -140,8 +136,6 @@ const List<_NavSection> _sections = <_NavSection>[
         path: '/settings',
         icon: Icons.settings_outlined,
         color: Color(0xFF455A64),
-        // Always visible — every member can change theme/locale and log
-        // out, even without any other permission.
       ),
     ],
   ),
@@ -166,55 +160,61 @@ bool _isActive(String location, String path) {
   return location == path || location.startsWith('$path/');
 }
 
-/// Returns the sections the current user is allowed to see, filtered by
-/// their permissions.
-///
-/// A destination is kept when its [requiredPermission] is `null` or when
-/// the current member holds that permission. Sections whose items are all
-/// hidden are dropped entirely.
-///
-/// While the member is still loading, we optimistically show everything so
-/// the sidebar does not flash empty on first paint.
 List<_NavSection> _visibleSections(WidgetRef ref) {
   final AsyncValue<CompanyMember?> memberAsync =
       ref.watch(currentMemberProvider);
 
-  // Show everything during the initial load — avoids a jarring flash of
-  // an almost-empty sidebar.
+  final List<_NavSection> result = <_NavSection>[];
+
   if (memberAsync.isLoading && !memberAsync.hasValue) {
-    return _sections;
-  }
-
-  final CompanyMember? member = memberAsync.valueOrNull;
-
-  // No member row available (unauthenticated, or a company was not yet
-  // resolved): keep the sidebar minimal but not broken.
-  if (member == null) {
-    return _sections
-        .map(
+    result.addAll(_sections);
+  } else {
+    final CompanyMember? member = memberAsync.valueOrNull;
+    if (member == null) {
+      result.addAll(
+        _sections.map(
           (_NavSection s) => _NavSection(
             title: s.title,
             items: s.items
                 .where((_NavDestination d) => d.requiredPermission == null)
                 .toList(growable: false),
           ),
-        )
-        .where((_NavSection s) => s.items.isNotEmpty)
-        .toList(growable: false);
+        ).where((_NavSection s) => s.items.isNotEmpty),
+      );
+    } else {
+      for (final _NavSection section in _sections) {
+        final List<_NavDestination> visible = section.items
+            .where(
+              (_NavDestination d) =>
+                  d.requiredPermission == null ||
+                  member.hasPermission(d.requiredPermission!),
+            )
+            .toList(growable: false);
+        if (visible.isNotEmpty) {
+          result.add(_NavSection(title: section.title, items: visible));
+        }
+      }
+    }
   }
 
-  final List<_NavSection> result = <_NavSection>[];
-  for (final _NavSection section in _sections) {
-    final List<_NavDestination> visible = section.items
-        .where(
-          (_NavDestination d) =>
-              d.requiredPermission == null ||
-              member.hasPermission(d.requiredPermission!),
-        )
-        .toList(growable: false);
-    if (visible.isEmpty) continue;
-    result.add(_NavSection(title: section.title, items: visible));
+  // ⬇️ إضافة قسم إدارة المنصة (يظهر فقط للـ Platform Admin)
+  final bool isAdmin = ref.watch(isPlatformAdminProvider);
+  if (isAdmin) {
+    result.add(
+      const _NavSection(
+        title: 'إدارة المنصة',
+        items: <_NavDestination>[
+          _NavDestination(
+            label: 'لوحة تحكم المنصة',
+            path: '/admin/dashboard',
+            icon: Icons.admin_panel_settings_outlined,
+            color: Color(0xFFC62828), // لون أحمر مميز
+          ),
+        ],
+      ),
+    );
   }
+
   return result;
 }
 
