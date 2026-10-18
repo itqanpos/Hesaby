@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../../shared/widgets/app_empty.dart';
 import '../../../../../shared/widgets/app_error.dart';
@@ -38,9 +39,9 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
       if (_statusFilter != _StatusFilter.all) {
         final CompanySubscription sub = CompanySubscription.fromCompany(c);
         final bool matches = switch (_statusFilter) {
-          _StatusFilter.active => sub.isActive,
-          _StatusFilter.trial => sub.isTrial,
-          _StatusFilter.expired => sub.isExpired,
+          _StatusFilter.active => sub.isActive && !c.isSuspended,
+          _StatusFilter.trial => sub.isTrial && !c.isSuspended,
+          _StatusFilter.expired => sub.isExpired || c.isSuspended,
           _StatusFilter.all => true,
         };
         if (!matches) return false;
@@ -65,47 +66,67 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
     );
     if (choice == null || !mounted) return;
 
+    final client = Supabase.instance.client;
+
     try {
       if (choice.action == AdminSubscriptionAction.cancel) {
-        await ref
-            .read(adminCompaniesProvider.notifier)
-            .updateSubscription(
-              companyId: company.id,
-              subscriptionStatus: 'cancelled',
-            );
-      } else {
-        final CompanySubscription sub =
-            CompanySubscription.fromCompany(company);
+        await client.rpc('admin_update_subscription', params: {
+          'p_company_id': company.id,
+          'p_status': 'cancelled',
+          'p_plan_id': company.planId,
+          'p_billing_cycle': company.billingCycle,
+          'p_subscribed_until': company.subscribedUntil?.toIso8601String(),
+        });
+      } else if (choice.action == AdminSubscriptionAction.suspend) {
+        await client.rpc('admin_suspend_company', params: {
+          'p_company_id': company.id,
+          'p_suspend': true,
+          'p_reason': 'تم الحظر من قبل الإدارة',
+        });
+      } else if (choice.action == AdminSubscriptionAction.unsuspend) {
+        await client.rpc('admin_suspend_company', params: {
+          'p_company_id': company.id,
+          'p_suspend': false,
+        });
+      } else if (choice.action == AdminSubscriptionAction.renew) {
+        final CompanySubscription sub = CompanySubscription.fromCompany(company);
         final DateTime now = DateTime.now().toUtc();
         final DateTime? until = sub.subscribedUntil;
-        final DateTime base =
-            (sub.isActive && until != null && until.isAfter(now))
-                ? until
-                : now;
-        final Duration duration = choice.billingCycle == 'yearly'
-            ? const Duration(days: 365)
-            : const Duration(days: 30);
-        await ref
-            .read(adminCompaniesProvider.notifier)
-            .updateSubscription(
-              companyId: company.id,
-              subscriptionStatus: 'active',
-              planId: choice.planId,
-              billingCycle: choice.billingCycle,
-              subscribedUntil: base.add(duration),
-            );
+        final DateTime base = (sub.isActive && until != null && until.isAfter(now)) ? until : now;
+        final Duration duration = choice.billingCycle == 'yearly' ? const Duration(days: 365) : const Duration(days: 30);
+        final newUntil = base.add(duration);
+
+        await client.rpc('admin_update_subscription', params: {
+          'p_company_id': company.id,
+          'p_status': 'active',
+          'p_plan_id': choice.planId,
+          'p_billing_cycle': choice.billingCycle,
+          'p_subscribed_until': newUntil.toIso8601String(),
+        });
+      } else if (choice.action == AdminSubscriptionAction.viewPayments) {
+        // TODO: Open payments dialog
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('سجل المدفوعات قيد الإنشاء...')));
+        return;
       }
+
+      ref.read(adminCompaniesProvider.notifier).refresh();
 
       if (!mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(content: Text('تم تحديث الاشتراك')),
+          const SnackBar(content: Text('تم تحديث بيانات الشركة')),
         );
-    } on CompanyException catch (error) {
+    } on PostgrestException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text(_failureMessage(error.type))),
+        SnackBar(content: Text('خطأ: ${error.message}')),
+      );
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذّر إتمام العملية. حاول مرة أخرى.')),
       );
     }
   }
@@ -212,7 +233,7 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
 }
 
 // ============================================================================
-// UI Components (مستخرجة من الكود السابق)
+// UI Components
 // ============================================================================
 
 enum _StatusFilter { all, active, trial, expired }
@@ -265,13 +286,17 @@ class _KpiRow extends StatelessWidget {
     int trial = 0;
     int expired = 0;
     for (final Company c in companies) {
-      final CompanySubscription sub = CompanySubscription.fromCompany(c);
-      if (sub.isExpired) {
+      if (c.isSuspended) {
         expired++;
-      } else if (sub.isTrial) {
-        trial++;
-      } else if (sub.isActive) {
-        active++;
+      } else {
+        final CompanySubscription sub = CompanySubscription.fromCompany(c);
+        if (sub.isExpired) {
+          expired++;
+        } else if (sub.isTrial) {
+          trial++;
+        } else if (sub.isActive) {
+          active++;
+        }
       }
     }
 
@@ -305,7 +330,7 @@ class _KpiRow extends StatelessWidget {
           const SizedBox(width: 8),
           Expanded(
             child: _KpiCard(
-              label: 'منتهي',
+              label: 'منتهي/محظور',
               value: expired.toString(),
               color: const Color(0xFFC62828),
             ),
@@ -378,7 +403,7 @@ class _CompanyCard extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final CompanySubscription sub = CompanySubscription.fromCompany(company);
-    final _BadgeVisual badge = _resolveBadge(sub, scheme);
+    final _BadgeVisual badge = _resolveBadge(company, sub, scheme);
 
     return Material(
       color: scheme.surface,
@@ -389,15 +414,18 @@ class _CompanyCard extends StatelessWidget {
         child: Container(
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: scheme.outlineVariant),
+            border: Border.all(
+              color: company.isSuspended ? scheme.error : scheme.outlineVariant,
+              width: company.isSuspended ? 2 : 1,
+            ),
           ),
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: <Widget>[
               CircleAvatar(
                 radius: 22,
-                backgroundColor: scheme.primaryContainer,
-                foregroundColor: scheme.onPrimaryContainer,
+                backgroundColor: company.isSuspended ? scheme.errorContainer : scheme.primaryContainer,
+                foregroundColor: company.isSuspended ? scheme.onErrorContainer : scheme.onPrimaryContainer,
                 child: Text(
                   company.name.characters.first.toUpperCase(),
                   style: theme.textTheme.titleMedium?.copyWith(
@@ -439,7 +467,7 @@ class _CompanyCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (sub.isActive && sub.plan != null) ...<Widget>[
+                        if (!company.isSuspended && sub.isActive && sub.plan != null) ...<Widget>[
                           const SizedBox(width: 6),
                           Text(
                             sub.plan!.label,
@@ -449,6 +477,13 @@ class _CompanyCard extends StatelessWidget {
                           ),
                         ],
                       ],
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '👥 ${company.maxUsers} مستخدم · 🏢 ${company.maxBranches} فرع',
+                      style: theme.textTheme.labelSmall?.copyWith(
+                        color: scheme.onSurfaceVariant,
+                      ),
                     ),
                   ],
                 ),
@@ -465,9 +500,17 @@ class _CompanyCard extends StatelessWidget {
   }
 
   static _BadgeVisual _resolveBadge(
+    Company company,
     CompanySubscription sub,
     ColorScheme scheme,
   ) {
+    if (company.isSuspended) {
+      return _BadgeVisual(
+        label: 'محظور',
+        background: scheme.error,
+        foreground: scheme.onError,
+      );
+    }
     if (sub.isExpired) {
       return _BadgeVisual(
         label: 'منتهي',
