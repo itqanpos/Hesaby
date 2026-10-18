@@ -4,29 +4,29 @@
 #   dart run flutter_native_splash:create
 
 flutter_native_splash:
-  # لون الخلفية في الوضع الفاتح
+  # لون الخلفية (اختر اللون الذي تريده للشاشة، مثلاً الأبيض)
   color: "#FFFFFF"
   
-  # لون الخلفية في الوضع الداكن
-  # تم تغييره إلى الأبيض ليمتزج مع خلفية الشعار الحالية
-  # (إذا حصلت على شعار بخلفية شفافة، يمكنك إرجاعه إلى "#121212")
-  color_dark: "#FFFFFF"
+  # لون الخلفية في الوضع الداكن (يفضل أن يكون داكناً إذا كانت الصورة شفافة)
+  color_dark: "#121212"
 
-  # الصورة
-  image: assets/images/logo.png
-  image_dark: assets/images/logo.png
+  # 👇 هنا نضع مسار الصورة الجديدة بدلاً من اللوجو
+  image: assets/images/splash_image.png
+  image_dark: assets/images/splash_image.png
 
-  # تفعيل المنصات (بناءً على استخدامك)
+  # تفعيل المنصات
   web: true
-  android: true   # تم التفعيل لأنك تستخدم APK
+  android: true
   ios: false
 
   # ملء الشاشة
   fullscreen: true
 
-  # إعدادات خاصة بـ Android 12+ (اختياري لكن يُنصح به)
+  # إعدادات Android 12+ (شاشة البداية الجديدة في أندرويد)
   android_12:
-    image: assets/images/logo.png
+    # في أندرويد 12، الصورة تكون داخل دائرة، لذا تأكد أن الصورة مناسبة
+    image: assets/images/splash_image.png
+    # لون خلفية الدائرة
     icon_background_color: "#FFFFFF"
-    image_dark: assets/images/logo.png
-    icon_background_color_dark: "#FFFFFF"
+    image_dark: assets/images/splash_image.png
+    icon_background_color_dark: "#121212"
