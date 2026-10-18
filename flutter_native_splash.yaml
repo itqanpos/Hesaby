@@ -1,23 +1,32 @@
 # Configuration for `dart run flutter_native_splash:create`.
-#
 # Run from the repository root:
 #   flutter pub get
 #   dart run flutter_native_splash:create
-#
-# Platform scope:
-#   Only the Web target is enabled. The repository does not (yet) contain
-#   android/ or ios/ directories. When a native platform is added later,
-#   flip its flag to `true` and re-run the tool locally to commit the
-#   generated binary assets.
 
 flutter_native_splash:
+  # لون الخلفية في الوضع الفاتح
   color: "#FFFFFF"
-  color_dark: "#121212"
+  
+  # لون الخلفية في الوضع الداكن
+  # تم تغييره إلى الأبيض ليمتزج مع خلفية الشعار الحالية
+  # (إذا حصلت على شعار بخلفية شفافة، يمكنك إرجاعه إلى "#121212")
+  color_dark: "#FFFFFF"
+
+  # الصورة
   image: assets/images/logo.png
   image_dark: assets/images/logo.png
 
-  android: false
-  ios: false
+  # تفعيل المنصات (بناءً على استخدامك)
   web: true
+  android: true   # تم التفعيل لأنك تستخدم APK
+  ios: false
 
+  # ملء الشاشة
   fullscreen: true
+
+  # إعدادات خاصة بـ Android 12+ (اختياري لكن يُنصح به)
+  android_12:
+    image: assets/images/logo.png
+    icon_background_color: "#FFFFFF"
+    image_dark: assets/images/logo.png
+    icon_background_color_dark: "#FFFFFF"
