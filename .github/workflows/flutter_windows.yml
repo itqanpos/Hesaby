@@ -1,0 +1,64 @@
+# Builds the Windows desktop app.
+#
+# The repository has no windows/ folder yet. This workflow creates the Windows
+# runner files on the fly with `flutter create --platforms=windows`, then builds.
+# Once the windows/ folder is committed, the create step is skipped.
+#
+# Required repository secrets (same as flutter_apk.yml):
+#   SUPABASE_URL, SUPABASE_ANON_KEY
+
+name: Windows build
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 45
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
+
+      - name: Create Windows runner if missing
+        shell: bash
+        run: |
+          if [ ! -d windows ]; then
+            flutter create --platforms=windows --project-name hesabi .
+          fi
+
+      - name: Get dependencies
+        run: flutter pub get
+
+      - name: Build Windows release
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        shell: bash
+        run: |
+          flutter build windows --release \
+            --dart-define=APP_ENV=production \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Upload Windows app
+        uses: actions/upload-artifact@v4
+        with:
+          name: hesabi-windows
+          path: build/windows/x64/runner/Release/
+          if-no-files-found: error
