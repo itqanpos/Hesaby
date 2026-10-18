@@ -331,27 +331,31 @@ class _SignUpCard extends StatelessWidget {
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Row(
+            // ⬇️ الهيدر الجديد المطابق لصفحة تسجيل الدخول
+            Column(
+              crossAxisAlignment: CrossAxisAlignment.center,
               children: <Widget>[
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.primaryContainer,
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(10),
-                    child: Icon(
-                      Icons.receipt_long_outlined,
-                      color: scheme.onPrimaryContainer,
-                    ),
-                  ),
+                Image.asset(
+                  'assets/images/splash_image.png',
+                  height: 100,
+                  fit: BoxFit.contain,
                 ),
-                const SizedBox(width: 12),
+                const SizedBox(height: 16),
                 Text(
                   'حسابي',
                   style: theme.textTheme.headlineMedium?.copyWith(
                     fontWeight: FontWeight.w700,
+                    color: theme.colorScheme.primary,
                   ),
+                  textAlign: TextAlign.center,
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  'نظام متكامل لإدارة نقاط البيع والمخزون والمبيعات والمحاسبة',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  textAlign: TextAlign.center,
                 ),
               ],
             ),
