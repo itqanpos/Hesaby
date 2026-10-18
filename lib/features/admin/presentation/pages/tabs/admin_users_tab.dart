@@ -47,23 +47,13 @@ class AdminUser {
 // Provider
 // ============================================================================
 
-/// Fetches all users (profiles), their emails, and their company roles.
-/// 
-/// Note: To get the email, this assumes the backend exposes it via a view or RPC.
-/// If it fails, it falls back to the user_id.
 final adminUsersProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) async {
   final client = Supabase.instance.client;
 
-  // 1. Fetch all profiles (RLS allows platform admin to select all).
-  // Assuming the table has user_id, full_name, created_at, is_platform_admin.
-  // We might need to join with an RPC to get the email from auth.users.
-  // For now, let's fetch profiles and company_members in parallel.
-  
-  final profilesResponse = await client
-      .from('profiles')
-      .select('user_id, full_name, is_platform_admin, created_at')
-      .order('created_at', ascending: false);
+  // 1. Fetch users via the secure RPC (includes email)
+  final rpcResponse = await client.rpc('get_admin_users');
 
+  // 2. Fetch company memberships
   final membersResponse = await client
       .from('company_members')
       .select('user_id, role, companies(name)');
@@ -90,19 +80,17 @@ final adminUsersProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) asy
 
   // Build the final list
   final List<AdminUser> users = [];
-  for (final p in profilesResponse as List) {
-    final userId = p['user_id'] as String;
-    // Note: If email is not in profiles, we use a placeholder. 
-    // We will fix this in the DB migration step.
-    final email = p['email'] as String? ?? 'غير متوفر ($userId)'; 
+  for (final p in (rpcResponse as List)) {
+    final map = p as Map<String, dynamic>;
+    final userId = map['user_id'] as String;
     
     users.add(
       AdminUser(
         id: userId,
-        fullName: p['full_name'] as String? ?? 'بدون اسم',
-        email: email,
-        isAdmin: p['is_platform_admin'] as bool? ?? false,
-        createdAt: DateTime.parse(p['created_at'] as String),
+        fullName: map['full_name'] as String? ?? 'بدون اسم',
+        email: map['email'] as String? ?? 'غير متوفر',
+        isAdmin: map['is_platform_admin'] as bool? ?? false,
+        createdAt: DateTime.parse(map['created_at'] as String),
         companies: memberships[userId] ?? [],
       ),
     );
