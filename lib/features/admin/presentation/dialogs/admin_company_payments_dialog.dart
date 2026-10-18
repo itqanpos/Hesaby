@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:intl/intl.dart' hide TextDirection;
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_loader.dart';
@@ -37,7 +37,8 @@ Future<void> showAdminCompanyPaymentsDialog({
 }) {
   return showDialog<void>(
     context: context,
-    builder: (BuildContext ctx) => _AdminCompanyPaymentsDialog(company: company),
+    builder: (BuildContext ctx) =>
+        _AdminCompanyPaymentsDialog(company: company),
   );
 }
 
@@ -53,8 +54,8 @@ class _AdminCompanyPaymentsDialog extends ConsumerStatefulWidget {
 
 class _AdminCompanyPaymentsDialogState
     extends ConsumerState<_AdminCompanyPaymentsDialog> {
-  final _amountController = TextEditingController();
-  final _notesController = TextEditingController();
+  final TextEditingController _amountController = TextEditingController();
+  final TextEditingController _notesController = TextEditingController();
   String _paymentMethod = 'cash';
   bool _isSaving = false;
 
@@ -66,7 +67,7 @@ class _AdminCompanyPaymentsDialogState
   }
 
   Future<void> _addPayment() async {
-    final amount = double.tryParse(_amountController.text.trim());
+    final double? amount = double.tryParse(_amountController.text.trim());
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('الرجاء إدخال مبلغ صحيح.')),
@@ -78,7 +79,7 @@ class _AdminCompanyPaymentsDialogState
 
     try {
       final client = Supabase.instance.client;
-      await client.from('subscription_payments').insert({
+      await client.from('subscription_payments').insert(<String, dynamic>{
         'company_id': widget.company.id,
         'amount': amount,
         'payment_method': _paymentMethod,
@@ -90,7 +91,7 @@ class _AdminCompanyPaymentsDialogState
       if (!mounted) return;
       _amountController.clear();
       _notesController.clear();
-      
+
       // Refresh the list
       ref.invalidate(companyPaymentsProvider(widget.company.id));
 
@@ -114,9 +115,10 @@ class _AdminCompanyPaymentsDialogState
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final paymentsAsync = ref.watch(companyPaymentsProvider(widget.company.id));
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final AsyncValue<List<Map<String, dynamic>>> paymentsAsync =
+        ref.watch(companyPaymentsProvider(widget.company.id));
 
     return Dialog(
       insetPadding: const EdgeInsets.all(16),
@@ -130,13 +132,15 @@ class _AdminCompanyPaymentsDialogState
             children: <Widget>[
               // Header
               Row(
-                children: [
+                children: <Widget>[
                   Icon(Icons.receipt_long, color: scheme.primary),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
                       'سجل المدفوعات - ${widget.company.name}',
-                      style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold),
+                      style: theme.textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                     ),
                   ),
                   IconButton(
@@ -148,32 +152,49 @@ class _AdminCompanyPaymentsDialogState
               const Divider(),
 
               // Add Payment Form
-              Text('تسجيل دفعة جديدة', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'تسجيل دفعة جديدة',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 8),
               Row(
-                children: [
+                children: <Widget>[
                   Expanded(
                     child: AppTextField(
                       controller: _amountController,
                       label: 'المبلغ',
                       hint: '0.00',
-                      keyboardType: const TextInputType.numberWithOptions(decimal: true),
+                      keyboardType: const TextInputType.numberWithOptions(
+                        decimal: true,
+                      ),
                     ),
                   ),
                   const SizedBox(width: 8),
                   Expanded(
                     child: DropdownButtonFormField<String>(
-                      value: _paymentMethod,
+                      initialValue: _paymentMethod,
                       decoration: const InputDecoration(
                         labelText: 'طريقة الدفع',
                         border: OutlineInputBorder(),
                       ),
-                      items: const [
-                        DropdownMenuItem(value: 'cash', child: Text('نقدي')),
-                        DropdownMenuItem(value: 'card', child: Text('بطاقة')),
-                        DropdownMenuItem(value: 'bank', child: Text('تحويل بنكي')),
+                      items: const <DropdownMenuItem<String>>[
+                        DropdownMenuItem<String>(
+                          value: 'cash',
+                          child: Text('نقدي'),
+                        ),
+                        DropdownMenuItem<String>(
+                          value: 'card',
+                          child: Text('بطاقة'),
+                        ),
+                        DropdownMenuItem<String>(
+                          value: 'bank',
+                          child: Text('تحويل بنكي'),
+                        ),
                       ],
-                      onChanged: (v) => setState(() => _paymentMethod = v ?? 'cash'),
+                      onChanged: (String? v) =>
+                          setState(() => _paymentMethod = v ?? 'cash'),
                     ),
                   ),
                 ],
@@ -198,35 +219,53 @@ class _AdminCompanyPaymentsDialogState
               const SizedBox(height: 8),
 
               // History List
-              Text('الدفعات السابقة', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+              Text(
+                'الدفعات السابقة',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
               const SizedBox(height: 8),
               Expanded(
                 child: paymentsAsync.when(
                   loading: () => const AppLoader(),
-                  error: (e, _) => Center(child: Text('خطأ: $e')),
-                  data: (payments) {
+                  error: (Object e, StackTrace _) =>
+                      Center(child: Text('خطأ: $e')),
+                  data: (List<Map<String, dynamic>> payments) {
                     if (payments.isEmpty) {
                       return const Center(child: Text('لا توجد دفعات سابقة.'));
                     }
                     return ListView.separated(
                       itemCount: payments.length,
                       separatorBuilder: (_, __) => const Divider(),
-                      itemBuilder: (context, index) {
-                        final p = payments[index];
-                        final amount = (p['amount'] as num).toDouble();
-                        final date = DateTime.parse(p['created_at'] as String).toLocal();
-                        final method = p['payment_method'] as String;
-                        final notes = p['notes'] as String?;
+                      itemBuilder: (BuildContext context, int index) {
+                        final Map<String, dynamic> p = payments[index];
+                        final double amount =
+                            (p['amount'] as num).toDouble();
+                        final DateTime date =
+                            DateTime.parse(p['created_at'] as String)
+                                .toLocal();
+                        final String method =
+                            p['payment_method'] as String;
+                        final String? notes = p['notes'] as String?;
 
                         return ListTile(
                           contentPadding: EdgeInsets.zero,
                           leading: CircleAvatar(
                             backgroundColor: scheme.primaryContainer,
-                            child: Icon(Icons.attach_money, color: scheme.onPrimaryContainer),
+                            child: Icon(
+                              Icons.attach_money,
+                              color: scheme.onPrimaryContainer,
+                            ),
                           ),
                           title: Text(
-                            NumberFormat.currency(locale: 'ar_EG', symbol: 'ج.م', decimalDigits: 2).format(amount),
-                            style: const TextStyle(fontWeight: FontWeight.bold),
+                            NumberFormat.currency(
+                              locale: 'ar_EG',
+                              symbol: 'ج.م',
+                              decimalDigits: 2,
+                            ).format(amount),
+                            style:
+                                const TextStyle(fontWeight: FontWeight.bold),
                           ),
                           subtitle: Text(
                             '${DateFormat('yyyy/MM/dd - hh:mm a').format(date)}\n'
@@ -249,10 +288,14 @@ class _AdminCompanyPaymentsDialogState
 
   String _methodLabel(String method) {
     switch (method) {
-      case 'cash': return 'نقدي';
-      case 'card': return 'بطاقة';
-      case 'bank': return 'تحويل بنكي';
-      default: return method;
+      case 'cash':
+        return 'نقدي';
+      case 'card':
+        return 'بطاقة';
+      case 'bank':
+        return 'تحويل بنكي';
+      default:
+        return method;
     }
   }
 }
