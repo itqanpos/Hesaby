@@ -17,17 +17,6 @@ import '../../data/services/pos_preferences.dart';
 import '../../domain/entities/receipt.dart';
 
 /// Live WYSIWYG preview of the thermal receipt.
-///
-/// Renders the **exact same bitmap** that [EscPosReceiptBuilder] sends to
-/// the printer, so what the user sees in this widget matches the printed
-/// output 1:1 (same fonts, same column layout, same logo placement).
-///
-/// The bitmap is re-rendered whenever the [receipt] changes, or when a
-/// new dialog instance mounts.
-///
-/// The image is displayed inside a white "paper" frame with a subtle
-/// shadow, and is scaled to fit the parent width while preserving aspect
-/// ratio.
 class ThermalReceiptPreview extends ConsumerStatefulWidget {
   const ThermalReceiptPreview({
     super.key,
@@ -36,9 +25,6 @@ class ThermalReceiptPreview extends ConsumerStatefulWidget {
   });
 
   final Receipt receipt;
-
-  /// Optional clamp on the preview height. When null, uses the intrinsic
-  /// bitmap height.
   final double? maxHeight;
 
   @override
@@ -126,6 +112,10 @@ class _ThermalReceiptPreviewState
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
     if (s == null || s.companyId.isEmpty) return null;
+
+    // Prevent black box: only load if a logo URL is actually present.
+    if (!s.hasLogo) return null;
+
     try {
       return await const CompanyLogoLoader().load(
         companyId: s.companyId,
