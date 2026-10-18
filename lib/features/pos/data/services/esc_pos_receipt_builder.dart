@@ -130,10 +130,6 @@ abstract final class EscPosReceiptBuilder {
     _boldFamily = bold.fontFamily ?? 'Cairo';
   }
 
-  // ---------------------------------------------------------------------------
-  // Raster encoding — Floyd-Steinberg dithering for crisper Arabic glyphs.
-  // ---------------------------------------------------------------------------
-
   static Future<List<int>> _encodeRaster(ui.Image image) async {
     final ByteData? byteData = await image.toByteData(
       format: ui.ImageByteFormat.rawRgba,
@@ -209,10 +205,6 @@ abstract final class EscPosReceiptBuilder {
   }
 }
 
-// ============================================================================
-// Painter
-// ============================================================================
-
 class _Painter {
   _Painter({
     required this.canvas,
@@ -267,12 +259,7 @@ class _Painter {
   Future<void> paint(Receipt r, Uint8List? logoBytes) async {
     _currencyLabel = r.showCurrencySymbol ? 'ج.م' : '';
     canvas.drawRect(
-      Rect.fromLTWH(
-        0,
-        0,
-        paperWidthDots.toDouble(),
-        100000,
-      ),
+      Rect.fromLTWH(0, 0, paperWidthDots.toDouble(), 100000),
       Paint()..color = const Color(0xFFFFFFFF),
     );
 
@@ -295,15 +282,31 @@ class _Painter {
     _gap(_sectionGap);
     _itemsTable(r);
     _gap(_sectionGap);
-    _grandTotal(r);
+
+    // 1. Previous Balance
+    if (r.hasCustomer && (r.previousBalance ?? 0) != 0) {
+      _kvRow('الرصيد السابق', _money(r.previousBalance!.abs()));
+      _gap(_sectionGap);
+      _divider();
+      _gap(_sectionGap);
+    }
+
+    // 2. Grand Total (Total Owed)
+    final double totalOwed = r.total + (r.previousBalance ?? 0);
+    _grandTotal(r, totalOwed);
     _gap(_sectionGap);
+
+    // 3. Payment Block
     _paymentBlock(r);
+
+    // 4. New Balance
     if (r.hasBalanceChange) {
       _gap(_sectionGap);
       _divider();
       _gap(_sectionGap);
-      _balanceBlock(r);
+      _newBalanceBlock(r);
     }
+
     _gap(_sectionGap * 1.5);
     _divider();
     _gap(_sectionGap);
@@ -333,12 +336,7 @@ class _Painter {
 
     canvas.drawImageRect(
       logo,
-      Rect.fromLTWH(
-        0,
-        0,
-        logo.width.toDouble(),
-        logo.height.toDouble(),
-      ),
+      Rect.fromLTWH(0, 0, logo.width.toDouble(), logo.height.toDouble()),
       Rect.fromLTWH(x, _y, finalW, targetH),
       Paint()..filterQuality = FilterQuality.high,
     );
@@ -347,95 +345,54 @@ class _Painter {
   }
 
   void _header(Receipt r) {
-    _text(
-      r.companyName,
-      fontSize: _font(24),
-      emphasized: true,
-      align: TextAlign.center,
-    );
+    _text(r.companyName, fontSize: _font(28), emphasized: true, align: TextAlign.center);
 
     if (r.hasCompanyAddress) {
       _gap(2 * _scale);
-      _text(
-        r.companyAddress!,
-        fontSize: _font(13),
-        color: _grey,
-        align: TextAlign.center,
-      );
+      _text(r.companyAddress!, fontSize: _font(15), color: _grey, align: TextAlign.center);
     }
-
     if (r.hasCompanyPhone) {
       _gap(2 * _scale);
-      _text(
-        r.companyPhone!,
-        fontSize: _font(13),
-        color: _grey,
-        align: TextAlign.center,
-      );
+      _text(r.companyPhone!, fontSize: _font(15), color: _grey, align: TextAlign.center);
     }
 
     _gap(2 * _scale);
-    _text(
-      r.branchName,
-      fontSize: _font(15),
-      color: _grey,
-      align: TextAlign.center,
-    );
+    _text(r.branchName, fontSize: _font(18), color: _grey, align: TextAlign.center);
 
     if (r.hasTaxNumberToPrint) {
       _gap(2 * _scale);
-      _text(
-        'الرقم الضريبي: ${r.companyTaxNumber}',
-        fontSize: _font(12),
-        color: _grey,
-        align: TextAlign.center,
-      );
+      _text('الرقم الضريبي: ${r.companyTaxNumber}', fontSize: _font(14), color: _grey, align: TextAlign.center);
     }
-
     if (r.hasCommercialRegisterToPrint) {
       _gap(2 * _scale);
-      _text(
-        'السجل التجاري: ${r.companyCommercialRegister}',
-        fontSize: _font(12),
-        color: _grey,
-        align: TextAlign.center,
-      );
+      _text('السجل التجاري: ${r.companyCommercialRegister}', fontSize: _font(14), color: _grey, align: TextAlign.center);
     }
 
     _gap(_sectionGap);
-    _chip('فاتورة مبيعات', fontSize: _font(17));
+    _chip('فاتورة مبيعات', fontSize: _font(20));
   }
 
   void _meta(Receipt r) {
     _metaRow('رقم الفاتورة', r.invoiceNumber ?? '—', bold: true);
     _metaRow('التاريخ', _formatDayAndDate(r.dateTime));
-
     if (r.cashierName != null && r.cashierName!.trim().isNotEmpty) {
       _metaRow('الكاشير', r.cashierName!);
     }
-
     if (r.hasCustomer) {
       _metaRow('العميل', r.customerName!);
-
-      if (r.hasCustomerAddress) {
-        _metaRow('عنوان العميل', r.customerAddress!);
-      }
-
-      if (r.hasCustomerPhone) {
-        _metaRow('هاتف العميل', r.customerPhone!);
-      }
+      if (r.hasCustomerAddress) _metaRow('عنوان العميل', r.customerAddress!);
+      if (r.hasCustomerPhone) _metaRow('هاتف العميل', r.customerPhone!);
     }
   }
 
   void _itemsTable(Receipt r) {
     final double w = _contentWidth;
-    final double colNumW = 24 * _scale;
+    final double colNumW = 26 * _scale;
     final double colQtyW = w * 0.20;
     final double colPriceW = w * 0.20;
     final double colTotalW = w * 0.24;
     final double colNameW = w - colNumW - colQtyW - colPriceW - colTotalW;
 
-    // Sum total quantities instead of line count.
     double totalQuantity = 0;
     for (final line in r.lines) {
       totalQuantity += line.quantity;
@@ -443,74 +400,58 @@ class _Painter {
 
     _row(
       cells: <_Cell>[
-        _Cell('م',
-            width: colNumW, bold: true, align: TextAlign.center),
-        _Cell('الصنف',
-            width: colNameW, bold: true, align: TextAlign.right),
-        _Cell('الكمية',
-            width: colQtyW, bold: true, align: TextAlign.center),
-        _Cell('السعر',
-            width: colPriceW, bold: true, align: TextAlign.center),
-        _Cell('الإجمالي',
-            width: colTotalW, bold: true, align: TextAlign.center),
+        _Cell('م', width: colNumW, bold: true, align: TextAlign.center),
+        _Cell('الصنف', width: colNameW, bold: true, align: TextAlign.right),
+        _Cell('الكمية', width: colQtyW, bold: true, align: TextAlign.center),
+        _Cell('السعر', width: colPriceW, bold: true, align: TextAlign.center),
+        _Cell('الإجمالي', width: colTotalW, bold: true, align: TextAlign.center),
       ],
-      fontSize: _font(13),
-      topPad: 6 * _scale,
-      bottomPad: 6 * _scale,
+      fontSize: _font(15),
+      topPad: 8 * _scale,
+      bottomPad: 8 * _scale,
     );
 
     for (int i = 0; i < r.lines.length; i++) {
       final ReceiptLine line = r.lines[i];
       _row(
         cells: <_Cell>[
-          _Cell('${i + 1}',
-              width: colNumW, align: TextAlign.center),
-          _Cell(line.productName,
-              width: colNameW, align: TextAlign.right),
-          _Cell('${_qty(line.quantity)} ${line.unitName}',
-              width: colQtyW, align: TextAlign.center),
-          _Cell(_money(line.unitPrice),
-              width: colPriceW, align: TextAlign.center),
-          _Cell(_money(line.lineTotal),
-              width: colTotalW, bold: true, align: TextAlign.center),
+          _Cell('${i + 1}', width: colNumW, align: TextAlign.center),
+          _Cell(line.productName, width: colNameW, align: TextAlign.right),
+          _Cell('${_qty(line.quantity)} ${line.unitName}', width: colQtyW, align: TextAlign.center),
+          _Cell(_money(line.unitPrice), width: colPriceW, align: TextAlign.center),
+          _Cell(_money(line.lineTotal), width: colTotalW, bold: true, align: TextAlign.center),
         ],
-        fontSize: _font(13),
-        topPad: 6 * _scale,
-        bottomPad: 6 * _scale,
+        fontSize: _font(15),
+        topPad: 8 * _scale,
+        bottomPad: 8 * _scale,
       );
     }
 
-    // Summary row now shows the SUM of quantities.
     _row(
       cells: <_Cell>[
         _Cell('', width: colNumW, align: TextAlign.center),
-        _Cell('المجموع الفرعي',
-            width: colNameW, bold: true, align: TextAlign.right),
-        _Cell(_qty(totalQuantity),
-            width: colQtyW, align: TextAlign.center),
+        _Cell('المجموع الفرعي', width: colNameW, bold: true, align: TextAlign.right),
+        _Cell(_qty(totalQuantity), width: colQtyW, align: TextAlign.center),
         _Cell('', width: colPriceW, align: TextAlign.center),
-        _Cell(_money(r.subtotal),
-            width: colTotalW, bold: true, align: TextAlign.center),
+        _Cell(_money(r.subtotal), width: colTotalW, bold: true, align: TextAlign.center),
       ],
-      fontSize: _font(13),
-      topPad: 6 * _scale,
-      bottomPad: 6 * _scale,
+      fontSize: _font(15),
+      topPad: 8 * _scale,
+      bottomPad: 8 * _scale,
     );
 
     if (r.hasDiscountToPrint) {
       _row(
         cells: <_Cell>[
           _Cell('', width: colNumW, align: TextAlign.center),
-          _Cell('الخصم',
-              width: colNameW, bold: true, align: TextAlign.right),
+          _Cell('الخصم', width: colNameW, bold: true, align: TextAlign.right),
           _Cell('', width: colQtyW, align: TextAlign.center),
           _Cell('', width: colPriceW, align: TextAlign.center),
-          _Cell('- ${_money(r.discount)}',
-              width: colTotalW, bold: true, align: TextAlign.center),
+          _Cell('- ${_money(r.discount)}', width: colTotalW, bold: true, align: TextAlign.center),
         ],
-        fontSize: _font(13),
-        topPad: 6 * _scale,
-        bottomPad: 6 * _scale,
+        fontSize: _font(15),
+        topPad: 8 * _scale,
+        bottomPad: 8 * _scale,
       );
     }
 
@@ -518,50 +459,35 @@ class _Painter {
       _row(
         cells: <_Cell>[
           _Cell('', width: colNumW, align: TextAlign.center),
-          _Cell('الضريبة',
-              width: colNameW, bold: true, align: TextAlign.right),
+          _Cell('الضريبة', width: colNameW, bold: true, align: TextAlign.right),
           _Cell('', width: colQtyW, align: TextAlign.center),
           _Cell('', width: colPriceW, align: TextAlign.center),
-          _Cell(_money(r.taxAmount),
-              width: colTotalW, bold: true, align: TextAlign.center),
+          _Cell(_money(r.taxAmount), width: colTotalW, bold: true, align: TextAlign.center),
         ],
-        fontSize: _font(13),
-        topPad: 6 * _scale,
-        bottomPad: 6 * _scale,
+        fontSize: _font(15),
+        topPad: 8 * _scale,
+        bottomPad: 8 * _scale,
       );
     }
   }
 
-  void _grandTotal(Receipt r) {
-    final double fontSize = _font(20);
-    final double boxPad = 8 * _scale;
+  void _grandTotal(Receipt r, double totalOwed) {
+    final double fontSize = _font(24);
+    final double boxPad = 10 * _scale;
 
-    final TextPainter label = _measure(
-      'إجمالي الفاتورة',
-      fontSize: fontSize,
-      emphasized: true,
-    );
-    final TextPainter value = _measure(
-      _money(r.total),
-      fontSize: fontSize,
-      emphasized: true,
-    );
-    final double lineH =
-        label.height > value.height ? label.height : value.height;
+    final String labelText = ((r.previousBalance ?? 0) != 0) ? 'الإجمالي الكلي' : 'إجمالي الفاتورة';
+
+    final TextPainter label = _measure(labelText, fontSize: fontSize, emphasized: true);
+    final TextPainter value = _measure(_money(totalOwed), fontSize: fontSize, emphasized: true);
+    final double lineH = label.height > value.height ? label.height : value.height;
     final double boxH = lineH + boxPad * 2;
 
     canvas.drawRect(
       Rect.fromLTWH(_paddingH, _y, _contentWidth, boxH),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5 * _scale
-        ..color = _black,
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 1.5 * _scale..color = _black,
     );
 
-    label.paint(
-      canvas,
-      Offset(_paddingH + _contentWidth - boxPad - label.width, _y + boxPad),
-    );
+    label.paint(canvas, Offset(_paddingH + _contentWidth - boxPad - label.width, _y + boxPad));
     value.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
 
     _y += boxH;
@@ -572,9 +498,7 @@ class _Painter {
     _kvRow('المدفوع', _money(r.paidAmount));
   }
 
-  void _balanceBlock(Receipt r) {
-    _kvRow('الرصيد السابق', _money(r.previousBalance ?? 0));
-
+  void _newBalanceBlock(Receipt r) {
     final double newBalance = r.newBalance ?? 0;
     final String label;
     final String value;
@@ -593,219 +517,105 @@ class _Painter {
   }
 
   void _balanceBox(String label, String value) {
-    final double fontSize = _font(16);
-    final double boxPad = 6 * _scale;
+    final double fontSize = _font(18);
+    final double boxPad = 8 * _scale;
 
-    final TextPainter labelP = _measure(
-      label,
-      fontSize: fontSize,
-      emphasized: true,
-    );
-    final TextPainter valueP = _measure(
-      value,
-      fontSize: fontSize,
-      emphasized: true,
-    );
-    final double lineH =
-        labelP.height > valueP.height ? labelP.height : valueP.height;
+    final TextPainter labelP = _measure(label, fontSize: fontSize, emphasized: true);
+    final TextPainter valueP = _measure(value, fontSize: fontSize, emphasized: true);
+    final double lineH = labelP.height > valueP.height ? labelP.height : valueP.height;
     final double boxH = lineH + boxPad * 2;
 
     canvas.drawRect(
       Rect.fromLTWH(_paddingH, _y, _contentWidth, boxH),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2 * _scale
-        ..color = _black,
+      Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2 * _scale..color = _black,
     );
 
-    labelP.paint(
-      canvas,
-      Offset(_paddingH + _contentWidth - boxPad - labelP.width, _y + boxPad),
-    );
+    labelP.paint(canvas, Offset(_paddingH + _contentWidth - boxPad - labelP.width, _y + boxPad));
     valueP.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
 
     _y += boxH;
   }
 
   void _footer(Receipt r) {
-    _text(
-      _footerText(r),
-      fontSize: _font(14),
-      color: _grey,
-      align: TextAlign.center,
-    );
+    _text(_footerText(r), fontSize: _font(15), color: _grey, align: TextAlign.center);
   }
 
-  // ---------------------------------------------------------------------------
-  // Meta row — label on the far right, value on the far left.
-  // ---------------------------------------------------------------------------
-
   void _metaRow(String label, String value, {bool bold = false}) {
-    final double fontSize = _font(14);
+    final double fontSize = _font(16);
 
-    final TextPainter labelPainter = _measure(
-      '$label:',
-      fontSize: fontSize,
-      bold: true,
-      align: TextAlign.right,
-      maxWidth: double.infinity,
-    );
-    
+    final TextPainter labelPainter = _measure('$label:', fontSize: fontSize, bold: true, align: TextAlign.right, maxWidth: double.infinity);
     final double gap = 8 * _scale;
     final double naturalLabelW = labelPainter.width + gap;
     final double maxLabelW = _contentWidth * 0.6;
     final double labelW = naturalLabelW < maxLabelW ? naturalLabelW : maxLabelW;
     final double valueMaxW = _contentWidth - labelW;
 
-    final TextPainter valuePainter = _measure(
-      value,
-      fontSize: fontSize,
-      bold: bold,
-      align: TextAlign.left,
-      maxWidth: valueMaxW,
-    );
-    final double rowH = labelPainter.height > valuePainter.height
-        ? labelPainter.height
-        : valuePainter.height;
+    final TextPainter valuePainter = _measure(value, fontSize: fontSize, bold: bold, align: TextAlign.left, maxWidth: valueMaxW);
+    final double rowH = labelPainter.height > valuePainter.height ? labelPainter.height : valuePainter.height;
 
-    // Label on the far right.
-    labelPainter.paint(
-      canvas,
-      Offset(_paddingH + _contentWidth - labelPainter.width, _y),
-    );
-    // Value on the far left.
-    valuePainter.paint(
-      canvas,
-      Offset(_paddingH, _y),
-    );
-
-    _y += rowH + 2 * _scale;
-  }
-
-  void _kvRow(String label, String value, {bool emphasized = false}) {
-    final double labelFont = _font(14);
-    final double valueFont = emphasized ? _font(17) : _font(14);
-
-    final TextPainter labelPainter = _measure(
-      label,
-      fontSize: labelFont,
-      bold: true,
-    );
-    final TextPainter valuePainter = _measure(
-      value,
-      fontSize: valueFont,
-      bold: emphasized,
-    );
-    final double rowH = labelPainter.height > valuePainter.height
-        ? labelPainter.height
-        : valuePainter.height;
-
-    labelPainter.paint(
-      canvas,
-      Offset(_paddingH + _contentWidth - labelPainter.width, _y),
-    );
+    labelPainter.paint(canvas, Offset(_paddingH + _contentWidth - labelPainter.width, _y));
     valuePainter.paint(canvas, Offset(_paddingH, _y));
 
     _y += rowH + 3 * _scale;
   }
 
-  void _text(
-    String text, {
-    required double fontSize,
-    bool bold = false,
-    bool emphasized = false,
-    Color color = _black,
-    TextAlign align = TextAlign.right,
-  }) {
+  void _kvRow(String label, String value, {bool emphasized = false}) {
+    final double labelFont = _font(16);
+    final double valueFont = emphasized ? _font(20) : _font(16);
+
+    final TextPainter labelPainter = _measure(label, fontSize: labelFont, bold: true);
+    final TextPainter valuePainter = _measure(value, fontSize: valueFont, bold: emphasized);
+    final double rowH = labelPainter.height > valuePainter.height ? labelPainter.height : valuePainter.height;
+
+    labelPainter.paint(canvas, Offset(_paddingH + _contentWidth - labelPainter.width, _y));
+    valuePainter.paint(canvas, Offset(_paddingH, _y));
+
+    _y += rowH + 4 * _scale;
+  }
+
+  void _text(String text, {required double fontSize, bool bold = false, bool emphasized = false, Color color = _black, TextAlign align = TextAlign.right}) {
     if (align == TextAlign.center) {
-      final TextPainter natural = _measure(
-        text,
-        fontSize: fontSize,
-        bold: bold,
-        emphasized: emphasized,
-        color: color,
-        align: TextAlign.left,
-        maxWidth: double.infinity,
-      );
+      final TextPainter natural = _measure(text, fontSize: fontSize, bold: bold, emphasized: emphasized, color: color, align: TextAlign.left, maxWidth: double.infinity);
       if (natural.width <= _contentWidth) {
-        natural.paint(
-          canvas,
-          Offset(_paddingH + (_contentWidth - natural.width) / 2, _y),
-        );
+        natural.paint(canvas, Offset(_paddingH + (_contentWidth - natural.width) / 2, _y));
         _y += natural.height;
         return;
       }
     }
-    final TextPainter painter = _measure(
-      text,
-      fontSize: fontSize,
-      bold: bold,
-      emphasized: emphasized,
-      color: color,
-      align: align,
-    );
+    final TextPainter painter = _measure(text, fontSize: fontSize, bold: bold, emphasized: emphasized, color: color, align: align);
     painter.paint(canvas, Offset(_paddingH, _y));
     _y += painter.height;
   }
 
   void _chip(String text, {required double fontSize}) {
-    final TextPainter painter = _measure(
-      text,
-      fontSize: fontSize,
-      emphasized: true,
-      align: TextAlign.center,
-    );
+    final TextPainter painter = _measure(text, fontSize: fontSize, emphasized: true, align: TextAlign.center);
 
-    final double padH = 22 * _scale;
-    final double padV = 6 * _scale;
+    final double padH = 24 * _scale;
+    final double padV = 8 * _scale;
     final double chipW = painter.width + padH * 2;
     final double chipH = painter.height + padV * 2;
     final double chipX = (_contentWidth - chipW) / 2 + _paddingH;
 
-    final RRect rrect = RRect.fromRectAndRadius(
-      Rect.fromLTWH(chipX, _y, chipW, chipH),
-      Radius.circular(3 * _scale),
-    );
-    canvas.drawRRect(
-      rrect,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2 * _scale
-        ..color = _black,
-    );
+    final RRect rrect = RRect.fromRectAndRadius(Rect.fromLTWH(chipX, _y, chipW, chipH), Radius.circular(4 * _scale));
+    canvas.drawRRect(rrect, Paint()..style = PaintingStyle.stroke..strokeWidth = 1.2 * _scale..color = _black);
     painter.paint(canvas, Offset(chipX + padH, _y + padV));
 
     _y += chipH;
   }
 
-  void _row({
-    required List<_Cell> cells,
-    required double fontSize,
-    required double topPad,
-    required double bottomPad,
-  }) {
+  void _row({required List<_Cell> cells, required double fontSize, required double topPad, required double bottomPad}) {
     final double cellInsetH = 4 * _scale;
-
     final List<TextPainter> painters = <TextPainter>[];
     double maxH = 0;
+
     for (final _Cell cell in cells) {
-      final TextPainter painter = _measure(
-        cell.text,
-        fontSize: fontSize,
-        bold: cell.bold,
-        align: cell.align,
-        maxWidth: cell.width - cellInsetH * 2,
-      );
+      final TextPainter painter = _measure(cell.text, fontSize: fontSize, bold: cell.bold, align: cell.align, maxWidth: cell.width - cellInsetH * 2);
       painters.add(painter);
       if (painter.height > maxH) maxH = painter.height;
     }
 
     final double rowH = maxH + topPad + bottomPad;
-
-    final Paint gridPaint = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 0.8 * _scale
-      ..color = _black;
+    final Paint gridPaint = Paint()..style = PaintingStyle.stroke..strokeWidth = 0.8 * _scale..color = _black;
 
     double x = _paddingH + _contentWidth;
     for (int i = 0; i < cells.length; i++) {
@@ -817,24 +627,12 @@ class _Painter {
       canvas.drawRect(Rect.fromLTWH(x, _y, cell.width, rowH), gridPaint);
     }
 
-    canvas.drawRect(
-      Rect.fromLTWH(
-        _paddingH,
-        _y + rowH - 0.5 * _scale,
-        _contentWidth,
-        0.5 * _scale,
-      ),
-      Paint()..color = const Color(0xFF888888),
-    );
-
+    canvas.drawRect(Rect.fromLTWH(_paddingH, _y + rowH - 0.5 * _scale, _contentWidth, 0.5 * _scale), Paint()..color = const Color(0xFF888888));
     _y += rowH;
   }
 
   void _divider() {
-    canvas.drawRect(
-      Rect.fromLTWH(_paddingH, _y, _contentWidth, 0.7 * _scale),
-      Paint()..color = const Color(0xFF666666),
-    );
+    canvas.drawRect(Rect.fromLTWH(_paddingH, _y, _contentWidth, 0.7 * _scale), Paint()..color = const Color(0xFF666666));
     _y += 1 * _scale;
   }
 
@@ -848,18 +646,9 @@ class _Painter {
     _y += pixels;
   }
 
-  TextPainter _measure(
-    String text, {
-    required double fontSize,
-    bool bold = false,
-    bool emphasized = false,
-    Color color = _black,
-    TextAlign align = TextAlign.right,
-    double? maxWidth,
-  }) {
+  TextPainter _measure(String text, {required double fontSize, bool bold = false, bool emphasized = false, Color color = _black, TextAlign align = TextAlign.right, double? maxWidth}) {
     final bool useBold = bold || emphasized;
-    final ({String family, FontWeight weight}) style =
-        _fontFor(emphasized: useBold);
+    final ({String family, FontWeight weight}) style = _fontFor(emphasized: useBold);
 
     final TextPainter painter = TextPainter(
       text: TextSpan(
@@ -879,20 +668,10 @@ class _Painter {
     return painter;
   }
 
-  String _money(double value) =>
-      ReceiptNumberFormat.money(value, currency: _currencyLabel);
-
+  String _money(double value) => ReceiptNumberFormat.money(value, currency: _currencyLabel);
   static String _qty(double value) => ReceiptNumberFormat.quantity(value);
 
-  static const List<String> _days = <String>[
-    'الإثنين',
-    'الثلاثاء',
-    'الأربعاء',
-    'الخميس',
-    'الجمعة',
-    'السبت',
-    'الأحد',
-  ];
+  static const List<String> _days = <String>['الإثنين', 'الثلاثاء', 'الأربعاء', 'الخميس', 'الجمعة', 'السبت', 'الأحد'];
 
   static String _formatDayAndDate(DateTime value) {
     final DateTime l = value.toLocal();
@@ -922,13 +701,7 @@ class _Painter {
 }
 
 class _Cell {
-  const _Cell(
-    this.text, {
-    required this.width,
-    this.bold = false,
-    this.align = TextAlign.right,
-  });
-
+  const _Cell(this.text, {required this.width, this.bold = false, this.align = TextAlign.right});
   final String text;
   final double width;
   final bool bold;
