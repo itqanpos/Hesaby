@@ -15,6 +15,8 @@ class CompanyModel extends Equatable {
     required this.createdAt,
     required this.updatedAt,
     required this.subscriptionStatus,
+    required this.maxUsers,
+    required this.maxBranches,
     this.legalName,
     this.phone,
     this.email,
@@ -26,6 +28,8 @@ class CompanyModel extends Equatable {
     this.planId,
     this.billingCycle,
     this.subscribedUntil,
+    this.isSuspended = false,
+    this.suspensionReason,
   });
 
   factory CompanyModel.fromMap(Map<String, dynamic> map) {
@@ -51,6 +55,11 @@ class CompanyModel extends Equatable {
       planId: _optionalString(map, 'plan_id'),
       billingCycle: _optionalString(map, 'billing_cycle'),
       subscribedUntil: _optionalTimestamp(map, 'subscribed_until'),
+      // ---- New fields ----
+      isSuspended: _optionalBool(map, 'is_suspended') ?? false,
+      suspensionReason: _optionalString(map, 'suspension_reason'),
+      maxUsers: _optionalInt(map, 'max_users') ?? 5,
+      maxBranches: _optionalInt(map, 'max_branches') ?? 1,
     );
   }
 
@@ -75,6 +84,12 @@ class CompanyModel extends Equatable {
   final String? billingCycle;
   final DateTime? subscribedUntil;
 
+  // ---- Suspension & Limits ----
+  final bool isSuspended;
+  final String? suspensionReason;
+  final int maxUsers;
+  final int maxBranches;
+
   Company toEntity() => Company(
         id: id,
         name: name,
@@ -95,6 +110,10 @@ class CompanyModel extends Equatable {
         planId: planId,
         billingCycle: billingCycle,
         subscribedUntil: subscribedUntil,
+        isSuspended: isSuspended,
+        suspensionReason: suspensionReason,
+        maxUsers: maxUsers,
+        maxBranches: maxBranches,
       );
 
   static String _requireString(Map<String, dynamic> map, String key) {
@@ -125,6 +144,15 @@ class CompanyModel extends Equatable {
       if (lower == 'true' || lower == 't' || lower == '1') return true;
       if (lower == 'false' || lower == 'f' || lower == '0') return false;
     }
+    return null;
+  }
+
+  static int? _optionalInt(Map<String, dynamic> map, String key) {
+    final Object? value = map[key];
+    if (value == null) return null;
+    if (value is int) return value;
+    if (value is num) return value.toInt();
+    if (value is String) return int.tryParse(value);
     return null;
   }
 
@@ -168,9 +196,14 @@ class CompanyModel extends Equatable {
         planId,
         billingCycle,
         subscribedUntil,
+        isSuspended,
+        suspensionReason,
+        maxUsers,
+        maxBranches,
       ];
 
   @override
   String toString() =>
-      'CompanyModel(id: $id, name: $name, status: $subscriptionStatus)';
+      'CompanyModel(id: $id, name: $name, status: $subscriptionStatus, '
+      'isSuspended: $isSuspended)';
 }
