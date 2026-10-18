@@ -8,13 +8,9 @@ import '../../../../app/router.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../providers/platform_admin_provider.dart';
+import 'tabs/admin_companies_tab.dart';
 
 /// Platform Admin Dashboard.
-///
-/// Contains three main tabs:
-/// 1. Companies & Subscriptions
-/// 2. Users (Subscribers)
-/// 3. App Control (Maintenance, Announcements, Feature Flags)
 class AdminDashboardPage extends ConsumerWidget {
   const AdminDashboardPage({super.key});
 
@@ -51,8 +47,6 @@ class AdminDashboardPage extends ConsumerWidget {
           ),
           title: const Text('لوحة تحكم المنصة'),
           bottom: const TabBar(
-            labelColor: Colors.teal, // يمكن تعديل اللون حسب الثيم
-            indicatorColor: Colors.teal,
             tabs: <Widget>[
               Tab(icon: Icon(Icons.storefront_outlined), text: 'الاشتراكات'),
               Tab(icon: Icon(Icons.people_outline), text: 'المشتركون'),
@@ -62,7 +56,7 @@ class AdminDashboardPage extends ConsumerWidget {
         ),
         body: const TabBarView(
           children: <Widget>[
-            _CompaniesTabPlaceholder(),
+            AdminCompaniesTab(), // ⬅️ التبويب الأول جاهز الآن
             _UsersTabPlaceholder(),
             _AppControlTabPlaceholder(),
           ],
@@ -75,17 +69,6 @@ class AdminDashboardPage extends ConsumerWidget {
 // ============================================================================
 // Placeholders (سيتم استبدالها بالملفات الفعلية لاحقاً)
 // ============================================================================
-
-class _CompaniesTabPlaceholder extends StatelessWidget {
-  const _CompaniesTabPlaceholder();
-
-  @override
-  Widget build(BuildContext context) {
-    return const Center(
-      child: Text('تبويب الشركات والاشتراكات (قيد الإنشاء...)'),
-    );
-  }
-}
 
 class _UsersTabPlaceholder extends StatelessWidget {
   const _UsersTabPlaceholder();
