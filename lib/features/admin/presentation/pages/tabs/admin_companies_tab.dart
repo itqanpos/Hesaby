@@ -1,7 +1,13 @@
 // lib/features/admin/presentation/pages/tabs/admin_companies_tab.dart
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart' hide TextDirection;
+import 'package:pdf/pdf.dart';
+import 'package:pdf/widgets.dart' as pw;
+import 'package:printing/printing.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../../shared/widgets/app_empty.dart';
@@ -12,6 +18,7 @@ import '../../../../companies/domain/entities/company.dart';
 import '../../../../companies/domain/entities/company_subscription.dart';
 import '../../../../companies/domain/repositories/company_repository.dart';
 import '../../dialogs/admin_company_actions_dialog.dart';
+import '../../dialogs/admin_company_payments_dialog.dart';
 import '../../providers/admin_companies_provider.dart';
 
 class AdminCompaniesTab extends ConsumerStatefulWidget {
@@ -31,6 +38,10 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
     _searchController.dispose();
     super.dispose();
   }
+
+  // ---------------------------------------------------------------------------
+  // Filtering
+  // ---------------------------------------------------------------------------
 
   List<Company> _applyFilters(List<Company> companies) {
     final String query = _searchQuery.trim().toLowerCase();
@@ -57,6 +68,10 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
           email.contains(query);
     }).toList(growable: false);
   }
+
+  // ---------------------------------------------------------------------------
+  // Actions
+  // ---------------------------------------------------------------------------
 
   Future<void> _openActions(Company company) async {
     final AdminSubscriptionChoice? choice =
@@ -89,12 +104,18 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
           'p_suspend': false,
         });
       } else if (choice.action == AdminSubscriptionAction.renew) {
-        final CompanySubscription sub = CompanySubscription.fromCompany(company);
+        final CompanySubscription sub =
+            CompanySubscription.fromCompany(company);
         final DateTime now = DateTime.now().toUtc();
         final DateTime? until = sub.subscribedUntil;
-        final DateTime base = (sub.isActive && until != null && until.isAfter(now)) ? until : now;
-        final Duration duration = choice.billingCycle == 'yearly' ? const Duration(days: 365) : const Duration(days: 30);
-        final newUntil = base.add(duration);
+        final DateTime base =
+            (sub.isActive && until != null && until.isAfter(now))
+                ? until
+                : now;
+        final Duration duration = choice.billingCycle == 'yearly'
+            ? const Duration(days: 365)
+            : const Duration(days: 30);
+        final DateTime newUntil = base.add(duration);
 
         await client.rpc('admin_update_subscription', params: {
           'p_company_id': company.id,
@@ -104,9 +125,11 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
           'p_subscribed_until': newUntil.toIso8601String(),
         });
       } else if (choice.action == AdminSubscriptionAction.viewPayments) {
-        // TODO: Open payments dialog
         if (!mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('سجل المدفوعات قيد الإنشاء...')));
+        await showAdminCompanyPaymentsDialog(
+          context: context,
+          company: company,
+        );
         return;
       }
 
@@ -130,6 +153,103 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
       );
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Export
+  // ---------------------------------------------------------------------------
+
+  Future<void> _exportReport(List<Company> companies) async {
+    try {
+      final List<List<String>> rows = <List<String>>[
+        <String>[
+          'Company Name',
+          'Status',
+          'Plan',
+          'Billing Cycle',
+          'Subscribed Until',
+          'Is Suspended',
+          'Max Users',
+          'Max Branches',
+          'Phone',
+          'Email',
+        ],
+      ];
+
+      for (final c in companies) {
+        final sub = CompanySubscription.fromCompany(c);
+        final String status = c.isSuspended
+            ? 'Suspended'
+            : sub.isActive
+                ? 'Active'
+                : sub.isTrial
+                    ? 'Trial'
+                    : 'Expired';
+        rows.add(<String>[
+          c.name,
+          status,
+          c.planId ?? '-',
+          c.billingCycle ?? '-',
+          c.subscribedUntil?.toIso8601String() ?? '-',
+          c.isSuspended ? 'Yes' : 'No',
+          c.maxUsers.toString(),
+          c.maxBranches.toString(),
+          c.phone ?? '-',
+          c.email ?? '-',
+        ]);
+      }
+
+      final pw.Document doc = pw.Document();
+      doc.addPage(
+        pw.MultiPage(
+          pageFormat: PdfPageFormat.a4,
+          textDirection: pw.TextDirection.rtl,
+          build: (pw.Context context) {
+            return <pw.Widget>[
+              pw.Header(
+                level: 0,
+                child: pw.Text(
+                  'Hesaby — Companies Export',
+                  style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+                ),
+              ),
+              pw.SizedBox(height: 6),
+              pw.Text(
+                'Generated: ${DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now())}',
+                style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+              ),
+              pw.SizedBox(height: 12),
+              pw.TableHelper.fromTextArray(
+                headers: rows.first,
+                data: rows.skip(1).toList(),
+                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+                cellStyle: const pw.TextStyle(fontSize: 8),
+                headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                cellPadding: const pw.EdgeInsets.all(3),
+                border: pw.TableBorder.all(color: PdfColors.grey600, width: 0.4),
+              ),
+            ];
+          },
+        ),
+      );
+
+      final Uint8List pdfBytes = await doc.save();
+
+      await Printing.sharePdf(
+        bytes: pdfBytes,
+        filename:
+            'companies_export_${DateTime.now().millisecondsSinceEpoch}.pdf',
+      );
+    } on Object catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذّر التصدير: $e')),
+      );
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Build
+  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -157,23 +277,35 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
             ),
             Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: AppTextField(
-                controller: _searchController,
-                hint: 'ابحث بالاسم أو الهاتف أو البريد',
-                prefixIcon: Icons.search,
-                suffixIcon: _searchQuery.isEmpty
-                    ? null
-                    : IconButton(
-                        tooltip: 'مسح',
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      ),
-                onChanged: (String v) {
-                  setState(() => _searchQuery = v);
-                },
+              child: Row(
+                children: <Widget>[
+                  Expanded(
+                    child: AppTextField(
+                      controller: _searchController,
+                      hint: 'ابحث بالاسم أو الهاتف أو البريد',
+                      prefixIcon: Icons.search,
+                      suffixIcon: _searchQuery.isEmpty
+                          ? null
+                          : IconButton(
+                              tooltip: 'مسح',
+                              icon: const Icon(Icons.close),
+                              onPressed: () {
+                                _searchController.clear();
+                                setState(() => _searchQuery = '');
+                              },
+                            ),
+                      onChanged: (String v) {
+                        setState(() => _searchQuery = v);
+                      },
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  IconButton.filledTonal(
+                    tooltip: 'تصدير PDF',
+                    onPressed: () => _exportReport(all),
+                    icon: const Icon(Icons.download),
+                  ),
+                ],
               ),
             ),
             const SizedBox(height: 8),
@@ -233,7 +365,7 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
 }
 
 // ============================================================================
-// UI Components
+// Status filter
 // ============================================================================
 
 enum _StatusFilter { all, active, trial, expired }
@@ -274,6 +406,10 @@ class _StatusFilterBar extends StatelessWidget {
         _StatusFilter.expired => 'منتهي',
       };
 }
+
+// ============================================================================
+// KPI row
+// ============================================================================
 
 class _KpiRow extends StatelessWidget {
   const _KpiRow({required this.companies});
@@ -392,6 +528,10 @@ class _KpiCard extends StatelessWidget {
   }
 }
 
+// ============================================================================
+// Company card
+// ============================================================================
+
 class _CompanyCard extends StatelessWidget {
   const _CompanyCard({required this.company, required this.onTap});
 
@@ -415,7 +555,9 @@ class _CompanyCard extends StatelessWidget {
           decoration: BoxDecoration(
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: company.isSuspended ? scheme.error : scheme.outlineVariant,
+              color: company.isSuspended
+                  ? scheme.error
+                  : scheme.outlineVariant,
               width: company.isSuspended ? 2 : 1,
             ),
           ),
@@ -424,8 +566,12 @@ class _CompanyCard extends StatelessWidget {
             children: <Widget>[
               CircleAvatar(
                 radius: 22,
-                backgroundColor: company.isSuspended ? scheme.errorContainer : scheme.primaryContainer,
-                foregroundColor: company.isSuspended ? scheme.onErrorContainer : scheme.onPrimaryContainer,
+                backgroundColor: company.isSuspended
+                    ? scheme.errorContainer
+                    : scheme.primaryContainer,
+                foregroundColor: company.isSuspended
+                    ? scheme.onErrorContainer
+                    : scheme.onPrimaryContainer,
                 child: Text(
                   company.name.characters.first.toUpperCase(),
                   style: theme.textTheme.titleMedium?.copyWith(
@@ -467,7 +613,9 @@ class _CompanyCard extends StatelessWidget {
                             ),
                           ),
                         ),
-                        if (!company.isSuspended && sub.isActive && sub.plan != null) ...<Widget>[
+                        if (!company.isSuspended &&
+                            sub.isActive &&
+                            sub.plan != null) ...<Widget>[
                           const SizedBox(width: 6),
                           Text(
                             sub.plan!.label,
