@@ -209,23 +209,36 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
                 level: 0,
                 child: pw.Text(
                   'Hesaby — Companies Export',
-                  style: pw.TextStyle(fontSize: 18, fontWeight: pw.FontWeight.bold),
+                  style: pw.TextStyle(
+                    fontSize: 18,
+                    fontWeight: pw.FontWeight.bold,
+                  ),
                 ),
               ),
               pw.SizedBox(height: 6),
               pw.Text(
                 'Generated: ${DateFormat('yyyy/MM/dd HH:mm').format(DateTime.now())}',
-                style: const pw.TextStyle(fontSize: 10, color: PdfColors.grey700),
+                style: const pw.TextStyle(
+                  fontSize: 10,
+                  color: PdfColors.grey700,
+                ),
               ),
               pw.SizedBox(height: 12),
               pw.TableHelper.fromTextArray(
                 headers: rows.first,
                 data: rows.skip(1).toList(),
-                headerStyle: pw.TextStyle(fontWeight: pw.FontWeight.bold, fontSize: 9),
+                headerStyle: pw.TextStyle(
+                  fontWeight: pw.FontWeight.bold,
+                  fontSize: 9,
+                ),
                 cellStyle: const pw.TextStyle(fontSize: 8),
-                headerDecoration: const pw.BoxDecoration(color: PdfColors.grey300),
+                headerDecoration:
+                    const pw.BoxDecoration(color: PdfColors.grey300),
                 cellPadding: const pw.EdgeInsets.all(3),
-                border: pw.TableBorder.all(color: PdfColors.grey600, width: 0.4),
+                border: pw.TableBorder.all(
+                  color: PdfColors.grey600,
+                  width: 0.4,
+                ),
               ),
             ];
           },
