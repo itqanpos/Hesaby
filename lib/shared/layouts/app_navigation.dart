@@ -11,6 +11,7 @@ import '../../features/companies/presentation/providers/company_context_provider
 import '../../features/companies/presentation/providers/company_context_state.dart';
 import '../../features/companies/presentation/providers/members_providers.dart';
 import '../../features/admin/presentation/providers/platform_admin_provider.dart';
+import '../../features/admin/presentation/providers/admin_app_config_provider.dart'; // ⬅️ جديد
 
 // ============================================================================
 // Destinations
@@ -24,21 +25,20 @@ class _NavDestination {
     required this.icon,
     required this.color,
     this.requiredPermission,
+    this.featureFlagKey, // ⬅️ جديد
   });
 
   final String label;
   final String path;
   final IconData icon;
   final Color color;
-
-  /// Permission code required to see this destination.
   final String? requiredPermission;
+  final String? featureFlagKey; // مفتاح الميزة في التطبيق (مثال: 'pos')
 }
 
 @immutable
 class _NavSection {
   const _NavSection({required this.title, required this.items});
-
   final String title;
   final List<_NavDestination> items;
 }
@@ -59,6 +59,7 @@ const List<_NavSection> _sections = <_NavSection>[
         icon: Icons.point_of_sale_outlined,
         color: Color(0xFF0F7B6C),
         requiredPermission: MemberPermission.posUse,
+        featureFlagKey: 'pos', // ⬅️ مرتبط بمفتاح الميزة
       ),
     ],
   ),
@@ -78,6 +79,7 @@ const List<_NavSection> _sections = <_NavSection>[
         icon: Icons.warehouse_outlined,
         color: Color(0xFF5E35B1),
         requiredPermission: MemberPermission.inventoryView,
+        featureFlagKey: 'inventory', // ⬅️
       ),
       _NavDestination(
         label: 'الفواتير',
@@ -92,6 +94,7 @@ const List<_NavSection> _sections = <_NavSection>[
         icon: Icons.shopping_bag_outlined,
         color: Color(0xFF0288D1),
         requiredPermission: MemberPermission.purchasesView,
+        featureFlagKey: 'purchases', // ⬅️
       ),
       _NavDestination(
         label: 'المرتجعات',
@@ -125,6 +128,7 @@ const List<_NavSection> _sections = <_NavSection>[
         icon: Icons.analytics_outlined,
         color: Color(0xFFB71C1C),
         requiredPermission: MemberPermission.reportsView,
+        featureFlagKey: 'reports', // ⬅️
       ),
     ],
   ),
@@ -161,8 +165,14 @@ bool _isActive(String location, String path) {
 }
 
 List<_NavSection> _visibleSections(WidgetRef ref) {
-  final AsyncValue<CompanyMember?> memberAsync =
-      ref.watch(currentMemberProvider);
+  final AsyncValue<CompanyMember?> memberAsync = ref.watch(currentMemberProvider);
+  final appConfig = ref.watch(adminAppConfigProvider).valueOrNull;
+  final flags = appConfig?.featureFlags ?? <String, dynamic>{};
+
+  bool isFeatureEnabled(String? key) {
+    if (key == null) return true;
+    return flags[key] as bool? ?? true; // افتراضياً مفعل إذا لم يوجد
+  }
 
   final List<_NavSection> result = <_NavSection>[];
 
@@ -170,34 +180,27 @@ List<_NavSection> _visibleSections(WidgetRef ref) {
     result.addAll(_sections);
   } else {
     final CompanyMember? member = memberAsync.valueOrNull;
-    if (member == null) {
-      result.addAll(
-        _sections.map(
-          (_NavSection s) => _NavSection(
-            title: s.title,
-            items: s.items
-                .where((_NavDestination d) => d.requiredPermission == null)
-                .toList(growable: false),
-          ),
-        ).where((_NavSection s) => s.items.isNotEmpty),
-      );
-    } else {
-      for (final _NavSection section in _sections) {
-        final List<_NavDestination> visible = section.items
-            .where(
-              (_NavDestination d) =>
-                  d.requiredPermission == null ||
-                  member.hasPermission(d.requiredPermission!),
-            )
-            .toList(growable: false);
-        if (visible.isNotEmpty) {
-          result.add(_NavSection(title: section.title, items: visible));
+    
+    for (final _NavSection section in _sections) {
+      final List<_NavDestination> visible = section.items.where((d) {
+        // 1. التحقق من الصلاحيات
+        if (d.requiredPermission != null && member != null && !member.hasPermission(d.requiredPermission!)) {
+          return false;
         }
+        // 2. التحقق من تفعيل الميزة من لوحة التحكم
+        if (!isFeatureEnabled(d.featureFlagKey)) {
+          return false;
+        }
+        return true;
+      }).toList(growable: false);
+
+      if (visible.isNotEmpty) {
+        result.add(_NavSection(title: section.title, items: visible));
       }
     }
   }
 
-  // ⬇️ إضافة قسم إدارة المنصة (يظهر فقط للـ Platform Admin)
+  // إضافة قسم إدارة المنصة (يظهر فقط للـ Platform Admin)
   final bool isAdmin = ref.watch(isPlatformAdminProvider);
   if (isAdmin) {
     result.add(
@@ -208,7 +211,7 @@ List<_NavSection> _visibleSections(WidgetRef ref) {
             label: 'لوحة تحكم المنصة',
             path: '/admin/dashboard',
             icon: Icons.admin_panel_settings_outlined,
-            color: Color(0xFFC62828), // لون أحمر مميز
+            color: Color(0xFFC62828),
           ),
         ],
       ),
@@ -224,13 +227,11 @@ List<_NavSection> _visibleSections(WidgetRef ref) {
 
 class AppSidebar extends StatelessWidget {
   const AppSidebar({super.key});
-
   static const double width = 260;
 
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-
     return Container(
       width: width,
       decoration: BoxDecoration(
@@ -254,11 +255,8 @@ class AppDrawer extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-
     return Drawer(
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.zero,
-      ),
+      shape: const RoundedRectangleBorder(borderRadius: BorderRadius.zero),
       backgroundColor: scheme.surface,
       child: const SafeArea(child: _NavigationBody()),
     );
@@ -288,10 +286,7 @@ class _NavigationBody extends ConsumerWidget {
             padding: const EdgeInsets.symmetric(vertical: 4),
             children: <Widget>[
               for (final _NavSection section in visible)
-                _SectionGroup(
-                  section: section,
-                  location: location,
-                ),
+                _SectionGroup(section: section, location: location),
             ],
           ),
         ),
@@ -313,7 +308,6 @@ class _Header extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-
     final CompanyContextState ctx = ref.watch(companyContextProvider);
     final AuthState auth = ref.watch(authProvider);
 
@@ -322,12 +316,8 @@ class _Header extends ConsumerWidget {
     final String? email = auth.session?.email;
 
     final List<String> meta = <String>[];
-    if (branchName != null && branchName.isNotEmpty) {
-      meta.add(branchName);
-    }
-    if (email != null && email.isNotEmpty) {
-      meta.add(email);
-    }
+    if (branchName != null && branchName.isNotEmpty) meta.add(branchName);
+    if (email != null && email.isNotEmpty) meta.add(email);
 
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 16, 16, 12),
@@ -340,11 +330,7 @@ class _Header extends ConsumerWidget {
               color: scheme.primary,
               borderRadius: BorderRadius.circular(12),
             ),
-            child: Icon(
-              Icons.point_of_sale_outlined,
-              color: scheme.onPrimary,
-              size: 22,
-            ),
+            child: Icon(Icons.point_of_sale_outlined, color: scheme.onPrimary, size: 22),
           ),
           const SizedBox(width: 12),
           Expanded(
@@ -354,9 +340,7 @@ class _Header extends ConsumerWidget {
               children: <Widget>[
                 Text(
                   companyName,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                  ),
+                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w800),
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -364,9 +348,7 @@ class _Header extends ConsumerWidget {
                   const SizedBox(height: 2),
                   Text(
                     meta.join(' · '),
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
+                    style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant),
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                   ),
@@ -381,15 +363,11 @@ class _Header extends ConsumerWidget {
 }
 
 // ============================================================================
-// Section
+// Section & Tile
 // ============================================================================
 
 class _SectionGroup extends StatelessWidget {
-  const _SectionGroup({
-    required this.section,
-    required this.location,
-  });
-
+  const _SectionGroup({required this.section, required this.location});
   final _NavSection section;
   final String location;
 
@@ -426,16 +404,8 @@ class _SectionGroup extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Tile
-// ============================================================================
-
 class _NavigationTile extends StatelessWidget {
-  const _NavigationTile({
-    required this.destination,
-    required this.isActive,
-  });
-
+  const _NavigationTile({required this.destination, required this.isActive});
   final _NavDestination destination;
   final bool isActive;
 
@@ -449,17 +419,10 @@ class _NavigationTile extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    final Color background = isActive
-        ? scheme.onSurface.withValues(alpha: 0.06)
-        : Colors.transparent;
-    final Color badgeBackground = isActive
-        ? destination.color.withValues(alpha: 0.16)
-        : destination.color.withValues(alpha: 0.10);
-    final Color iconColor = isActive
-        ? destination.color
-        : destination.color.withValues(alpha: 0.75);
-    final Color titleColor =
-        isActive ? scheme.onSurface : scheme.onSurfaceVariant;
+    final Color background = isActive ? scheme.onSurface.withValues(alpha: 0.06) : Colors.transparent;
+    final Color badgeBackground = isActive ? destination.color.withValues(alpha: 0.16) : destination.color.withValues(alpha: 0.10);
+    final Color iconColor = isActive ? destination.color : destination.color.withValues(alpha: 0.75);
+    final Color titleColor = isActive ? scheme.onSurface : scheme.onSurfaceVariant;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 1),
@@ -473,9 +436,7 @@ class _NavigationTile extends StatelessWidget {
             children: <Widget>[
               if (isActive)
                 PositionedDirectional(
-                  start: 0,
-                  top: 8,
-                  bottom: 8,
+                  start: 0, top: 8, bottom: 8,
                   child: Container(
                     width: 3,
                     decoration: BoxDecoration(
@@ -485,32 +446,23 @@ class _NavigationTile extends StatelessWidget {
                   ),
                 ),
               Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 9,
-                ),
+                padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 9),
                 child: Row(
                   children: <Widget>[
                     Container(
-                      width: 32,
-                      height: 32,
+                      width: 32, height: 32,
                       decoration: BoxDecoration(
                         color: badgeBackground,
                         borderRadius: BorderRadius.circular(8),
                       ),
-                      child: Icon(
-                        destination.icon,
-                        size: 18,
-                        color: iconColor,
-                      ),
+                      child: Icon(destination.icon, size: 18, color: iconColor),
                     ),
                     const SizedBox(width: 12),
                     Expanded(
                       child: Text(
                         destination.label,
                         style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight:
-                              isActive ? FontWeight.w700 : FontWeight.w500,
+                          fontWeight: isActive ? FontWeight.w700 : FontWeight.w500,
                           color: titleColor,
                         ),
                         overflow: TextOverflow.ellipsis,
@@ -543,29 +495,11 @@ class _Footer extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 12),
       child: Row(
         children: <Widget>[
-          Container(
-            width: 6,
-            height: 6,
-            decoration: BoxDecoration(
-              color: scheme.primary,
-              shape: BoxShape.circle,
-            ),
-          ),
+          Container(width: 6, height: 6, decoration: BoxDecoration(color: scheme.primary, shape: BoxShape.circle)),
           const SizedBox(width: 8),
-          Text(
-            'حسابي',
-            style: theme.textTheme.labelSmall?.copyWith(
-              fontWeight: FontWeight.w700,
-              color: scheme.onSurfaceVariant,
-            ),
-          ),
+          Text('حسابي', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
           const Spacer(),
-          Text(
-            'v0.1.0',
-            style: theme.textTheme.labelSmall?.copyWith(
-              color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
-            ),
-          ),
+          Text('v0.1.0', style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant.withValues(alpha: 0.75))),
         ],
       ),
     );
