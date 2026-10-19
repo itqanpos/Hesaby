@@ -3,6 +3,8 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../core/utils/logger.dart';
+
 class AppConfig {
   const AppConfig({
     required this.maintenanceMode,
@@ -19,6 +21,19 @@ class AppConfig {
   final String announcementText;
   final String announcementSeverity; // 'info', 'warning', 'critical'
   final Map<String, dynamic> featureFlags;
+
+  /// Safe defaults — used when the config cannot be fetched.
+  /// Everything is off, no announcement, all features enabled.
+  factory AppConfig.defaults() {
+    return const AppConfig(
+      maintenanceMode: false,
+      maintenanceMessage: '',
+      announcementVisible: false,
+      announcementText: '',
+      announcementSeverity: 'info',
+      featureFlags: <String, dynamic>{},
+    );
+  }
 
   factory AppConfig.fromMap(Map<String, dynamic> map) {
     return AppConfig(
@@ -46,13 +61,25 @@ class AppConfig {
 class AppConfigNotifier extends AsyncNotifier<AppConfig> {
   @override
   Future<AppConfig> build() async {
-    final client = Supabase.instance.client;
-    final response = await client
-        .from('app_config')
-        .select()
-        .eq('id', 'singleton')
-        .single();
-    return AppConfig.fromMap(response);
+    try {
+      final client = Supabase.instance.client;
+      final response = await client
+          .from('app_config')
+          .select()
+          .eq('id', 'singleton')
+          .single()
+          .timeout(const Duration(seconds: 5));
+
+      return AppConfig.fromMap(response);
+    } on Object catch (error, stackTrace) {
+      // Do not block the app if the config cannot be fetched.
+      // Return safe defaults so the user can still use the app.
+      AppLogger.warning(
+        'Failed to load app_config (non-fatal). Using defaults.',
+      );
+      AppLogger.error('app_config load failed', error, stackTrace);
+      return AppConfig.defaults();
+    }
   }
 
   Future<void> save(AppConfig config) async {
@@ -61,13 +88,14 @@ class AppConfigNotifier extends AsyncNotifier<AppConfig> {
         .from('app_config')
         .update(config.toMap())
         .eq('id', 'singleton');
-    
+
     // تحديث الحالة فوراً بعد الحفظ
-    state = AsyncData(config);
+    state = AsyncData<AppConfig>(config);
   }
 }
 
-final adminAppConfigProvider =
+final AsyncNotifierProvider<AppConfigNotifier, AppConfig>
+    adminAppConfigProvider =
     AsyncNotifierProvider<AppConfigNotifier, AppConfig>(
   AppConfigNotifier.new,
 );
