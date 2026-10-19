@@ -29,8 +29,7 @@ enum DirectSalePrintResult {
   sendFailed,
 }
 
-/// Prints [sale] directly to the saved thermal printer — no preview
-/// dialog, no PDF, no share sheet.
+/// Prints [sale] directly to the saved thermal printer.
 Future<DirectSalePrintResult> printSaleDirect({
   required WidgetRef ref,
   required Sale sale,
@@ -205,6 +204,11 @@ Receipt buildReceiptFromSale({
     customerAddress: sale.customerId != null ? customerAddress : null,
     customerPhone: sale.customerId != null ? customerPhone : null,
     cashierName: cashierName,
+    // ⬇️ جديد: تمرير الرصيد السابق والجديد
+    previousBalance: sale.previousBalance,
+    newBalance: sale.newBalance,
+    // ⬇️ جديد: تمرير التذييل
+    footer: ref.read(receiptFooterProvider),
   );
 }
 
@@ -231,7 +235,6 @@ Future<Uint8List?> _loadLogoBytes(WidgetRef ref) async {
       ref.read(companySettingsProvider).valueOrNull;
   if (s == null || s.companyId.isEmpty) return null;
 
-  // Prevent black box: only load if a logo URL is actually present.
   if (!s.hasLogo) return null;
 
   try {
