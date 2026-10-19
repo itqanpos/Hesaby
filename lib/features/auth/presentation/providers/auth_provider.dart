@@ -8,6 +8,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
     show Supabase, SupabaseClient;
 
+import '../../../../core/utils/logger.dart';
 import '../../data/datasources/auth_remote_datasource.dart';
 import '../../data/repositories/auth_repository_impl.dart';
 import '../../domain/entities/auth_session.dart';
@@ -78,7 +79,8 @@ class AuthNotifier extends Notifier<AuthState> {
     final StreamSubscription<AuthSession?> subscription =
         repository.authStateChanges.listen(
       _applySession,
-      onError: (Object _, StackTrace __) {
+      onError: (Object error, StackTrace stackTrace) {
+        AppLogger.error('Auth stream error', error, stackTrace);
         if (_isDisposed) return;
         state = const AuthState.unauthenticated();
       },
@@ -89,6 +91,8 @@ class AuthNotifier extends Notifier<AuthState> {
       subscription.cancel();
     });
 
+    // Fire-and-forget session restoration — must never block the app.
+    // We wrap in unawaited so a failure here cannot prevent init.
     unawaited(_restoreSession());
 
     return const AuthState.unknown();
@@ -111,15 +115,6 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
-  /// Registers a new user. When [companyName] is provided, the backend
-  /// bootstraps a company owned by the new user.
-  ///
-  /// Returns:
-  /// * `null` on success with an active session (email confirmation
-  ///   disabled), or
-  /// * `AuthSignUpResult.needsEmailConfirmation` on success without a
-  ///   session, or
-  /// * an [AuthFailureType] on failure.
   Future<Object?> signUp({
     required String email,
     required String password,
@@ -148,12 +143,6 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
-  /// Starts the Google OAuth flow.
-  ///
-  /// The returned value reflects only the ability to *launch* the flow.
-  /// The actual session arrives asynchronously through the auth state
-  /// stream owned by this notifier — by the time it fires, `state` is
-  /// already updated and every listener (including the router) reacts.
   Future<AuthFailureType?> signInWithGoogle() async {
     try {
       await ref.read(authRepositoryProvider).signInWithGoogle();
@@ -187,14 +176,25 @@ class AuthNotifier extends Notifier<AuthState> {
     }
   }
 
+  /// Restores the current session on startup.
+  ///
+  /// Must NEVER leave the state in `unknown`:
+  /// * On success, apply the session.
+  /// * On ANY failure (network, storage, plugin), fall back to
+  ///   `unauthenticated` so the router can proceed to the login screen.
+  /// * A timeout guards against a hanging plugin call.
   Future<void> _restoreSession() async {
     try {
-      final AuthSession? session = await ref.read(
-        getCurrentSessionUseCaseProvider,
-      )();
+      final AuthSession? session = await ref
+          .read(getCurrentSessionUseCaseProvider)()
+          .timeout(const Duration(seconds: 5));
+
       if (_isDisposed || !state.isUnknown) return;
       _applySession(session);
-    } on AuthException {
+    } on Object catch (error, stackTrace) {
+      // Covers AuthException, TimeoutException, MissingPluginException,
+      // storage failures, and any other unexpected error.
+      AppLogger.error('Session restore failed', error, stackTrace);
       if (_isDisposed || !state.isUnknown) return;
       state = const AuthState.unauthenticated();
     }
