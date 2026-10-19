@@ -22,14 +22,6 @@ import '../providers/printer_providers.dart';
 import '../widgets/thermal_receipt_preview.dart';
 
 /// Opens the print preview dialog for [receipt].
-///
-/// The dialog shows:
-/// * A live **thermal preview** — the exact bitmap that will be sent to
-///   the printer (WYSIWYG).
-/// * Up to three actions (in order):
-///     1. **طباعة حرارية** (Bluetooth) — only when a saved printer exists.
-///     2. **طباعة** — prints a PDF via the system dialog.
-///     3. **مشاركة** — shares a PDF via the platform sheet.
 Future<void> showPosPrintPreviewDialog({
   required BuildContext context,
   required Receipt receipt,
@@ -84,9 +76,8 @@ class _PosPrintPreviewDialogState
         ref.read(companySettingsProvider).valueOrNull;
     if (settings == null || settings.companyId.isEmpty) return null;
     
-    // Prevent black box: only load if a logo URL is actually present.
-    if (!settings.hasLogo) return null; 
-
+    // CompanyLogoLoader handles empty URL internally — no need to check
+    // hasLogo here (previously blocked valid logos).
     try {
       return await const CompanyLogoLoader().load(
         companyId: settings.companyId,
