@@ -3,7 +3,6 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:hesabi/features/companies/domain/entities/company.dart';
 import 'package:hesabi/features/companies/presentation/providers/company_context_provider.dart';
 import 'package:hesabi/features/companies/presentation/providers/company_context_state.dart';
 import 'package:hesabi/features/sales/domain/entities/sale_entities.dart';
@@ -19,14 +18,14 @@ class FakeCustomerRepository implements CustomerRepository {
 
   final List<Customer> _initial;
 
-  /// عدد مرات استدعاء updateCustomer — للتحقق من حدوث التحديث.
   int updateCallCount = 0;
-
-  /// آخر قيمة isActive تم إرسالها.
   bool? lastIsActive;
 
   @override
-  Future<List<Customer>> listCustomers(String companyId, {bool includeInactive = false}) async {
+  Future<List<Customer>> listCustomers(
+    String companyId, {
+    bool includeInactive = false,
+  }) async {
     return _initial;
   }
 
@@ -56,16 +55,12 @@ class FakeCustomerRepository implements CustomerRepository {
       isActive: isActive,
     );
 
-    // تحديث القائمة المحلية
     final int index = _initial.indexWhere((c) => c.id == customerId);
     _initial[index] = updated;
 
     return updated;
   }
 
-  // ------------------------------------------------------------------------
-  // Methods not used by these tests — throw UnimplementedError.
-  // ------------------------------------------------------------------------
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError(
@@ -74,35 +69,33 @@ class FakeCustomerRepository implements CustomerRepository {
 }
 
 // ============================================================================
+// Fake Company Context Notifier
+// ============================================================================
+
+/// Notifier وهمي يتخطى التهيئة الحقيقية ويعيد حالة ثابتة.
+class _FakeCompanyContextNotifier extends CompanyContextNotifier {
+  _FakeCompanyContextNotifier();
+
+  @override
+  CompanyContextState build() {
+    return const CompanyContextState(
+      currentCompany: null,
+      branches: <dynamic>[],
+      currentBranch: null,
+    );
+  }
+}
+
+// ============================================================================
 // Helpers
 // ============================================================================
 
-/// يبني `ProviderContainer` مع تجاوزات آمنة (بدون الحاجة لكائنات حقيقية).
 ProviderContainer buildContainer(FakeCustomerRepository repo) {
-  // إنشاء شركة وهمية
-  final fakeCompany = Company(
-    id: 'co1',
-    name: 'شركة وهمية',
-    currency: 'EGP',
-    timezone: 'Africa/Cairo',
-    isActive: true,
-    createdAt: DateTime(2026),
-    updatedAt: DateTime(2026),
-  );
-
-  // إنشاء حالة سياق وهمية (سنحتاج للتأكد من الحقول المطلوبة في ملفك)
-  // ملاحظة: إذا كان CompanyContextState يحتوي على حقول أخرى، أضفها هنا.
-  final fakeContext = CompanyContextState(
-    currentCompany: fakeCompany,
-    branches: const [],
-    currentBranch: null,
-  );
-
   return ProviderContainer(
     overrides: <Override>[
-      // نُجبر سياق الشركة على إرجاع الشركة الوهمية
-      companyContextProvider.overrideWith((ref) => fakeContext),
-      // نُغيّر customerRepositoryProvider ليعيد الـ fake.
+      companyContextProvider.overrideWith(
+        _FakeCompanyContextNotifier.new,
+      ),
       customerRepositoryProvider.overrideWithValue(repo),
     ],
   );
@@ -113,9 +106,6 @@ ProviderContainer buildContainer(FakeCustomerRepository repo) {
 // ============================================================================
 
 void main() {
-  // ------------------------------------------------------------------------
-  // Common test data
-  // ------------------------------------------------------------------------
   final activeCustomer = Customer(
     id: 'c1',
     companyId: 'co1',
@@ -137,9 +127,6 @@ void main() {
   );
 
   group('CustomersNotifier — updateCustomer(isActive)', () {
-    // ----------------------------------------------------------------------
-    // 1) تعطيل عميل
-    // ----------------------------------------------------------------------
     test('disables a customer successfully', () async {
       final repo = FakeCustomerRepository(
         <Customer>[activeCustomer, secondCustomer],
@@ -160,9 +147,6 @@ void main() {
       expect(repo.lastIsActive, isFalse);
     });
 
-    // ----------------------------------------------------------------------
-    // 2) إعادة تشغيل عميل
-    // ----------------------------------------------------------------------
     test('re-enables a disabled customer successfully', () async {
       final disabledCustomer = activeCustomer.copyWith(isActive: false);
       final repo = FakeCustomerRepository(<Customer>[disabledCustomer]);
@@ -182,9 +166,6 @@ void main() {
       expect(repo.lastIsActive, isTrue);
     });
 
-    // ----------------------------------------------------------------------
-    // 3) تحديث بدون تغيير isActive (لا يتأثر)
-    // ----------------------------------------------------------------------
     test('updating other fields does not alter isActive', () async {
       final repo = FakeCustomerRepository(<Customer>[activeCustomer]);
 
@@ -196,16 +177,12 @@ void main() {
       final Customer result = await notifier.updateCustomer(
         customerId: 'c1',
         phone: '01099999999',
-        // isActive: لم يُمرر
       );
 
-      expect(result.isActive, isTrue); // لم يتغير
-      expect(repo.lastIsActive, isNull); // لم يُرسل
+      expect(result.isActive, isTrue);
+      expect(repo.lastIsActive, isNull);
     });
 
-    // ----------------------------------------------------------------------
-    // 4) سيناريو كامل: تعطيل → إعادة تشغيل → تعطيل مرة أخرى
-    // ----------------------------------------------------------------------
     test('full disable → re-enable → disable cycle', () async {
       final repo = FakeCustomerRepository(<Customer>[activeCustomer]);
 
@@ -214,7 +191,6 @@ void main() {
 
       final notifier = container.read(customersProvider.notifier);
 
-      // تعطيل
       final Customer disabled = await notifier.updateCustomer(
         customerId: 'c1',
         isActive: false,
@@ -222,7 +198,6 @@ void main() {
       expect(disabled.isActive, isFalse);
       expect(repo.updateCallCount, 1);
 
-      // إعادة تشغيل
       final Customer reEnabled = await notifier.updateCustomer(
         customerId: 'c1',
         isActive: true,
@@ -230,7 +205,6 @@ void main() {
       expect(reEnabled.isActive, isTrue);
       expect(repo.updateCallCount, 2);
 
-      // تعطيل ثالث
       final Customer disabledAgain = await notifier.updateCustomer(
         customerId: 'c1',
         isActive: false,
@@ -239,9 +213,6 @@ void main() {
       expect(repo.updateCallCount, 3);
     });
 
-    // ----------------------------------------------------------------------
-    // 5) الرصيد لا يتأثر بالتعطيل
-    // ----------------------------------------------------------------------
     test('balance is preserved across disable/enable', () async {
       final richCustomer = activeCustomer.copyWith(balance: 1234.56);
       final repo = FakeCustomerRepository(<Customer>[richCustomer]);
