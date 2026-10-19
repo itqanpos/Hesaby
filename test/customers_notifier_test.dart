@@ -3,6 +3,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:hesabi/features/companies/domain/entities/branch.dart'; // ⬅️ جديد
 import 'package:hesabi/features/companies/presentation/providers/company_context_provider.dart';
 import 'package:hesabi/features/companies/presentation/providers/company_context_state.dart';
 import 'package:hesabi/features/sales/domain/entities/sale_entities.dart';
@@ -17,7 +18,6 @@ class FakeCustomerRepository implements CustomerRepository {
   FakeCustomerRepository(this._initial);
 
   final List<Customer> _initial;
-
   int updateCallCount = 0;
   bool? lastIsActive;
 
@@ -57,7 +57,6 @@ class FakeCustomerRepository implements CustomerRepository {
 
     final int index = _initial.indexWhere((c) => c.id == customerId);
     _initial[index] = updated;
-
     return updated;
   }
 
@@ -72,7 +71,6 @@ class FakeCustomerRepository implements CustomerRepository {
 // Fake Company Context Notifier
 // ============================================================================
 
-/// Notifier وهمي يتخطى التهيئة الحقيقية ويعيد حالة ثابتة.
 class _FakeCompanyContextNotifier extends CompanyContextNotifier {
   _FakeCompanyContextNotifier();
 
@@ -80,7 +78,7 @@ class _FakeCompanyContextNotifier extends CompanyContextNotifier {
   CompanyContextState build() {
     return const CompanyContextState(
       currentCompany: null,
-      branches: <dynamic>[],
+      branches: <Branch>[], // ⬅️ تم التصحيح
       currentBranch: null,
     );
   }
@@ -93,9 +91,7 @@ class _FakeCompanyContextNotifier extends CompanyContextNotifier {
 ProviderContainer buildContainer(FakeCustomerRepository repo) {
   return ProviderContainer(
     overrides: <Override>[
-      companyContextProvider.overrideWith(
-        _FakeCompanyContextNotifier.new,
-      ),
+      companyContextProvider.overrideWith(_FakeCompanyContextNotifier.new),
       customerRepositoryProvider.overrideWithValue(repo),
     ],
   );
@@ -136,7 +132,6 @@ void main() {
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
-
       final Customer result = await notifier.updateCustomer(
         customerId: 'c1',
         isActive: false,
@@ -155,7 +150,6 @@ void main() {
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
-
       final Customer result = await notifier.updateCustomer(
         customerId: 'c1',
         isActive: true,
@@ -173,7 +167,6 @@ void main() {
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
-
       final Customer result = await notifier.updateCustomer(
         customerId: 'c1',
         phone: '01099999999',
