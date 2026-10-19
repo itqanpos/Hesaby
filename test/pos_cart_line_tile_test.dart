@@ -21,7 +21,6 @@ void main() {
 
   testWidgets('focuses quantity when focusedCartLineProvider matches', (tester) async {
     final container = ProviderContainer();
-    // تفعيل التركيز لهذا السطر
     container.read(focusedCartLineProvider.notifier).state = testLine.key;
 
     await tester.pumpWidget(
@@ -42,9 +41,10 @@ void main() {
 
     await tester.pumpAndSettle();
 
-    // التحقق من أن حقل الكمية تم التركيز عليه
     final textField = tester.widget<TextField>(find.byType(TextField).first);
     expect(textField.focusNode?.hasFocus, isTrue);
+
+    container.dispose();
   });
 
   testWidgets('shows SnackBar when quantity exceeds stock', (tester) async {
@@ -53,28 +53,28 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         home: Scaffold(
-          body: Consumer(
-            child: PosCartLineTile(
-              line: testLine,
-              onSetQuantity: (q) {
-                if (q > testLine.availableStock!) {
-                  quantityRejected = true;
-                  return false;
-                }
-                return true;
-              },
-              onSetPrice: (p) => true,
-              onRemove: () {},
-            ),
+          body: PosCartLineTile(
+            line: testLine,
+            onSetQuantity: (q) {
+              if (q > testLine.availableStock!) {
+                quantityRejected = true;
+                return false;
+              }
+              return true;
+            },
+            onSetPrice: (p) => true,
+            onRemove: () {},
           ),
         ),
       ),
     );
 
-    // إدخال كمية أكبر من المتاح
     await tester.enterText(find.byType(TextField).first, '10');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
+
+    // التحقق من أن الكمية رُفضت
+    expect(quantityRejected, isTrue);
 
     // التحقق من ظهور رسالة التحذير
     expect(find.text('عذراً، الكمية المتاحة هي 5 فقط.'), findsOneWidget);
