@@ -8,27 +8,21 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/utils/logger.dart';
 
-/// Full-screen barcode scanner dialog — speed tuned.
+/// Full-screen barcode scanner dialog — stability-first.
 ///
-/// ## Speed
-/// * `DetectionSpeed.unrestricted` (no throttling between frames).
-/// * Only the formats a POS really needs (fewer decoders = faster frames).
-/// * Camera started manually and exactly once (`autoStart: false`), so
-///   there is no start/stop race with the widget or with retry.
-/// * The result is returned the moment a barcode is decoded: no setState,
-///   no animation delay, haptic/sound are fire-and-forget.
-/// * Static overlay (dim + corners) is painted once; only the laser line
-///   repaints each frame, with no Path boolean ops and no shaders.
-///
-/// ## Correctness fixes vs. previous version
-/// * Detection is paused while the manual-entry sheet is open, so a scan
-///   can never pop the sheet instead of the dialog.
-/// * Single owner for camera start; lifecycle-aware (stops in background,
-///   restarts on resume, auto-retries after returning from permission
-///   settings).
-/// * Scaffold ignores the keyboard inset so the preview never resizes under
-///   the cached scan window.
-/// * Torch icon reflects the real torch state; torch errors are caught.
+/// ## Correctness fixes
+/// * **No `scanWindow`** — the previous version passed widget coordinates
+///   to `MobileScanner.scanWindow`, which expects **image coordinates**.
+///   This mismatch caused native crashes on some Android devices
+///   (especially Samsung). The visual overlay is kept as UX only and does
+///   not affect detection.
+/// * **No `cameraResolution`** — some Android devices reject a hard
+///   resolution request at the CameraX level, which crashes the app
+///   instead of falling back. Removing it lets the SDK choose a safe
+///   default.
+/// * Detection paused while the manual-entry sheet is open.
+/// * Single owner for camera start; lifecycle-aware.
+/// * Torch icon reflects the real state; torch errors are caught.
 class PosBarcodeScannerDialog extends StatefulWidget {
   const PosBarcodeScannerDialog({super.key});
 
@@ -48,11 +42,10 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   bool _isRetrying = false;
   MobileScannerException? _cameraError;
 
-  /// Scan window is cached together with the size it was computed for.
-  /// It is recomputed only if the available size really changes (e.g.
-  /// rotation) — never on ordinary rebuilds.
-  Rect? _scanWindow;
-  Size? _scanWindowFor;
+  /// Visual overlay rectangle — widget coordinates, **not** used by the
+  /// scanner. Recomputed only when the available size changes.
+  Rect? _overlayRect;
+  Size? _overlayRectFor;
 
   @override
   void initState() {
@@ -64,11 +57,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       detectionSpeed: DetectionSpeed.unrestricted,
       facing: CameraFacing.back,
       torchEnabled: false,
-      // Android only. 1280x720 reads small / dense barcodes at a distance
-      // noticeably better than 640x480 while staying cheap with scanWindow.
-      // Remove this line if your mobile_scanner version doesn't have it.
-      cameraResolution: const Size(1280, 720),
-      // Fewer formats => faster decoding. Add back QR / ITF only if needed.
+      // Fewer formats => faster decoding.
       formats: const <BarcodeFormat>[
         BarcodeFormat.ean13,
         BarcodeFormat.ean8,
@@ -189,7 +178,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   }
 
   // ---------------------------------------------------------------------------
-  // Detection — keep this as short as possible
+  // Detection
   // ---------------------------------------------------------------------------
 
   void _handleDetection(BarcodeCapture capture) {
@@ -231,18 +220,18 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   }
 
   // ---------------------------------------------------------------------------
-  // Scan window
+  // Visual overlay rectangle
   // ---------------------------------------------------------------------------
 
-  Rect _scanWindowFor_(BoxConstraints constraints) {
+  Rect _overlayRectFor(BoxConstraints constraints) {
     final Size size = constraints.biggest;
-    if (_scanWindow != null && _scanWindowFor == size) return _scanWindow!;
+    if (_overlayRect != null && _overlayRectFor == size) return _overlayRect!;
 
     // Barcode-friendly aspect ratio: wider than tall (2:1).
     final double width = (size.width * 0.82).clamp(240.0, 340.0);
     final double height = width * 0.5;
-    _scanWindowFor = size;
-    return _scanWindow = Rect.fromCenter(
+    _overlayRectFor = size;
+    return _overlayRect = Rect.fromCenter(
       center: Offset(size.width / 2, size.height * 0.40),
       width: width,
       height: height,
@@ -259,7 +248,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
 
     return Scaffold(
       backgroundColor: Colors.black,
-      // The preview must never resize when the manual-entry keyboard opens.
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
         backgroundColor: Colors.black,
@@ -291,14 +279,14 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
             )
           : LayoutBuilder(
               builder: (BuildContext context, BoxConstraints constraints) {
-                final Rect scanWindow = _scanWindowFor_(constraints);
+                final Rect overlayRect = _overlayRectFor(constraints);
 
                 return Stack(
                   children: <Widget>[
+                    // ⬇️ بدون scanWindow — نمسح الصورة بالكامل
                     MobileScanner(
                       controller: _controller,
                       onDetect: _handleDetection,
-                      scanWindow: scanWindow,
                       errorBuilder: (
                         BuildContext context,
                         MobileScannerException error,
@@ -323,7 +311,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                       child: RepaintBoundary(
                         child: CustomPaint(
                           size: Size.infinite,
-                          painter: _FramePainter(rect: scanWindow),
+                          painter: _FramePainter(rect: overlayRect),
                         ),
                       ),
                     ),
@@ -334,7 +322,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                         child: CustomPaint(
                           size: Size.infinite,
                           painter: _LaserPainter(
-                            rect: scanWindow,
+                            rect: overlayRect,
                             animation: _laserController,
                           ),
                         ),
@@ -415,7 +403,6 @@ class _BottomHint extends StatelessWidget {
 // Painters
 // ============================================================================
 
-/// Static: dimmed surroundings + rounded border + corner brackets.
 class _FramePainter extends CustomPainter {
   const _FramePainter({required this.rect});
 
@@ -425,7 +412,6 @@ class _FramePainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     final RRect hole = RRect.fromRectAndRadius(rect, const Radius.circular(16));
 
-    // drawDRRect is much cheaper than Path.combine(difference, ...).
     canvas.drawDRRect(
       RRect.fromRectXY(Offset.zero & size, 0, 0),
       hole,
@@ -448,19 +434,15 @@ class _FramePainter extends CustomPainter {
       ..color = Colors.white;
 
     final Path corners = Path()
-      // top-left
       ..moveTo(rect.left, rect.top + c)
       ..lineTo(rect.left, rect.top)
       ..lineTo(rect.left + c, rect.top)
-      // top-right
       ..moveTo(rect.right, rect.top + c)
       ..lineTo(rect.right, rect.top)
       ..lineTo(rect.right - c, rect.top)
-      // bottom-left
       ..moveTo(rect.left, rect.bottom - c)
       ..lineTo(rect.left, rect.bottom)
       ..lineTo(rect.left + c, rect.bottom)
-      // bottom-right
       ..moveTo(rect.right, rect.bottom - c)
       ..lineTo(rect.right, rect.bottom)
       ..lineTo(rect.right - c, rect.bottom);
@@ -471,8 +453,6 @@ class _FramePainter extends CustomPainter {
   bool shouldRepaint(_FramePainter old) => old.rect != rect;
 }
 
-/// Animated: only a glow line and a core line. Repaints via [repaint]
-/// directly, with no widget rebuild at all.
 class _LaserPainter extends CustomPainter {
   _LaserPainter({required this.rect, required Animation<double> animation})
       : _animation = animation,
