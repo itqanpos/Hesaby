@@ -19,10 +19,15 @@ void main() {
     availableStock: 5,
   );
 
-  testWidgets('focuses quantity when focusedCartLineProvider matches', (tester) async {
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test 1: Focus moves to quantity field when provider is set
+  // ══════════════════════════════════════════════════════════════════════════
+  testWidgets('focuses quantity when focusedCartLineProvider matches',
+      (tester) async {
     final container = ProviderContainer();
-    container.read(focusedCartLineProvider.notifier).state = testLine.key;
+    addTearDown(container.dispose);
 
+    // ⬇️ بناء الواجهة أولاً (قبل تعيين الحالة)
     await tester.pumpWidget(
       UncontrolledProviderScope(
         container: container,
@@ -30,53 +35,67 @@ void main() {
           home: Scaffold(
             body: PosCartLineTile(
               line: testLine,
-              onSetQuantity: (q) => true,
-              onSetPrice: (p) => true,
+              onSetQuantity: (double q) => true,
+              onSetPrice: (double p) => true,
               onRemove: () {},
             ),
           ),
         ),
       ),
     );
+    await tester.pump();
 
+    // ⬇️ الآن نُغيّر الحالة لتفعيل ref.listen
+    container.read(focusedCartLineProvider.notifier).state = testLine.key;
     await tester.pumpAndSettle();
 
-    final textField = tester.widget<TextField>(find.byType(TextField).first);
-    expect(textField.focusNode?.hasFocus, isTrue);
-
-    container.dispose();
+    // التحقق من أن حقل الكمية حصل على التركيز
+    final TextField quantityField =
+        tester.widget<TextField>(find.byType(TextField).first);
+    expect(quantityField.focusNode?.hasFocus, isTrue);
   });
 
+  // ══════════════════════════════════════════════════════════════════════════
+  // Test 2: SnackBar appears when quantity exceeds stock
+  // ══════════════════════════════════════════════════════════════════════════
   testWidgets('shows SnackBar when quantity exceeds stock', (tester) async {
     bool quantityRejected = false;
 
+    // ⬇️ إضافة ProviderScope لحل مشكلة "No ProviderScope found"
     await tester.pumpWidget(
-      MaterialApp(
-        home: Scaffold(
-          body: PosCartLineTile(
-            line: testLine,
-            onSetQuantity: (q) {
-              if (q > testLine.availableStock!) {
-                quantityRejected = true;
-                return false;
-              }
-              return true;
-            },
-            onSetPrice: (p) => true,
-            onRemove: () {},
+      ProviderScope(
+        child: MaterialApp(
+          home: Scaffold(
+            body: PosCartLineTile(
+              line: testLine,
+              onSetQuantity: (double q) {
+                if (q > testLine.availableStock!) {
+                  quantityRejected = true;
+                  return false;
+                }
+                return true;
+              },
+              onSetPrice: (double p) => true,
+              onRemove: () {},
+            ),
           ),
         ),
       ),
     );
+    await tester.pump();
 
+    // إدخال كمية تتجاوز المتاح (5)
     await tester.enterText(find.byType(TextField).first, '10');
     await tester.testTextInput.receiveAction(TextInputAction.done);
     await tester.pumpAndSettle();
 
-    // التحقق من أن الكمية رُفضت
+    // التحقق من رفض الكمية
     expect(quantityRejected, isTrue);
 
     // التحقق من ظهور رسالة التحذير
-    expect(find.text('عذراً، الكمية المتاحة هي 5 فقط.'), findsOneWidget);
+    expect(
+      find.text('عذراً، الكمية المتاحة هي 5 فقط.'),
+      findsOneWidget,
+    );
   });
 }
