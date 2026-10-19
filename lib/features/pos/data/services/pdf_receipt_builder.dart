@@ -135,7 +135,7 @@ abstract final class PdfReceiptBuilder {
     ];
   }
 
-  // ⬇️ دالة جديدة لقسم الإجماليات
+  // ⬇️ دالة جديدة لقسم الإجماليات (مع طريقة الدفع)
   static pw.Widget _totalsSection(Receipt receipt, _Sizes s, PrintStyleSettings style) {
     final double totalOwed = receipt.total + (receipt.previousBalance ?? 0);
     final double newBalance = receipt.newBalance ?? 0;
@@ -176,8 +176,10 @@ abstract final class PdfReceiptBuilder {
           ),
         ),
 
-        // 4. المدفوع
+        // 4. طريقة الدفع + المدفوع
         pw.SizedBox(height: 8),
+        _kvRow('طريقة الدفع', _paymentMethodLabel(receipt), s, style),
+        pw.SizedBox(height: 6),
         _kvRow('المدفوع', _money(receipt.paidAmount, receipt), s, style),
 
         // 5. الرصيد الجديد
@@ -499,6 +501,7 @@ abstract final class PdfReceiptBuilder {
     return '$day  $y/$m/$d  $hh:$mm $ampm';
   }
 
+  // ⬇️ تمت إعادة الدالة
   static String _paymentMethodLabel(Receipt receipt) {
     if (receipt.paidAmount <= 0) return 'آجل';
     if (receipt.paidAmount >= receipt.total) return 'نقدي';
