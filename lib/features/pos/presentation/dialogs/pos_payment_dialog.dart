@@ -17,6 +17,7 @@ import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/domain/repositories/sales_repository.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
+import '../../../settings/presentation/providers/user_profile_providers.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/entities/receipt.dart';
@@ -66,7 +67,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     super.initState();
     _cart = ref.read(posCartProvider);
     _totals = ref.read(posTotalsProvider);
-    // Default: exact settlement amount (previous balance + sale).
     _amountController = TextEditingController(
       text: _formatAmount(_settlementTotal),
     );
@@ -92,20 +92,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return value.toStringAsFixed(2);
   }
 
-  // ---------------------------------------------------------------------------
-  // Core math — single source of truth
-  // ---------------------------------------------------------------------------
-
   double get _input => double.tryParse(_amountController.text.trim()) ?? 0;
-
-  /// Sale total = invoice value only.
   double get _saleTotal => _totals.total;
-
-  /// Total owed by the customer = old balance + sale total.
   double get _settlementTotal => _cart.customerBalance + _saleTotal;
-
-  /// Resulting balance = owed − paid.
-  /// Positive = owes us; negative = we owe them.
   double get _newBalance => _settlementTotal - _input;
 
   bool get _hasBalanceChange =>
@@ -116,10 +105,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     if (_method == PosPaymentMethod.card) return 'card';
     return 'cash';
   }
-
-  // ---------------------------------------------------------------------------
-  // Validation
-  // ---------------------------------------------------------------------------
 
   String? _validationError() {
     if (_cart.isEmpty) return 'السلة فارغة. أضف منتجاً قبل الدفع.';
@@ -153,10 +138,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     return null;
   }
 
-  // ---------------------------------------------------------------------------
-  // Submission
-  // ---------------------------------------------------------------------------
-
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
     if (_validationError() != null) return;
@@ -188,13 +169,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     required String branchId,
   }) async {
     final SalesNotifier notifier = ref.read(salesProvider.notifier);
-
-    // الفاتورة التي أُنشئت فعلاً في هذه المحاولة. بمجرد وجودها لا يجوز حفظ
-    // نسخة أوفلاين ثانية، لأن ذلك يكرر الفاتورة ويكرر خصم المخزون والخزينة.
     Sale? createdSale;
 
     try {
-      // Split input: part for the invoice, part for the old balance.
       final double saleTotal = _saleTotal;
       final double input = _input;
       final double appliedToSale = input < saleTotal ? input : saleTotal;
@@ -267,8 +244,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       if (!mounted) return;
       Navigator.of(context).pop(true);
     } on SaleException catch (error) {
-      // انقطاع الشبكة قبل إنشاء أي فاتورة فقط يُحفظ أوفلاين.
-      // إذا أُنشئت الفاتورة ثم انقطع الاتصال، فالحفظ الأوفلاين يكرر الفاتورة.
       if (error.type == SalesFailureType.network && createdSale == null) {
         if (!mounted) return;
         await _submitOffline(
@@ -286,7 +261,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     } on Object {
       if (!mounted) return;
       if (createdSale != null) {
-        // الفاتورة موجودة على الخادم بالفعل: لا نعيد الحفظ، بل نُظهر الخطأ.
         setState(() {
           _isSubmitting = false;
           _serverFailure = SalesFailureType.unknown;
@@ -384,6 +358,30 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     required DateTime saleDate,
     required CompanyContextState contextState,
   }) {
+    // ⬇️ جلب البائع (cashierName) من userProfileProvider
+    final cashierName = ref.read(userProfileProvider).valueOrNull?.fullName;
+
+    // ⬇️ جلب عنوان العميل وهاتفه من customersProvider (إن وُجد عميل)
+    String? customerAddress;
+    String? customerPhone;
+    if (_cart.customerId != null) {
+      final AsyncValue<List<Customer>> customersAsync =
+          ref.read(customersProvider);
+      final List<Customer>? customers = customersAsync.valueOrNull;
+      if (customers != null) {
+        final Customer? customer = customers
+            .cast<Customer?>()
+            .firstWhere(
+              (Customer? c) => c?.id == _cart.customerId,
+              orElse: () => null,
+            );
+        if (customer != null) {
+          customerAddress = customer.address;
+          customerPhone = customer.phone;
+        }
+      }
+    }
+
     return Receipt(
       saleId: saleId,
       invoiceNumber: invoiceNumber,
@@ -417,6 +415,9 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       total: _saleTotal,
       paidAmount: _input,
       customerName: _cart.customerName,
+      customerAddress: customerAddress,
+      customerPhone: customerPhone,
+      cashierName: cashierName,
       previousBalance:
           _cart.hasCustomer ? _cart.customerBalance : null,
       newBalance: _cart.hasCustomer ? _newBalance : null,
@@ -437,10 +438,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       }
     });
   }
-
-  // ---------------------------------------------------------------------------
-  // UI
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -497,12 +494,40 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                     ],
                   ),
                   _CustomerRow(customerName: _cart.customerName),
+                  
+                  // ⬇️ بطاقة مبسطة جداً (الإجمالي المطلوب فقط)
                   const SizedBox(height: 12),
-                  _TotalsCard(
-                    saleTotal: _saleTotal,
-                    customerBalance: _cart.customerBalance,
-                    hasCustomer: _cart.hasCustomer,
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        vertical: 12,
+                        horizontal: 16,
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: <Widget>[
+                          Text(
+                            'المطلوب',
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: scheme.onPrimaryContainer,
+                            ),
+                          ),
+                          Text(
+                            AppFormatters.money(_settlementTotal),
+                            style: theme.textTheme.headlineSmall?.copyWith(
+                              color: scheme.onPrimaryContainer,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
+
                   const SizedBox(height: 16),
                   Text('طريقة الدفع', style: theme.textTheme.labelLarge),
                   const SizedBox(height: 8),
@@ -555,13 +580,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                     const SizedBox(height: 12),
                     _ErrorBanner(message: displayError),
                   ],
-                  const SizedBox(height: 16),
-                  _BalanceResult(
-                    hasCustomer: _cart.hasCustomer,
-                    previousBalance: _cart.customerBalance,
-                    newBalance: _newBalance,
-                    hasBalanceChange: _hasBalanceChange,
-                  ),
                   const SizedBox(height: 20),
                   AppButton(
                     label: 'إتمام البيع',
@@ -582,12 +600,11 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 }
 
 // ============================================================================
-// Sub-widgets
+// Sub-widgets (التي بقيت)
 // ============================================================================
 
 class _CustomerRow extends StatelessWidget {
   const _CustomerRow({required this.customerName});
-
   final String? customerName;
 
   @override
@@ -620,218 +637,6 @@ class _CustomerRow extends StatelessWidget {
           ],
         ),
       ),
-    );
-  }
-}
-
-class _TotalsCard extends StatelessWidget {
-  const _TotalsCard({
-    required this.saleTotal,
-    required this.customerBalance,
-    required this.hasCustomer,
-  });
-
-  final double saleTotal;
-  final double customerBalance;
-  final bool hasCustomer;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final bool showBalance = hasCustomer && customerBalance != 0;
-    final double total =
-        showBalance ? customerBalance + saleTotal : saleTotal;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: showBalance
-            ? scheme.surfaceContainerHighest
-            : scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-        child: showBalance
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  _row(context, 'الرصيد السابق',
-                      AppFormatters.money(customerBalance.abs()),
-                      color: customerBalance > 0
-                          ? scheme.error
-                          : scheme.primary),
-                  const SizedBox(height: 6),
-                  _row(context, 'قيمة الفاتورة',
-                      AppFormatters.money(saleTotal)),
-                  const Divider(height: 16),
-                  _row(context, 'الإجمالي المطلوب',
-                      AppFormatters.money(total),
-                      emphasized: true,
-                      color: scheme.primary),
-                ],
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: <Widget>[
-                  Text(
-                    'الإجمالي المطلوب',
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: scheme.onPrimaryContainer,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    AppFormatters.money(total),
-                    style: theme.textTheme.headlineMedium?.copyWith(
-                      color: scheme.onPrimaryContainer,
-                      fontWeight: FontWeight.w800,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                ],
-              ),
-      ),
-    );
-  }
-
-  Widget _row(
-    BuildContext context,
-    String label,
-    String value, {
-    bool emphasized = false,
-    Color? color,
-  }) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: Text(
-            label,
-            style: emphasized
-                ? theme.textTheme.titleMedium
-                : theme.textTheme.bodyMedium,
-          ),
-        ),
-        Text(
-          value,
-          style: (emphasized
-                  ? theme.textTheme.headlineSmall
-                  : theme.textTheme.bodyLarge)
-              ?.copyWith(
-            color: color ?? scheme.onSurface,
-            fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-/// Shows the resulting balance after this sale.
-class _BalanceResult extends StatelessWidget {
-  const _BalanceResult({
-    required this.hasCustomer,
-    required this.previousBalance,
-    required this.newBalance,
-    required this.hasBalanceChange,
-  });
-
-  final bool hasCustomer;
-  final double previousBalance;
-  final double newBalance;
-  final bool hasBalanceChange;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    if (!hasCustomer) {
-      return const SizedBox.shrink();
-    }
-
-    String label;
-    Color color;
-    double displayed;
-    if (newBalance > 0) {
-      label = 'الرصيد الجديد على العميل';
-      color = scheme.error;
-      displayed = newBalance;
-    } else if (newBalance < 0) {
-      label = 'الرصيد الجديد للعميل (له عندنا)';
-      color = scheme.primary;
-      displayed = newBalance.abs();
-    } else {
-      label = 'الرصيد الجديد';
-      color = scheme.primary;
-      displayed = 0;
-    }
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            if (hasBalanceChange) ...<Widget>[
-              _row(
-                theme,
-                scheme,
-                'الرصيد السابق',
-                AppFormatters.money(previousBalance.abs()),
-              ),
-              const Divider(height: 16),
-            ],
-            _row(
-              theme,
-              scheme,
-              label,
-              AppFormatters.money(displayed),
-              emphasized: true,
-              color: color,
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _row(
-    ThemeData theme,
-    ColorScheme scheme,
-    String label,
-    String value, {
-    bool emphasized = false,
-    Color? color,
-  }) {
-    return Row(
-      children: <Widget>[
-        Expanded(
-          child: Text(
-            label,
-            style: emphasized
-                ? theme.textTheme.titleMedium
-                : theme.textTheme.bodyMedium,
-          ),
-        ),
-        Text(
-          value,
-          style: (emphasized
-                  ? theme.textTheme.headlineSmall
-                  : theme.textTheme.bodyLarge)
-              ?.copyWith(
-            color: color ?? scheme.onSurface,
-            fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
-          ),
-        ),
-      ],
     );
   }
 }
@@ -945,7 +750,6 @@ class _AmountField extends StatelessWidget {
 
 class _ErrorBanner extends StatelessWidget {
   const _ErrorBanner({required this.message});
-
   final String message;
 
   @override
@@ -984,7 +788,7 @@ class _ErrorBanner extends StatelessWidget {
 }
 
 // ============================================================================
-// Receipt dialog
+// Receipt Dialog (باقي الكود)
 // ============================================================================
 
 class _PosReceiptDialog extends ConsumerWidget {
