@@ -171,7 +171,7 @@ Receipt buildReceiptFromSale({
   final CompanySettings? settings =
       ref.read(companySettingsProvider).valueOrNull;
 
-  // ⬇️ نقرأ رصيد العميل الحالي
+  // قراءة رصيد العميل الحالي (تقريبي)
   double? previousBalance;
   double? newBalance;
 
@@ -187,12 +187,8 @@ Receipt buildReceiptFromSale({
             orElse: () => null,
           );
       if (customer != null) {
-        // الرصيد الحالي للعميل = الرصيد بعد هذه الفاتورة
         final double currentBalance = customer.balance;
-        // الرصيد الجديد = الرصيد الحالي (لأنه بعد الفاتورة)
         newBalance = currentBalance;
-        // الرصيد السابق = الرصيد الحالي - (إجمالي الفاتورة - المدفوع)
-        // بمعنى: currentBalance = previousBalance + (total - paidAmount)
         previousBalance = currentBalance - sale.total + sale.paidAmount;
       }
     }
@@ -261,8 +257,7 @@ Future<Uint8List?> _loadLogoBytes(WidgetRef ref) async {
       ref.read(companySettingsProvider).valueOrNull;
   if (s == null || s.companyId.isEmpty) return null;
 
-  if (!s.hasLogo) return null;
-
+  // CompanyLogoLoader handles empty URL internally.
   try {
     return await const CompanyLogoLoader().load(
       companyId: s.companyId,
