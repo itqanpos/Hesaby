@@ -2,26 +2,21 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
+import '../../../../app/router.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/presentation/dialogs/customer_payment_dialog.dart';
+import '../../../sales/presentation/providers/sales_providers.dart';
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
 import '../../domain/entities/pos_cart.dart';
+import '../dialogs/pos_print_preview_dialog.dart';
 import '../dialogs/pos_print_settings_sheet.dart';
 import '../state/pos_providers.dart';
 
 /// Opens the POS actions menu.
-///
-/// The menu is presented as a bottom sheet anchored to the bottom of the
-/// screen. Most entries are navigation contracts or explicit "قريبًا"
-/// placeholders; two entries are functional:
-///
-/// * **إعدادات الطباعة**   — opens `showPosPrintSettingsSheet`.
-/// * **تحصيل من العميل**   — opens `showCustomerPaymentDialog` and keeps
-///   the POS cart's balance snapshot in sync with the fresh value returned
-///   by the dialog.
 Future<void> showPosActionsSheet({required BuildContext context}) {
   return showModalBottomSheet<void>(
     context: context,
@@ -31,6 +26,9 @@ Future<void> showPosActionsSheet({required BuildContext context}) {
     builder: (BuildContext sheetContext) => const _PosActionsSheet(),
   );
 }
+
+// ⬇️ مزود لحالة السلة المعلقة (في الذاكرة مؤقتاً)
+final heldCartProvider = StateProvider<PosCart?>((ref) => null);
 
 class _PosActionsSheet extends ConsumerWidget {
   const _PosActionsSheet();
@@ -47,6 +45,7 @@ class _PosActionsSheet extends ConsumerWidget {
     final ColorScheme scheme = theme.colorScheme;
     final PosCart cart = ref.watch(posCartProvider);
     final String? customerName = cart.customerName;
+    final PosCart? heldCart = ref.watch(heldCartProvider);
 
     final AsyncValue<ReceiptPaperSize> asyncSize =
         ref.watch(posPaperSizeProvider);
@@ -105,7 +104,7 @@ class _PosActionsSheet extends ConsumerWidget {
             ],
 
             // -------------------------------------------------------------------
-            // Active actions
+            // 1. Active actions
             // -------------------------------------------------------------------
             _ActionTile(
               icon: Icons.payments_outlined,
@@ -121,31 +120,50 @@ class _PosActionsSheet extends ConsumerWidget {
               enabled: true,
               onTap: () => _openPrintSettings(context),
             ),
+            _ActionTile(
+              icon: Icons.pause_circle_outline,
+              title: 'تعليق الفاتورة',
+              subtitle: 'حفظ السلة مؤقتاً وبدء سلة جديدة.',
+              enabled: cart.isNotEmpty,
+              onTap: () => _holdCart(context, ref),
+            ),
+            _ActionTile(
+              icon: Icons.shopping_bag_outlined,
+              title: 'استعادة السلة',
+              subtitle: heldCart != null
+                  ? 'استعادة السلة المعلقة (${heldCart.lines.length} صنف).'
+                  : 'لا توجد سلة معلقة.',
+              enabled: heldCart != null,
+              onTap: () => _restoreCart(context, ref),
+            ),
 
             const SizedBox(height: 6),
             const Divider(height: 1),
             const SizedBox(height: 6),
 
             // -------------------------------------------------------------------
-            // Placeholder actions — available in later phases
+            // 2. View actions
             // -------------------------------------------------------------------
             _ActionTile(
               icon: Icons.receipt_long_outlined,
               title: 'الفاتورة الحالية',
               subtitle: 'مراجعة بنود الفاتورة الحالية',
-              enabled: false,
-            ),
-            _ActionTile(
-              icon: Icons.assignment_return_outlined,
-              title: 'إنشاء فاتورة مرتجع',
-              subtitle: 'إرجاع منتجات من فاتورة سابقة',
-              enabled: false,
+              enabled: cart.isNotEmpty,
+              onTap: () => _viewCurrentReceipt(context, ref),
             ),
             _ActionTile(
               icon: Icons.history_outlined,
               title: 'إعادة طباعة الإيصال',
               subtitle: 'طباعة آخر إيصال مكتمل',
-              enabled: false,
+              enabled: true,
+              onTap: () => _reprintLastReceipt(context, ref),
+            ),
+            _ActionTile(
+              icon: Icons.assignment_return_outlined,
+              title: 'إنشاء فاتورة مرتجع',
+              subtitle: 'إرجاع منتجات من فاتورة سابقة',
+              enabled: true,
+              onTap: () => _openReturns(context),
             ),
 
             const SizedBox(height: 8),
@@ -153,7 +171,7 @@ class _PosActionsSheet extends ConsumerWidget {
             const SizedBox(height: 10),
 
             Text(
-              'بقية الإجراءات ستكون متاحة في المراحل القادمة.',
+              'الحفظ يُطبق على الجلسة الحالية فقط.',
               style: theme.textTheme.bodySmall?.copyWith(
                 color: scheme.onSurfaceVariant,
               ),
@@ -169,24 +187,11 @@ class _PosActionsSheet extends ConsumerWidget {
   // Actions
   // ---------------------------------------------------------------------------
 
-  /// Closes this sheet, then opens the print-settings sheet.
-  ///
-  /// `Navigator.pop` is synchronous in Flutter — it schedules the route
-  /// removal but the current context stays mounted for the duration of the
-  /// same synchronous block, so a follow-up `showModalBottomSheet` on that
-  /// context will still resolve the same root navigator.
   void _openPrintSettings(BuildContext context) {
     Navigator.of(context).pop();
     showPosPrintSettingsSheet(context: context);
   }
 
-  /// Opens the customer-payment dialog on top of this sheet.
-  ///
-  /// The sheet is kept open while the dialog is active; when the dialog
-  /// returns a non-null [Customer], the POS cart's balance snapshot is
-  /// refreshed (so the "الرصيد الحالي" subtitle reflects the new value)
-  /// and a confirmation snack bar is shown. The sheet is intentionally
-  /// **not** popped so the cashier can continue from where they were.
   Future<void> _openCustomerPayment(
     BuildContext context,
     WidgetRef ref,
@@ -216,6 +221,109 @@ class _PosActionsSheet extends ConsumerWidget {
       ..showSnackBar(
         const SnackBar(content: Text('تم تسجيل الدفعة بنجاح.')),
       );
+  }
+
+  /// يحفظ السلة الحالية في `heldCartProvider` ثم يفرغ السلة.
+  void _holdCart(BuildContext context, WidgetRef ref) {
+    final cart = ref.read(posCartProvider);
+    ref.read(heldCartProvider.notifier).state = cart;
+    ref.read(posCartProvider.notifier).reset();
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('تم تعليق الفاتورة.')),
+    );
+  }
+
+  /// يستعيد السلة المعلقة.
+  void _restoreCart(BuildContext context, WidgetRef ref) {
+    final heldCart = ref.read(heldCartProvider);
+    if (heldCart == null) return;
+    ref.read(posCartProvider.notifier).restore(heldCart);
+    ref.read(heldCartProvider.notifier).state = null;
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('تم استعادة السلة المعلقة.')),
+    );
+  }
+
+  Future<void> _viewCurrentReceipt(BuildContext context, WidgetRef ref) async {
+    final cart = ref.read(posCartProvider);
+    if (cart.isEmpty) return;
+
+    Navigator.of(context).pop();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('بنود الفاتورة الحالية'),
+        content: SizedBox(
+          width: double.maxFinite,
+          child: ListView.builder(
+            shrinkWrap: true,
+            itemCount: cart.lines.length,
+            itemBuilder: (ctx, i) {
+              final line = cart.lines[i];
+              return ListTile(
+                title: Text(line.productName),
+                subtitle: Text(
+                  '${_money.format(line.unitPrice)} × ${line.quantity} ${line.unitName}',
+                ),
+                trailing: Text(_money.format(line.lineTotal)),
+              );
+            },
+          ),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('إغلاق'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _reprintLastReceipt(BuildContext context, WidgetRef ref) async {
+    final salesAsync = ref.read(salesProvider);
+    final sales = salesAsync.valueOrNull;
+    if (sales == null || sales.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('لا توجد فواتير سابقة.')),
+      );
+      return;
+    }
+
+    final lastSale = sales.first; // نفترض أن أول عنصر هو الأحدث
+    Navigator.of(context).pop();
+    await showDialog<void>(
+      context: context,
+      builder: (dialogContext) => AlertDialog(
+        title: const Text('آخر إيصال'),
+        content: Text('رقم الفاتورة: ${lastSale.invoiceNumber ?? lastSale.id}\n'
+            'التاريخ: ${_formatDate(lastSale.saleDate)}'),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(),
+            child: const Text('إلغاء'),
+          ),
+          TextButton(
+            onPressed: () {
+              Navigator.of(dialogContext).pop();
+              // TODO: إعادة طباعة الإيصال
+            },
+            child: const Text('إعادة الطباعة'),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Future<void> _openReturns(BuildContext context) async {
+    Navigator.of(context).pop();
+    context.pushNamed(AppRouter.returnsName);
+  }
+
+  static String _formatDate(DateTime date) {
+    return DateFormat('yyyy/MM/dd HH:mm').format(date.toLocal());
   }
 
   static String _labelOf(ReceiptPaperSize size) {
@@ -317,7 +425,7 @@ class _ActionTile extends StatelessWidget {
                   vertical: 3,
                 ),
                 child: Text(
-                  'قريبًا',
+                  'غير متاح',
                   style: theme.textTheme.labelSmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                     fontWeight: FontWeight.w700,
@@ -327,7 +435,7 @@ class _ActionTile extends StatelessWidget {
             )
           else
             Icon(
-              Icons.chevron_left, // RTL: points left, meaning "forward"
+              Icons.chevron_left,
               color: scheme.onSurfaceVariant,
             ),
         ],
