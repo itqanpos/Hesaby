@@ -12,7 +12,6 @@ import '../../../sales/presentation/providers/sales_providers.dart';
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
 import '../../domain/entities/pos_cart.dart';
-import '../dialogs/pos_print_preview_dialog.dart';
 import '../dialogs/pos_print_settings_sheet.dart';
 import '../state/pos_providers.dart';
 
@@ -103,9 +102,6 @@ class _PosActionsSheet extends ConsumerWidget {
               const SizedBox(height: 8),
             ],
 
-            // -------------------------------------------------------------------
-            // 1. Active actions
-            // -------------------------------------------------------------------
             _ActionTile(
               icon: Icons.payments_outlined,
               title: 'تحصيل من العميل',
@@ -141,9 +137,6 @@ class _PosActionsSheet extends ConsumerWidget {
             const Divider(height: 1),
             const SizedBox(height: 6),
 
-            // -------------------------------------------------------------------
-            // 2. View actions
-            // -------------------------------------------------------------------
             _ActionTile(
               icon: Icons.receipt_long_outlined,
               title: 'الفاتورة الحالية',
@@ -292,14 +285,16 @@ class _PosActionsSheet extends ConsumerWidget {
       return;
     }
 
-    final lastSale = sales.first; // نفترض أن أول عنصر هو الأحدث
+    final lastSale = sales.first;
     Navigator.of(context).pop();
     await showDialog<void>(
       context: context,
       builder: (dialogContext) => AlertDialog(
         title: const Text('آخر إيصال'),
-        content: Text('رقم الفاتورة: ${lastSale.invoiceNumber ?? lastSale.id}\n'
-            'التاريخ: ${_formatDate(lastSale.saleDate)}'),
+        content: Text(
+          'رقم الفاتورة: ${lastSale.invoiceNumber ?? lastSale.id}\n'
+          'التاريخ: ${_formatDate(lastSale.saleDate)}',
+        ),
         actions: [
           TextButton(
             onPressed: () => Navigator.of(dialogContext).pop(),
@@ -317,9 +312,10 @@ class _PosActionsSheet extends ConsumerWidget {
     );
   }
 
+  // ⬇️ تمت إضافة await هنا لحل unawaited_futures
   Future<void> _openReturns(BuildContext context) async {
     Navigator.of(context).pop();
-    context.pushNamed(AppRouter.returnsName);
+    await context.pushNamed(AppRouter.returnsName);
   }
 
   static String _formatDate(DateTime date) {
