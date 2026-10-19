@@ -6,21 +6,6 @@ import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
 
 /// Owns the POS cart state.
-///
-/// Every operation is synchronous and local. Nothing reaches the database
-/// until the sale is confirmed from the payment dialog; this notifier is
-/// strictly UI state.
-///
-/// Conventions:
-/// * Lines are uniquely identified by `(productId, unitId)`. Adding the
-///   same product with the same unit merges quantities; adding it with a
-///   different unit creates a second line.
-/// * A line whose quantity reaches zero is removed automatically.
-/// * The cashier may edit the unit price only within the bounds carried by
-///   each line ([PosCartLine.isPriceValid]); out-of-range inputs are
-///   rejected silently by the notifier and the caller is expected to have
-///   validated them first.
-/// * Discount and tax are clamped at zero.
 class PosCartNotifier extends Notifier<PosCart> {
   @override
   PosCart build() => const PosCart();
@@ -29,19 +14,6 @@ class PosCartNotifier extends Notifier<PosCart> {
   // Line operations
   // ---------------------------------------------------------------------------
 
-  /// Adds a product line to the cart, or merges into an existing line with
-  /// the same `(productId, unitId)`.
-  ///
-  /// The merge rule is:
-  /// * quantities are summed,
-  /// * the newest [unitPrice], [productName], [unitName] and
-  ///   [conversionFactor] replace the previous ones,
-  /// * price bounds and the available-stock snapshot are taken from the
-  ///   newest call (they are advisory only).
-  ///
-  /// Returns `true` when a line was added or merged; `false` when the call
-  /// was rejected (quantity ≤ 0, or the resulting quantity would exceed
-  /// the known available stock).
   bool addLine({
     required String productId,
     required String productName,
@@ -71,7 +43,6 @@ class PosCartNotifier extends Notifier<PosCart> {
 
       final double mergedQuantity = line.quantity + quantity;
       if (availableStock != null && mergedQuantity > availableStock) {
-        // Reject silently: the caller is expected to have validated.
         return false;
       }
 
@@ -120,10 +91,6 @@ class PosCartNotifier extends Notifier<PosCart> {
     return true;
   }
 
-  /// Increments the quantity of a line by one, if allowed by its known
-  /// available stock.
-  ///
-  /// Returns `true` when the increment was applied.
   bool incrementLine({
     required String productId,
     required String unitId,
@@ -135,8 +102,6 @@ class PosCartNotifier extends Notifier<PosCart> {
       if (line.key != key || !line.canIncrease) {
         return line;
       }
-      // canIncrease يتحقق من (quantity < stock) قبل الزيادة، وهذا لا يكفي
-      // للكميات الكسرية (3 من 3.5 تصبح 4). نتحقق من القيمة الناتجة.
       final double candidate = line.quantity + 1;
       final double? available = line.availableStock;
       if (available != null && candidate > available) {
@@ -152,8 +117,6 @@ class PosCartNotifier extends Notifier<PosCart> {
     return applied;
   }
 
-  /// Decrements the quantity of a line by one. A line whose resulting
-  /// quantity reaches zero is removed.
   void decrementLine({
     required String productId,
     required String unitId,
@@ -170,17 +133,11 @@ class PosCartNotifier extends Notifier<PosCart> {
       if (newQuantity > 0) {
         next.add(line.copyWith(quantity: newQuantity));
       }
-      // Otherwise, drop the line silently.
     }
 
     state = state.copyWith(lines: next);
   }
 
-  /// Sets the exact quantity of a line. A quantity ≤ 0 removes the line.
-  ///
-  /// Returns `true` when the value was accepted (either applied or used
-  /// to remove the line); `false` when the new quantity exceeds the known
-  /// available stock.
   bool setLineQuantity({
     required String productId,
     required String unitId,
@@ -196,7 +153,6 @@ class PosCartNotifier extends Notifier<PosCart> {
         continue;
       }
       if (quantity <= 0) {
-        // Remove the line.
         continue;
       }
       final double? available = line.availableStock;
@@ -215,10 +171,6 @@ class PosCartNotifier extends Notifier<PosCart> {
     return false;
   }
 
-  /// Sets the unit price of a line, provided it is within the line's
-  /// allowed range.
-  ///
-  /// Returns `true` when the value was accepted.
   bool setLinePrice({
     required String productId,
     required String unitId,
@@ -254,7 +206,6 @@ class PosCartNotifier extends Notifier<PosCart> {
     return false;
   }
 
-  /// Removes a line regardless of its quantity.
   void removeLine({
     required String productId,
     required String unitId,
@@ -266,21 +217,24 @@ class PosCartNotifier extends Notifier<PosCart> {
     state = state.copyWith(lines: next);
   }
 
-  /// Clears every line but keeps the attached customer, discount and tax.
   void clearLines() {
     state = state.copyWith(lines: const <PosCartLine>[]);
   }
 
-  /// Resets the entire cart to its initial empty state.
   void reset() {
     state = const PosCart();
+  }
+
+  /// ⬇️ دالة جديدة: استعادة السلة المعلقة
+  /// تستبدل الحالة الحالية بالكامل بالسلة المحفوظة مسبقاً.
+  void restore(PosCart cart) {
+    state = cart;
   }
 
   // ---------------------------------------------------------------------------
   // Customer
   // ---------------------------------------------------------------------------
 
-  /// Attaches a registered customer to the cart.
   void setCustomer({
     required String customerId,
     required String customerName,
@@ -293,13 +247,6 @@ class PosCartNotifier extends Notifier<PosCart> {
     );
   }
 
-  /// Updates only the balance of the currently attached customer.
-  ///
-  /// Used after a payment is recorded elsewhere (for example from the POS
-  /// actions sheet) so the payment dialog and the printed receipt reflect
-  /// the fresh balance without detaching the customer.
-  ///
-  /// No-op when no customer is attached, or when the value is unchanged.
   void updateCustomerBalance(double customerBalance) {
     if (state.customerId == null) {
       return;
@@ -310,7 +257,6 @@ class PosCartNotifier extends Notifier<PosCart> {
     state = state.copyWith(customerBalance: customerBalance);
   }
 
-  /// Detaches the current customer, reverting to a cash sale.
   void clearCustomer() {
     state = state.copyWith(clearCustomer: true);
   }
@@ -319,12 +265,10 @@ class PosCartNotifier extends Notifier<PosCart> {
   // Discount / tax
   // ---------------------------------------------------------------------------
 
-  /// Sets the header-level discount. Negative values are clamped to zero.
   void setDiscount(double discount) {
     state = state.copyWith(discount: discount < 0 ? 0 : discount);
   }
 
-  /// Sets the header-level tax amount. Negative values are clamped to zero.
   void setTaxAmount(double taxAmount) {
     state = state.copyWith(taxAmount: taxAmount < 0 ? 0 : taxAmount);
   }
