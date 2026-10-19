@@ -1325,8 +1325,9 @@ class _InfrastructureFooter extends StatelessWidget {
             ),
           ),
           const Spacer(),
+          // ⬇️ تم تحديث رقم الإصدار إلى v1.0.0
           Text(
-            'v0.1.0',
+            'v1.0.0',
             style: theme.textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
