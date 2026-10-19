@@ -58,6 +58,17 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # ⬇️ استخراج الإصدار من pubspec.yaml (جديد)
+      - name: Extract version from pubspec.yaml
+        id: get_version
+        run: |
+          FULL_VERSION=$(grep '^version:' pubspec.yaml | awk '{print $2}')
+          VERSION_NAME=$(echo "$FULL_VERSION" | cut -d'+' -f1)
+          VERSION_CODE=$(echo "$FULL_VERSION" | cut -d'+' -f2)
+          echo "VERSION_NAME=$VERSION_NAME" >> $GITHUB_ENV
+          echo "VERSION_CODE=$VERSION_CODE" >> $GITHUB_ENV
+          echo "Detected version: $VERSION_NAME+$VERSION_CODE"
+
       - name: Run unit tests
         run: flutter test --reporter expanded
 
@@ -429,6 +440,8 @@ jobs:
           # 32-bit phones, which causes an immediate crash at launch on
           # those devices. Do NOT remove it without a good reason.
           flutter build apk --$BUILD_TYPE \
+            --build-name=${{ env.VERSION_NAME }} \
+            --build-number=${{ env.VERSION_CODE }} \
             --target-platform=android-arm64,android-arm \
             --dart-define=APP_ENV=production \
             --dart-define=SUPABASE_URL="$SUPABASE_URL" \
@@ -454,14 +467,15 @@ jobs:
           BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
         run: |
           mkdir -p build/apk
-          cp "build/app/outputs/flutter-apk/app-$BUILD_TYPE.apk" \
-             "build/apk/hesabi-${BUILD_TYPE}-build${{ github.run_number }}.apk"
+          APK_NAME="hesabi-v${{ env.VERSION_NAME }}-build${{ github.run_number }}.apk"
+          cp "build/app/outputs/flutter-apk/app-$BUILD_TYPE.apk" "build/apk/$APK_NAME"
+          echo "APK_NAME=$APK_NAME" >> $GITHUB_ENV
           ls -lh build/apk/
 
       - name: Upload APK as run artifact
         uses: actions/upload-artifact@v4
         with:
-          name: hesabi-apk-build${{ github.run_number }}
+          name: hesabi-v${{ env.VERSION_NAME }}-build${{ github.run_number }}
           path: build/apk/*.apk
           retention-days: 30
           if-no-files-found: error
@@ -470,18 +484,32 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: apk-latest
-          name: "Hesabi APK - Latest"
+          name: "Hesabi APK - Latest (v${{ env.VERSION_NAME }})"
           body: |
+            **Version:** v${{ env.VERSION_NAME }} (build ${{ env.VERSION_CODE }})
             **Build #${{ github.run_number }}**
             - Commit: `${{ github.sha }}`
-            - Build type: `${{ github.event.inputs.build_type || 'release' }}`
             - Built from: `${{ github.ref_name }}`
             - Signed with: release keystore (stable signature)
-            - Target: Android ARM64 + ARMv7 (all phones from ~2010 onwards)
+            - Target: Android ARM64 + ARMv7
 
-            حمّل ملف APK من قسم Assets أدناه، ثم افتحه على جهاز Android
-            لتثبيت Hesabi.
+            حمّل ملف APK من قسم Assets أدناه (`hesabi-v${{ env.VERSION_NAME }}-build${{ github.run_number }}.apk`).
           files: build/apk/*.apk
           make_latest: true
           draft: false
           prerelease: true
+
+      - name: Publish to version-specific release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ env.VERSION_NAME }}
+          name: "Hesabi v${{ env.VERSION_NAME }}"
+          body: |
+            **الإصدار v${{ env.VERSION_NAME }}**
+            - Build #${{ github.run_number }}
+            - Commit: `${{ github.sha }}`
+
+            حمّل ملف APK من Assets أدناه.
+          files: build/apk/*.apk
+          draft: false
+          prerelease: false
