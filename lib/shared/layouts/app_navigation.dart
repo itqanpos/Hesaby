@@ -11,7 +11,7 @@ import '../../features/companies/presentation/providers/company_context_provider
 import '../../features/companies/presentation/providers/company_context_state.dart';
 import '../../features/companies/presentation/providers/members_providers.dart';
 import '../../features/admin/presentation/providers/platform_admin_provider.dart';
-import '../../features/admin/presentation/providers/admin_app_config_provider.dart'; // ⬅️ جديد
+import '../../features/admin/presentation/providers/admin_app_config_provider.dart';
 
 // ============================================================================
 // Destinations
@@ -25,7 +25,7 @@ class _NavDestination {
     required this.icon,
     required this.color,
     this.requiredPermission,
-    this.featureFlagKey, // ⬅️ جديد
+    this.featureFlagKey,
   });
 
   final String label;
@@ -33,7 +33,7 @@ class _NavDestination {
   final IconData icon;
   final Color color;
   final String? requiredPermission;
-  final String? featureFlagKey; // مفتاح الميزة في التطبيق (مثال: 'pos')
+  final String? featureFlagKey;
 }
 
 @immutable
@@ -59,7 +59,7 @@ const List<_NavSection> _sections = <_NavSection>[
         icon: Icons.point_of_sale_outlined,
         color: Color(0xFF0F7B6C),
         requiredPermission: MemberPermission.posUse,
-        featureFlagKey: 'pos', // ⬅️ مرتبط بمفتاح الميزة
+        featureFlagKey: 'pos',
       ),
     ],
   ),
@@ -79,7 +79,7 @@ const List<_NavSection> _sections = <_NavSection>[
         icon: Icons.warehouse_outlined,
         color: Color(0xFF5E35B1),
         requiredPermission: MemberPermission.inventoryView,
-        featureFlagKey: 'inventory', // ⬅️
+        featureFlagKey: 'inventory',
       ),
       _NavDestination(
         label: 'الفواتير',
@@ -94,7 +94,7 @@ const List<_NavSection> _sections = <_NavSection>[
         icon: Icons.shopping_bag_outlined,
         color: Color(0xFF0288D1),
         requiredPermission: MemberPermission.purchasesView,
-        featureFlagKey: 'purchases', // ⬅️
+        featureFlagKey: 'purchases',
       ),
       _NavDestination(
         label: 'المرتجعات',
@@ -128,7 +128,7 @@ const List<_NavSection> _sections = <_NavSection>[
         icon: Icons.analytics_outlined,
         color: Color(0xFFB71C1C),
         requiredPermission: MemberPermission.reportsView,
-        featureFlagKey: 'reports', // ⬅️
+        featureFlagKey: 'reports',
       ),
     ],
   ),
@@ -171,7 +171,7 @@ List<_NavSection> _visibleSections(WidgetRef ref) {
 
   bool isFeatureEnabled(String? key) {
     if (key == null) return true;
-    return flags[key] as bool? ?? true; // افتراضياً مفعل إذا لم يوجد
+    return flags[key] as bool? ?? true;
   }
 
   final List<_NavSection> result = <_NavSection>[];
@@ -183,11 +183,9 @@ List<_NavSection> _visibleSections(WidgetRef ref) {
     
     for (final _NavSection section in _sections) {
       final List<_NavDestination> visible = section.items.where((d) {
-        // 1. التحقق من الصلاحيات
         if (d.requiredPermission != null && member != null && !member.hasPermission(d.requiredPermission!)) {
           return false;
         }
-        // 2. التحقق من تفعيل الميزة من لوحة التحكم
         if (!isFeatureEnabled(d.featureFlagKey)) {
           return false;
         }
@@ -200,7 +198,6 @@ List<_NavSection> _visibleSections(WidgetRef ref) {
     }
   }
 
-  // إضافة قسم إدارة المنصة (يظهر فقط للـ Platform Admin)
   final bool isAdmin = ref.watch(isPlatformAdminProvider);
   if (isAdmin) {
     result.add(
@@ -499,7 +496,13 @@ class _Footer extends StatelessWidget {
           const SizedBox(width: 8),
           Text('حسابي', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
           const Spacer(),
-          Text('v0.1.0', style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant.withValues(alpha: 0.75))),
+          // ⬇️ تحديث رقم الإصدار إلى 1.0.0
+          Text(
+            'v1.0.0',
+            style: theme.textTheme.labelSmall?.copyWith(
+              color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
+            ),
+          ),
         ],
       ),
     );
