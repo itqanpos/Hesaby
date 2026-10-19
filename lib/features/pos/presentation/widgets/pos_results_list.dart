@@ -18,13 +18,6 @@ import '../state/pos_search_notifier.dart';
 import 'pos_product_result_tile.dart';
 
 /// The list of products matching the current POS search query.
-///
-/// Each tile shows the product name and its **default-unit** price and
-/// stock. Tapping a tile opens `showPosUnitQuickAddSheet`, where the
-/// cashier picks the unit to add to the cart.
-///
-/// After a successful add, the search query is cleared automatically so the
-/// cashier is immediately ready to look up the next product.
 class PosResultsList extends ConsumerWidget {
   const PosResultsList({super.key});
 
@@ -97,8 +90,7 @@ class PosResultsList extends ConsumerWidget {
       return;
     }
 
-    // Clear the search query so the results area empties and the cart
-    // regains the full middle area — ready for the next scan.
+    // Clear the search query so the results area empties.
     ref.read(posSearchProvider.notifier).clear();
   }
 }
@@ -108,10 +100,7 @@ class PosResultsList extends ConsumerWidget {
 // ============================================================================
 
 /// Adds [product] to the POS cart at its default unit and catalogue price,
-/// with quantity 1.
-///
-/// Used by the barcode-scanning flow when exactly one product matches the
-/// scanned value.
+/// with quantity 1. Returns success if added.
 PosQuickAddResult posQuickAddProduct(WidgetRef ref, Product product) {
   final CompanyContextState state = ref.read(companyContextProvider);
   final String? branchId = state.currentBranch?.id;
@@ -147,7 +136,14 @@ PosQuickAddResult posQuickAddProduct(WidgetRef ref, Product product) {
         minSellingPrice: product.minSellingPrice,
         maxSellingPrice: product.maxSellingPrice,
       );
-  return added ? PosQuickAddResult.success : PosQuickAddResult.rejected;
+
+  // ⬇️ تفعيل التركيز على الكمية بعد الإضافة
+  if (added) {
+    ref.read(focusedCartLineProvider.notifier).state =
+        '${product.id}::${product.defaultUnitId}';
+    return PosQuickAddResult.success;
+  }
+  return PosQuickAddResult.rejected;
 }
 
 /// Why a quick-add did or did not happen. Lets the UI tell the cashier.
