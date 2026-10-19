@@ -308,7 +308,9 @@ class _Painter {
     _gap(4 * _scale);
     _grandTotal(r, totalOwed);
 
-    // 4. المدفوع
+    // 4. المدفوع + طريقة الدفع
+    _gap(4 * _scale);
+    _kvRow('طريقة الدفع', _paymentMethodLabel(r));
     _gap(4 * _scale);
     _kvRow('المدفوع', _money(r.paidAmount));
 
@@ -690,6 +692,7 @@ class _Painter {
     return '$day، $y/$m/$d — $hh:$mm $ampm';
   }
 
+  // ⬇️ تمت إعادة الدالة
   static String _paymentMethodLabel(Receipt r) {
     if (r.paidAmount <= 0) return 'آجل';
     if (r.paidAmount >= r.total) return 'نقدي';
