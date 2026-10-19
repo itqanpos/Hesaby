@@ -55,7 +55,6 @@ class CompanyModel extends Equatable {
       planId: _optionalString(map, 'plan_id'),
       billingCycle: _optionalString(map, 'billing_cycle'),
       subscribedUntil: _optionalTimestamp(map, 'subscribed_until'),
-      // ---- New fields ----
       isSuspended: _optionalBool(map, 'is_suspended') ?? false,
       suspensionReason: _optionalString(map, 'suspension_reason'),
       maxUsers: _optionalInt(map, 'max_users') ?? 5,
@@ -84,7 +83,6 @@ class CompanyModel extends Equatable {
   final String? billingCycle;
   final DateTime? subscribedUntil;
 
-  // ---- Suspension & Limits ----
   final bool isSuspended;
   final String? suspensionReason;
   final int maxUsers;
@@ -164,13 +162,32 @@ class CompanyModel extends Equatable {
     );
   }
 
+  /// 🔥 الإصلاح هنا: دالة تقوم بتنظيف النص القادم من Supabase لتفهمه Dart
   static DateTime? _optionalTimestamp(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
     if (value == null) return null;
     if (value is DateTime) return value.toUtc();
     if (value is String && value.isNotEmpty) {
-      final DateTime? parsed = DateTime.tryParse(value);
+      // المحاولة الأولى: التنسيق القياسي
+      DateTime? parsed = DateTime.tryParse(value);
       if (parsed != null) return parsed.toUtc();
+
+      // المحاولة الثانية: تنسيق Postgres (مثل "2026-10-02 11:27:09.602636+00")
+      try {
+        String normalized = value.trim();
+        // استبدال المسافة بحرف T
+        if (normalized.contains(' ')) {
+          normalized = normalized.replaceFirst(' ', 'T');
+        }
+        // استبدال +00 أو -00 بـ Z
+        if (normalized.endsWith('+00')) {
+          normalized = normalized.replaceAll('+00', 'Z');
+        } else if (normalized.endsWith('-00')) {
+          normalized = normalized.replaceAll('-00', 'Z');
+        }
+        parsed = DateTime.tryParse(normalized);
+        if (parsed != null) return parsed.toUtc();
+      } catch (_) {}
     }
     return null;
   }
