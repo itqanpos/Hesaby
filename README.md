@@ -1,23 +1,102 @@
-# README.md — HESABI
+# HESABI — حسابي
 
-Hesabi (حسابي) — Multi-tenant SaaS for POS, Inventory, Sales and Accounting.
+> **Multi-tenant SaaS for POS, Inventory, Sales, Purchases & Accounting**  
+> نظام إدارة متكامل للمتاجر والمندوبين والشركات الصغيرة والمتوسطة — عربي بالكامل، RTL، ويعمل على الويب والأندرويد.
 
-**Phase 0 — Foundation only.** No business features, no authentication, no
-database schema.
+[![Version](https://img.shields.io/badge/version-1.0.0%2B1-blue)](https://github.com/itqanpos/Hesaby)
+[![Flutter](https://img.shields.io/badge/Flutter-%3E%3D3.24.0-02569B)](https://flutter.dev)
+[![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20RLS-3ECF8E)](https://supabase.com)
+[![Platform](https://img.shields.io/badge/Web%20%2B%20Android-✓-success)](#)
 
-## Requirements
+---
 
-| Tool  | Version       |
-|-------|---------------|
-| Flutter | >= 3.24.0   |
-| Dart    | >= 3.5.0    |
+## 🔗 روابط أساسية
 
-## Bootstrap
+| البند | الرابط |
+|---|---|
+| 🌐 **الإنتاج (Web)** | https://itqanpos.github.io/Hesaby/ |
+| 📦 **المستودع** | https://github.com/itqanpos/Hesaby |
+| 🗄️ **قاعدة البيانات** | Supabase (PostgreSQL + RLS + Auth + Storage) |
+| 📱 **المنصات** | Web (GitHub Pages) + Android APK — لا iOS |
 
-```sh
-flutter create --org com.hesabi --project-name hesabi .
-# then drop the provided lib/, test/, pubspec.yaml, analysis_options.yaml in place
-flutter pub get
-flutter analyze
-flutter test
-flutter build web --release
+---
+
+## 📖 نظرة عامة
+
+**Hesabi (حسابي)** نظام سحابي (SaaS) متعدد المستأجرين (multi-tenant) لإدارة:
+- 🛒 **نقاط البيع (POS)** — مع دعم الطابعات الحرارية (Bluetooth / USB / TCP).
+- 📦 **المخزون** — حركات، جرد، تحويلات بين الوحدات.
+- 💰 **المبيعات** — فواتير، مرتجعات، عملاء، أرصدة (مدين/دائن)، آجل.
+- 🧾 **المشتريات** — موردين، أوامر شراء، دفعات.
+- 🧮 **المحاسبة** — خزنة، مصروفات، رواتب، سلف، تقارير مالية.
+- 🏢 **متعدد الشركات والفروع** — مع صلاحيات دقيقة لكل مستخدم.
+- 🔐 **اشتراكات SaaS** — تجربة مجانية، باقات، تجديد، حظر، سجل مدفوعات.
+- ⚙️ **لوحة تحكم المنصة (Platform Admin)** — إدارة كاملة للمنصة من داخل التطبيق.
+
+---
+
+## ✨ الميزات الرئيسية
+
+### 🛒 نقاط البيع (POS)
+- بحث فوري عن المنتجات (خادم + باركود).
+- سلة ذكية مع دعم الوحدات المتعددة (قطعة / علبة / كرتونة).
+- **تعليق واستعادة السلة** (Hold Sale) — لخدمة أكثر من عميل.
+- **التركيز التلقائي** على الكمية عند إضافة أي منتج.
+- **تحذير فوري** عند تجاوز الكمية المتاحة.
+- دفع نقدي / بطاقة / آجل / **دفع مختلط**.
+- **إدارة أرصدة العملاء** (مدين/دائن/مستقر).
+- طباعة حرارية (ESC/POS bitmap) + PDF + مشاركة.
+
+### 📦 المنتجات والمخزون
+- فئات، وحدات قياس (مع معاملات تحويل)، SKUs، باركود.
+- تتبع المخزون لكل منتج / فرع / حركة.
+- جرد المخزون (Stock Count) بجلسات كاملة.
+- تنبيهات المخزون المنخفض والراكد.
+
+### 💰 المبيعات والعملاء
+- فواتير مبيعات، مرتجعات، تقارير مبيعات.
+- كشف حساب عميل (Customer Statement).
+- دفعات مستقلة، تسويات يدوية.
+- رصيد العميل يتحدث تلقائياً عبر triggers.
+
+### 🧾 المشتريات والموردين
+- أوامر شراء، دفعات موردين، كشوف حساب.
+
+### 🧮 المحاسبة والرواتب
+- خزنة (نقدي + بطاقة + بنكي)، حركات، تدفق نقدي.
+- موظفون، سلف، رواتب، خصومات تلقائية.
+- مصروفات (إيجار، كهرباء، صيانة، ...).
+- **تقارير:** الأرباح والخسائر، تقييم المخزون، أفضل المنتجات/العملاء، المستحقات، المدفوعات، إلخ.
+
+### 🔐 الصلاحيات والأمان
+- **Row Level Security (RLS)** على كل جدول.
+- أدوار: `owner`, `admin`, `manager`, `cashier`.
+- صلاحيات دقيقة لكل عضو (`has_permission`).
+- حماية trigger-level ضد تعديل حقول حساسة (اشتراك، دور، ...).
+
+### 💳 اشتراكات SaaS
+- تجربة مجانية 7 أيام.
+- باقات: `basic` / `pro` — شهري / سنوي.
+- حظر تلقائي عند الانتهاء (SubscriptionGuard).
+- حدود: `max_users`, `max_branches`.
+
+### ⚙️ لوحة تحكم المنصة (Platform Admin)
+- إدارة كل الشركات والاشتراكات.
+- **تعليق / فك حظر** أي شركة.
+- تجديد سريع + تغيير الباقة.
+- **سجل مدفوعات** لكل شركة.
+- **تصدير الشركات** إلى PDF.
+- **وضع الصيانة** (Maintenance Mode) — يشمل المالك فقط.
+- **إعلانات عامة** (Banner) لكل المستخدمين.
+- **Feature Flags** — تعطيل أي ميزة من المنصة.
+
+### 📡 العمل بدون إنترنت (Offline)
+- طابور عمليات (Operation Queue).
+- إعادة المحاولة التلقائية عند عودة الشبكة.
+- لا يفقد البيانات في حالة انقطاع الاتصال.
+
+---
+
+## 🏗️ المعمارية
+
+**Feature-first architecture** (على نمط Clean Architecture):
