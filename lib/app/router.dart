@@ -5,7 +5,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../features/admin/presentation/pages/admin_companies_page.dart';
-import '../features/admin/presentation/pages/admin_dashboard_page.dart'; // ⬅️ تمت الإضافة
+import '../features/admin/presentation/pages/admin_dashboard_page.dart';
+import '../features/admin/presentation/providers/admin_app_config_provider.dart'; // ⬅️ جديد
 import '../features/auth/presentation/pages/create_company_page.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/signup_page.dart';
@@ -74,7 +75,6 @@ abstract final class AppRouter {
   static const String loadingPath = '/loading';
   static const String loadingName = 'loading';
 
-  // ---- Phase T-3: Google Sign-In onboarding ----
   static const String createCompanyPath = '/create-company';
   static const String createCompanyName = 'create-company';
 
@@ -93,7 +93,6 @@ abstract final class AppRouter {
   static const String stockMovementsPath = '/inventory/movements';
   static const String stockMovementsName = 'stock-movements';
 
-  // ---- Stock count ----
   static const String stockCountSessionsPath = '/inventory/stock-count';
   static const String stockCountSessionsName = 'stock-count-sessions';
 
@@ -164,40 +163,33 @@ abstract final class AppRouter {
   static const String printerSettingsPath = '/settings/printer';
   static const String printerSettingsName = 'printer-settings';
 
-  // ---- Phase T-1: Subscription ----
   static const String subscriptionPath = '/subscription';
   static const String subscriptionName = 'subscription';
 
-  // ---- Phase T-2: Platform Admin ----
-  static const String adminDashboardPath = '/admin/dashboard'; // ⬅️ تمت الإضافة
-  static const String adminDashboardName = 'admin-dashboard'; // ⬅️ تمت الإضافة
+  static const String adminDashboardPath = '/admin/dashboard';
+  static const String adminDashboardName = 'admin-dashboard';
 
   static const String adminCompaniesPath = '/admin/companies';
   static const String adminCompaniesName = 'admin-companies';
 
-  // ---- Phase T-5: Cash Register ----
   static const String cashRegisterPath = '/cash';
   static const String cashRegisterName = 'cash-register';
 
   static const String cashReportsPath = '/cash/reports';
   static const String cashReportsName = 'cash-reports';
 
-  // ---- Phase T-5: Employees ----
   static const String employeesPath = '/employees';
   static const String employeesName = 'employees';
 
-  // ---- Phase T-5: Payroll ----
   static const String advancesPath = '/advances';
   static const String advancesName = 'advances';
 
   static const String salariesPath = '/salaries';
   static const String salariesName = 'salaries';
 
-  // ---- Phase T-5: Expenses ----
   static const String expensesPath = '/expenses';
   static const String expensesName = 'expenses';
 
-  // ---- Phase 9: Reports ----
   static const String reportsPath = '/reports';
   static const String reportsName = 'reports';
 
@@ -238,6 +230,15 @@ abstract final class AppRouter {
 
   static const String posPath = '/pos';
   static const String posName = 'pos';
+
+  // ⬇️ دالة مساعدة: هل المسار يحتاج ميزة معينة؟
+  static String? _featureFlagForPath(String path) {
+    if (path.startsWith(posPath)) return 'pos';
+    if (path.startsWith(inventoryPath)) return 'inventory';
+    if (path.startsWith(purchasesPath)) return 'purchases';
+    if (path.startsWith(reportsPath)) return 'reports';
+    return null;
+  }
 }
 
 /// Provides the application router.
@@ -264,6 +265,18 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
           location == AppRouter.signupPath ||
           location == AppRouter.loadingPath) {
         return AppRouter.homePath;
+      }
+
+      // ⬇️ حماية Feature Flags
+      final String? flagKey = AppRouter._featureFlagForPath(location);
+      if (flagKey != null) {
+        final appConfig = ref.read(adminAppConfigProvider).valueOrNull;
+        final bool isEnabled =
+            appConfig?.featureFlags[flagKey] as bool? ?? true;
+        if (!isEnabled) {
+          // الميزة معطلة → نوجهه للرئيسية
+          return AppRouter.homePath;
+        }
       }
 
       return null;
@@ -305,7 +318,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const SubscriptionPage(),
       ),
-      // ⬇️ مسار لوحة التحكم الجديدة
       GoRoute(
         path: AppRouter.adminDashboardPath,
         name: AppRouter.adminDashboardName,
@@ -570,7 +582,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
           ),
         ],
       ),
-      // ---- Phase 9: Reports ----
       GoRoute(
         path: AppRouter.reportsPath,
         name: AppRouter.reportsName,
@@ -665,6 +676,13 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
 
   ref.listen<AuthState>(authProvider, (AuthState? previous, AuthState next) {
     if (previous?.status != next.status) {
+      router.refresh();
+    }
+  });
+
+  // ⬇️ الاستماع لتغيير إعدادات التطبيق لتحديث الصفحات المحمية
+  ref.listen<AsyncValue<AppConfig>>(adminAppConfigProvider, (prev, next) {
+    if (prev?.valueOrNull?.featureFlags != next.valueOrNull?.featureFlags) {
       router.refresh();
     }
   });
