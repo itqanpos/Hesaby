@@ -32,4 +32,112 @@ final NotifierProvider<PosSearchNotifier, PosSearchState> posSearchProvider =
 final StateProvider<String?> focusedCartLineProvider =
     StateProvider<String?>((ref) => null);
 
-// ... (بقية الملف كما هو: posServerSearchProvider, PosTotals, posTotalsProvider, إلخ) ...
+// ============================================================================
+// Search results — server-side
+// ============================================================================
+
+final FutureProvider<List<Product>> posServerSearchProvider =
+    FutureProvider<List<Product>>((ref) async {
+  final PosSearchState search = ref.watch(posSearchProvider);
+  if (search.isEmpty) {
+    return const <Product>[];
+  }
+
+  bool isDisposed = false;
+  ref.onDispose(() => isDisposed = true);
+
+  await Future<void>.delayed(_debounceDelay);
+  if (isDisposed) return const <Product>[];
+
+  final String? companyId = ref.watch(
+    companyContextProvider.select(
+      (CompanyContextState s) => s.currentCompany?.id,
+    ),
+  );
+  if (companyId == null) return const <Product>[];
+
+  final ProductsPageResult page = await ref
+      .read(productRepositoryProvider)
+      .listProductsPaged(
+        companyId: companyId,
+        offset: 0,
+        limit: _maxResults,
+        searchQuery: search.normalizedQuery,
+        isActive: true,
+        sortField: ProductSortField.name,
+        sortAscending: true,
+      );
+
+  if (isDisposed) return const <Product>[];
+  return page.items;
+});
+
+const Duration _debounceDelay = Duration(milliseconds: 200);
+const int _maxResults = 20;
+
+final Provider<AsyncValue<List<Product>>> posSearchResultsProvider =
+    Provider<AsyncValue<List<Product>>>((ref) {
+  return ref.watch(posServerSearchProvider);
+});
+
+final Provider<bool> posHasSearchResultsProvider = Provider<bool>((ref) {
+  final AsyncValue<List<Product>> results =
+      ref.watch(posSearchResultsProvider);
+  return results.maybeWhen(
+    data: (List<Product> products) => products.isNotEmpty,
+    orElse: () => false,
+  );
+});
+
+// ============================================================================
+// Totals
+// ============================================================================
+
+@immutable
+class PosTotals extends Equatable {
+  const PosTotals({
+    required this.lineCount,
+    required this.subtotal,
+    required this.discount,
+    required this.taxAmount,
+    required this.total,
+  });
+
+  final int lineCount;
+  final double subtotal;
+  final double discount;
+  final double taxAmount;
+  final double total;
+
+  bool get isEmpty => lineCount == 0;
+  bool get isNotEmpty => lineCount > 0;
+
+  @override
+  List<Object?> get props =>
+      <Object?>[lineCount, subtotal, discount, taxAmount, total];
+
+  @override
+  String toString() =>
+      'PosTotals(lineCount: $lineCount, subtotal: $subtotal, '
+      'discount: $discount, taxAmount: $taxAmount, total: $total)';
+}
+
+final Provider<PosTotals> posTotalsProvider = Provider<PosTotals>((ref) {
+  final PosCart cart = ref.watch(posCartProvider);
+  final double defaultTaxRate = ref.watch(defaultTaxRateProvider);
+
+  final double afterDiscount = cart.subtotal - cart.discount;
+  final double tax = PosTaxCalculator.taxFor(
+    afterDiscount: afterDiscount,
+    manualTax: cart.taxAmount,
+    defaultTaxRate: defaultTaxRate,
+  );
+
+  return PosTotals(
+    lineCount: cart.lineCount,
+    subtotal: cart.subtotal,
+    discount: cart.discount,
+    taxAmount: tax,
+    total: PosTaxCalculator.totalFor(afterDiscount: afterDiscount, tax: tax),
+  );
+});
