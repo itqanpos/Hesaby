@@ -7,6 +7,7 @@ import 'package:supabase_flutter/supabase_flutter.dart'
     show Supabase, SupabaseClient;
 
 import '../../../../core/storage/preferences_storage.dart';
+import '../../../../core/utils/logger.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../data/datasources/company_remote_datasource.dart';
 import '../../data/repositories/company_repository_impl.dart';
@@ -33,8 +34,7 @@ final Provider<CompanyRepository> companyRepositoryProvider =
       (ref) => CompanyRepositoryImpl(ref.watch(companyRemoteDataSourceProvider)),
     );
 
-/// Provides every branch (active and inactive) of the currently selected
-/// company.
+/// Provides every branch (active and inactive) of the currently selected company.
 final FutureProvider<List<Branch>> companyAllBranchesProvider =
     FutureProvider<List<Branch>>((ref) async {
   final String? companyId = ref.watch(
@@ -160,10 +160,6 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
   // Public API — companies
   // ---------------------------------------------------------------------------
 
-  /// Updates the profile of the currently selected company.
-  ///
-  /// [taxNumber] and [commercialRegister] are optional; passing `null`
-  /// clears the corresponding column.
   Future<Company> updateCurrentCompany({
     required String name,
     required String currency,
@@ -348,148 +344,188 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       isLoadingBranches: false,
     );
 
-    final PreferencesStorage preferences = await _preferences();
-    final String? savedCompanyId = await preferences.readString(
-      key: _currentCompanyIdKey,
-    );
-    final String? savedBranchId = await preferences.readString(
-      key: _currentBranchIdKey,
-    );
-
-    if (_isDisposed) {
-      return;
-    }
-
-    final List<Company> companies;
     try {
-      companies = await ref.read(companyRepositoryProvider).getMyCompanies();
-    } on CompanyException catch (error) {
-      if (_isDisposed) {
-        return;
-      }
-      state = state.copyWith(
-        status: CompanyContextStatus.error,
-        companiesFailure: error.type,
+      final PreferencesStorage preferences = await _preferences();
+      final String? savedCompanyId = await preferences.readString(
+        key: _currentCompanyIdKey,
       );
-      return;
-    }
-
-    if (_isDisposed) {
-      return;
-    }
-
-    if (companies.isEmpty) {
-      await preferences.remove(key: _currentCompanyIdKey);
-      await preferences.remove(key: _currentBranchIdKey);
-      if (_isDisposed) {
-        return;
-      }
-      state = CompanyContextState(
-        status: CompanyContextStatus.ready,
-        companies: const <Company>[],
+      final String? savedBranchId = await preferences.readString(
+        key: _currentBranchIdKey,
       );
-      return;
-    }
 
-    final Company? selectedCompany = _resolveCompanySelection(
-      companies: companies,
-      savedCompanyId: savedCompanyId,
-    );
-
-    if (selectedCompany == null) {
-      await preferences.remove(key: _currentCompanyIdKey);
-      await preferences.remove(key: _currentBranchIdKey);
       if (_isDisposed) {
         return;
       }
+
+      final List<Company> companies;
+      try {
+        // ⬇️ إضافة timeout لجلب الشركات
+        companies = await ref
+            .read(companyRepositoryProvider)
+            .getMyCompanies()
+            .timeout(const Duration(seconds: 15));
+      } on TimeoutException {
+        if (_isDisposed) return;
+        state = state.copyWith(
+          status: CompanyContextStatus.error,
+          companiesFailure: CompanyFailureType.network,
+        );
+        return;
+      } on CompanyException catch (error) {
+        if (_isDisposed) {
+          return;
+        }
+        state = state.copyWith(
+          status: CompanyContextStatus.error,
+          companiesFailure: error.type,
+        );
+        return;
+      }
+
+      if (_isDisposed) {
+        return;
+      }
+
+      if (companies.isEmpty) {
+        await preferences.remove(key: _currentCompanyIdKey);
+        await preferences.remove(key: _currentBranchIdKey);
+        if (_isDisposed) {
+          return;
+        }
+        state = CompanyContextState(
+          status: CompanyContextStatus.ready,
+          companies: const <Company>[],
+        );
+        return;
+      }
+
+      final Company? selectedCompany = _resolveCompanySelection(
+        companies: companies,
+        savedCompanyId: savedCompanyId,
+      );
+
+      if (selectedCompany == null) {
+        await preferences.remove(key: _currentCompanyIdKey);
+        await preferences.remove(key: _currentBranchIdKey);
+        if (_isDisposed) {
+          return;
+        }
+        state = CompanyContextState(
+          status: CompanyContextStatus.ready,
+          companies: companies,
+        );
+        return;
+      }
+
+      await preferences.writeString(
+        key: _currentCompanyIdKey,
+        value: selectedCompany.id,
+      );
+
+      if (_isDisposed) {
+        return;
+      }
+
       state = CompanyContextState(
         status: CompanyContextStatus.ready,
         companies: companies,
+        currentCompany: selectedCompany,
+        isLoadingBranches: true,
       );
-      return;
+
+      await _loadBranchesFor(selectedCompany, savedBranchId: savedBranchId);
+    } on Object catch (error, stackTrace) {
+      AppLogger.error('Unhandled error in _loadFromScratch', error, stackTrace);
+      if (_isDisposed) return;
+      state = state.copyWith(
+        status: CompanyContextStatus.error,
+        companiesFailure: CompanyFailureType.unknown,
+      );
     }
-
-    await preferences.writeString(
-      key: _currentCompanyIdKey,
-      value: selectedCompany.id,
-    );
-
-    if (_isDisposed) {
-      return;
-    }
-
-    state = CompanyContextState(
-      status: CompanyContextStatus.ready,
-      companies: companies,
-      currentCompany: selectedCompany,
-      isLoadingBranches: true,
-    );
-
-    await _loadBranchesFor(selectedCompany, savedBranchId: savedBranchId);
   }
 
   Future<void> _loadBranchesFor(
     Company company, {
     String? savedBranchId,
   }) async {
-    final PreferencesStorage preferences = await _preferences();
-
-    final List<Branch> branches;
     try {
-      branches = await ref
-          .read(companyRepositoryProvider)
-          .getCompanyBranches(company.id);
-    } on CompanyException catch (error) {
+      final PreferencesStorage preferences = await _preferences();
+
+      final List<Branch> branches;
+      try {
+        // ⬇️ إضافة timeout لجلب الفروع
+        branches = await ref
+            .read(companyRepositoryProvider)
+            .getCompanyBranches(company.id)
+            .timeout(const Duration(seconds: 15));
+      } on TimeoutException {
+        if (_isDisposed) return;
+        if (state.currentCompany?.id != company.id) return;
+        state = state.copyWith(
+          isLoadingBranches: false,
+          branchesFailure: CompanyFailureType.network,
+        );
+        return;
+      } on CompanyException catch (error) {
+        if (_isDisposed) {
+          return;
+        }
+        if (state.currentCompany?.id != company.id) {
+          return;
+        }
+        state = state.copyWith(
+          isLoadingBranches: false,
+          branchesFailure: error.type,
+        );
+        return;
+      }
+
       if (_isDisposed) {
         return;
       }
+
       if (state.currentCompany?.id != company.id) {
         return;
       }
+
+      final Branch? selectedBranch = _resolveBranchSelection(
+        branches: branches,
+        savedBranchId: savedBranchId,
+      );
+
+      if (selectedBranch != null) {
+        await preferences.writeString(
+          key: _currentBranchIdKey,
+          value: selectedBranch.id,
+        );
+      } else {
+        await preferences.remove(key: _currentBranchIdKey);
+      }
+
+      if (_isDisposed) {
+        return;
+      }
+
+      if (state.currentCompany?.id != company.id) {
+        return;
+      }
+
+      state = state.copyWith(
+        branches: branches,
+        currentBranch: selectedBranch,
+        clearCurrentBranch: selectedBranch == null,
+        isLoadingBranches: false,
+        clearBranchesFailure: true,
+      );
+    } on Object catch (error, stackTrace) {
+      AppLogger.error('Unhandled error in _loadBranchesFor', error, stackTrace);
+      if (_isDisposed) return;
+      if (state.currentCompany?.id != company.id) return;
       state = state.copyWith(
         isLoadingBranches: false,
-        branchesFailure: error.type,
+        branchesFailure: CompanyFailureType.unknown,
       );
-      return;
     }
-
-    if (_isDisposed) {
-      return;
-    }
-
-    if (state.currentCompany?.id != company.id) {
-      return;
-    }
-
-    final Branch? selectedBranch = _resolveBranchSelection(
-      branches: branches,
-      savedBranchId: savedBranchId,
-    );
-
-    if (selectedBranch != null) {
-      await preferences.writeString(
-        key: _currentBranchIdKey,
-        value: selectedBranch.id,
-      );
-    } else {
-      await preferences.remove(key: _currentBranchIdKey);
-    }
-
-    if (_isDisposed) {
-      return;
-    }
-
-    if (state.currentCompany?.id != company.id) {
-      return;
-    }
-
-    state = state.copyWith(
-      branches: branches,
-      currentBranch: selectedBranch,
-      clearCurrentBranch: selectedBranch == null,
-      isLoadingBranches: false,
-      clearBranchesFailure: true,
-    );
   }
 
   Future<void> _resetContext() async {
