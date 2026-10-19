@@ -3,6 +3,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
+import 'package:hesabi/features/companies/domain/entities/company.dart';
 import 'package:hesabi/features/companies/presentation/providers/company_context_provider.dart';
 import 'package:hesabi/features/companies/presentation/providers/company_context_state.dart';
 import 'package:hesabi/features/sales/domain/entities/sale_entities.dart';
@@ -25,7 +26,7 @@ class FakeCustomerRepository implements CustomerRepository {
   bool? lastIsActive;
 
   @override
-  Future<List<Customer>> listCustomers(String companyId) async {
+  Future<List<Customer>> listCustomers(String companyId, {bool includeInactive = false}) async {
     return _initial;
   }
 
@@ -65,7 +66,6 @@ class FakeCustomerRepository implements CustomerRepository {
   // ------------------------------------------------------------------------
   // Methods not used by these tests — throw UnimplementedError.
   // ------------------------------------------------------------------------
-
   @override
   dynamic noSuchMethod(Invocation invocation) =>
       throw UnimplementedError(
@@ -77,16 +77,31 @@ class FakeCustomerRepository implements CustomerRepository {
 // Helpers
 // ============================================================================
 
-/// Builds a ProviderContainer with a fake repository and a fixed company.
+/// يبني `ProviderContainer` مع تجاوزات آمنة (بدون الحاجة لكائنات حقيقية).
 ProviderContainer buildContainer(FakeCustomerRepository repo) {
+  // إنشاء شركة وهمية
+  final fakeCompany = Company(
+    id: 'co1',
+    name: 'شركة وهمية',
+    currency: 'EGP',
+    timezone: 'Africa/Cairo',
+    isActive: true,
+    createdAt: DateTime(2026),
+    updatedAt: DateTime(2026),
+  );
+
+  // إنشاء حالة سياق وهمية (سنحتاج للتأكد من الحقول المطلوبة في ملفك)
+  // ملاحظة: إذا كان CompanyContextState يحتوي على حقول أخرى، أضفها هنا.
+  final fakeContext = CompanyContextState(
+    currentCompany: fakeCompany,
+    branches: const [],
+    currentBranch: null,
+  );
+
   return ProviderContainer(
     overrides: <Override>[
-      // نُغيّر companyContextProvider ليعيد شركة وهمية.
-      companyContextProvider.overrideWith((ref) {
-        return const CompanyContextState(
-          currentCompany: null, // سيتم التعامل معه لاحقاً
-        );
-      }),
+      // نُجبر سياق الشركة على إرجاع الشركة الوهمية
+      companyContextProvider.overrideWith((ref) => fakeContext),
       // نُغيّر customerRepositoryProvider ليعيد الـ fake.
       customerRepositoryProvider.overrideWithValue(repo),
     ],
@@ -130,12 +145,7 @@ void main() {
         <Customer>[activeCustomer, secondCustomer],
       );
 
-      // نُجبر companyContext على إرجاع شركة وهمية
-      final container = ProviderContainer(
-        overrides: <Override>[
-          customerRepositoryProvider.overrideWithValue(repo),
-        ],
-      );
+      final container = buildContainer(repo);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
@@ -157,11 +167,7 @@ void main() {
       final disabledCustomer = activeCustomer.copyWith(isActive: false);
       final repo = FakeCustomerRepository(<Customer>[disabledCustomer]);
 
-      final container = ProviderContainer(
-        overrides: <Override>[
-          customerRepositoryProvider.overrideWithValue(repo),
-        ],
-      );
+      final container = buildContainer(repo);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
@@ -182,11 +188,7 @@ void main() {
     test('updating other fields does not alter isActive', () async {
       final repo = FakeCustomerRepository(<Customer>[activeCustomer]);
 
-      final container = ProviderContainer(
-        overrides: <Override>[
-          customerRepositoryProvider.overrideWithValue(repo),
-        ],
-      );
+      final container = buildContainer(repo);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
@@ -207,11 +209,7 @@ void main() {
     test('full disable → re-enable → disable cycle', () async {
       final repo = FakeCustomerRepository(<Customer>[activeCustomer]);
 
-      final container = ProviderContainer(
-        overrides: <Override>[
-          customerRepositoryProvider.overrideWithValue(repo),
-        ],
-      );
+      final container = buildContainer(repo);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
@@ -248,11 +246,7 @@ void main() {
       final richCustomer = activeCustomer.copyWith(balance: 1234.56);
       final repo = FakeCustomerRepository(<Customer>[richCustomer]);
 
-      final container = ProviderContainer(
-        overrides: <Override>[
-          customerRepositoryProvider.overrideWithValue(repo),
-        ],
-      );
+      final container = buildContainer(repo);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
