@@ -9,20 +9,6 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../../core/utils/logger.dart';
 
 /// Full-screen barcode scanner dialog — stability-first.
-///
-/// ## Correctness fixes
-/// * **No `scanWindow`** — the previous version passed widget coordinates
-///   to `MobileScanner.scanWindow`, which expects **image coordinates**.
-///   This mismatch caused native crashes on some Android devices
-///   (especially Samsung). The visual overlay is kept as UX only and does
-///   not affect detection.
-/// * **No `cameraResolution`** — some Android devices reject a hard
-///   resolution request at the CameraX level, which crashes the app
-///   instead of falling back. Removing it lets the SDK choose a safe
-///   default.
-/// * Detection paused while the manual-entry sheet is open.
-/// * Single owner for camera start; lifecycle-aware.
-/// * Torch icon reflects the real state; torch errors are caught.
 class PosBarcodeScannerDialog extends StatefulWidget {
   const PosBarcodeScannerDialog({super.key});
 
@@ -45,7 +31,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   /// Visual overlay rectangle — widget coordinates, **not** used by the
   /// scanner. Recomputed only when the available size changes.
   Rect? _overlayRect;
-  Size? _overlayRectFor;
+  Size? _overlayRectSize; // ⬅️ تمت إعادة التسمية
 
   @override
   void initState() {
@@ -53,11 +39,10 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     WidgetsBinding.instance.addObserver(this);
 
     _controller = MobileScannerController(
-      autoStart: false, // we are the only owner of start()/stop()
+      autoStart: false,
       detectionSpeed: DetectionSpeed.unrestricted,
       facing: CameraFacing.back,
       torchEnabled: false,
-      // Fewer formats => faster decoding.
       formats: const <BarcodeFormat>[
         BarcodeFormat.ean13,
         BarcodeFormat.ean8,
@@ -97,7 +82,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       if (error == null) {
         _startCamera();
       } else if (error.errorCode == MobileScannerErrorCode.permissionDenied) {
-        // User probably came back from the system settings.
         _retry();
       }
     } else if (state == AppLifecycleState.paused ||
@@ -116,7 +100,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     try {
       await _controller.start();
     } on MobileScannerException catch (error) {
-      // Already running is not a real error.
       if (error.errorCode ==
           MobileScannerErrorCode.controllerAlreadyInitialized) {
         return;
@@ -161,7 +144,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     try {
       await _controller.stop();
     } on Object {
-      // Ignore — the controller may already be stopped.
+      // Ignore
     }
     if (!mounted) return;
 
@@ -223,14 +206,15 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   // Visual overlay rectangle
   // ---------------------------------------------------------------------------
 
-  Rect _overlayRectFor(BoxConstraints constraints) {
+  Rect _computeOverlayRect(BoxConstraints constraints) {
     final Size size = constraints.biggest;
-    if (_overlayRect != null && _overlayRectFor == size) return _overlayRect!;
+    if (_overlayRect != null && _overlayRectSize == size) {
+      return _overlayRect!;
+    }
 
-    // Barcode-friendly aspect ratio: wider than tall (2:1).
     final double width = (size.width * 0.82).clamp(240.0, 340.0);
     final double height = width * 0.5;
-    _overlayRectFor = size;
+    _overlayRectSize = size;
     return _overlayRect = Rect.fromCenter(
       center: Offset(size.width / 2, size.height * 0.40),
       width: width,
@@ -279,11 +263,10 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
             )
           : LayoutBuilder(
               builder: (BuildContext context, BoxConstraints constraints) {
-                final Rect overlayRect = _overlayRectFor(constraints);
+                final Rect overlayRect = _computeOverlayRect(constraints);
 
                 return Stack(
                   children: <Widget>[
-                    // ⬇️ بدون scanWindow — نمسح الصورة بالكامل
                     MobileScanner(
                       controller: _controller,
                       onDetect: _handleDetection,
@@ -306,7 +289,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                           const _LoadingView(),
                     ),
 
-                    // Static layer: painted once, never repaints.
                     IgnorePointer(
                       child: RepaintBoundary(
                         child: CustomPaint(
@@ -316,7 +298,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                       ),
                     ),
 
-                    // Animated layer: only the laser line repaints.
                     IgnorePointer(
                       child: RepaintBoundary(
                         child: CustomPaint(
