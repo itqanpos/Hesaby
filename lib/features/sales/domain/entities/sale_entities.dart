@@ -57,10 +57,6 @@ class Customer extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  // ---------------------------------------------------------------------------
-  // Convenience
-  // ---------------------------------------------------------------------------
-
   bool get hasCode => code != null && code!.trim().isNotEmpty;
   bool get hasPhone => phone != null && phone!.trim().isNotEmpty;
   bool get hasEmail => email != null && email!.trim().isNotEmpty;
@@ -70,10 +66,6 @@ class Customer extends Equatable {
   bool get hasOutstandingBalance => balance > 0;
   bool get isDebtor => balance > 0;
   bool get isSettled => balance <= 0;
-
-  // ---------------------------------------------------------------------------
-  // copyWith
-  // ---------------------------------------------------------------------------
 
   Customer copyWith({
     String? name,
@@ -129,4 +121,189 @@ class Customer extends Equatable {
       'balance: $balance, isActive: $isActive)';
 }
 
-// ... (بقية الملف: Sale, SaleItem, SaleItemDraft كما هي بدون تغيير) ...
+// ============================================================================
+// Sale
+// ============================================================================
+
+@immutable
+class Sale extends Equatable {
+  const Sale({
+    required this.id,
+    required this.companyId,
+    required this.branchId,
+    required this.saleDate,
+    required this.status,
+    required this.subtotal,
+    required this.discount,
+    required this.taxAmount,
+    required this.total,
+    required this.paidAmount,
+    required this.paymentStatus,
+    required this.createdAt,
+    required this.updatedAt,
+    this.customerId,
+    this.invoiceNumber,
+    this.notes,
+    this.createdBy,
+    this.confirmedAt,
+    this.cancelledAt,
+  });
+
+  final String id;
+  final String companyId;
+  final String branchId;
+  final String? customerId;
+  final String? invoiceNumber;
+  final DateTime saleDate;
+  final String status;
+  final double subtotal;
+  final double discount;
+  final double taxAmount;
+  final double total;
+  final double paidAmount;
+  final String paymentStatus;
+  final String? notes;
+  final String? createdBy;
+  final DateTime? confirmedAt;
+  final DateTime? cancelledAt;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  bool get isDraft => status == SaleStatus.draft;
+  bool get isConfirmed => status == SaleStatus.confirmed;
+  bool get isCancelled => status == SaleStatus.cancelled;
+  bool get canEdit => isDraft;
+  bool get canTransition => isDraft || isConfirmed;
+
+  bool get hasCustomer => customerId != null;
+  bool get hasInvoiceNumber =>
+      invoiceNumber != null && invoiceNumber!.trim().isNotEmpty;
+  bool get hasNotes => notes != null && notes!.trim().isNotEmpty;
+  bool get wasConfirmed => confirmedAt != null;
+  bool get wasCancelled => cancelledAt != null;
+
+  bool get isUnpaid => paymentStatus == PaymentStatus.unpaid;
+  bool get isPartiallyPaid => paymentStatus == PaymentStatus.partial;
+  bool get isFullyPaid => paymentStatus == PaymentStatus.paid;
+
+  double get amountDue {
+    final double due = total - paidAmount;
+    return due < 0 ? 0 : due;
+  }
+
+  double get netAfterDiscount => subtotal - discount;
+
+  @override
+  List<Object?> get props => <Object?>[
+        id,
+        companyId,
+        branchId,
+        customerId,
+        invoiceNumber,
+        saleDate,
+        status,
+        subtotal,
+        discount,
+        taxAmount,
+        total,
+        paidAmount,
+        paymentStatus,
+        notes,
+        createdBy,
+        confirmedAt,
+        cancelledAt,
+        createdAt,
+        updatedAt,
+      ];
+
+  @override
+  String toString() =>
+      'Sale(id: $id, customerId: $customerId, status: $status, '
+      'total: $total, paidAmount: $paidAmount)';
+}
+
+// ============================================================================
+// Sale item
+// ============================================================================
+
+@immutable
+class SaleItem extends Equatable {
+  const SaleItem({
+    required this.id,
+    required this.companyId,
+    required this.saleId,
+    required this.productId,
+    required this.unitId,
+    required this.quantity,
+    required this.unitPrice,
+    required this.lineTotal,
+    required this.createdAt,
+    required this.updatedAt,
+    this.notes,
+  });
+
+  final String id;
+  final String companyId;
+  final String saleId;
+  final String productId;
+  final String unitId;
+  final double quantity;
+  final double unitPrice;
+  final double lineTotal;
+  final String? notes;
+  final DateTime createdAt;
+  final DateTime updatedAt;
+
+  bool get hasNotes => notes != null && notes!.trim().isNotEmpty;
+  double get value => lineTotal;
+
+  @override
+  List<Object?> get props => <Object?>[
+        id,
+        companyId,
+        saleId,
+        productId,
+        unitId,
+        quantity,
+        unitPrice,
+        lineTotal,
+        notes,
+        createdAt,
+        updatedAt,
+      ];
+
+  @override
+  String toString() =>
+      'SaleItem(id: $id, saleId: $saleId, productId: $productId, '
+      'quantity: $quantity, unitPrice: $unitPrice, lineTotal: $lineTotal)';
+}
+
+// ============================================================================
+// Sale item draft
+// ============================================================================
+
+@immutable
+class SaleItemDraft extends Equatable {
+  const SaleItemDraft({
+    required this.productId,
+    required this.unitId,
+    required this.quantity,
+    required this.unitPrice,
+    this.notes,
+  });
+
+  final String productId;
+  final String unitId;
+  final double quantity;
+  final double unitPrice;
+  final String? notes;
+
+  @override
+  List<Object?> get props =>
+      <Object?>[productId, unitId, quantity, unitPrice, notes];
+
+  @override
+  String toString() =>
+      'SaleItemDraft(productId: $productId, unitId: $unitId, '
+      'quantity: $quantity, unitPrice: $unitPrice)';
+}
