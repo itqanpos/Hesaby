@@ -2,23 +2,14 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
 import '../../domain/entities/pos_cart_line.dart';
+import '../state/pos_providers.dart';
 
 /// A single line in the POS cart — **single row layout**.
-///
-/// Layout (RTL):
-/// ```
-/// ┌──────────────────────────────────────────────────────────────┐
-/// │ بيبسي 1 لتر  [2] قطعة  [12.00] 24.00 ج.م  ✕                  │
-/// └──────────────────────────────────────────────────────────────┘
-/// ```
-///
-/// The price range hint appears **only while the price field is focused**,
-/// as a small overlay above the line — it does not consume vertical space
-/// in the steady state.
-class PosCartLineTile extends StatefulWidget {
+class PosCartLineTile extends ConsumerStatefulWidget {
   const PosCartLineTile({
     super.key,
     required this.line,
@@ -28,20 +19,15 @@ class PosCartLineTile extends StatefulWidget {
   });
 
   final PosCartLine line;
-
-  /// Commits a new quantity. Returns `true` when accepted.
   final bool Function(double quantity) onSetQuantity;
-
-  /// Commits a new unit price. Returns `true` when accepted.
   final bool Function(double price) onSetPrice;
-
   final VoidCallback onRemove;
 
   @override
-  State<PosCartLineTile> createState() => _PosCartLineTileState();
+  ConsumerState<PosCartLineTile> createState() => _PosCartLineTileState();
 }
 
-class _PosCartLineTileState extends State<PosCartLineTile> {
+class _PosCartLineTileState extends ConsumerState<PosCartLineTile> {
   static final NumberFormat _money = NumberFormat.currency(
     locale: 'en_US',
     symbol: 'ج.م ',
@@ -93,10 +79,6 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Commit helpers
-  // ---------------------------------------------------------------------------
-
   void _onQuantityFocusChange() {
     if (mounted) setState(() {});
     if (!_quantityFocus.hasFocus) _commitQuantity();
@@ -129,6 +111,20 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
               ? 'المتاح ${_formatQuantity(available)}'
               : 'كمية مرفوضة';
         });
+        
+        // ⬇️ إظهار رسالة تحذيرية عند رفض الكمية
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            SnackBar(
+              content: Text(
+                available != null
+                    ? 'عذراً، الكمية المتاحة هي ${_formatQuantity(available)} فقط.'
+                    : 'الكمية المطلوبة غير متاحة.',
+              ),
+              backgroundColor: Theme.of(context).colorScheme.error,
+            ),
+          );
       }
       _quantityController.text = _formatQuantity(widget.line.quantity);
       return;
@@ -198,18 +194,28 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
     return value.toStringAsFixed(2);
   }
 
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final PosCartLine line = widget.line;
 
-    // Whether to show the price-range overlay: only while the price field
-    // is focused (or the price has an active error).
+    // ⬇️ مراقبة المنتج المضاف حديثاً لتفعيل التركيز على الكمية
+    ref.listen<String?>(focusedCartLineProvider, (previous, next) {
+      if (next == line.key) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _quantityFocus.requestFocus();
+            _quantityController.selection = TextSelection(
+              baseOffset: 0,
+              extentOffset: _quantityController.text.length,
+            );
+            ref.read(focusedCartLineProvider.notifier).state = null;
+          }
+        });
+      }
+    });
+
     final bool showPriceRangeOverlay =
         line.hasPriceRange && (_priceFocus.hasFocus || _priceError != null);
 
@@ -219,7 +225,6 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         mainAxisSize: MainAxisSize.min,
         children: <Widget>[
-          // ---- Price range overlay (shown only on price focus/error) ----
           if (showPriceRangeOverlay)
             Padding(
               padding: const EdgeInsets.only(bottom: 4, right: 8, left: 8),
@@ -258,11 +263,9 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
               ),
             ),
 
-          // ---- Single row: name | qty | unit | price | total | remove ----
           Row(
             crossAxisAlignment: CrossAxisAlignment.center,
             children: <Widget>[
-              // ---- Product name ----
               Expanded(
                 flex: 4,
                 child: Text(
@@ -276,7 +279,6 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
               ),
               const SizedBox(width: 6),
 
-              // ---- Quantity ----
               SizedBox(
                 width: 52,
                 child: _CompactField(
@@ -288,7 +290,6 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
               ),
               const SizedBox(width: 4),
 
-              // ---- Unit name ----
               SizedBox(
                 width: 44,
                 child: Text(
@@ -303,7 +304,6 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
               ),
               const SizedBox(width: 4),
 
-              // ---- Unit price ----
               SizedBox(
                 width: 68,
                 child: _CompactField(
@@ -315,7 +315,6 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
               ),
               const SizedBox(width: 6),
 
-              // ---- Line total ----
               SizedBox(
                 width: 72,
                 child: Text(
@@ -330,7 +329,6 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
                 ),
               ),
 
-              // ---- Remove ----
               _IconTap(
                 tooltip: 'حذف من السلة',
                 icon: Icons.close,
@@ -343,10 +341,6 @@ class _PosCartLineTileState extends State<PosCartLineTile> {
     );
   }
 }
-
-// ============================================================================
-// Compact number field
-// ============================================================================
 
 class _CompactField extends StatelessWidget {
   const _CompactField({
@@ -401,10 +395,6 @@ class _CompactField extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Small icon tap target
-// ============================================================================
 
 class _IconTap extends StatelessWidget {
   const _IconTap({
