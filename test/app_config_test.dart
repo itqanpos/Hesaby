@@ -1,54 +1,34 @@
 // test/app_config_test.dart
+
 import 'package:flutter_test/flutter_test.dart';
-import 'package:hesabi/app/config/app_config.dart';
+import 'package:hesabi/features/admin/presentation/providers/admin_app_config_provider.dart';
 
 void main() {
   group('AppConfig', () {
-    test('fromEnvironment falls back to empty credentials in development', () {
-      final AppConfig config = AppConfig.fromEnvironment();
+    test('parses map correctly', () {
+      final map = {
+        'maintenance_mode': true,
+        'maintenance_message': 'Down for maintenance',
+        'announcement_visible': true,
+        'announcement_text': 'New update!',
+        'announcement_severity': 'warning',
+        'feature_flags': {'pos': false, 'reports': true},
+      };
 
-      expect(config.supabaseUrl, isEmpty);
-      expect(config.supabaseAnonKey, isEmpty);
-      expect(config.environment, AppEnvironment.development);
-      expect(config.isDevelopment, isTrue);
-      expect(config.isSupabaseConfigured, isFalse);
+      final config = AppConfig.fromMap(map);
+
+      expect(config.maintenanceMode, isTrue);
+      expect(config.announcementSeverity, 'warning');
+      expect(config.featureFlags['pos'], isFalse);
+      expect(config.featureFlags['reports'], isTrue);
     });
 
-    test('isSupabaseConfigured requires both url and key', () {
-      const AppConfig complete = AppConfig(
-        supabaseUrl: 'https://example.supabase.co',
-        supabaseAnonKey: 'public-anon-key',
-        environment: AppEnvironment.production,
-      );
-      expect(complete.isSupabaseConfigured, isTrue);
-      expect(complete.isProduction, isTrue);
-      expect(complete.isDevelopment, isFalse);
-
-      const AppConfig missingKey = AppConfig(
-        supabaseUrl: 'https://example.supabase.co',
-        supabaseAnonKey: '',
-        environment: AppEnvironment.staging,
-      );
-      expect(missingKey.isSupabaseConfigured, isFalse);
-
-      const AppConfig missingUrl = AppConfig(
-        supabaseUrl: '   ',
-        supabaseAnonKey: 'public-anon-key',
-        environment: AppEnvironment.staging,
-      );
-      expect(missingUrl.isSupabaseConfigured, isFalse);
-    });
-
-    test('environment is exposed through AppEnvironment', () {
-      const AppConfig config = AppConfig(
-        supabaseUrl: '',
-        supabaseAnonKey: '',
-        environment: AppEnvironment.staging,
-      );
-
-      expect(config.environment.name, 'staging');
-      expect(config.isStaging, isTrue);
-      expect(config.isProduction, isFalse);
+    test('defaults factory returns safe values', () {
+      final config = AppConfig.defaults();
+      
+      expect(config.maintenanceMode, isFalse);
+      expect(config.announcementVisible, isFalse);
+      expect(config.featureFlags, isEmpty);
     });
   });
 }
