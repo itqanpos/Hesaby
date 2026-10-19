@@ -113,9 +113,7 @@ class _ThermalReceiptPreviewState
         ref.read(companySettingsProvider).valueOrNull;
     if (s == null || s.companyId.isEmpty) return null;
 
-    // Prevent black box: only load if a logo URL is actually present.
-    if (!s.hasLogo) return null;
-
+    // CompanyLogoLoader handles empty URL internally.
     try {
       return await const CompanyLogoLoader().load(
         companyId: s.companyId,
