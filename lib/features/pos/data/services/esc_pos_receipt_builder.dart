@@ -333,12 +333,13 @@ class _Painter {
     }
   }
 
+  // ⬇️ تم تكبير اللوجو هنا (من 0.55 إلى 0.70، ومن 140 إلى 180)
   void _drawLogo(ui.Image logo) {
-    final double targetW = _contentWidth * 0.55;
+    final double targetW = _contentWidth * 0.70;
     final double ratio = logo.height / logo.width;
     final double naturalH = targetW * ratio;
 
-    final double maxH = 140 * _scale;
+    final double maxH = 180 * _scale;
     final double targetH = naturalH > maxH ? maxH : naturalH;
     final double finalW = targetH / ratio;
 
