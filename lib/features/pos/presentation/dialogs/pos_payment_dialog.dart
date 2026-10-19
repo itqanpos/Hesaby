@@ -97,9 +97,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   double get _settlementTotal => _cart.customerBalance + _saleTotal;
   double get _newBalance => _settlementTotal - _input;
 
-  bool get _hasBalanceChange =>
-      _cart.hasCustomer && _newBalance != _cart.customerBalance;
-
   String? _paymentMethodForOffline() {
     if (_method == PosPaymentMethod.credit) return null;
     if (_method == PosPaymentMethod.card) return 'card';
