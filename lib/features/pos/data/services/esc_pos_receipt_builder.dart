@@ -282,35 +282,43 @@ class _Painter {
     _gap(_sectionGap);
     _itemsTable(r);
     _gap(_sectionGap);
-
-    // 1. Previous Balance
-    if (r.hasCustomer && (r.previousBalance ?? 0) != 0) {
-      _kvRow('الرصيد السابق', _money(r.previousBalance!.abs()));
-      _gap(_sectionGap);
-      _divider();
-      _gap(_sectionGap);
-    }
-
-    // 2. Grand Total (Total Owed)
-    final double totalOwed = r.total + (r.previousBalance ?? 0);
-    _grandTotal(r, totalOwed);
-    _gap(_sectionGap);
-
-    // 3. Payment Block
-    _paymentBlock(r);
-
-    // 4. New Balance
-    if (r.hasBalanceChange) {
-      _gap(_sectionGap);
-      _divider();
-      _gap(_sectionGap);
-      _newBalanceBlock(r);
-    }
+    
+    // ⬇️ قسم الإجماليات الجديد (بالترتيب المطلوب)
+    _totalsSection(r);
 
     _gap(_sectionGap * 1.5);
     _divider();
     _gap(_sectionGap);
     _footer(r);
+  }
+
+  // ⬇️ دالة جديدة لقسم الإجماليات
+  void _totalsSection(Receipt r) {
+    // 1. الإجمالي الحالي (قيمة الفاتورة)
+    _kvRow('الإجمالي الحالي', _money(r.total));
+
+    // 2. الرصيد السابق (إذا وجد عميل ورصيد)
+    if (r.hasCustomer && (r.previousBalance ?? 0) != 0) {
+      _gap(4 * _scale);
+      _kvRow('الرصيد السابق', _money(r.previousBalance!.abs()));
+    }
+
+    // 3. الإجمالي الكلي (الفاتورة + الرصيد السابق)
+    final double totalOwed = r.total + (r.previousBalance ?? 0);
+    _gap(4 * _scale);
+    _grandTotal(r, totalOwed);
+
+    // 4. المدفوع
+    _gap(4 * _scale);
+    _kvRow('المدفوع', _money(r.paidAmount));
+
+    // 5. الرصيد الجديد (إذا وجد)
+    if (r.hasBalanceChange) {
+      _gap(4 * _scale);
+      _divider();
+      _gap(4 * _scale);
+      _newBalanceBlock(r);
+    }
   }
 
   Future<ui.Image?> _decodeImage(Uint8List bytes) async {
@@ -472,7 +480,7 @@ class _Painter {
   }
 
   void _grandTotal(Receipt r, double totalOwed) {
-    final double fontSize = _font(24);
+    final double fontSize = _font(22);
     final double boxPad = 10 * _scale;
 
     final String labelText = ((r.previousBalance ?? 0) != 0) ? 'الإجمالي الكلي' : 'إجمالي الفاتورة';
@@ -491,11 +499,6 @@ class _Painter {
     value.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
 
     _y += boxH;
-  }
-
-  void _paymentBlock(Receipt r) {
-    _kvRow('طريقة الدفع', _paymentMethodLabel(r));
-    _kvRow('المدفوع', _money(r.paidAmount));
   }
 
   void _newBalanceBlock(Receipt r) {
