@@ -20,6 +20,7 @@ import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../domain/entities/sale_entities.dart';
+import '../providers/sales_providers.dart';
 
 /// Outcome of a direct thermal print attempt.
 enum DirectSalePrintResult {
@@ -170,6 +171,33 @@ Receipt buildReceiptFromSale({
   final CompanySettings? settings =
       ref.read(companySettingsProvider).valueOrNull;
 
+  // ⬇️ نقرأ رصيد العميل الحالي
+  double? previousBalance;
+  double? newBalance;
+
+  if (sale.customerId != null) {
+    final AsyncValue<List<Customer>> customersAsync =
+        ref.read(customersProvider);
+    final List<Customer>? customers = customersAsync.valueOrNull;
+    if (customers != null) {
+      final Customer? customer = customers
+          .cast<Customer?>()
+          .firstWhere(
+            (Customer? c) => c?.id == sale.customerId,
+            orElse: () => null,
+          );
+      if (customer != null) {
+        // الرصيد الحالي للعميل = الرصيد بعد هذه الفاتورة
+        final double currentBalance = customer.balance;
+        // الرصيد الجديد = الرصيد الحالي (لأنه بعد الفاتورة)
+        newBalance = currentBalance;
+        // الرصيد السابق = الرصيد الحالي - (إجمالي الفاتورة - المدفوع)
+        // بمعنى: currentBalance = previousBalance + (total - paidAmount)
+        previousBalance = currentBalance - sale.total + sale.paidAmount;
+      }
+    }
+  }
+
   return Receipt(
     saleId: sale.id,
     invoiceNumber: sale.invoiceNumber,
@@ -204,10 +232,8 @@ Receipt buildReceiptFromSale({
     customerAddress: sale.customerId != null ? customerAddress : null,
     customerPhone: sale.customerId != null ? customerPhone : null,
     cashierName: cashierName,
-    // ⬇️ جديد: تمرير الرصيد السابق والجديد
-    previousBalance: sale.previousBalance,
-    newBalance: sale.newBalance,
-    // ⬇️ جديد: تمرير التذييل
+    previousBalance: previousBalance,
+    newBalance: newBalance,
     footer: ref.read(receiptFooterProvider),
   );
 }
