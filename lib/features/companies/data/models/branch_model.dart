@@ -5,14 +5,6 @@ import 'package:equatable/equatable.dart';
 import '../../domain/entities/branch.dart';
 
 /// Data-layer representation of a row in `public.branches`.
-///
-/// Maps the PostgreSQL snake_case columns into a pure [Branch] entity via
-/// [toEntity]. This is the only place in the companies feature that is
-/// allowed to know the physical branch column names.
-///
-/// The model deliberately does not extend [Branch], for the same reason
-/// [CompanyModel] does not extend `Company`: it keeps `Equatable` semantics
-/// predictable across the layer boundary.
 class BranchModel extends Equatable {
   const BranchModel({
     required this.id,
@@ -26,10 +18,6 @@ class BranchModel extends Equatable {
     this.phone,
   });
 
-  /// Builds a model from a row returned by Supabase / PostgreSQL.
-  ///
-  /// Throws [FormatException] when a required column is missing or has an
-  /// unexpected type. Optional columns default to `null`.
   factory BranchModel.fromMap(Map<String, dynamic> map) {
     return BranchModel(
       id: _requireString(map, 'id'),
@@ -54,7 +42,6 @@ class BranchModel extends Equatable {
   final DateTime createdAt;
   final DateTime updatedAt;
 
-  /// Maps this data-layer model into the pure Domain entity.
   Branch toEntity() => Branch(
         id: id,
         companyId: companyId,
@@ -79,9 +66,7 @@ class BranchModel extends Equatable {
 
   static String? _optionalString(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value == null) {
-      return null;
-    }
+    if (value == null) return null;
     if (value is String) {
       final String trimmed = value.trim();
       return trimmed.isEmpty ? null : trimmed;
@@ -91,41 +76,51 @@ class BranchModel extends Equatable {
 
   static bool? _optionalBool(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value == null) {
-      return null;
-    }
-    if (value is bool) {
-      return value;
-    }
-    if (value is num) {
-      return value != 0;
-    }
+    if (value == null) return null;
+    if (value is bool) return value;
+    if (value is num) return value != 0;
     if (value is String) {
       final String lower = value.toLowerCase();
-      if (lower == 'true' || lower == 't' || lower == '1') {
-        return true;
-      }
-      if (lower == 'false' || lower == 'f' || lower == '0') {
-        return false;
-      }
+      if (lower == 'true' || lower == 't' || lower == '1') return true;
+      if (lower == 'false' || lower == 'f' || lower == '0') return false;
     }
     return null;
   }
 
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
-    final Object? value = map[key];
-    if (value is DateTime) {
-      return value.toUtc();
-    }
-    if (value is String && value.isNotEmpty) {
-      final DateTime? parsed = DateTime.tryParse(value);
-      if (parsed != null) {
-        return parsed.toUtc();
-      }
-    }
+    final DateTime? parsed = _optionalTimestamp(map, key);
+    if (parsed != null) return parsed;
     throw FormatException(
       'BranchModel: missing or invalid timestamp column "$key".',
     );
+  }
+
+  /// 🔥 الإصلاح هنا: دالة تقوم بتنظيف النص القادم من Supabase لتفهمه Dart
+  static DateTime? _optionalTimestamp(Map<String, dynamic> map, String key) {
+    final Object? value = map[key];
+    if (value == null) return null;
+    if (value is DateTime) return value.toUtc();
+    if (value is String && value.isNotEmpty) {
+      // المحاولة الأولى: التنسيق القياسي
+      DateTime? parsed = DateTime.tryParse(value);
+      if (parsed != null) return parsed.toUtc();
+
+      // المحاولة الثانية: تنسيق Postgres (مثل "2026-10-02 11:27:09.602636+00")
+      try {
+        String normalized = value.trim();
+        if (normalized.contains(' ')) {
+          normalized = normalized.replaceFirst(' ', 'T');
+        }
+        if (normalized.endsWith('+00')) {
+          normalized = normalized.replaceAll('+00', 'Z');
+        } else if (normalized.endsWith('-00')) {
+          normalized = normalized.replaceAll('-00', 'Z');
+        }
+        parsed = DateTime.tryParse(normalized);
+        if (parsed != null) return parsed.toUtc();
+      } catch (_) {}
+    }
+    return null;
   }
 
   @override
