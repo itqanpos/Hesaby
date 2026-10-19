@@ -225,7 +225,11 @@ class _UnitsList extends ConsumerWidget {
           minSellingPrice: choice.minSellingPrice,
           maxSellingPrice: choice.maxSellingPrice,
         );
+    
     if (added) {
+      // ⬇️ تفعيل التركيز على الكمية بعد الإضافة
+      ref.read(focusedCartLineProvider.notifier).state =
+          '${product.id}::${choice.unitId}';
       onAdded();
     }
   }
