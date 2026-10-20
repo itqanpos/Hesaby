@@ -1,229 +1,162 @@
 // lib/features/pos/data/services/printer_service.dart
 
-import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart'
-    as fpp;
+import 'package:flutter/foundation.dart';
+import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart';
 
-import '../../../../core/utils/logger.dart';
 import '../../domain/entities/printer_device.dart';
 
-/// Categories of printer failures the UI can translate to Arabic.
+/// أنواع الأخطاء التي قد تحدث أثناء الاتصال أو الطباعة.
 enum PrinterFailureType {
-  /// The current platform does not expose any printer transport.
   notSupported,
-
-  /// The connection attempt failed (printer off, out of range, busy).
   connectFailed,
-
-  /// The caller tried to send bytes without an active connection.
   notConnected,
-
-  /// The bytes could not be sent (connection lost mid-transfer).
   sendFailed,
-
-  /// Any other unclassified failure.
   unknown,
 }
 
-/// Domain-level exception raised by [PrinterService].
+/// استثناء مخصص لأخطاء الطابعة.
 class PrinterException implements Exception {
-  const PrinterException(this.type, {this.cause});
-
+  const PrinterException(this.type, [this.message]);
   final PrinterFailureType type;
-  final Object? cause;
+  final String? message;
 
   @override
-  String toString() => 'PrinterException(${type.name})';
+  String toString() => 'PrinterException(type: $type, message: $message)';
 }
 
-/// Contract for discovering, connecting to, and sending bytes to a
-/// thermal printer over Bluetooth / USB / network.
+/// واجهة خدمة الطابعة.
 abstract interface class PrinterService {
-  /// Whether a printer is currently connected.
   bool get isConnected;
-
-  /// The currently connected device, or `null`.
-  PrinterDevice? get connectedDevice;
-
-  /// Emits discovered devices of the given [type] until the stream is
-  /// cancelled.
-  ///
-  /// Each call starts a fresh scan; the caller is expected to cancel the
-  /// subscription when done. On a platform where the transport is not
-  /// available, the stream completes immediately without emitting.
-  Stream<PrinterDevice> discover(PrinterConnectionType type);
-
-  /// Connects to [device]. Returns `true` on success.
   Future<bool> connect(PrinterDevice device);
-
-  /// Disconnects the current printer, if any. Safe to call repeatedly.
   Future<void> disconnect();
-
-  /// Sends raw ESC/POS [bytes] to the connected printer.
-  ///
-  /// Throws [PrinterException] with [PrinterFailureType.notConnected]
-  /// when called without an active connection.
   Future<void> sendBytes(List<int> bytes);
+  
+  /// جلب طابعات USB المتصلة (مفيد جداً في ويندوز).
+  Future<List<PrinterDevice>> getUsbDevices();
 }
 
-/// Default [PrinterService] backed by
-/// `flutter_pos_printer_platform_image_3`.
-///
-/// The service is stateful: it remembers the currently connected device
-/// so [sendBytes] does not require the caller to pass it every time.
-/// It is not thread-safe; concurrent [connect] calls are undefined.
-///
-/// The plugin distinguishes the three transports via `PrinterType`, and
-/// uses a `isBle` boolean on Bluetooth calls to select between Classic
-/// SPP (default) and BLE. This service maps domain-side
-/// [PrinterConnectionType] to that shape.
-class FlutterPosPrinterService implements PrinterService {
-  FlutterPosPrinterService();
-
-  final fpp.PrinterManager _manager = fpp.PrinterManager.instance;
-
-  PrinterDevice? _connected;
-  fpp.PrinterType? _connectedManagerType;
+/// التنفيذ الفعلي لخدمة الطابعة باستخدام مكتبة flutter_pos_printer_platform.
+class PrinterServiceImpl implements PrinterService {
+  bool _isConnected = false;
 
   @override
-  bool get isConnected => _connected != null;
+  bool get isConnected => _isConnected;
 
-  @override
-  PrinterDevice? get connectedDevice => _connected;
-
-  @override
-  Stream<PrinterDevice> discover(PrinterConnectionType type) {
-    final fpp.PrinterType managerType = _toManagerType(type);
-    final bool isBle = type == PrinterConnectionType.bluetoothBle;
-
-    return _manager
-        .discovery(type: managerType, isBle: isBle)
-        .map((fpp.PrinterDevice device) => _toDomain(device, type));
-  }
+  // ---------------------------------------------------------------------------
+  // الاتصال
+  // ---------------------------------------------------------------------------
 
   @override
   Future<bool> connect(PrinterDevice device) async {
-    // Always drop any previous connection first — a printer cannot be
-    // reached over two transports at once.
-    await disconnect();
-
     try {
-      final fpp.PrinterType managerType = _toManagerType(device.connectionType);
-      final fpp.BasePrinterInput input = _toManagerInput(device);
-
-      final bool ok = await _manager.connect(
-        type: managerType,
-        model: input,
-      );
-
-      if (ok) {
-        _connected = device;
-        _connectedManagerType = managerType;
+      // التأكد من قطع الاتصال القديم أولاً
+      if (_isConnected) {
+        await disconnect();
       }
-      return ok;
-    } on Object catch (error, stackTrace) {
-      AppLogger.error('Printer connect failed', error, stackTrace);
-      _connected = null;
-      _connectedManagerType = null;
+
+      if (device.connectionType == PrinterConnectionType.usb) {
+        // ⬇️ اتصال USB (يدعم الويندوز والأندرويد بشكل ممتاز)
+        await PrinterManager.instance.connect(
+          type: PrinterType.usb,
+          model: UsbPrinterInput(
+            name: device.name,
+            productId: device.productId,
+            vendorId: device.vendorId,
+          ),
+        );
+      } else if (device.connectionType == PrinterConnectionType.network) {
+        // ⬇️ اتصال شبكة (TCP/IP)
+        await PrinterManager.instance.connect(
+          type: PrinterType.network,
+          model: TcpPrinterInput(ipAddress: device.address),
+        );
+      } else if (device.connectionType == PrinterConnectionType.bluetoothClassic ||
+          device.connectionType == PrinterConnectionType.bluetoothBle) {
+        // ⬇️ اتصال بلوتوث (يدعم الأندرويد فقط)
+        await PrinterManager.instance.connect(
+          type: PrinterType.bluetooth,
+          model: BluetoothPrinterInput(
+            name: device.name,
+            address: device.address,
+            isBle: device.connectionType == PrinterConnectionType.bluetoothBle,
+          ),
+        );
+      } else {
+        throw const PrinterException(PrinterFailureType.notSupported);
+      }
+
+      _isConnected = true;
+      return true;
+    } catch (e) {
+      debugPrint('Printer Connect Error: $e');
+      _isConnected = false;
       return false;
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // قطع الاتصال
+  // ---------------------------------------------------------------------------
+
   @override
   Future<void> disconnect() async {
-    final fpp.PrinterType? type = _connectedManagerType;
-    if (type != null) {
-      try {
-        await _manager.disconnect(type: type);
-      } on Object catch (error, stackTrace) {
-        AppLogger.error('Printer disconnect failed', error, stackTrace);
-      }
+    try {
+      await PrinterManager.instance.disconnect(type: PrinterType.usb);
+      await PrinterManager.instance.disconnect(type: PrinterType.network);
+      await PrinterManager.instance.disconnect(type: PrinterType.bluetooth);
+    } catch (_) {
+      // تجاهل الأخطاء إذا كانت الطابعة مفصولة بالفعل
+    } finally {
+      _isConnected = false;
     }
-    _connected = null;
-    _connectedManagerType = null;
   }
+
+  // ---------------------------------------------------------------------------
+  // إرسال البيانات (الطباعة)
+  // ---------------------------------------------------------------------------
 
   @override
   Future<void> sendBytes(List<int> bytes) async {
-    final fpp.PrinterType? type = _connectedManagerType;
-    if (type == null) {
+    if (!_isConnected) {
       throw const PrinterException(PrinterFailureType.notConnected);
     }
+
     try {
-      final bool ok = await _manager.send(type: type, bytes: bytes);
-      if (!ok) {
-        throw const PrinterException(PrinterFailureType.sendFailed);
-      }
-    } on PrinterException {
-      rethrow;
-    } on Object catch (error, stackTrace) {
-      AppLogger.error('Printer sendBytes failed', error, stackTrace);
-      throw PrinterException(
-        PrinterFailureType.sendFailed,
-        cause: error,
+      // إرسال البيانات كـ RAW BYTES (وهو ما ينتجه EscPosReceiptBuilder)
+      await PrinterManager.instance.send(
+        type: PrinterType.usb, // سيتم تجاهلها إذا كانت متصلة بشبكة أو بلوتوث
+        bytes: bytes,
       );
+    } catch (e) {
+      // في بعض الأحيان تفشل الطابعات في استقبال البيانات لأسباب مختلفة
+      throw PrinterException(PrinterFailureType.sendFailed, e.toString());
     }
   }
 
   // ---------------------------------------------------------------------------
-  // Mapping
+  // اكتشاف طابعات USB (للويندوز)
   // ---------------------------------------------------------------------------
 
-  /// Maps a domain [PrinterConnectionType] to the plugin's [fpp.PrinterType].
-  ///
-  /// Both Bluetooth variants share the same plugin transport; the Classic
-  /// vs BLE distinction is carried by the `isBle` flag on the plugin calls.
-  static fpp.PrinterType _toManagerType(PrinterConnectionType type) {
-    switch (type) {
-      case PrinterConnectionType.bluetoothClassic:
-      case PrinterConnectionType.bluetoothBle:
-        return fpp.PrinterType.bluetooth;
-      case PrinterConnectionType.usb:
-        return fpp.PrinterType.usb;
-      case PrinterConnectionType.network:
-        return fpp.PrinterType.network;
-    }
-  }
+  @override
+  Future<List<PrinterDevice>> getUsbDevices() async {
+    try {
+      // جلب أجهزة USB من النظام
+      final List<PrinterDeviceInfo> usbDevices =
+          await PrinterManager.instance.discovery(type: PrinterType.usb);
 
-  /// Builds the plugin-side input object matching [device]'s transport.
-  ///
-  /// Each transport has its own `*PrinterInput` class; the manager
-  /// dispatches on the runtime type, so a wrong pairing throws at runtime.
-  static fpp.BasePrinterInput _toManagerInput(PrinterDevice device) {
-    switch (device.connectionType) {
-      case PrinterConnectionType.bluetoothClassic:
-        return fpp.BluetoothPrinterInput(
-          address: device.address,
+      return usbDevices.map((device) {
+        return PrinterDevice(
           name: device.name,
-          isBle: false,
-        );
-      case PrinterConnectionType.bluetoothBle:
-        return fpp.BluetoothPrinterInput(
-          address: device.address,
-          name: device.name,
-          isBle: true,
-        );
-      case PrinterConnectionType.usb:
-        return fpp.UsbPrinterInput(
-          name: device.name,
+          // في USB، قد لا يكون هناك عنوان MAC، فنستخدم الـ ID
+          address: '${device.vendorId}:${device.productId}',
+          connectionType: PrinterConnectionType.usb,
           vendorId: device.vendorId,
           productId: device.productId,
         );
-      case PrinterConnectionType.network:
-        return fpp.TcpPrinterInput(ipAddress: device.address);
+      }).toList();
+    } catch (e) {
+      debugPrint('Failed to discover USB devices: $e');
+      return [];
     }
-  }
-
-  /// Builds a domain [PrinterDevice] from a plugin-side device.
-  static PrinterDevice _toDomain(
-    fpp.PrinterDevice device,
-    PrinterConnectionType type,
-  ) {
-    return PrinterDevice(
-      name: device.name,
-      address: device.address ?? '',
-      connectionType: type,
-      vendorId: device.vendorId,
-      productId: device.productId,
-    );
   }
 }
