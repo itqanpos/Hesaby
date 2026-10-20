@@ -10,7 +10,6 @@ import '../../features/pos/data/services/esc_pos_receipt_builder.dart';
 import '../../features/pos/domain/entities/receipt.dart';
 import '../../features/settings/domain/entities/print_style_settings.dart';
 import '../../features/pos/presentation/providers/printer_providers.dart';
-import '../../features/pos/data/services/printer_service.dart';
 import '../../core/utils/logger.dart';
 
 class AppPrintEngine {
@@ -59,7 +58,7 @@ class AppPrintEngine {
     try {
       final bytes = await PdfReceiptBuilder.build(
         receipt: receipt,
-        size: ReceiptPaperSize.a4, // ⬅️ إجبار المقاس على A4
+        size: ReceiptPaperSize.a4,
         style: style,
         logoBytes: logoBytes,
       );
@@ -84,7 +83,7 @@ class AppPrintEngine {
     try {
       final bytes = await PdfReceiptBuilder.build(
         receipt: receipt,
-        size: ReceiptPaperSize.a4, // ⬅️ إجبار المقاس على A4
+        size: ReceiptPaperSize.a4,
         style: style,
         logoBytes: logoBytes,
       );
