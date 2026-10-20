@@ -1,11 +1,8 @@
 // lib/features/pos/presentation/widgets/printer_scan_sheet.dart
 
-import 'dart:io' show Platform;
-
-import 'package:flutter/foundation.dart';
+import 'package:flutter/foundation.dart' show kIsWeb, defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
-// ⬇️ إخفاء PrinterDevice لتجنب التعارض
-import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart' as pos hide PrinterDevice;
+import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart' as pos;
 
 import '../../../../core/utils/logger.dart';
 import '../../domain/entities/printer_device.dart';
@@ -49,7 +46,9 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
 
       if (kIsWeb) {
         _errorMessage = 'الطباعة المباشرة غير مدعومة على متصفح الويب.';
-      } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+      } else if (defaultTargetPlatform == TargetPlatform.windows ||
+          defaultTargetPlatform == TargetPlatform.linux ||
+          defaultTargetPlatform == TargetPlatform.macOS) {
         // ⬇️ استخدام .toList() مع الـ Stream
         final List<pos.PrinterDevice> usbDevices = await pos.PrinterManager.instance
             .discovery(type: pos.PrinterType.usb)
@@ -74,7 +73,6 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
           return PrinterDevice(
             name: d.name.isEmpty ? 'طابعة بلوتوث' : d.name,
             address: d.address ?? '',
-            // المكتبة لا توفر isBle مباشرة، نفترض Classic كوضع افتراضي
             connectionType: PrinterConnectionType.bluetoothClassic,
           );
         }).toList();
@@ -161,7 +159,9 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+                    defaultTargetPlatform == TargetPlatform.windows ||
+                            defaultTargetPlatform == TargetPlatform.linux ||
+                            defaultTargetPlatform == TargetPlatform.macOS
                         ? 'تأكد من توصيل الطابعة بكابل USB وتعريفها في النظام.'
                         : 'تأكد من تشغيل البلوتوث وإقران الطابعة.',
                     textAlign: TextAlign.center,
