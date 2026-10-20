@@ -4,13 +4,12 @@ import 'dart:io' show Platform;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart' as pos;
+// ⬇️ إخفاء PrinterDevice لتجنب التعارض
+import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart' as pos hide PrinterDevice;
 
 import '../../../../core/utils/logger.dart';
 import '../../domain/entities/printer_device.dart';
 
-/// Opens a bottom sheet to scan for available printers.
-/// Returns the selected [PrinterDevice] or `null` if cancelled.
 Future<PrinterDevice?> showPrinterScanSheet({required BuildContext context}) {
   return showModalBottomSheet<PrinterDevice>(
     context: context,
@@ -51,9 +50,10 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
       if (kIsWeb) {
         _errorMessage = 'الطباعة المباشرة غير مدعومة على متصفح الويب.';
       } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
-        // ⬇️ البحث عن طابعات USB للكمبيوتر (ويندوز / ماك / لينكس)
-        final List<pos.PrinterDevice> usbDevices =
-            await pos.PrinterManager.instance.discovery(type: pos.PrinterType.usb);
+        // ⬇️ استخدام .toList() مع الـ Stream
+        final List<pos.PrinterDevice> usbDevices = await pos.PrinterManager.instance
+            .discovery(type: pos.PrinterType.usb)
+            .toList();
 
         found = usbDevices.map((d) {
           return PrinterDevice(
@@ -65,17 +65,17 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
           );
         }).toList();
       } else {
-        // ⬇️ البحث عن طابعات البلوتوث (أندرويد)
-        final List<pos.PrinterDevice> btDevices =
-            await pos.PrinterManager.instance.discovery(type: pos.PrinterType.bluetooth);
+        // ⬇️ استخدام .toList() مع الـ Stream
+        final List<pos.PrinterDevice> btDevices = await pos.PrinterManager.instance
+            .discovery(type: pos.PrinterType.bluetooth)
+            .toList();
 
         found = btDevices.map((d) {
           return PrinterDevice(
             name: d.name.isEmpty ? 'طابعة بلوتوث' : d.name,
             address: d.address ?? '',
-            connectionType: d.isBle
-                ? PrinterConnectionType.bluetoothBle
-                : PrinterConnectionType.bluetoothClassic,
+            // المكتبة لا توفر isBle مباشرة، نفترض Classic كوضع افتراضي
+            connectionType: PrinterConnectionType.bluetoothClassic,
           );
         }).toList();
       }
@@ -108,7 +108,6 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
         mainAxisSize: MainAxisSize.min,
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          // الترويسة
           Row(
             children: <Widget>[
               Icon(Icons.print_outlined, color: scheme.primary),
@@ -129,7 +128,6 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
           ),
           const SizedBox(height: 12),
           
-          // المحتوى
           if (_isLoading)
             const Padding(
               padding: EdgeInsets.symmetric(vertical: 48),
@@ -163,8 +161,8 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
                   ),
                   const SizedBox(height: 6),
                   Text(
-                    Platform.isWindows 
-                        ? 'تأكد من توصيل الطابعة بكابل USB وتعريفها في ويندوز.'
+                    (Platform.isWindows || Platform.isLinux || Platform.isMacOS)
+                        ? 'تأكد من توصيل الطابعة بكابل USB وتعريفها في النظام.'
                         : 'تأكد من تشغيل البلوتوث وإقران الطابعة.',
                     textAlign: TextAlign.center,
                     style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
@@ -200,7 +198,7 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
                       style: const TextStyle(fontWeight: FontWeight.bold),
                     ),
                     subtitle: Text(
-                      isUsb ? 'USB' : (device.connectionType == PrinterConnectionType.bluetoothBle ? 'Bluetooth BLE' : 'Bluetooth Classic'),
+                      isUsb ? 'USB' : 'Bluetooth',
                       style: theme.textTheme.bodySmall,
                     ),
                     onTap: () => Navigator.of(context).pop(device),
@@ -211,7 +209,6 @@ class _PrinterScanSheetState extends State<_PrinterScanSheet> {
 
           const SizedBox(height: 16),
           
-          // زر إعادة البحث
           if (!_isLoading)
             FilledButton.icon(
               onPressed: _scan,
