@@ -9,17 +9,10 @@ import '../../data/services/pos_preferences.dart';
 import '../../data/services/printer_service.dart';
 import '../../domain/entities/printer_device.dart';
 
-/// مزود خدمة الطابعة المركزية.
-/// 
-/// يستخدم [PrinterServiceImpl] التي قمنا بإعدادها لدعم USB، الشبكة، والبلوتوث.
 final Provider<PrinterService> printerServiceProvider = Provider<PrinterService>((ref) {
   return PrinterServiceImpl();
 });
 
-/// مزود الطابعة المحفوظة.
-/// 
-/// يقوم بقراءة وحفظ بيانات الطابعة (الاسم، العنوان، النوع) من التخزين المحلي
-/// (SharedPreferences) لضمان بقاء الاتصال محفوظاً حتى بعد إغلاق التطبيق.
 final AsyncNotifierProvider<SavedPrinterNotifier, SavedPrinter?>
     savedPrinterProvider =
     AsyncNotifierProvider<SavedPrinterNotifier, SavedPrinter?>(
@@ -27,8 +20,13 @@ final AsyncNotifierProvider<SavedPrinterNotifier, SavedPrinter?>
 );
 
 class SavedPrinterNotifier extends AsyncNotifier<SavedPrinter?> {
+  bool _isDisposed = false;
+
   @override
   Future<SavedPrinter?> build() async {
+    _isDisposed = false;
+    ref.onDispose(() => _isDisposed = true);
+
     final PreferencesStorage storage =
         await ref.watch(preferencesStorageProvider.future);
 
@@ -45,14 +43,11 @@ class SavedPrinterNotifier extends AsyncNotifier<SavedPrinter?> {
           jsonDecode(raw) as Map<String, dynamic>;
       return SavedPrinter.fromJson(map);
     } on Object {
-      // إذا كانت البيانات المحفوظة تالفة أو غير متوافقة، نرجع null
-      // ونمسحها لتجنب أي انهيار.
       await storage.remove(key: PosPreferences.savedPrinterKey);
       return null;
     }
   }
 
-  /// حفظ طابعة جديدة واستبدال القديمة.
   Future<void> save(SavedPrinter printer) async {
     final PreferencesStorage storage =
         await ref.read(preferencesStorageProvider.future);
@@ -62,18 +57,17 @@ class SavedPrinterNotifier extends AsyncNotifier<SavedPrinter?> {
       value: jsonEncode(printer.toJson()),
     );
 
-    if (!ref.mounted) return; // حماية من التحديث بعد التدمير
+    if (_isDisposed) return;
     state = AsyncData<SavedPrinter?>(printer);
   }
 
-  /// مسح الطابعة المحفوظة (نسيان الطابعة).
   Future<void> clear() async {
     final PreferencesStorage storage =
         await ref.read(preferencesStorageProvider.future);
 
     await storage.remove(key: PosPreferences.savedPrinterKey);
 
-    if (!ref.mounted) return;
+    if (_isDisposed) return;
     state = const AsyncData<SavedPrinter?>(null);
   }
 }
