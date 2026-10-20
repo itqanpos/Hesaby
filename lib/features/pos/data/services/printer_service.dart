@@ -1,8 +1,7 @@
 // lib/features/pos/data/services/printer_service.dart
 
 import 'package:flutter/foundation.dart';
-// ⬇️ استخدمنا as pos لتجنب تعارض الأسماء، و hide PrinterDevice لاستخدام كلاسنا الخاص
-import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart' as pos hide PrinterDevice;
+import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart' as pos;
 
 import '../../domain/entities/printer_device.dart';
 
@@ -107,7 +106,7 @@ class PrinterServiceImpl implements PrinterService {
   @override
   Future<List<PrinterDevice>> getUsbDevices() async {
     try {
-      // ⬇️ discovery ترجع Stream، لذلك نستخدم .toList() لجمع النتائج
+      // ⬇️ استخدام .toList() مع الـ Stream لتحويله إلى List
       final List<pos.PrinterDevice> usbDevices = await pos.PrinterManager.instance
           .discovery(type: pos.PrinterType.usb)
           .toList();
