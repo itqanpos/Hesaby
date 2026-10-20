@@ -1,289 +1,228 @@
 // lib/features/pos/presentation/widgets/printer_scan_sheet.dart
 
-import 'dart:async';
+import 'dart:io' show Platform;
 
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
-import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart' as pos;
 
 import '../../../../core/utils/logger.dart';
-import '../../data/services/printer_service.dart';
 import '../../domain/entities/printer_device.dart';
-import '../providers/printer_providers.dart';
 
-/// Opens the printer-scan bottom sheet and returns the picked device,
-/// or `null` when the user cancels.
-Future<PrinterDevice?> showPrinterScanSheet({
-  required BuildContext context,
-}) {
+/// Opens a bottom sheet to scan for available printers.
+/// Returns the selected [PrinterDevice] or `null` if cancelled.
+Future<PrinterDevice?> showPrinterScanSheet({required BuildContext context}) {
   return showModalBottomSheet<PrinterDevice>(
     context: context,
     isScrollControlled: true,
     useSafeArea: true,
     showDragHandle: true,
-    builder: (BuildContext sheetContext) => const _PrinterScanSheet(),
+    builder: (BuildContext ctx) => const _PrinterScanSheet(),
   );
 }
 
-// ============================================================================
-// Sheet
-// ============================================================================
-
-class _PrinterScanSheet extends ConsumerStatefulWidget {
+class _PrinterScanSheet extends StatefulWidget {
   const _PrinterScanSheet();
 
   @override
-  ConsumerState<_PrinterScanSheet> createState() =>
-      _PrinterScanSheetState();
+  State<_PrinterScanSheet> createState() => _PrinterScanSheetState();
 }
 
-class _PrinterScanSheetState extends ConsumerState<_PrinterScanSheet> {
-  PrinterConnectionType _type = PrinterConnectionType.bluetoothClassic;
-
-  StreamSubscription<PrinterDevice>? _sub;
-  final List<PrinterDevice> _found = <PrinterDevice>[];
-  final Set<String> _seenIds = <String>{};
-
-  bool _isScanning = false;
-  String? _error;
+class _PrinterScanSheetState extends State<_PrinterScanSheet> {
+  bool _isLoading = true;
+  String? _errorMessage;
+  List<PrinterDevice> _devices = const [];
 
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback((_) => _startScan());
+    _scan();
   }
 
-  @override
-  void dispose() {
-    _sub?.cancel();
-    super.dispose();
-  }
-
-  // ---------------------------------------------------------------------------
-  // Scan
-  // ---------------------------------------------------------------------------
-
-  Future<void> _startScan() async {
-    await _sub?.cancel();
-
+  Future<void> _scan() async {
     setState(() {
-      _found.clear();
-      _seenIds.clear();
-      _isScanning = true;
-      _error = null;
+      _isLoading = true;
+      _errorMessage = null;
     });
 
-    final PrinterService service = ref.read(printerServiceProvider);
+    try {
+      List<PrinterDevice> found = [];
 
-    _sub = service.discover(_type).listen(
-      (PrinterDevice device) {
-        if (!mounted) return;
-        if (_seenIds.add(device.id)) {
-          setState(() => _found.add(device));
-        }
-      },
-      onError: (Object error, StackTrace stackTrace) {
-        AppLogger.error('Printer scan failed', error, stackTrace);
-        if (!mounted) return;
-        setState(() {
-          _error = 'تعذّر البحث عن الطابعات.';
-          _isScanning = false;
-        });
-      },
-      onDone: () {
-        if (!mounted) return;
-        setState(() => _isScanning = false);
-      },
-      cancelOnError: false,
-    );
+      if (kIsWeb) {
+        _errorMessage = 'الطباعة المباشرة غير مدعومة على متصفح الويب.';
+      } else if (Platform.isWindows || Platform.isLinux || Platform.isMacOS) {
+        // ⬇️ البحث عن طابعات USB للكمبيوتر (ويندوز / ماك / لينكس)
+        final List<pos.PrinterDevice> usbDevices =
+            await pos.PrinterManager.instance.discovery(type: pos.PrinterType.usb);
 
-    // Hard-stop after 15s so the spinner never runs forever.
-    Future<void>.delayed(const Duration(seconds: 15), () {
-      if (!mounted) return;
-      if (_isScanning) {
-        setState(() => _isScanning = false);
+        found = usbDevices.map((d) {
+          return PrinterDevice(
+            name: d.name.isEmpty ? 'طابعة USB' : d.name,
+            address: '${d.vendorId ?? "0"}:${d.productId ?? "0"}',
+            connectionType: PrinterConnectionType.usb,
+            vendorId: d.vendorId,
+            productId: d.productId,
+          );
+        }).toList();
+      } else {
+        // ⬇️ البحث عن طابعات البلوتوث (أندرويد)
+        final List<pos.PrinterDevice> btDevices =
+            await pos.PrinterManager.instance.discovery(type: pos.PrinterType.bluetooth);
+
+        found = btDevices.map((d) {
+          return PrinterDevice(
+            name: d.name.isEmpty ? 'طابعة بلوتوث' : d.name,
+            address: d.address ?? '',
+            connectionType: d.isBle
+                ? PrinterConnectionType.bluetoothBle
+                : PrinterConnectionType.bluetoothClassic,
+          );
+        }).toList();
       }
-    });
-  }
 
-  void _changeType(PrinterConnectionType next) {
-    if (next == _type) return;
-    setState(() => _type = next);
-    _startScan();
+      if (mounted) {
+        setState(() {
+          _devices = found;
+          _isLoading = false;
+        });
+      }
+    } catch (e, s) {
+      AppLogger.error('Printer scan failed', e, s);
+      if (mounted) {
+        setState(() {
+          _errorMessage = 'تعذّر البحث عن الطابعات. تأكد من تشغيل البلوتوث أو توصيل كابل USB.';
+          _isLoading = false;
+        });
+      }
+    }
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
 
     return Padding(
-      padding: EdgeInsets.only(bottom: keyboardInset),
-      child: SafeArea(
-        top: false,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 4, 16, 16),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: <Widget>[
+          // الترويسة
+          Row(
             children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Icon(Icons.print_outlined, color: scheme.primary),
-                  const SizedBox(width: 8),
-                  Text(
-                    'اختيار طابعة',
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                  const Spacer(),
-                  IconButton(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.close),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-
-              // ---- Type selector ----
-              SingleChildScrollView(
-                scrollDirection: Axis.horizontal,
-                child: SegmentedButton<PrinterConnectionType>(
-                  segments: const <ButtonSegment<PrinterConnectionType>>[
-                    ButtonSegment<PrinterConnectionType>(
-                      value: PrinterConnectionType.bluetoothClassic,
-                      label: Text('بلوتوث قديم'),
-                      icon: Icon(Icons.bluetooth),
-                    ),
-                    ButtonSegment<PrinterConnectionType>(
-                      value: PrinterConnectionType.bluetoothBle,
-                      label: Text('بلوتوث BLE'),
-                      icon: Icon(Icons.bluetooth_searching),
-                    ),
-                    ButtonSegment<PrinterConnectionType>(
-                      value: PrinterConnectionType.usb,
-                      label: Text('USB'),
-                      icon: Icon(Icons.usb),
-                    ),
-                    ButtonSegment<PrinterConnectionType>(
-                      value: PrinterConnectionType.network,
-                      label: Text('شبكة'),
-                      icon: Icon(Icons.wifi),
-                    ),
-                  ],
-                  selected: <PrinterConnectionType>{_type},
-                  onSelectionChanged: (Set<PrinterConnectionType> sel) {
-                    if (sel.isEmpty) return;
-                    _changeType(sel.first);
-                  },
-                  showSelectedIcon: false,
-                ),
-              ),
-              const SizedBox(height: 8),
-
-              // ---- Hint ----
-              Text(
-                _hintFor(_type),
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
-              const SizedBox(height: 12),
-
-              // ---- Results ----
-              if (_error != null)
-                DecoratedBox(
-                  decoration: BoxDecoration(
-                    color: scheme.errorContainer,
-                    borderRadius: BorderRadius.circular(10),
-                  ),
-                  child: Padding(
-                    padding: const EdgeInsets.all(12),
-                    child: Text(
-                      _error!,
-                      style: TextStyle(color: scheme.onErrorContainer),
-                    ),
-                  ),
-                )
-              else if (_found.isEmpty && _isScanning)
-                const Padding(
-                  padding: EdgeInsets.symmetric(vertical: 24),
-                  child: Center(child: CircularProgressIndicator()),
-                )
-              else if (_found.isEmpty)
-                Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 16),
-                  child: Text(
-                    'لم يتم العثور على أي طابعة. تأكد من تشغيل الطابعة '
-                    'وأنها في وضع الاقتران.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
-                )
-              else
-                Flexible(
-                  child: ListView.separated(
-                    shrinkWrap: true,
-                    itemCount: _found.length,
-                    separatorBuilder: (_, __) => const SizedBox(height: 4),
-                    itemBuilder: (BuildContext itemContext, int index) {
-                      final PrinterDevice device = _found[index];
-                      return ListTile(
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(12),
-                        ),
-                        leading: const CircleAvatar(
-                          child: Icon(Icons.print_outlined),
-                        ),
-                        title: Text(device.name),
-                        subtitle: Text(
-                          device.address.isEmpty ? '—' : device.address,
-                        ),
-                        onTap: () =>
-                            Navigator.of(context).pop(device),
-                      );
-                    },
+              Icon(Icons.print_outlined, color: scheme.primary),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  'اختيار طابعة',
+                  style: theme.textTheme.titleLarge?.copyWith(
+                    fontWeight: FontWeight.bold,
                   ),
                 ),
-
-              const SizedBox(height: 12),
-
-              // ---- Rescan ----
-              FilledButton.tonalIcon(
-                onPressed: _isScanning ? null : _startScan,
-                icon: _isScanning
-                    ? const SizedBox(
-                        width: 16,
-                        height: 16,
-                        child: CircularProgressIndicator(strokeWidth: 2),
-                      )
-                    : const Icon(Icons.refresh),
-                label: Text(_isScanning ? 'جاري البحث…' : 'إعادة البحث'),
+              ),
+              IconButton(
+                onPressed: () => Navigator.of(context).pop(),
+                icon: const Icon(Icons.close),
               ),
             ],
           ),
-        ),
+          const SizedBox(height: 12),
+          
+          // المحتوى
+          if (_isLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 48),
+              child: Center(child: CircularProgressIndicator()),
+            )
+          else if (_errorMessage != null)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 24),
+              child: Column(
+                children: [
+                  Icon(Icons.error_outline, color: scheme.error, size: 40),
+                  const SizedBox(height: 12),
+                  Text(
+                    _errorMessage!,
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodyMedium?.copyWith(color: scheme.error),
+                  ),
+                ],
+              ),
+            )
+          else if (_devices.isEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 32),
+              child: Column(
+                children: [
+                  Icon(Icons.print_disabled_outlined, size: 40, color: scheme.onSurfaceVariant),
+                  const SizedBox(height: 12),
+                  Text(
+                    'لم يتم العثور على طابعات.',
+                    style: theme.textTheme.bodyMedium,
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    Platform.isWindows 
+                        ? 'تأكد من توصيل الطابعة بكابل USB وتعريفها في ويندوز.'
+                        : 'تأكد من تشغيل البلوتوث وإقران الطابعة.',
+                    textAlign: TextAlign.center,
+                    style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            )
+          else
+            Flexible(
+              child: ListView.separated(
+                shrinkWrap: true,
+                itemCount: _devices.length,
+                separatorBuilder: (_, __) => const Divider(height: 1),
+                itemBuilder: (BuildContext ctx, int index) {
+                  final PrinterDevice device = _devices[index];
+                  final bool isUsb = device.connectionType == PrinterConnectionType.usb;
+                  
+                  return ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: scheme.primaryContainer,
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: Icon(
+                        isUsb ? Icons.usb : Icons.bluetooth,
+                        color: scheme.onPrimaryContainer,
+                      ),
+                    ),
+                    title: Text(
+                      device.name,
+                      style: const TextStyle(fontWeight: FontWeight.bold),
+                    ),
+                    subtitle: Text(
+                      isUsb ? 'USB' : (device.connectionType == PrinterConnectionType.bluetoothBle ? 'Bluetooth BLE' : 'Bluetooth Classic'),
+                      style: theme.textTheme.bodySmall,
+                    ),
+                    onTap: () => Navigator.of(context).pop(device),
+                  );
+                },
+              ),
+            ),
+
+          const SizedBox(height: 16),
+          
+          // زر إعادة البحث
+          if (!_isLoading)
+            FilledButton.icon(
+              onPressed: _scan,
+              icon: const Icon(Icons.search),
+              label: const Text('بحث مرة أخرى'),
+              style: FilledButton.styleFrom(
+                minimumSize: const Size.fromHeight(48),
+              ),
+            ),
+        ],
       ),
     );
-  }
-
-  static String _hintFor(PrinterConnectionType type) {
-    switch (type) {
-      case PrinterConnectionType.bluetoothClassic:
-        return 'معظم الطابعات الحرارية الرخيصة تستخدم هذا النوع.';
-      case PrinterConnectionType.bluetoothBle:
-        return 'طابعات حديثة تعمل ببطارية غالبًا.';
-      case PrinterConnectionType.usb:
-        return 'طابعة موصولة بكابل USB (Android فقط).';
-      case PrinterConnectionType.network:
-        return 'طابعة على نفس شبكة الواي فاي.';
-    }
   }
 }
