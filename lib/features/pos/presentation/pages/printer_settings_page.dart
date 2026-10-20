@@ -1,5 +1,6 @@
 // lib/features/pos/presentation/pages/printer_settings_page.dart
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
@@ -20,14 +21,6 @@ import '../providers/printer_providers.dart';
 import '../widgets/printer_scan_sheet.dart';
 
 /// Printer settings page.
-///
-/// Sections (top → bottom):
-/// 1. **الطابعة** — pick a default thermal printer, test it, or forget it.
-/// 2. **الطباعة المباشرة** — toggle to skip the preview dialog.
-/// 3. **حجم الورق** — 58mm vs 80mm (local to this device).
-/// 4. **خيارات الطباعة** — tax number, commercial register, currency symbol.
-/// 5. **تذييل الإيصال** — receipt footer text + preview.
-/// 6. **حجم وثقل الخط** — font size + weight for thermal and A4.
 class PrinterSettingsPage extends ConsumerStatefulWidget {
   const PrinterSettingsPage({super.key});
 
@@ -36,13 +29,17 @@ class PrinterSettingsPage extends ConsumerStatefulWidget {
       _PrinterSettingsPageState();
 }
 
-class _PrinterSettingsPageState
-    extends ConsumerState<PrinterSettingsPage> {
+class _PrinterSettingsPageState extends ConsumerState<PrinterSettingsPage> {
   bool _isConnecting = false;
   bool _isConnected = false;
   bool _isTesting = false;
   bool _isSavingToggle = false;
   bool _isSavingPrintOption = false;
+
+  bool get _isDesktop =>
+      defaultTargetPlatform == TargetPlatform.windows ||
+      defaultTargetPlatform == TargetPlatform.linux ||
+      defaultTargetPlatform == TargetPlatform.macOS;
 
   @override
   void initState() {
@@ -55,8 +52,7 @@ class _PrinterSettingsPageState
   // ---------------------------------------------------------------------------
 
   Future<void> _autoConnect() async {
-    final SavedPrinter? saved =
-        ref.read(savedPrinterProvider).valueOrNull;
+    final SavedPrinter? saved = ref.read(savedPrinterProvider).valueOrNull;
     if (saved == null) return;
     await _connect(saved);
   }
@@ -77,7 +73,7 @@ class _PrinterSettingsPageState
     });
 
     if (!ok && mounted) {
-      _snack('تعذّر الاتصال بالطابعة. تأكد من تشغيلها.');
+      _snack('تعذّر الاتصال بالطابعة. تأكد من توصيلها وتشغيلها.');
     }
   }
 
@@ -262,13 +258,14 @@ class _PrinterSettingsPageState
       children: <Widget>[
         // ---- Printer ----
         if (saved == null)
-          _NoPrinterBody(onPick: _pickPrinter)
+          _NoPrinterBody(onPick: _pickPrinter, isDesktop: _isDesktop)
         else
           _SavedPrinterBody(
             saved: saved,
             isConnecting: _isConnecting,
             isConnected: _isConnected,
             isTesting: _isTesting,
+            isDesktop: _isDesktop,
             onConnect: () => _connect(saved),
             onTest: _testPrint,
             onPick: _pickPrinter,
@@ -282,6 +279,7 @@ class _PrinterSettingsPageState
           padding: const EdgeInsets.symmetric(horizontal: 4),
           child: _DirectPrintToggle(
             isSaving: _isSavingToggle,
+            isDesktop: _isDesktop,
             onChanged: _toggleDirectPrint,
           ),
         ),
@@ -859,10 +857,12 @@ class _InlineError extends StatelessWidget {
 class _DirectPrintToggle extends ConsumerWidget {
   const _DirectPrintToggle({
     required this.isSaving,
+    required this.isDesktop,
     required this.onChanged,
   });
 
   final bool isSaving;
+  final bool isDesktop;
   final ValueChanged<bool> onChanged;
 
   @override
@@ -882,9 +882,10 @@ class _DirectPrintToggle extends ConsumerWidget {
       child: SwitchListTile(
         contentPadding: const EdgeInsets.symmetric(horizontal: 14),
         title: const Text('الطباعة المباشرة'),
-        subtitle: const Text(
-          'تجاوز حوار المعاينة واطبع فورًا. '
-          'يعمل على Android مع طابعة Bluetooth محفوظة أو طابعة نظام افتراضية.',
+        subtitle: Text(
+          isDesktop
+              ? 'تجاوز حوار المعاينة واطبع فورًا على طابعة USB المتصلة.'
+              : 'تجاوز حوار المعاينة واطبع فورًا على طابعة Bluetooth المتصلة.',
         ),
         value: enabled,
         onChanged: isSaving ? null : onChanged,
@@ -902,9 +903,10 @@ class _DirectPrintToggle extends ConsumerWidget {
 // ============================================================================
 
 class _NoPrinterBody extends StatelessWidget {
-  const _NoPrinterBody({required this.onPick});
+  const _NoPrinterBody({required this.onPick, required this.isDesktop});
 
   final VoidCallback onPick;
+  final bool isDesktop;
 
   @override
   Widget build(BuildContext context) {
@@ -930,7 +932,9 @@ class _NoPrinterBody extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(
-          'اختر طابعة حرارية لطباعة إيصالات نقطة البيع مباشرة.',
+          isDesktop
+              ? 'اختر طابعة حرارية متصلة بكابل USB لطباعة الإيصالات.'
+              : 'اختر طابعة حرارية لطباعة إيصالات نقطة البيع مباشرة.',
           style: theme.textTheme.bodyMedium?.copyWith(
             color: scheme.onSurfaceVariant,
           ),
@@ -941,7 +945,7 @@ class _NoPrinterBody extends StatelessWidget {
           padding: const EdgeInsets.symmetric(horizontal: 24),
           child: AppButton(
             label: 'اختيار طابعة',
-            icon: Icons.search,
+            icon: isDesktop ? Icons.usb : Icons.search,
             expanded: true,
             size: AppButtonSize.large,
             onPressed: onPick,
@@ -962,6 +966,7 @@ class _SavedPrinterBody extends StatelessWidget {
     required this.isConnecting,
     required this.isConnected,
     required this.isTesting,
+    required this.isDesktop,
     required this.onConnect,
     required this.onTest,
     required this.onPick,
@@ -972,6 +977,7 @@ class _SavedPrinterBody extends StatelessWidget {
   final bool isConnecting;
   final bool isConnected;
   final bool isTesting;
+  final bool isDesktop;
   final VoidCallback onConnect;
   final VoidCallback onTest;
   final VoidCallback onPick;
@@ -981,6 +987,7 @@ class _SavedPrinterBody extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final bool isUsb = saved.connectionType == PrinterConnectionType.usb;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -1000,7 +1007,10 @@ class _SavedPrinterBody extends StatelessWidget {
                 children: <Widget>[
                   Row(
                     children: <Widget>[
-                      Icon(Icons.print_outlined, color: scheme.primary),
+                      Icon(
+                        isUsb ? Icons.usb : Icons.print_outlined,
+                        color: scheme.primary,
+                      ),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Column(
@@ -1015,7 +1025,7 @@ class _SavedPrinterBody extends StatelessWidget {
                             ),
                             const SizedBox(height: 2),
                             Text(
-                              saved.address,
+                              isUsb ? 'طابعة USB' : saved.address,
                               style: theme.textTheme.bodySmall?.copyWith(
                                 color: scheme.onSurfaceVariant,
                               ),
@@ -1091,8 +1101,9 @@ class _SavedPrinterBody extends StatelessWidget {
         Padding(
           padding: const EdgeInsets.symmetric(horizontal: 8),
           child: Text(
-            'ملاحظة: الاتصال بالطابعة يبقى نشطًا أثناء استخدام التطبيق فقط. '
-            'عند إعادة فتح التطبيق، سيُعاد الاتصال تلقائيًا بالطابعة المحفوظة.',
+            isDesktop
+                ? 'ملاحظة: تأكد من توصيل الطابعة بالكمبيوتر عبر كابل USB وتعريفها في إعدادات ويندوز.'
+                : 'ملاحظة: الاتصال بالطابعة يبقى نشطًا أثناء استخدام التطبيق فقط. عند إعادة فتح التطبيق، سيُعاد الاتصال تلقائيًا بالطابعة المحفوظة.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
@@ -1109,7 +1120,7 @@ class _SavedPrinterBody extends StatelessWidget {
       case PrinterConnectionType.bluetoothBle:
         return 'بلوتوث (BLE)';
       case PrinterConnectionType.usb:
-        return 'USB';
+        return 'USB (كابل)';
       case PrinterConnectionType.network:
         return 'شبكة';
     }
