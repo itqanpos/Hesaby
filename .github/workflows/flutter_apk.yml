@@ -58,7 +58,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # ⬇️ استخراج الإصدار من pubspec.yaml (جديد)
+      # ⬇️ استخراج الإصدار من pubspec.yaml
       - name: Extract version from pubspec.yaml
         id: get_version
         run: |
@@ -169,9 +169,16 @@ jobs:
           print(f'Android build files patched: {patched}')
           PY
 
+      # ⬇️ إضافة الصلاحيات (الإنترنت، الكاميرا، البلوتوث...)
       - name: Add Android permissions
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
+          
+          # 🔥 صلاحية الإنترنت (السبب الرئيسي لعدم عمل التطبيق على الأندرويد)
+          if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
+            sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
+          fi
+          
           if ! grep -q 'android.permission.CAMERA' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
           fi
@@ -189,6 +196,7 @@ jobs:
           if ! grep -q 'android.hardware.camera' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' "$MANIFEST"
           fi
+          
           echo "--- AndroidManifest.xml (permissions section) ---"
           grep 'uses-permission\|uses-feature' "$MANIFEST"
 
@@ -435,10 +443,6 @@ jobs:
           SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
           SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
         run: |
-          # --target-platform: covers BOTH modern ARM64 devices AND older
-          # ARMv7 (32-bit) devices. Removing android-arm drops support for
-          # 32-bit phones, which causes an immediate crash at launch on
-          # those devices. Do NOT remove it without a good reason.
           flutter build apk --$BUILD_TYPE \
             --build-name=${{ env.VERSION_NAME }} \
             --build-number=${{ env.VERSION_CODE }} \
