@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/printing/app_print_engine.dart';
+import '../../features/pos/data/services/pdf_receipt_builder.dart'; // ⬅️ تم إضافة هذا الاستيراد
 import '../../features/pos/data/services/pos_preferences.dart';
 import '../../features/pos/domain/entities/receipt.dart';
 import '../../features/pos/presentation/widgets/thermal_receipt_preview.dart';
@@ -143,7 +144,6 @@ class _AppPrintPreviewDialogState extends ConsumerState<_AppPrintPreviewDialog> 
         Column(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            // 1. الخيار الحراري
             if (hasPrinter) ...[
               AppButton(
                 label: 'طباعة إيصال حراري',
@@ -156,7 +156,6 @@ class _AppPrintPreviewDialogState extends ConsumerState<_AppPrintPreviewDialog> 
               const SizedBox(height: 8),
             ],
             
-            // 2. خيار A4
             AppButton(
               label: 'طباعة A4',
               icon: Icons.print_outlined,
@@ -167,7 +166,6 @@ class _AppPrintPreviewDialogState extends ConsumerState<_AppPrintPreviewDialog> 
             ),
             const SizedBox(height: 8),
             
-            // 3. مشاركة A4
             AppButton(
               label: 'مشاركة A4',
               icon: Icons.ios_share,
