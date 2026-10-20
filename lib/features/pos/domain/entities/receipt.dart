@@ -3,6 +3,30 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
+/// أنواع المستندات التي يمكن طباعتها في النظام
+enum DocumentType {
+  sale,
+  purchase,
+  saleReturn,
+  purchaseReturn,
+  stockCount;
+
+  String get label {
+    switch (this) {
+      case DocumentType.sale:
+        return 'فاتورة مبيعات';
+      case DocumentType.purchase:
+        return 'فاتورة مشتريات';
+      case DocumentType.saleReturn:
+        return 'مرتجع مبيعات';
+      case DocumentType.purchaseReturn:
+        return 'مرتجع مشتريات';
+      case DocumentType.stockCount:
+        return 'جرد مخزون';
+    }
+  }
+}
+
 /// Immutable, self-contained representation of a sale receipt.
 @immutable
 class Receipt extends Equatable {
@@ -17,6 +41,7 @@ class Receipt extends Equatable {
     required this.taxAmount,
     required this.total,
     required this.paidAmount,
+    this.documentType = DocumentType.sale,
     this.invoiceNumber,
     this.companyAddress,
     this.companyPhone,
@@ -47,6 +72,9 @@ class Receipt extends Equatable {
 
   /// Amount the customer paid toward the invoice + old balance.
   final double paidAmount;
+
+  /// نوع المستند (مبيعات، مشتريات، مرتجع، إلخ)
+  final DocumentType documentType;
 
   // ---- Company identity ----
   final String? companyAddress;
@@ -126,6 +154,71 @@ class Receipt extends Equatable {
 
   int get lineCount => lines.length;
 
+  // ---------------------------------------------------------------------------
+  // copyWith
+  // ---------------------------------------------------------------------------
+
+  Receipt copyWith({
+    String? saleId,
+    String? invoiceNumber,
+    DateTime? dateTime,
+    String? companyName,
+    String? branchName,
+    List<ReceiptLine>? lines,
+    double? subtotal,
+    double? discount,
+    double? taxAmount,
+    double? total,
+    double? paidAmount,
+    DocumentType? documentType,
+    String? companyAddress,
+    String? companyPhone,
+    String? companyTaxNumber,
+    String? companyCommercialRegister,
+    bool? showTaxNumberOnPrint,
+    bool? showCommercialRegisterOnPrint,
+    bool? showCurrencySymbol,
+    String? customerName,
+    String? customerAddress,
+    String? customerPhone,
+    String? cashierName,
+    double? previousBalance,
+    double? newBalance,
+    String? footer,
+  }) {
+    return Receipt(
+      saleId: saleId ?? this.saleId,
+      invoiceNumber: invoiceNumber ?? this.invoiceNumber,
+      dateTime: dateTime ?? this.dateTime,
+      companyName: companyName ?? this.companyName,
+      branchName: branchName ?? this.branchName,
+      lines: lines ?? this.lines,
+      subtotal: subtotal ?? this.subtotal,
+      discount: discount ?? this.discount,
+      taxAmount: taxAmount ?? this.taxAmount,
+      total: total ?? this.total,
+      paidAmount: paidAmount ?? this.paidAmount,
+      documentType: documentType ?? this.documentType,
+      companyAddress: companyAddress ?? this.companyAddress,
+      companyPhone: companyPhone ?? this.companyPhone,
+      companyTaxNumber: companyTaxNumber ?? this.companyTaxNumber,
+      companyCommercialRegister:
+          companyCommercialRegister ?? this.companyCommercialRegister,
+      showTaxNumberOnPrint:
+          showTaxNumberOnPrint ?? this.showTaxNumberOnPrint,
+      showCommercialRegisterOnPrint:
+          showCommercialRegisterOnPrint ?? this.showCommercialRegisterOnPrint,
+      showCurrencySymbol: showCurrencySymbol ?? this.showCurrencySymbol,
+      customerName: customerName ?? this.customerName,
+      customerAddress: customerAddress ?? this.customerAddress,
+      customerPhone: customerPhone ?? this.customerPhone,
+      cashierName: cashierName ?? this.cashierName,
+      previousBalance: previousBalance ?? this.previousBalance,
+      newBalance: newBalance ?? this.newBalance,
+      footer: footer ?? this.footer,
+    );
+  }
+
   @override
   List<Object?> get props => <Object?>[
         saleId,
@@ -133,6 +226,13 @@ class Receipt extends Equatable {
         dateTime,
         companyName,
         branchName,
+        lines,
+        subtotal,
+        discount,
+        taxAmount,
+        total,
+        paidAmount,
+        documentType,
         companyAddress,
         companyPhone,
         companyTaxNumber,
@@ -140,12 +240,6 @@ class Receipt extends Equatable {
         showTaxNumberOnPrint,
         showCommercialRegisterOnPrint,
         showCurrencySymbol,
-        lines,
-        subtotal,
-        discount,
-        taxAmount,
-        total,
-        paidAmount,
         customerName,
         customerAddress,
         customerPhone,
@@ -158,6 +252,7 @@ class Receipt extends Equatable {
   @override
   String toString() =>
       'Receipt(saleId: $saleId, invoiceNumber: $invoiceNumber, '
+      'type: ${documentType.name}, '
       'lines: ${lines.length}, total: $total, paidAmount: $paidAmount, '
       'newBalance: $newBalance, showCurrencySymbol: $showCurrencySymbol)';
 }
