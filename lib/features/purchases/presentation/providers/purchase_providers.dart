@@ -12,14 +12,6 @@ import '../../domain/entities/purchase.dart';
 import '../../domain/entities/purchase_item.dart';
 import '../../domain/repositories/purchase_repository.dart';
 
-/// The application's purchase repository.
-///
-/// Builds a [PurchaseRepositoryImpl] from the active Supabase client. When
-/// Supabase is not initialised (for example when credentials were not
-/// provided at build time), the underlying data source wraps a `null`
-/// client and every operation fails predictably with a
-/// [PurchaseFailureType.unknown] exception instead of throwing a low-level
-/// state error.
 final Provider<PurchaseRepository> purchaseRepositoryProvider =
     Provider<PurchaseRepository>((ref) {
   SupabaseClient? client;
@@ -31,19 +23,6 @@ final Provider<PurchaseRepository> purchaseRepositoryProvider =
   return PurchaseRepositoryImpl(PurchaseRemoteDataSource(client));
 });
 
-// -----------------------------------------------------------------------------
-// Purchases list
-// -----------------------------------------------------------------------------
-
-/// Provides the list of purchases for the currently selected company.
-///
-/// The notifier reloads automatically whenever [companyContextProvider]
-/// reports a different `currentCompany.id`. When no company is selected, it
-/// resolves to an empty list.
-///
-/// Note on naming: [AsyncNotifier] already declares `update`. Business
-/// operations are therefore named `createPurchase`, `updateDraft`,
-/// `confirmPurchase` and `cancelPurchase`.
 class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
   @override
   Future<List<Purchase>> build() async {
@@ -60,10 +39,7 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
     return ref.read(purchaseRepositoryProvider).listPurchases(companyId);
   }
 
-  /// Creates a new draft purchase with its items.
-  ///
-  /// Throws [PurchaseException] when there is no current company, or when
-  /// the underlying repository rejects the operation.
+  // ⬇️ إضافة paidAmount و paymentMethod
   Future<Purchase> createPurchase({
     required String branchId,
     required String supplierId,
@@ -72,6 +48,8 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
     String? invoiceNumber,
     double discount = 0,
     double taxAmount = 0,
+    double paidAmount = 0,
+    String paymentMethod = 'cash',
     String? notes,
   }) async {
     final String companyId = _requireCurrentCompanyId();
@@ -86,19 +64,16 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
               invoiceNumber: invoiceNumber,
               discount: discount,
               taxAmount: taxAmount,
+              paidAmount: paidAmount,
+              paymentMethod: paymentMethod,
               notes: notes,
             );
 
-    // The new purchase has just been created; no items provider exists yet
-    // for its id, so no per-id invalidation is needed here.
     await _reload();
     return created;
   }
 
-  /// Replaces the header and items of an existing draft purchase.
-  ///
-  /// Invalidates both the list and the item-level provider for the affected
-  /// purchase.
+  // ⬇️ إضافة paidAmount و paymentMethod
   Future<Purchase> updateDraft({
     required String purchaseId,
     required String branchId,
@@ -108,6 +83,8 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
     String? invoiceNumber,
     double discount = 0,
     double taxAmount = 0,
+    double paidAmount = 0,
+    String paymentMethod = 'cash',
     String? notes,
   }) async {
     final String companyId = _requireCurrentCompanyId();
@@ -123,6 +100,8 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
               invoiceNumber: invoiceNumber,
               discount: discount,
               taxAmount: taxAmount,
+              paidAmount: paidAmount,
+              paymentMethod: paymentMethod,
               notes: notes,
             );
 
@@ -131,12 +110,6 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
     return updated;
   }
 
-  /// Confirms a draft purchase.
-  ///
-  /// The database trigger inserts the corresponding `purchase_in` stock
-  /// movements. On success, both the list and the item-level provider are
-  /// invalidated so the UI reflects the new status and (indirectly) the
-  /// updated stock.
   Future<Purchase> confirmPurchase(String purchaseId) async {
     final Purchase confirmed =
         await ref.read(purchaseRepositoryProvider).confirmPurchase(purchaseId);
@@ -146,12 +119,6 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
     return confirmed;
   }
 
-  /// Cancels a purchase.
-  ///
-  /// A draft purchase is cancelled without touching stock. A confirmed
-  /// purchase has its movements reversed; if that reversal would drive a
-  /// stock balance negative, the operation fails with
-  /// [PurchaseFailureType.insufficientStock].
   Future<Purchase> cancelPurchase(String purchaseId) async {
     final Purchase cancelled =
         await ref.read(purchaseRepositoryProvider).cancelPurchase(purchaseId);
@@ -160,10 +127,6 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
     await _reload();
     return cancelled;
   }
-
-  // ---------------------------------------------------------------------------
-  // Internal helpers
-  // ---------------------------------------------------------------------------
 
   String _requireCurrentCompanyId() {
     final CompanyContextState context = ref.read(companyContextProvider);
@@ -183,23 +146,12 @@ class PurchasesNotifier extends AsyncNotifier<List<Purchase>> {
   }
 }
 
-/// Provides the current company's purchases.
 final AsyncNotifierProvider<PurchasesNotifier, List<Purchase>>
     purchasesProvider =
     AsyncNotifierProvider<PurchasesNotifier, List<Purchase>>(
   PurchasesNotifier.new,
 );
 
-// -----------------------------------------------------------------------------
-// Purchase items (per purchase)
-// -----------------------------------------------------------------------------
-
-/// Provides the line items of a single purchase, keyed by `purchaseId`.
-///
-/// This is a read-only derived view over `purchase_items`. It is
-/// invalidated explicitly by [PurchasesNotifier] after any mutation that
-/// touches the purchase's lines (`updateDraft`, `confirmPurchase`,
-/// `cancelPurchase`).
 class PurchaseItemsNotifier
     extends FamilyAsyncNotifier<List<PurchaseItem>, String> {
   @override
@@ -210,18 +162,12 @@ class PurchaseItemsNotifier
     return ref.read(purchaseRepositoryProvider).listPurchaseItems(purchaseId);
   }
 
-  /// Reloads the items from the backend.
   Future<void> refresh() async {
     ref.invalidateSelf();
     await future;
   }
 }
 
-/// Provides the line items of a single purchase, keyed by `purchaseId`.
-///
-/// No explicit type annotation is used: `AsyncNotifierProvider.family` is a
-/// factory constructor, not a type. Dart infers the correct
-/// `AsyncNotifierProviderFamily<...>` from the value expression.
 final purchaseItemsProvider = AsyncNotifierProvider.family<
     PurchaseItemsNotifier, List<PurchaseItem>, String>(
   PurchaseItemsNotifier.new,
