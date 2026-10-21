@@ -103,6 +103,13 @@ const List<_NavSection> _sections = <_NavSection>[
         color: Color(0xFF00838F),
         requiredPermission: MemberPermission.returnsView,
       ),
+      // ⬇️ جديد: الخزنة
+      _NavDestination(
+        label: 'الخزنة',
+        path: '/cash',
+        icon: Icons.account_balance_wallet_outlined,
+        color: Color(0xFFEF6C00),
+      ),
     ],
   ),
   _NavSection(
@@ -496,7 +503,6 @@ class _Footer extends StatelessWidget {
           const SizedBox(width: 8),
           Text('حسابي', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
           const Spacer(),
-          // ⬇️ تحديث رقم الإصدار إلى 1.0.0
           Text(
             'v1.0.0',
             style: theme.textTheme.labelSmall?.copyWith(
