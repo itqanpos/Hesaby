@@ -3,9 +3,12 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
+import '../../../cash/domain/entities/cash_entities.dart';
+import '../../../cash/presentation/providers/cash_providers.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
@@ -22,20 +25,9 @@ import '../state/purchase_cart_notifier.dart';
 import '../state/purchase_providers.dart';
 import 'purchase_mobile_layout.dart';
 
-/// Purchase form page — POS-style split layout.
-///
-/// Create mode: cart starts empty.
-/// Edit mode: cart is pre-filled from the existing draft's items. Lines
-/// whose product or unit is no longer available are silently skipped.
-///
-/// Save actions:
-/// * **حفظ كمسودة** — creates or updates the draft. No stock impact.
-/// * **حفظ وتأكيد** — creates or updates, then immediately confirms
-///   (adds the quantities to stock).
 class PurchaseFormPage extends ConsumerStatefulWidget {
   const PurchaseFormPage({super.key, this.purchaseId});
 
-  /// When non-null, the page loads and edits the given draft purchase.
   final String? purchaseId;
 
   @override
@@ -69,9 +61,20 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Load existing purchase (edit mode)
-  // ---------------------------------------------------------------------------
+  CashAccountType _mapPaymentMethodToAccountType(String method) {
+    switch (method) {
+      case 'cash':
+        return CashAccountType.cash;
+      case 'card':
+        return CashAccountType.card;
+      case 'bank_transfer':
+        return CashAccountType.bank;
+      case 'instapay':
+        return CashAccountType.instapay;
+      default:
+        return CashAccountType.other;
+    }
+  }
 
   Future<void> _loadExisting() async {
     final String? purchaseId = widget.purchaseId;
@@ -87,7 +90,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
           .read(purchaseRepositoryProvider)
           .listPurchaseItems(purchaseId);
 
-      // Ensure product / unit lookup data is available before mapping.
       final List<Product> products =
           await ref.read(productsProvider.future);
       final List<Unit> units = await ref.read(unitsProvider.future);
@@ -105,27 +107,18 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
           ref.read(purchaseCartProvider.notifier);
       cart.reset();
 
-      // Header fields.
       cart.setPurchaseDate(purchase.purchaseDate);
       cart.setInvoiceNumber(purchase.invoiceNumber ?? '');
       cart.setNotes(purchase.notes ?? '');
       cart.setDiscount(purchase.discount);
       cart.setTaxAmount(purchase.taxAmount);
-
-      // Supplier: we only have the id here. The header bar will resolve and
-      // display the supplier name once its own supplier list arrives.
-      // Passing an empty name keeps the picker showing "the currently
-      // selected id" until the name is known.
       cart.setSupplier(id: purchase.supplierId, name: '');
 
-      // Lines: skip any line whose product or unit is no longer available.
       for (final PurchaseItem item in items) {
         final Product? product = productsById[item.productId];
         final Unit? unit = unitsById[item.unitId];
 
-        if (product == null || unit == null) {
-          continue;
-        }
+        if (product == null || unit == null) continue;
 
         cart.addProduct(
           product: product,
@@ -154,16 +147,11 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Save
-  // ---------------------------------------------------------------------------
-
   Future<void> _save({required bool andConfirm}) async {
     FocusScope.of(context).unfocus();
 
     final PurchaseCart cart = ref.read(purchaseCartProvider);
 
-    // ---- Validate header ----
     if (!cart.hasSupplier || cart.supplierId == null) {
       _snack('اختر المورد أولًا.');
       return;
@@ -175,6 +163,27 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
     if (cart.isEmpty) {
       _snack('أضف بندًا واحدًا على الأقل.');
       return;
+    }
+
+    // ⬇️ التحقق من رصيد الخزنة قبل الحفظ
+    if (cart.paidAmount > 0) {
+      final overview = ref.read(cashOverviewProvider).valueOrNull;
+      if (overview != null) {
+        final targetType = _mapPaymentMethodToAccountType(cart.paymentMethod);
+        double currentBalance = 0.0;
+        
+        for (final balance in overview.balances) {
+          if (balance.account.type == targetType) {
+            currentBalance = balance.balance;
+            break;
+          }
+        }
+
+        if (cart.paidAmount > currentBalance) {
+          _snack('الرصيد غير كافٍ في الخزنة. المتاح: ${AppFormatters.money(currentBalance)}');
+          return;
+        }
+      }
     }
 
     final CompanyContextState contextState =
@@ -215,6 +224,8 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
               : cart.invoiceNumber.trim(),
           discount: cart.discount,
           taxAmount: cart.taxAmount,
+          paidAmount: cart.paidAmount,          // ⬅️ إرسال المبلغ المدفوع
+          paymentMethod: cart.paymentMethod,    // ⬅️ إرسال طريقة الدفع
           notes: cart.notes.trim().isEmpty ? null : cart.notes.trim(),
         );
       } else {
@@ -228,6 +239,8 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
               : cart.invoiceNumber.trim(),
           discount: cart.discount,
           taxAmount: cart.taxAmount,
+          paidAmount: cart.paidAmount,          // ⬅️ إرسال المبلغ المدفوع
+          paymentMethod: cart.paymentMethod,    // ⬅️ إرسال طريقة الدفع
           notes: cart.notes.trim().isEmpty ? null : cart.notes.trim(),
         );
       }
@@ -238,7 +251,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
 
       if (!mounted) return;
 
-      // Reset the cart so the next entry starts clean.
       ref.read(purchaseCartProvider.notifier).reset();
       ref.read(purchaseSearchProvider.notifier).clear();
 
@@ -270,10 +282,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     if (_isLoadingExisting) {
@@ -302,7 +310,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
     }
 
     return AppShell(
-      // Keep the bottom panel pinned above the soft keyboard.
       resizeToAvoidBottomInset: false,
       appBar: AppBar(
         title: Text(_isEditMode ? 'تعديل فاتورة' : 'فاتورة جديدة'),
@@ -315,10 +322,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
     );
   }
 }
-
-// -----------------------------------------------------------------------------
-// Localization helpers
-// -----------------------------------------------------------------------------
 
 String _errorMessage(Object error) {
   if (error is PurchaseException) {
