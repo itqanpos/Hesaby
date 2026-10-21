@@ -55,6 +55,17 @@ jobs:
       - name: Display Flutter version
         run: flutter --version
 
+      - name: Verify Supabase secrets are configured
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        run: |
+          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
+            echo "::error::SUPABASE_URL or SUPABASE_ANON_KEY secret is missing. The APK would be built without a backend connection."
+            exit 1
+          fi
+          echo "Supabase secrets are present."
+
       - name: Install dependencies
         run: flutter pub get
 
