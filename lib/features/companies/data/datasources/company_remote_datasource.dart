@@ -23,14 +23,31 @@ class CompanyRemoteDataSource {
 
     // ⬇️ استخدام الدالة المخصصة (RPC) لتجاوز تعقيدات RLS
     final dynamic response = await client.rpc('get_my_companies');
-    
-    if (response == null) return [];
 
-    final List<dynamic> rows = response as List<dynamic>;
-    
-    return rows
-        .map((row) => CompanyModel.fromMap(row as Map<String, dynamic>))
-        .toList(growable: false);
+    if (response == null) return const <CompanyModel>[];
+
+    // ⬇️ إصلاح صارم للأنواع ليعمل على الأندرويد (Dart VM) والويب (dart2js)
+    if (response is! List) {
+      throw CompanyException(
+        type: CompanyFailureType.invalidResponse,
+        cause: 'get_my_companies returned ${response.runtimeType}, expected List.',
+      );
+    }
+
+    final List<CompanyModel> result = <CompanyModel>[];
+    for (final dynamic row in response) {
+      if (row is Map<String, dynamic>) {
+        result.add(CompanyModel.fromMap(row));
+      } else if (row is Map) {
+        result.add(CompanyModel.fromMap(Map<String, dynamic>.from(row)));
+      } else {
+        throw CompanyException(
+          type: CompanyFailureType.invalidResponse,
+          cause: 'get_my_companies row is ${row.runtimeType}, expected Map.',
+        );
+      }
+    }
+    return result;
   }
 
   Future<List<CompanyModel>> fetchAllCompanies() async {
