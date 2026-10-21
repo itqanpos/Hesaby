@@ -16,16 +16,6 @@ import '../providers/sales_providers.dart';
 import 'customer_statement_page.dart';
 
 /// Customer management page.
-///
-/// Lists all customers of the currently selected company, and exposes
-/// create / edit / toggle-active / delete actions. All actions go through
-/// [CustomersNotifier], which delegates to the repository and therefore to
-/// Row Level Security in the database.
-///
-/// **Interaction model:** tapping a customer card opens its account
-/// statement (the natural "details" view). Edit / toggle / delete are
-/// reachable only from the per-card overflow menu — accidental taps never
-/// open the edit form.
 class CustomersPage extends ConsumerStatefulWidget {
   const CustomersPage({super.key});
 
@@ -200,24 +190,28 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     Customer customer,
   ) async {
     try {
+      // 1. تحديد الحالة الجديدة (عكس الحالة الحالية)
+      final bool newState = !customer.isActive;
+
+      // 2. إرسال التحديث
       await ref.read(customersProvider.notifier).updateCustomer(
             customerId: customer.id,
-            isActive: !customer.isActive,
+            isActive: newState,
           );
-      if (!context.mounted) {
-        return;
-      }
+      
+      if (!context.mounted) return;
+      
+      // 3. إظهار رسالة النجاح بناءً على الحالة الجديدة
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
-            customer.isActive ? 'تم تعطيل العميل' : 'تم تفعيل العميل',
+            newState ? 'تم تفعيل العميل' : 'تم تعطيل العميل',
           ),
+          backgroundColor: newState ? Colors.green : Colors.red,
         ),
       );
     } on CustomerException catch (error) {
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       _showError(context, error);
     }
   }
@@ -312,9 +306,6 @@ class _CustomerCard extends StatelessWidget {
       borderRadius: BorderRadius.circular(16),
       child: InkWell(
         borderRadius: BorderRadius.circular(16),
-        // Tapping the card opens the account statement — the natural
-        // "details" view. Editing is reachable only from the overflow
-        // menu, so an accidental tap never opens the edit form.
         onTap: onStatement,
         child: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
@@ -340,7 +331,10 @@ class _CustomerCard extends StatelessWidget {
                         Expanded(
                           child: Text(
                             customer.name,
-                            style: theme.textTheme.titleMedium,
+                            style: theme.textTheme.titleMedium?.copyWith(
+                              color: isActive ? null : scheme.onSurfaceVariant,
+                              decoration: isActive ? null : TextDecoration.lineThrough,
+                            ),
                             overflow: TextOverflow.ellipsis,
                           ),
                         ),
@@ -351,12 +345,15 @@ class _CustomerCard extends StatelessWidget {
                               vertical: 2,
                             ),
                             decoration: BoxDecoration(
-                              color: scheme.surfaceContainerHighest,
+                              color: scheme.errorContainer,
                               borderRadius: BorderRadius.circular(999),
                             ),
                             child: Text(
                               'معطّل',
-                              style: theme.textTheme.labelSmall,
+                              style: theme.textTheme.labelSmall?.copyWith(
+                                color: scheme.onErrorContainer,
+                                fontWeight: FontWeight.bold,
+                              ),
                             ),
                           ),
                       ],
@@ -370,6 +367,8 @@ class _CustomerCard extends StatelessWidget {
                   ],
                 ),
               ),
+              
+              // قائمة الخيارات (المنطق يعتمد على isActive)
               PopupMenuButton<_CustomerAction>(
                 tooltip: 'خيارات',
                 onSelected: (_CustomerAction action) {
@@ -407,9 +406,10 @@ class _CustomerCard extends StatelessWidget {
                     child: ListTile(
                       leading: Icon(
                         isActive
-                            ? Icons.visibility_off_outlined
-                            : Icons.visibility_outlined,
+                            ? Icons.block // أيقونة تعطيل
+                            : Icons.check_circle_outline, // أيقونة تفعيل
                       ),
+                      // المنطق هنا صحيح: إذا كان نشطاً يعرض "تعطيل"، وإذا كان معطلاً يعرض "تفعيل"
                       title: Text(isActive ? 'تعطيل' : 'تفعيل'),
                       contentPadding: EdgeInsets.zero,
                     ),
@@ -441,8 +441,6 @@ enum _CustomerAction { statement, edit, toggleActive, delete }
 class _CustomerFormDialog extends ConsumerStatefulWidget {
   const _CustomerFormDialog({this.existing});
 
-  /// When non-null the dialog is in edit mode; otherwise it creates a new
-  /// customer.
   final Customer? existing;
 
   @override
