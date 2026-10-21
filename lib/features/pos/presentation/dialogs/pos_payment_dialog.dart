@@ -1,5 +1,8 @@
 // lib/features/pos/presentation/dialogs/pos_payment_dialog.dart
 
+import 'dart:typed_data';
+
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
@@ -7,6 +10,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/invalidation/data_invalidation.dart';
 import '../../../../core/network/network_status_provider.dart';
 import '../../../../core/network/offline_writer.dart';
+import '../../../../core/printing/app_print_engine.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../cash/domain/entities/cash_entities.dart';
@@ -16,11 +20,16 @@ import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/domain/repositories/sales_repository.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
+import '../../../settings/data/services/company_logo_loader.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../../settings/presentation/providers/company_settings_providers.dart';
 import '../../../settings/presentation/providers/user_profile_providers.dart';
+import '../../data/services/pdf_receipt_builder.dart';
+import '../../data/services/pos_preferences.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/entities/receipt.dart';
+import '../providers/printer_providers.dart';
 import '../state/pos_providers.dart';
 import 'pos_print_preview_dialog.dart';
 
@@ -142,8 +151,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     FocusScope.of(context).unfocus();
     if (_validationError() != null) return;
 
-    final CompanyContextState contextState =
-        ref.read(companyContextProvider);
+    final CompanyContextState contextState = ref.read(companyContextProvider);
     final String? branchId = contextState.currentBranch?.id;
     if (branchId == null) {
       setState(() => _serverFailure = SalesFailureType.branchNotFound);
@@ -234,12 +242,50 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
       ref.read(posCartProvider.notifier).reset();
 
-      await showDialog<void>(
-        context: context,
-        barrierDismissible: false,
-        builder: (BuildContext dialogContext) =>
-            _PosReceiptDialog(receipt: receipt),
-      );
+      // ⬇️ التحقق من إعداد الطباعة المباشرة
+      final bool directPrint = ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ?? false;
+      final bool isDesktop = defaultTargetPlatform == TargetPlatform.windows || 
+                             defaultTargetPlatform == TargetPlatform.linux || 
+                             defaultTargetPlatform == TargetPlatform.macOS;
+      final bool hasSavedPrinter = ref.read(savedPrinterProvider).valueOrNull != null;
+
+      if (directPrint && isDesktop && hasSavedPrinter) {
+        // تنفيذ الطباعة المباشرة
+        try {
+          final engine = ref.read(appPrintEngineProvider);
+          final logo = await _loadLogoBytes();
+          final style = _readStyle();
+          
+          final success = await engine.printThermal(
+            receipt: receipt,
+            paperWidthDots: _thermalWidthDots(),
+            logoBytes: logo,
+            style: style,
+          );
+
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            SnackBar(
+              content: Text(success 
+                  ? 'تم إتمام البيع والطباعة المباشرة.' 
+                  : 'تم إتمام البيع، لكن تعذّرت الطباعة المباشرة.'),
+            ),
+          );
+        } catch (e) {
+          if (!mounted) return;
+          ScaffoldMessenger.of(context).showSnackBar(
+            const SnackBar(content: Text('تم إتمام البيع، لكن حدث خطأ أثناء الطباعة.')),
+          );
+        }
+      } else {
+        // إظهار حوار المعاينة العادي
+        await showDialog<void>(
+          context: context,
+          barrierDismissible: false,
+          builder: (BuildContext dialogContext) =>
+              _PosReceiptDialog(receipt: receipt),
+        );
+      }
 
       if (!mounted) return;
       Navigator.of(context).pop(true);
@@ -339,17 +385,79 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
     ref.read(posCartProvider.notifier).reset();
 
-    await showDialog<void>(
-      context: context,
-      barrierDismissible: false,
-      builder: (BuildContext dialogContext) => _PosReceiptDialog(
-        receipt: receipt,
-        isOffline: true,
-      ),
-    );
+    // ⬇️ التحقق من إعداد الطباعة المباشرة للأوفلاين
+    final bool directPrint = ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ?? false;
+    final bool isDesktop = defaultTargetPlatform == TargetPlatform.windows || 
+                           defaultTargetPlatform == TargetPlatform.linux || 
+                           defaultTargetPlatform == TargetPlatform.macOS;
+    final bool hasSavedPrinter = ref.read(savedPrinterProvider).valueOrNull != null;
+
+    if (directPrint && isDesktop && hasSavedPrinter) {
+      // تنفيذ الطباعة المباشرة
+      try {
+        final engine = ref.read(appPrintEngineProvider);
+        final logo = await _loadLogoBytes();
+        final style = _readStyle();
+        
+        final success = await engine.printThermal(
+          receipt: receipt,
+          paperWidthDots: _thermalWidthDots(),
+          logoBytes: logo,
+          style: style,
+        );
+
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(success 
+                ? 'تم الحفظ محلياً والطباعة المباشرة.' 
+                : 'تم الحفظ محلياً، لكن تعذّرت الطباعة المباشرة.'),
+          ),
+        );
+      } catch (e) {
+        if (!mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم الحفظ محلياً، لكن حدث خطأ أثناء الطباعة.')),
+        );
+      }
+    } else {
+      // إظهار حوار المعاينة العادي
+      await showDialog<void>(
+        context: context,
+        barrierDismissible: false,
+        builder: (BuildContext dialogContext) => _PosReceiptDialog(
+          receipt: receipt,
+          isOffline: true,
+        ),
+      );
+    }
 
     if (!mounted) return;
     Navigator.of(context).pop(true);
+  }
+
+  Future<Uint8List?> _loadLogoBytes() async {
+    final settings = ref.read(companySettingsProvider).valueOrNull;
+    if (settings == null || settings.companyId.isEmpty) return null;
+    try {
+      return await const CompanyLogoLoader().load(
+        companyId: settings.companyId,
+        logoUrl: settings.logoUrl,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
+  PrintStyleSettings _readStyle() {
+    final settings = ref.read(companySettingsProvider).valueOrNull;
+    if (settings == null) return const PrintStyleSettings.defaults();
+    return PrintStyleSettings.fromCompanySettings(settings);
+  }
+
+  int _thermalWidthDots() {
+    final size = ref.read(posPaperSizeProvider).valueOrNull ?? PosPreferences.defaultPaperSize;
+    return size == ReceiptPaperSize.mm58 ? 384 : 576;
   }
 
   Receipt _buildReceipt({
@@ -358,10 +466,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     required DateTime saleDate,
     required CompanyContextState contextState,
   }) {
-    // ⬇️ جلب البائع (cashierName) من userProfileProvider
     final cashierName = ref.read(userProfileProvider).valueOrNull?.fullName;
 
-    // ⬇️ جلب عنوان العميل وهاتفه من customersProvider (إن وُجد عميل)
     String? customerAddress;
     String? customerPhone;
     if (_cart.customerId != null) {
@@ -495,7 +601,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   ),
                   _CustomerRow(customerName: _cart.customerName),
                   
-                  // ⬇️ استعادة بطاقة تفاصيل الرصيد
                   const SizedBox(height: 12),
                   _TotalsCard(
                     saleTotal: _saleTotal,
@@ -556,7 +661,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                     _ErrorBanner(message: displayError),
                   ],
 
-                  // ⬇️ استعادة بطاقة الرصيد الجديد
                   const SizedBox(height: 16),
                   _BalanceResult(
                     hasCustomer: _cart.hasCustomer,
@@ -626,7 +730,6 @@ class _CustomerRow extends StatelessWidget {
   }
 }
 
-// ⬇️ استعادة بطاقة الإجماليات
 class _TotalsCard extends StatelessWidget {
   const _TotalsCard({
     required this.saleTotal,
@@ -733,7 +836,6 @@ class _TotalsCard extends StatelessWidget {
   }
 }
 
-// ⬇️ استعادة بطاقة الرصيد الجديد
 class _BalanceResult extends StatelessWidget {
   const _BalanceResult({
     required this.hasCustomer,
