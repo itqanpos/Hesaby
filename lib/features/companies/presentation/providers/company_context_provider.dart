@@ -2,9 +2,10 @@
 
 import 'dart:async';
 
+import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart'
-    show Supabase, SupabaseClient;
+    show Supabase, SupabaseClient, AuthChangeEvent;
 
 import '../../../../core/storage/preferences_storage.dart';
 import '../../../../core/utils/logger.dart';
@@ -344,6 +345,18 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       isLoadingBranches: false,
     );
 
+    // ⬇️ انتظار جاهزية الجلسة (لتفادي أخطاء 401 / PGRST301 على الأندرويد)
+    try {
+      final session = Supabase.instance.client.auth.currentSession;
+      if (session == null) {
+        await Supabase.instance.client.auth.onAuthStateChange
+            .firstWhere((e) => e.event == AuthChangeEvent.signedIn)
+            .timeout(const Duration(seconds: 5));
+      }
+    } on Object {
+      // تجاهل الخطأ - سنحاول RPC على أي حال
+    }
+
     try {
       final PreferencesStorage preferences = await _preferences();
       final String? savedCompanyId = await preferences.readString(
@@ -435,6 +448,11 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
 
       await _loadBranchesFor(selectedCompany, savedBranchId: savedBranchId);
     } on Object catch (error, stackTrace) {
+      // ⬇️ سطور التشخيص المؤقتة
+      debugPrint('🔴 [ANDROID REAL ERROR] type=${error.runtimeType}');
+      debugPrint('🔴 [ANDROID REAL ERROR] msg=$error');
+      debugPrint('🔴 [STACK] $stackTrace');
+
       AppLogger.error('Unhandled error in _loadFromScratch', error, stackTrace);
       if (_isDisposed) return;
       state = state.copyWith(
@@ -518,6 +536,9 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
         clearBranchesFailure: true,
       );
     } on Object catch (error, stackTrace) {
+      debugPrint('🔴 [ANDROID REAL ERROR] type=${error.runtimeType}');
+      debugPrint('🔴 [ANDROID REAL ERROR] msg=$error');
+      
       AppLogger.error('Unhandled error in _loadBranchesFor', error, stackTrace);
       if (_isDisposed) return;
       if (state.currentCompany?.id != company.id) return;
