@@ -6,12 +6,6 @@ import 'package:flutter/foundation.dart';
 import '../entities/purchase.dart';
 import '../entities/purchase_item.dart';
 
-/// Input value object describing a single line item when creating or
-/// updating a draft purchase.
-///
-/// `id` and `lineTotal` are intentionally absent: both are maintained by
-/// the database. `purchase_id` is derived by the data layer from the
-/// surrounding operation, so the caller never supplies it.
 @immutable
 class PurchaseItemDraft extends Equatable {
   const PurchaseItemDraft({
@@ -22,19 +16,10 @@ class PurchaseItemDraft extends Equatable {
     this.notes,
   });
 
-  /// Identifier of the product to purchase.
   final String productId;
-
-  /// Identifier of the unit of measure.
   final String unitId;
-
-  /// Quantity purchased. Must be strictly positive.
   final double quantity;
-
-  /// Unit cost. Must be non-negative.
   final double unitCost;
-
-  /// Optional free-form note for this line.
   final String? notes;
 
   @override
@@ -47,8 +32,6 @@ class PurchaseItemDraft extends Equatable {
       'quantity: $quantity, unitCost: $unitCost)';
 }
 
-/// Categories of failures that the presentation layer can safely translate
-/// into localized user messages.
 enum PurchaseFailureType {
   network,
   unauthorized,
@@ -65,7 +48,6 @@ enum PurchaseFailureType {
   unknown,
 }
 
-/// Domain-level exception raised by [PurchaseRepository] operations.
 @immutable
 class PurchaseException extends Equatable implements Exception {
   const PurchaseException({
@@ -85,12 +67,6 @@ class PurchaseException extends Equatable implements Exception {
   String toString() => 'PurchaseException(type: ${type.name})';
 }
 
-/// Contract for purchase operations.
-///
-/// All access decisions are ultimately enforced by Row Level Security in
-/// the database: the data layer never accepts a `userId`, and `companyId`
-/// is only ever used to scope the operation — RLS rejects any attempt to
-/// read or write rows outside the caller's memberships.
 abstract interface class PurchaseRepository {
   // ---------------------------------------------------------------------------
   // Reads
@@ -111,12 +87,7 @@ abstract interface class PurchaseRepository {
   // Writes
   // ---------------------------------------------------------------------------
 
-  /// Creates a new draft purchase with its items, in a single logical
-  /// operation.
-  ///
-  /// The purchase is always created with `status = draft`; the database
-  /// enforces this. [items] may be empty (the purchase is completed and
-  /// confirmed in a later step).
+  // ⬇️ إضافة paidAmount و paymentMethod
   Future<Purchase> createPurchase({
     required String companyId,
     required String branchId,
@@ -126,14 +97,12 @@ abstract interface class PurchaseRepository {
     String? invoiceNumber,
     double discount,
     double taxAmount,
+    double paidAmount,
+    String paymentMethod,
     String? notes,
   });
 
-  /// Replaces the header and items of an existing draft purchase.
-  ///
-  /// All existing items are removed and replaced by [items]. The operation
-  /// is rejected with [PurchaseFailureType.invalidStatusTransition] when
-  /// the purchase is not in `draft`.
+  // ⬇️ إضافة paidAmount و paymentMethod
   Future<Purchase> updateDraft({
     required String purchaseId,
     required String companyId,
@@ -144,21 +113,12 @@ abstract interface class PurchaseRepository {
     String? invoiceNumber,
     double discount,
     double taxAmount,
+    double paidAmount,
+    String paymentMethod,
     String? notes,
   });
 
-  /// Confirms a draft purchase.
-  ///
-  /// The database trigger inserts the corresponding `purchase_in` stock
-  /// movements. A purchase with no items is rejected with
-  /// [PurchaseFailureType.emptyPurchase].
   Future<Purchase> confirmPurchase(String purchaseId);
 
-  /// Cancels a purchase.
-  ///
-  /// A draft purchase is cancelled without touching stock. A confirmed
-  /// purchase has its movements reversed; if that reversal would drive a
-  /// stock balance negative, the operation fails with
-  /// [PurchaseFailureType.insufficientStock].
   Future<Purchase> cancelPurchase(String purchaseId);
 }
