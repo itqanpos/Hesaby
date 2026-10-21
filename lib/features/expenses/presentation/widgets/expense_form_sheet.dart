@@ -49,7 +49,10 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
   String? _categoryId;
   String _paymentMethod = 'cash';
   bool _isSubmitting = false;
+  
+  // ⬇️ متغيرات لإظهار رسالة الخطأ
   ExpenseFailureType? _failure;
+  String? _customError;
 
   bool get _isEdit => widget.existing != null;
 
@@ -82,7 +85,12 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
   }
 
   void _onAmountChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        _customError = null;
+        _failure = null;
+      });
+    }
   }
 
   static String _fmtNum(double v) {
@@ -93,6 +101,22 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
   static String? _emptyToNull(String s) {
     final String t = s.trim();
     return t.isEmpty ? null : t;
+  }
+
+  // ⬇️ دالة لتحويل طريقة الدفع النصية إلى نوع الحساب في الخزنة
+  CashAccountType _mapPaymentMethodToAccountType(String method) {
+    switch (method) {
+      case 'cash':
+        return CashAccountType.cash;
+      case 'card':
+        return CashAccountType.card;
+      case 'bank_transfer':
+        return CashAccountType.bank;
+      case 'instapay':
+        return CashAccountType.instapay;
+      default:
+        return CashAccountType.other;
+    }
   }
 
   Future<void> _pickDate() async {
@@ -111,11 +135,35 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
     if (_failure != null) setState(() => _failure = null);
+    if (_customError != null) setState(() => _customError = null);
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
-    setState(() => _isSubmitting = true);
-
     final double amount = double.tryParse(_amountController.text.trim()) ?? 0;
+
+    // ⬇️ التحقق من الرصيد المتاح (فقط عند إضافة مصروف جديد، وليس عند التعديل لتجنب التعقيد)
+    if (!_isEdit) {
+      final overview = ref.read(cashOverviewProvider).valueOrNull;
+      if (overview != null) {
+        final targetType = _mapPaymentMethodToAccountType(_paymentMethod);
+        double currentBalance = 0.0;
+
+        for (final balance in overview.balances) {
+          if (balance.account.type == targetType) {
+            currentBalance = balance.balance;
+            break;
+          }
+        }
+
+        if (amount > currentBalance) {
+          setState(() {
+            _customError = 'الرصيد غير كافٍ في الحساب المختار. المتاح: ${AppFormatters.money(currentBalance)}';
+          });
+          return;
+        }
+      }
+    }
+
+    setState(() => _isSubmitting = true);
 
     try {
       if (_isEdit) {
@@ -174,7 +222,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
             .where((CashCategory c) => c.kind == CashCategoryKind.expense)
             .toList(growable: false);
 
-    // Live preview of the entered amount.
     final double? enteredAmount =
         double.tryParse(_amountController.text.trim());
 
@@ -204,7 +251,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                 ),
                 const SizedBox(height: 20),
 
-                // ---- Description ----
                 TextFormField(
                   controller: _descriptionController,
                   enabled: !_isSubmitting,
@@ -223,7 +269,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Amount ----
                 TextFormField(
                   controller: _amountController,
                   enabled: !_isSubmitting,
@@ -249,7 +294,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                   },
                 ),
 
-                // ---- Amount preview ----
                 if (enteredAmount != null && enteredAmount > 0) ...<Widget>[
                   const SizedBox(height: 6),
                   _AmountPreview(amount: enteredAmount),
@@ -257,7 +301,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
 
                 const SizedBox(height: 12),
 
-                // ---- Category ----
                 DropdownButtonFormField<String>(
                   key: ValueKey<String>('category-${_categoryId ?? ''}'),
                   initialValue: _categoryId,
@@ -283,7 +326,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Payment method ----
                 DropdownButtonFormField<String>(
                   key: ValueKey<String>('method-$_paymentMethod'),
                   initialValue: _paymentMethod,
@@ -317,13 +359,15 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                       ? null
                       : (String? v) {
                           if (v != null) {
-                            setState(() => _paymentMethod = v);
+                            setState(() {
+                              _paymentMethod = v;
+                              _customError = null; // مسح الخطأ عند تغيير الحساب
+                            });
                           }
                         },
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Date ----
                 InkWell(
                   borderRadius: BorderRadius.circular(4),
                   onTap: _isSubmitting ? null : _pickDate,
@@ -338,7 +382,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Reference ----
                 TextFormField(
                   controller: _referenceController,
                   enabled: !_isSubmitting,
@@ -351,7 +394,6 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Notes ----
                 TextFormField(
                   controller: _notesController,
                   enabled: !_isSubmitting,
@@ -362,7 +404,11 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
                   ),
                 ),
 
-                if (_failure != null) ...<Widget>[
+                // ⬇️ عرض رسالة الخطأ
+                if (_customError != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  _FailureBanner(message: _customError!),
+                ] else if (_failure != null) ...<Widget>[
                   const SizedBox(height: 12),
                   _FailureBanner(message: _failureMessage(_failure!)),
                 ],
@@ -386,13 +432,9 @@ class _ExpenseFormSheetState extends ConsumerState<_ExpenseFormSheet> {
   }
 }
 
-// ============================================================================
-// Amount preview
-// ============================================================================
-
+// ... (باقي كلاسات _AmountPreview و _FailureBanner ودالة _failureMessage كما هي بدون تغيير) ...
 class _AmountPreview extends StatelessWidget {
   const _AmountPreview({required this.amount});
-
   final double amount;
 
   @override
@@ -410,11 +452,7 @@ class _AmountPreview extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
         child: Row(
           children: <Widget>[
-            const Icon(
-              Icons.arrow_upward,
-              size: 16,
-              color: tone,
-            ),
+            const Icon(Icons.arrow_upward, size: 16, color: tone),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
@@ -439,13 +477,8 @@ class _AmountPreview extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Failure banner
-// ============================================================================
-
 class _FailureBanner extends StatelessWidget {
   const _FailureBanner({required this.message});
-
   final String message;
 
   @override
@@ -474,10 +507,6 @@ class _FailureBanner extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Localization
-// ============================================================================
 
 String _failureMessage(ExpenseFailureType type) => switch (type) {
       ExpenseFailureType.network =>
