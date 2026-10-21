@@ -40,6 +40,8 @@ class _FakePurchaseRepository implements PurchaseRepository {
     String? invoiceNumber,
     double discount = 0,
     double taxAmount = 0,
+    double paidAmount = 0,
+    String paymentMethod = 'cash',
     String? notes,
   }) async =>
       throw UnimplementedError();
@@ -55,6 +57,8 @@ class _FakePurchaseRepository implements PurchaseRepository {
     String? invoiceNumber,
     double discount = 0,
     double taxAmount = 0,
+    double paidAmount = 0,
+    String paymentMethod = 'cash',
     String? notes,
   }) async =>
       throw UnimplementedError();
