@@ -1,7 +1,5 @@
 // lib/features/pos/presentation/dialogs/pos_payment_dialog.dart
 
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
