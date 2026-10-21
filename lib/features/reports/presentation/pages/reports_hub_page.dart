@@ -112,6 +112,14 @@ class ReportsHubPage extends StatelessWidget {
                 subtitle: 'مشتريات حسب المورد',
                 routeName: AppRouter.reportPayablesName,
               ),
+              // ⬇️ جديد: تقارير الخزنة
+              _ReportTile(
+                icon: Icons.payments_outlined,
+                color: Color(0xFFEF6C00),
+                title: 'تقارير الخزنة',
+                subtitle: 'حركات الخزنة والأرصدة والملخص',
+                routeName: AppRouter.cashReportsName,
+              ),
             ],
           ),
         ],
