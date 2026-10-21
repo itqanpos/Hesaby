@@ -10,23 +10,6 @@ import '../datasources/purchase_remote_datasource.dart';
 import '../models/purchase_item_model.dart';
 import '../models/purchase_model.dart';
 
-/// Concrete implementation of [PurchaseRepository] backed by Supabase.
-///
-/// Responsibilities:
-/// * Call the remote data source.
-/// * Translate [PurchaseModel] / [PurchaseItemModel] rows into pure
-///   [Purchase] / [PurchaseItem] entities.
-/// * Translate Supabase / PostgREST errors into safe [PurchaseException]s
-///   carrying a [PurchaseFailureType]. Raw backend messages never leave this
-///   layer, and no credential or token is ever logged.
-///
-/// Typed error disambiguation:
-/// All business-rule violations raised by the Phase 7 triggers report the
-/// same PostgreSQL code `23514` (check_violation). The specific failure type
-/// is therefore resolved by inspecting the message text, which is stable
-/// because every trigger raises it explicitly. Foreign-key violations
-/// (`23503`) are resolved by constraint name; uniqueness (`23505`) on this
-/// table only concerns the invoice number.
 class PurchaseRepositoryImpl implements PurchaseRepository {
   const PurchaseRepositoryImpl(this._remoteDataSource);
 
@@ -125,6 +108,8 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
     String? invoiceNumber,
     double discount = 0,
     double taxAmount = 0,
+    double paidAmount = 0,          // ⬅️ جديد
+    String paymentMethod = 'cash',  // ⬅️ جديد
     String? notes,
   }) async {
     try {
@@ -137,6 +122,8 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
         invoiceNumber: invoiceNumber,
         discount: discount,
         taxAmount: taxAmount,
+        paidAmount: paidAmount,
+        paymentMethod: paymentMethod,
         notes: notes,
       );
       return model.toEntity();
@@ -164,6 +151,8 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
     String? invoiceNumber,
     double discount = 0,
     double taxAmount = 0,
+    double paidAmount = 0,          // ⬅️ جديد
+    String paymentMethod = 'cash',  // ⬅️ جديد
     String? notes,
   }) async {
     try {
@@ -177,6 +166,8 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
         invoiceNumber: invoiceNumber,
         discount: discount,
         taxAmount: taxAmount,
+        paidAmount: paidAmount,
+        paymentMethod: paymentMethod,
         notes: notes,
       );
       return model.toEntity();
@@ -319,19 +310,6 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
     );
   }
 
-  /// Classifies a PostgREST error into a safe [PurchaseFailureType].
-  ///
-  /// Codes handled explicitly:
-  /// * `23505` unique_violation              → invoiceNumberConflict
-  ///   (only uniqueness on `purchases` is the invoice number)
-  /// * `23503` foreign_key_violation         → supplierNotFound /
-  ///   branchNotFound / productNotFound / unitNotFound
-  /// * `23514` check_violation               → invalidStatusTransition /
-  ///   emptyPurchase / insufficientStock
-  ///   (message-based; the triggers raise specific sentences)
-  /// * `PGRST116` no rows / multiple for single() → notFound
-  /// * `42501` / `28xxx`                     → unauthorized
-  /// * `42xxx`                               → invalidResponse
   static PurchaseFailureType _classifyPostgrest(
     supabase.PostgrestException error,
   ) {
@@ -339,17 +317,14 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
     final String message = error.message.toLowerCase();
     final String full = error.toString().toLowerCase();
 
-    // --- Integrity: unique violations -----------------------------------------
     if (code == '23505') {
       if (full.contains('uniq_purchases_company_invoice_number') ||
           message.contains('invoice_number')) {
         return PurchaseFailureType.invoiceNumberConflict;
       }
-      // No other uniqueness is expected on the Phase 7 tables.
       return PurchaseFailureType.invalidResponse;
     }
 
-    // --- Integrity: foreign key violations ------------------------------------
     if (code == '23503') {
       if (full.contains('purchases_supplier_company_fk')) {
         return PurchaseFailureType.supplierNotFound;
@@ -369,10 +344,7 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
       return PurchaseFailureType.notFound;
     }
 
-    // --- Integrity: check violations (business rules) -------------------------
     if (code == '23514') {
-      // Insufficient stock during cancellation is raised by the Phase 5
-      // trigger with a stable leading sentence.
       if (message.contains('insufficient stock') ||
           full.contains('insufficient stock')) {
         return PurchaseFailureType.insufficientStock;
@@ -387,27 +359,21 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
           message.contains('cannot modify items of a')) {
         return PurchaseFailureType.invalidStatusTransition;
       }
-      // Fallback: any other CHECK on the Phase 7 tables is a state-machine
-      // violation, so the most accurate default is invalidStatusTransition.
       return PurchaseFailureType.invalidStatusTransition;
     }
 
-    // --- Not found ------------------------------------------------------------
     if (code == 'PGRST116') {
       return PurchaseFailureType.notFound;
     }
 
-    // --- Authorization --------------------------------------------------------
     if (code.startsWith('42501') || code.startsWith('28')) {
       return PurchaseFailureType.unauthorized;
     }
 
-    // --- Syntax / undefined objects -------------------------------------------
     if (code.startsWith('42')) {
       return PurchaseFailureType.invalidResponse;
     }
 
-    // --- Textual fallbacks ----------------------------------------------------
     if (message.contains('permission denied') ||
         message.contains('row level security') ||
         message.contains('jwt')) {
