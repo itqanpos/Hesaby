@@ -7,11 +7,6 @@ import '../../../products/domain/entities/unit.dart';
 import '../../domain/entities/purchase_cart.dart';
 import '../../domain/entities/purchase_cart_line.dart';
 
-/// Owns the state of the purchase cart.
-///
-/// Synchronous by design: every method mutates the state in place. The
-/// submission to the backend happens elsewhere (in the form page). This
-/// mirrors `PosCartNotifier` for consistency.
 class PurchaseCartNotifier extends Notifier<PurchaseCart> {
   @override
   PurchaseCart build() => const PurchaseCart();
@@ -20,12 +15,6 @@ class PurchaseCartNotifier extends Notifier<PurchaseCart> {
   // Lines
   // ---------------------------------------------------------------------------
 
-  /// Adds [product] (with [unit]) to the cart.
-  ///
-  /// When [unitCost] is `null`, the product's current `costPrice` multiplied
-  /// by [conversionFactor] is used. When the same `(productId, unitId)`
-  /// already exists, its quantity is increased instead of adding a second
-  /// line.
   void addProduct({
     required Product product,
     required Unit unit,
@@ -33,12 +22,9 @@ class PurchaseCartNotifier extends Notifier<PurchaseCart> {
     double? unitCost,
     double conversionFactor = 1,
   }) {
-    if (quantity <= 0) {
-      return;
-    }
+    if (quantity <= 0) return;
 
-    final double factor =
-        conversionFactor > 0 ? conversionFactor : 1;
+    final double factor = conversionFactor > 0 ? conversionFactor : 1;
     final double cost = unitCost ?? (product.costPrice * factor);
     final PurchaseCartLine? existing = state.findLine(
       productId: product.id,
@@ -73,7 +59,6 @@ class PurchaseCartNotifier extends Notifier<PurchaseCart> {
     );
   }
 
-  /// Removes the line with [key] (`productId::unitId`).
   void removeLine(String key) {
     state = state.copyWith(
       lines: state.lines
@@ -82,11 +67,8 @@ class PurchaseCartNotifier extends Notifier<PurchaseCart> {
     );
   }
 
-  /// Sets a new quantity for the line with [key]. Rejected when ≤ 0.
   void setQuantity(String key, double quantity) {
-    if (quantity <= 0) {
-      return;
-    }
+    if (quantity <= 0) return;
     state = state.copyWith(
       lines: <PurchaseCartLine>[
         for (final PurchaseCartLine line in state.lines)
@@ -98,11 +80,8 @@ class PurchaseCartNotifier extends Notifier<PurchaseCart> {
     );
   }
 
-  /// Sets a new unit cost for the line with [key]. Rejected when < 0.
   void setUnitCost(String key, double cost) {
-    if (cost < 0) {
-      return;
-    }
+    if (cost < 0) return;
     state = state.copyWith(
       lines: <PurchaseCartLine>[
         for (final PurchaseCartLine line in state.lines)
@@ -115,46 +94,47 @@ class PurchaseCartNotifier extends Notifier<PurchaseCart> {
   // Header fields
   // ---------------------------------------------------------------------------
 
-  /// Attaches a supplier to the cart.
   void setSupplier({required String id, required String name}) {
     state = state.copyWith(supplierId: id, supplierName: name);
   }
 
-  /// Detaches the current supplier.
   void clearSupplier() {
     state = state.copyWith(clearSupplier: true);
   }
 
-  /// Sets the purchase business date.
   void setPurchaseDate(DateTime date) {
     state = state.copyWith(purchaseDate: date);
   }
 
-  /// Sets the (optional) supplier invoice number.
   void setInvoiceNumber(String value) {
     state = state.copyWith(invoiceNumber: value);
   }
 
-  /// Sets the (optional) free-form notes.
   void setNotes(String value) {
     state = state.copyWith(notes: value);
   }
 
-  /// Sets the header-level discount. Negative values are clamped to 0.
   void setDiscount(double value) {
     state = state.copyWith(discount: value < 0 ? 0 : value);
   }
 
-  /// Sets the header-level tax amount. Negative values are clamped to 0.
   void setTaxAmount(double value) {
     state = state.copyWith(taxAmount: value < 0 ? 0 : value);
+  }
+
+  // ⬇️ دوال الدفع الجديدة
+  void setPaidAmount(double value) {
+    state = state.copyWith(paidAmount: value < 0 ? 0 : value);
+  }
+
+  void setPaymentMethod(String value) {
+    state = state.copyWith(paymentMethod: value);
   }
 
   // ---------------------------------------------------------------------------
   // Reset
   // ---------------------------------------------------------------------------
 
-  /// Clears the whole cart back to its initial empty state.
   void reset() {
     state = const PurchaseCart();
   }
