@@ -21,13 +21,16 @@ class CompanyRemoteDataSource {
   Future<List<CompanyModel>> fetchMyCompanies() async {
     final SupabaseClient client = _requireClient();
 
-    final List<Map<String, dynamic>> rows = await client
-        .from('companies')
-        .select()
-        .eq('is_active', true)
-        .order('name', ascending: true);
+    // ⬇️ استخدام الدالة المخصصة (RPC) لتجاوز تعقيدات RLS
+    final dynamic response = await client.rpc('get_my_companies');
+    
+    if (response == null) return [];
 
-    return rows.map(CompanyModel.fromMap).toList(growable: false);
+    final List<dynamic> rows = response as List<dynamic>;
+    
+    return rows
+        .map((row) => CompanyModel.fromMap(row as Map<String, dynamic>))
+        .toList(growable: false);
   }
 
   Future<List<CompanyModel>> fetchAllCompanies() async {
@@ -41,11 +44,6 @@ class CompanyRemoteDataSource {
     return rows.map(CompanyModel.fromMap).toList(growable: false);
   }
 
-  /// Updates the profile of [companyId] and returns the updated row.
-  ///
-  /// The `taxNumber` and `commercialRegister` parameters are sent as-is;
-  /// `null` clears the corresponding column, matching the "empty string ⇒
-  /// null" convention established by the UI layer.
   Future<CompanyModel> updateCompany({
     required String companyId,
     required String name,
