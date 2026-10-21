@@ -10,11 +10,6 @@ import '../../domain/entities/cash_entities.dart';
 import '../../domain/repositories/cash_repository.dart';
 import '../providers/cash_providers.dart';
 
-/// Bottom sheet for recording a manual cash movement.
-///
-/// The user picks the account, the direction (in / out), the category, and
-/// the amount. Everything else is optional. On success the sheet closes and
-/// the caller refreshes through the invalidated providers.
 Future<CashTransaction?> showAddCashTransactionSheet({
   required BuildContext context,
   String? initialAccountId,
@@ -57,7 +52,10 @@ class _AddCashTransactionSheetState
   String? _accountId;
   String? _categoryId;
   bool _isSubmitting = false;
+  
+  // ⬇️ متغيرات لإظهار رسالة الخطأ
   CashFailureType? _failure;
+  String? _customError;
 
   @override
   void initState() {
@@ -77,7 +75,12 @@ class _AddCashTransactionSheetState
   }
 
   void _onAmountChanged() {
-    if (mounted) setState(() {});
+    if (mounted) {
+      setState(() {
+        _customError = null;
+        _failure = null;
+      });
+    }
   }
 
   Future<void> _submit() async {
@@ -91,16 +94,39 @@ class _AddCashTransactionSheetState
       return;
     }
 
-    final double amount =
-        double.tryParse(_amountController.text.trim()) ?? 0;
+    final double amount = double.tryParse(_amountController.text.trim()) ?? 0;
     if (amount <= 0) {
       setState(() => _failure = CashFailureType.invalidInput);
       return;
     }
 
+    // ⬇️ التحقق من الرصيد المتاح (فقط إذا كانت الحركة صادر)
+    if (_direction == CashDirection.outFlow) {
+      final AsyncValue<CashOverview> overviewAsync = ref.read(cashOverviewProvider);
+      final CashOverview? overview = overviewAsync.valueOrNull;
+      
+      if (overview != null) {
+        double currentBalance = 0;
+        for (final balance in overview.balances) {
+          if (balance.account.id == accountId) {
+            currentBalance = balance.balance;
+            break;
+          }
+        }
+
+        if (amount > currentBalance) {
+          setState(() {
+            _customError = 'الرصيد غير كافٍ. الرصيد المتاح في هذا الحساب هو: ${AppFormatters.money(currentBalance)}';
+          });
+          return; // إيقاف العملية
+        }
+      }
+    }
+
     setState(() {
       _isSubmitting = true;
       _failure = null;
+      _customError = null;
     });
 
     try {
@@ -142,13 +168,10 @@ class _AddCashTransactionSheetState
     final ColorScheme scheme = theme.colorScheme;
     final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
 
-    final AsyncValue<List<CashAccount>> accountsAsync =
-        ref.watch(cashAccountsProvider);
-    final AsyncValue<List<CashCategory>> categoriesAsync =
-        ref.watch(cashCategoriesProvider);
+    final AsyncValue<List<CashAccount>> accountsAsync = ref.watch(cashAccountsProvider);
+    final AsyncValue<List<CashCategory>> categoriesAsync = ref.watch(cashCategoriesProvider);
 
-    final List<CashAccount> accounts =
-        accountsAsync.valueOrNull ?? const <CashAccount>[];
+    final List<CashAccount> accounts = accountsAsync.valueOrNull ?? const <CashAccount>[];
 
     if (_accountId == null && accounts.isNotEmpty) {
       _accountId = accounts.first.id;
@@ -162,9 +185,19 @@ class _AddCashTransactionSheetState
       return _direction == CashDirection.inFlow ? isIncome : isExpense;
     }).toList(growable: false);
 
-    // Live preview: parse the entered text and format it with grouping.
-    final double? enteredAmount =
-        double.tryParse(_amountController.text.trim());
+    final double? enteredAmount = double.tryParse(_amountController.text.trim());
+
+    // ⬇️ جلب رصيد الحساب المختار لعرضه بجانب الحقل
+    double? currentBalance;
+    final overview = ref.watch(cashOverviewProvider).valueOrNull;
+    if (overview != null && _accountId != null) {
+      for (final b in overview.balances) {
+        if (b.account.id == _accountId) {
+          currentBalance = b.balance;
+          break;
+        }
+      }
+    }
 
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
@@ -192,7 +225,6 @@ class _AddCashTransactionSheetState
                 ),
                 const SizedBox(height: 20),
 
-                // ---- Direction ----
                 SegmentedButton<CashDirection>(
                   segments: const <ButtonSegment<CashDirection>>[
                     ButtonSegment<CashDirection>(
@@ -213,23 +245,27 @@ class _AddCashTransactionSheetState
                           setState(() {
                             _direction = s.first;
                             _categoryId = null;
+                            _customError = null;
                           });
                         },
                 ),
                 const SizedBox(height: 16),
 
-                // ---- Account ----
                 if (accounts.isEmpty)
                   const _EmptyHint(
                     message: 'لا توجد حسابات. تواصل مع المالك.',
                   )
-                else
+                else ...[
                   DropdownButtonFormField<String>(
                     key: ValueKey<String>('account-${_accountId ?? ''}'),
                     initialValue: _accountId,
-                    decoration: const InputDecoration(
+                    decoration: InputDecoration(
                       labelText: 'الحساب',
-                      border: OutlineInputBorder(),
+                      border: const OutlineInputBorder(),
+                      // ⬇️ عرض الرصيد المتاح أسفل اسم الحساب
+                      helperText: currentBalance != null 
+                          ? 'الرصيد المتاح: ${AppFormatters.money(currentBalance)}'
+                          : null,
                     ),
                     items: <DropdownMenuItem<String>>[
                       for (final CashAccount a in accounts)
@@ -240,16 +276,18 @@ class _AddCashTransactionSheetState
                     ],
                     onChanged: _isSubmitting
                         ? null
-                        : (String? v) => setState(() => _accountId = v),
+                        : (String? v) => setState(() {
+                          _accountId = v;
+                          _customError = null;
+                        }),
                   ),
+                ],
                 const SizedBox(height: 12),
 
-                // ---- Amount ----
                 TextFormField(
                   controller: _amountController,
                   enabled: !_isSubmitting,
-                  keyboardType:
-                      const TextInputType.numberWithOptions(decimal: true),
+                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
                   inputFormatters: <TextInputFormatter>[
                     FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
                   ],
@@ -272,7 +310,6 @@ class _AddCashTransactionSheetState
                   },
                 ),
 
-                // ---- Amount preview ----
                 if (enteredAmount != null && enteredAmount > 0) ...<Widget>[
                   const SizedBox(height: 6),
                   _AmountPreview(
@@ -283,7 +320,6 @@ class _AddCashTransactionSheetState
 
                 const SizedBox(height: 12),
 
-                // ---- Category ----
                 DropdownButtonFormField<String>(
                   key: ValueKey<String>('category-${_categoryId ?? ''}'),
                   initialValue: _categoryId,
@@ -309,7 +345,6 @@ class _AddCashTransactionSheetState
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Reference ----
                 TextFormField(
                   controller: _referenceController,
                   enabled: !_isSubmitting,
@@ -322,7 +357,6 @@ class _AddCashTransactionSheetState
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Notes ----
                 TextFormField(
                   controller: _notesController,
                   enabled: !_isSubmitting,
@@ -333,7 +367,11 @@ class _AddCashTransactionSheetState
                   ),
                 ),
 
-                if (_failure != null) ...<Widget>[
+                // ⬇️ عرض رسالة الخطأ (سواء كان رصيد غير كافٍ أو خطأ من السيرفر)
+                if (_customError != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  _FailureBanner(message: _customError!),
+                ] else if (_failure != null) ...<Widget>[
                   const SizedBox(height: 12),
                   _FailureBanner(message: _failureMessage(_failure!)),
                 ],
