@@ -1,6 +1,7 @@
 // lib/features/companies/data/models/company_model.dart
 
 import 'package:equatable/equatable.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../domain/entities/company.dart';
 
@@ -117,9 +118,8 @@ class CompanyModel extends Equatable {
   static String _requireString(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
     if (value is String && value.isNotEmpty) return value;
-    throw FormatException(
-      'CompanyModel: missing or invalid required column "$key".',
-    );
+    debugPrint('⚠️ CompanyModel: Missing String "$key". Value: $value');
+    return 'غير محدد';
   }
 
   static String? _optionalString(Map<String, dynamic> map, String key) {
@@ -157,29 +157,20 @@ class CompanyModel extends Equatable {
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
     final DateTime? parsed = _optionalTimestamp(map, key);
     if (parsed != null) return parsed;
-    throw FormatException(
-      'CompanyModel: missing or invalid timestamp column "$key".',
-    );
+    debugPrint('⚠️ CompanyModel: Failed to parse Timestamp "$key". Value: ${map[key]}');
+    return DateTime(2000, 1, 1);
   }
 
-  /// 🔥 الإصلاح هنا: دالة تقوم بتنظيف النص القادم من Supabase لتفهمه Dart
   static DateTime? _optionalTimestamp(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
     if (value == null) return null;
     if (value is DateTime) return value.toUtc();
     if (value is String && value.isNotEmpty) {
-      // المحاولة الأولى: التنسيق القياسي
       DateTime? parsed = DateTime.tryParse(value);
       if (parsed != null) return parsed.toUtc();
 
-      // المحاولة الثانية: تنسيق Postgres (مثل "2026-10-02 11:27:09.602636+00")
       try {
-        String normalized = value.trim();
-        // استبدال المسافة بحرف T
-        if (normalized.contains(' ')) {
-          normalized = normalized.replaceFirst(' ', 'T');
-        }
-        // استبدال +00 أو -00 بـ Z
+        String normalized = value.trim().replaceFirst(' ', 'T');
         if (normalized.endsWith('+00')) {
           normalized = normalized.replaceAll('+00', 'Z');
         } else if (normalized.endsWith('-00')) {
@@ -194,29 +185,11 @@ class CompanyModel extends Equatable {
 
   @override
   List<Object?> get props => <Object?>[
-        id,
-        name,
-        legalName,
-        phone,
-        email,
-        address,
-        taxNumber,
-        commercialRegister,
-        currency,
-        timezone,
-        isActive,
-        createdAt,
-        updatedAt,
-        subscriptionStatus,
-        trialEndsAt,
-        subscriptionStartedAt,
-        planId,
-        billingCycle,
-        subscribedUntil,
-        isSuspended,
-        suspensionReason,
-        maxUsers,
-        maxBranches,
+        id, name, legalName, phone, email, address, taxNumber,
+        commercialRegister, currency, timezone, isActive, createdAt,
+        updatedAt, subscriptionStatus, trialEndsAt, subscriptionStartedAt,
+        planId, billingCycle, subscribedUntil, isSuspended, suspensionReason,
+        maxUsers, maxBranches,
       ];
 
   @override
