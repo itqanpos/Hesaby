@@ -7,20 +7,6 @@ import 'package:intl/intl.dart';
 
 import '../state/pos_providers.dart';
 
-/// The totals bar shown at the bottom of the POS.
-///
-/// Layout:
-/// ```
-/// الأصناف                           3
-/// الإجمالي                   1,250.00 ج.م
-/// الخصم             [    0    ] ج.م
-/// ───────────────────────────────────
-/// الصافي                     1,250.00 ج.م
-/// ```
-///
-/// The discount is editable inline; the cashier types a value and the
-/// cart's `posCartProvider` is updated immediately. Tax handling lives at
-/// the payment dialog, not here, to keep this bar compact.
 class PosTotalsBar extends ConsumerWidget {
   const PosTotalsBar({super.key});
 
@@ -36,60 +22,45 @@ class PosTotalsBar extends ConsumerWidget {
     final ColorScheme scheme = theme.colorScheme;
     final PosTotals totals = ref.watch(posTotalsProvider);
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 8, 12, 4),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: scheme.surface,
-          borderRadius: BorderRadius.circular(14),
-          border: Border.all(color: scheme.outlineVariant),
-        ),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(
-            horizontal: 14,
-            vertical: 10,
+    return Container(
+      color: scheme.surface, // ليتناسب مع العمود الأيمن
+      padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          _TotalsRow(
+            label: 'الأصناف',
+            value: totals.lineCount.toString(),
+            theme: theme,
           ),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            mainAxisSize: MainAxisSize.min,
-            children: <Widget>[
-              _TotalsRow(
-                label: 'الأصناف',
-                value: totals.lineCount.toString(),
-                theme: theme,
-              ),
-              const SizedBox(height: 4),
-              _TotalsRow(
-                label: 'الإجمالي',
-                value: _money.format(totals.subtotal),
-                theme: theme,
-              ),
-              const SizedBox(height: 6),
-              _DiscountRow(
-                discount: totals.discount,
-                money: _money,
-                onChanged: (double value) =>
-                    ref.read(posCartProvider.notifier).setDiscount(value),
-              ),
-              const Divider(height: 20),
-              _TotalsRow(
-                label: 'الصافي',
-                value: _money.format(totals.total),
-                theme: theme,
-                emphasized: true,
-              ),
-            ],
+          const SizedBox(height: 6),
+          _TotalsRow(
+            label: 'الإجمالي',
+            value: _money.format(totals.subtotal),
+            theme: theme,
           ),
-        ),
+          const SizedBox(height: 8),
+          _DiscountRow(
+            discount: totals.discount,
+            money: _money,
+            onChanged: (double value) =>
+                ref.read(posCartProvider.notifier).setDiscount(value),
+          ),
+          const Divider(height: 24),
+          _TotalsRow(
+            label: 'الصافي',
+            value: _money.format(totals.total),
+            theme: theme,
+            emphasized: true,
+          ),
+        ],
       ),
     );
   }
 }
 
-// ============================================================================
-// Generic totals row
-// ============================================================================
-
+// ... (باقي كلاسات _TotalsRow و _DiscountRow كما هي في كودك السابق بدون أي تغيير) ...
 class _TotalsRow extends StatelessWidget {
   const _TotalsRow({
     required this.label,
@@ -107,33 +78,20 @@ class _TotalsRow extends StatelessWidget {
   Widget build(BuildContext context) {
     final ColorScheme scheme = theme.colorScheme;
     final TextStyle? labelStyle = emphasized
-        ? theme.textTheme.titleMedium?.copyWith(
-            fontWeight: FontWeight.w700,
-          )
+        ? theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700)
         : theme.textTheme.bodyMedium;
     final TextStyle? valueStyle = emphasized
-        ? theme.textTheme.headlineSmall?.copyWith(
-            color: scheme.primary,
-            fontWeight: FontWeight.w800,
-          )
-        : theme.textTheme.bodyLarge?.copyWith(
-            fontWeight: FontWeight.w600,
-          );
+        ? theme.textTheme.headlineSmall?.copyWith(color: scheme.primary, fontWeight: FontWeight.w800)
+        : theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600);
 
     return Row(
       children: <Widget>[
-        Expanded(
-          child: Text(label, style: labelStyle),
-        ),
+        Expanded(child: Text(label, style: labelStyle)),
         Text(value, style: valueStyle),
       ],
     );
   }
 }
-
-// ============================================================================
-// Discount row (editable)
-// ============================================================================
 
 class _DiscountRow extends StatefulWidget {
   const _DiscountRow({
@@ -157,21 +115,15 @@ class _DiscountRowState extends State<_DiscountRow> {
   @override
   void initState() {
     super.initState();
-    _controller = TextEditingController(
-      text: _formatDiscount(widget.discount),
-    );
+    _controller = TextEditingController(text: _formatDiscount(widget.discount));
     _focusNode = FocusNode();
-
-    // Refresh the visual when the cart's discount is changed from outside
-    // (for example, when the cart is reset after a successful sale).
     _controller.addListener(_onTextChanged);
   }
 
   @override
   void didUpdateWidget(_DiscountRow oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (widget.discount != oldWidget.discount &&
-        !_focusNode.hasFocus) {
+    if (widget.discount != oldWidget.discount && !_focusNode.hasFocus) {
       _controller.text = _formatDiscount(widget.discount);
     }
   }
@@ -190,12 +142,8 @@ class _DiscountRowState extends State<_DiscountRow> {
   }
 
   static String _formatDiscount(double value) {
-    if (value == 0) {
-      return '';
-    }
-    if (value == value.roundToDouble()) {
-      return value.toInt().toString();
-    }
+    if (value == 0) return '';
+    if (value == value.roundToDouble()) return value.toInt().toString();
     return value.toStringAsFixed(2);
   }
 
@@ -205,10 +153,7 @@ class _DiscountRowState extends State<_DiscountRow> {
 
     return Row(
       children: <Widget>[
-        SizedBox(
-          width: 76,
-          child: Text('الخصم', style: theme.textTheme.bodyMedium),
-        ),
+        SizedBox(width: 76, child: Text('الخصم', style: theme.textTheme.bodyMedium)),
         const Spacer(),
         SizedBox(
           width: 110,
@@ -218,22 +163,16 @@ class _DiscountRowState extends State<_DiscountRow> {
             focusNode: _focusNode,
             textAlign: TextAlign.center,
             textAlignVertical: TextAlignVertical.center,
-            keyboardType: const TextInputType.numberWithOptions(
-              decimal: true,
-            ),
+            keyboardType: const TextInputType.numberWithOptions(decimal: true),
             inputFormatters: <TextInputFormatter>[
               FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
             ],
-            style: theme.textTheme.bodyLarge?.copyWith(
-              fontWeight: FontWeight.w600,
-            ),
+            style: theme.textTheme.bodyLarge?.copyWith(fontWeight: FontWeight.w600),
             decoration: InputDecoration(
               hintText: '0',
               contentPadding: const EdgeInsets.symmetric(horizontal: 8),
               isDense: true,
-              border: OutlineInputBorder(
-                borderRadius: BorderRadius.circular(8),
-              ),
+              border: OutlineInputBorder(borderRadius: BorderRadius.circular(8)),
             ),
           ),
         ),
