@@ -54,7 +54,9 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     // ⬇️ أمان إضافي: تأكد من إيقاف أي كاميرا عالقة من محاولة سابقة
     try {
       _controller.stop();
-    } catch (_) {}
+    } on Object {
+      // تجاهل الخطأ إذا كان المتحكم لم يتم تهيئته بعد
+    }
 
     _laserController = AnimationController(
       vsync: this,
@@ -136,7 +138,9 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     });
     try {
       await _controller.stop();
-    } on Object {}
+    } on Object {
+      // تجاهل الخطأ إذا كان المتحكم مغلقاً بالفعل
+    }
     if (!mounted) return;
     await _startCamera();
     if (mounted) setState(() => _isRetrying = false);
