@@ -69,6 +69,8 @@ abstract final class AppRouter {
   static const String loginPath = '/login';
   static const String loginName = 'login';
 
+  /// Kept for backward compatibility (deep links, old QR codes).
+  /// The route redirects everyone to [loginPath] — self-signup is disabled.
   static const String signupPath = '/signup';
   static const String signupName = 'signup';
 
@@ -254,13 +256,15 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (auth.isUnauthenticated) {
-        if (location == AppRouter.loginPath ||
-            location == AppRouter.signupPath) {
+        // ⬇️ التسجيل الذاتي مغلق: الزائر غير المسجل يُوجَّه دائمًا إلى
+        //    صفحة الدخول، حتى لو فتح /signup مباشرة.
+        if (location == AppRouter.loginPath) {
           return null;
         }
         return AppRouter.loginPath;
       }
 
+      // ⬇️ المستخدم المسجل: صفحات الدخول/التسجيل/التحميل كلها تُعيده للرئيسية.
       if (location == AppRouter.loginPath ||
           location == AppRouter.signupPath ||
           location == AppRouter.loadingPath) {
@@ -294,6 +298,8 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const LoginPage(),
       ),
+      // ⬇️ مسار /signup محفوظ للتوافق، لكنه يعرض رسالة "التسجيل مغلق"
+      //    في الحالات النادرة التي يصل فيها المستخدم قبل تطبيق redirect.
       GoRoute(
         path: AppRouter.signupPath,
         name: AppRouter.signupName,
@@ -680,7 +686,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
     }
   });
 
-  // ⬇️ الاستماع لتغيير إعدادات التطبيق لتحديث الصفحات المحمية
   ref.listen<AsyncValue<AppConfig>>(adminAppConfigProvider, (prev, next) {
     if (prev?.valueOrNull?.featureFlags != next.valueOrNull?.featureFlags) {
       router.refresh();
