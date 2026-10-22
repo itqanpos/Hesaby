@@ -39,7 +39,9 @@ dependencies:
   url_launcher: ^6.3.1
 
   # Media & imaging
-  mobile_scanner: ^7.2.1
+  # ⬇️ تم التثبيت على 7.2.1 (بدون ^) لضمان توحيد الإصدار بين جميع الـ runners
+  #    وحل تعارض التوقيع بين 5.x و7.x.
+  mobile_scanner: 7.2.1
   image_picker: ^1.1.2
 
   # POS — Phase 7 additions
