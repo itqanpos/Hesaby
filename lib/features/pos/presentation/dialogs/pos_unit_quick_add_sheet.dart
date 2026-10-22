@@ -41,8 +41,7 @@ class _PosUnitQuickAddSheet extends ConsumerWidget {
     final AsyncValue<List<ProductUnit>> extrasAsync =
         ref.watch(productUnitsProvider(product.id));
 
-    final bool isLoading =
-        unitsAsync.isLoading || extrasAsync.isLoading;
+    final bool isLoading = unitsAsync.isLoading || extrasAsync.isLoading;
 
     return SafeArea(
       top: false,
@@ -123,8 +122,7 @@ class _UnitsList extends ConsumerWidget {
       for (final Unit u in units) u.id: u.name,
     };
 
-    final String baseUnitName =
-        unitNames[product.defaultUnitId] ?? 'وحدة';
+    final String baseUnitName = unitNames[product.defaultUnitId] ?? 'وحدة';
 
     final List<_UnitChoice> choices = <_UnitChoice>[
       _UnitChoice(
@@ -203,6 +201,28 @@ class _UnitsList extends ConsumerWidget {
       product.id,
       choice.unitId,
     );
+
+    // ⬇️ فحص مسبق: إذا كان السطر موجودًا وله كمية متاحة، تأكد من أن
+    //    الزيادة لن تتجاوزها قبل إظهار نافذة التأكيد.
+    final double? availableStock = existing?.availableStock;
+    if (availableStock != null) {
+      final double currentQty = existing?.quantity ?? 0;
+      final double newQty = currentQty + 1;
+      if (newQty > availableStock) {
+        _showError(
+          context,
+          availableStock <= 0
+              ? 'لا يوجد مخزون متاح من «${product.name}» '
+                  '(${choice.unitName}).'
+              : 'الكمية المتاحة من «${product.name}» '
+                  '(${choice.unitName}) هي '
+                  '${_formatQty(availableStock)} فقط. '
+                  'لديك بالفعل ${_formatQty(currentQty)} في السلة.',
+        );
+        return;
+      }
+    }
+
     if (existing != null) {
       final bool confirmed = await confirmIncreaseExistingLine(
         context,
@@ -225,13 +245,51 @@ class _UnitsList extends ConsumerWidget {
           minSellingPrice: choice.minSellingPrice,
           maxSellingPrice: choice.maxSellingPrice,
         );
-    
+
     if (added) {
-      // ⬇️ تفعيل التركيز على الكمية بعد الإضافة
       ref.read(focusedCartLineProvider.notifier).state =
           '${product.id}::${choice.unitId}';
       onAdded();
+    } else {
+      // ⬇️ لم يعد الرفض صامتًا — نعرض سببًا واضحًا
+      final double? afterAvailable = existing?.availableStock;
+      _showError(
+        context,
+        afterAvailable != null
+            ? (afterAvailable <= 0
+                ? 'لا يوجد مخزون متاح من «${product.name}» '
+                    '(${choice.unitName}).'
+                : 'الكمية المتاحة من «${product.name}» '
+                    '(${choice.unitName}) هي '
+                    '${_formatQty(afterAvailable)} فقط.')
+            : 'تعذّرت إضافة «${product.name}» (${choice.unitName}). '
+                'قد تكون الكمية غير كافية أو السعر خارج النطاق المسموح.',
+      );
     }
+  }
+
+  void _showError(BuildContext context, String message) {
+    if (!context.mounted) return;
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            message,
+            style: TextStyle(color: scheme.onError),
+          ),
+          backgroundColor: scheme.error,
+          duration: const Duration(seconds: 5),
+        ),
+      );
+  }
+
+  static String _formatQty(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toStringAsFixed(2);
   }
 }
 
@@ -283,9 +341,8 @@ class _UnitCard extends StatelessWidget {
     final Color cardColor = isFirst
         ? scheme.primaryContainer.withValues(alpha: 0.35)
         : scheme.surface;
-    final Color borderColor = isFirst
-        ? scheme.primary
-        : scheme.outlineVariant;
+    final Color borderColor =
+        isFirst ? scheme.primary : scheme.outlineVariant;
     final double borderWidth = isFirst ? 1.5 : 1;
     final Color radioColor =
         isFirst ? scheme.primary : scheme.outlineVariant;
