@@ -9,20 +9,6 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../../core/utils/logger.dart';
 
 /// Full-screen barcode scanner dialog — stability-first.
-///
-/// Compatible with `mobile_scanner: 7.2.1` (pinned).
-///
-/// Key behaviours:
-/// * Delays the camera start to the first post-frame callback so the
-///   widget tree is mounted before the native camera is touched.
-/// * Pauses the camera on `paused` / `hidden` lifecycle states and resumes
-///   it on `resumed` — this prevents the Android CameraX "already
-///   initialised" crash when the user switches apps mid-scan.
-/// * Never lets a `MobileScannerException` escape to the widget tree —
-///   every error is captured into [_cameraError] and rendered as an
-///   inline [_CameraErrorView] with a retry and manual-entry fallback.
-/// * Emits the first barcode exactly once, then pops the dialog with the
-///   raw string.
 class PosBarcodeScannerDialog extends StatefulWidget {
   const PosBarcodeScannerDialog({super.key});
 
@@ -42,8 +28,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   bool _isRetrying = false;
   MobileScannerException? _cameraError;
 
-  /// Visual overlay rectangle — widget coordinates, **not** used by the
-  /// scanner. Recomputed only when the available size changes.
   Rect? _overlayRect;
   Size? _overlayRectSize;
 
@@ -67,6 +51,11 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       ],
     );
 
+    // ⬇️ أمان إضافي: تأكد من إيقاف أي كاميرا عالقة من محاولة سابقة
+    try {
+      _controller.stop();
+    } catch (_) {}
+
     _laserController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 1600),
@@ -82,10 +71,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     _controller.dispose();
     super.dispose();
   }
-
-  // ---------------------------------------------------------------------------
-  // Lifecycle
-  // ---------------------------------------------------------------------------
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
@@ -103,10 +88,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       _controller.stop().ignore();
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Camera control
-  // ---------------------------------------------------------------------------
 
   Future<void> _startCamera() async {
     if (_starting || !mounted || _hasEmitted) return;
@@ -149,19 +130,14 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
 
   Future<void> _retry() async {
     if (_isRetrying) return;
-
     setState(() {
       _isRetrying = true;
       _cameraError = null;
     });
-
     try {
       await _controller.stop();
-    } on Object {
-      // Ignore — controller may already be stopped.
-    }
+    } on Object {}
     if (!mounted) return;
-
     await _startCamera();
     if (mounted) setState(() => _isRetrying = false);
   }
@@ -174,23 +150,16 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Detection
-  // ---------------------------------------------------------------------------
-
   void _handleDetection(BarcodeCapture capture) {
     if (_hasEmitted || _manualOpen) return;
-
     for (final Barcode barcode in capture.barcodes) {
       final String? raw = barcode.rawValue;
       if (raw == null) continue;
       final String value = raw.trim();
       if (value.isEmpty) continue;
-
       _hasEmitted = true;
       HapticFeedback.heavyImpact().ignore();
       SystemSound.play(SystemSoundType.alert).ignore();
-
       if (mounted) Navigator.of(context).pop(value);
       return;
     }
@@ -199,7 +168,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   Future<void> _manualEntry() async {
     if (_manualOpen || _hasEmitted) return;
     _manualOpen = true;
-
     final String? value = await showModalBottomSheet<String>(
       context: context,
       isScrollControlled: true,
@@ -208,7 +176,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       builder: (BuildContext ctx) =>
           const _ManualEntrySheet(title: 'إدخال الباركود يدويًا'),
     );
-
     _manualOpen = false;
     if (value == null || value.trim().isEmpty) return;
     if (!mounted || _hasEmitted) return;
@@ -216,16 +183,11 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     Navigator.of(context).pop(value.trim());
   }
 
-  // ---------------------------------------------------------------------------
-  // Visual overlay rectangle
-  // ---------------------------------------------------------------------------
-
   Rect _computeOverlayRect(BoxConstraints constraints) {
     final Size size = constraints.biggest;
     if (_overlayRect != null && _overlayRectSize == size) {
       return _overlayRect!;
     }
-
     final double width = (size.width * 0.82).clamp(240.0, 340.0);
     final double height = width * 0.5;
     _overlayRectSize = size;
@@ -235,10 +197,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       height: height,
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -278,14 +236,11 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
           : LayoutBuilder(
               builder: (BuildContext context, BoxConstraints constraints) {
                 final Rect overlayRect = _computeOverlayRect(constraints);
-
                 return Stack(
                   children: <Widget>[
                     MobileScanner(
                       controller: _controller,
                       onDetect: _handleDetection,
-                      // ✅ mobile_scanner 7.x — errorBuilder يستقبل معاملين فقط
-                      //    (BuildContext, MobileScannerException).
                       errorBuilder: (
                         BuildContext context,
                         MobileScannerException error,
@@ -297,13 +252,9 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                         });
                         return const _LoadingView();
                       },
-                      // ✅ mobile_scanner 7.x — placeholderBuilder يستقبل
-                      //    معاملًا واحدًا فقط (BuildContext).
                       placeholderBuilder: (BuildContext context) =>
                           const _LoadingView(),
                     ),
-
-                    // Dimmed mask + corner brackets around the overlay rect.
                     IgnorePointer(
                       child: RepaintBoundary(
                         child: CustomPaint(
@@ -312,8 +263,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                         ),
                       ),
                     ),
-
-                    // Animated laser line inside the overlay rect.
                     IgnorePointer(
                       child: RepaintBoundary(
                         child: CustomPaint(
@@ -325,9 +274,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                         ),
                       ),
                     ),
-
                     const _BottomHint(),
-
                     Positioned(
                       left: 0,
                       right: 0,
@@ -337,14 +284,8 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                         child: Center(
                           child: TextButton.icon(
                             onPressed: _manualEntry,
-                            icon: const Icon(
-                              Icons.keyboard,
-                              color: Colors.white,
-                            ),
-                            label: const Text(
-                              'إدخال يدوي',
-                              style: TextStyle(color: Colors.white),
-                            ),
+                            icon: const Icon(Icons.keyboard, color: Colors.white),
+                            label: const Text('إدخال يدوي', style: TextStyle(color: Colors.white)),
                           ),
                         ),
                       ),
@@ -357,13 +298,8 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   }
 }
 
-// ============================================================================
-// Bottom hint
-// ============================================================================
-
 class _BottomHint extends StatelessWidget {
   const _BottomHint();
-
   @override
   Widget build(BuildContext context) {
     return Positioned(
@@ -382,11 +318,7 @@ class _BottomHint extends StatelessWidget {
               padding: EdgeInsets.symmetric(horizontal: 16, vertical: 8),
               child: Text(
                 'وجّه الكاميرا نحو الباركود',
-                style: TextStyle(
-                  color: Colors.white,
-                  fontSize: 14,
-                  fontWeight: FontWeight.w600,
-                ),
+                style: TextStyle(color: Colors.white, fontSize: 14, fontWeight: FontWeight.w600),
               ),
             ),
           ),
@@ -396,78 +328,35 @@ class _BottomHint extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Painters
-// ============================================================================
-
 class _FramePainter extends CustomPainter {
   const _FramePainter({required this.rect});
-
   final Rect rect;
-
   @override
   void paint(Canvas canvas, Size size) {
     final RRect hole = RRect.fromRectAndRadius(rect, const Radius.circular(16));
-
-    canvas.drawDRRect(
-      RRect.fromRectXY(Offset.zero & size, 0, 0),
-      hole,
-      Paint()..color = const Color(0x99000000),
-    );
-
-    canvas.drawRRect(
-      hole,
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.5
-        ..color = Colors.white.withValues(alpha: 0.5),
-    );
-
+    canvas.drawDRRect(RRect.fromRectXY(Offset.zero & size, 0, 0), hole, Paint()..color = const Color(0x99000000));
+    canvas.drawRRect(hole, Paint()..style = PaintingStyle.stroke..strokeWidth = 2.5..color = Colors.white.withValues(alpha: 0.5));
     const double c = 26;
-    final Paint p = Paint()
-      ..style = PaintingStyle.stroke
-      ..strokeWidth = 5
-      ..strokeCap = StrokeCap.round
-      ..color = Colors.white;
-
+    final Paint p = Paint()..style = PaintingStyle.stroke..strokeWidth = 5..strokeCap = StrokeCap.round..color = Colors.white;
     final Path corners = Path()
-      ..moveTo(rect.left, rect.top + c)
-      ..lineTo(rect.left, rect.top)
-      ..lineTo(rect.left + c, rect.top)
-      ..moveTo(rect.right, rect.top + c)
-      ..lineTo(rect.right, rect.top)
-      ..lineTo(rect.right - c, rect.top)
-      ..moveTo(rect.left, rect.bottom - c)
-      ..lineTo(rect.left, rect.bottom)
-      ..lineTo(rect.left + c, rect.bottom)
-      ..moveTo(rect.right, rect.bottom - c)
-      ..lineTo(rect.right, rect.bottom)
-      ..lineTo(rect.right - c, rect.bottom);
+      ..moveTo(rect.left, rect.top + c)..lineTo(rect.left, rect.top)..lineTo(rect.left + c, rect.top)
+      ..moveTo(rect.right, rect.top + c)..lineTo(rect.right, rect.top)..lineTo(rect.right - c, rect.top)
+      ..moveTo(rect.left, rect.bottom - c)..lineTo(rect.left, rect.bottom)..lineTo(rect.left + c, rect.bottom)
+      ..moveTo(rect.right, rect.bottom - c)..lineTo(rect.right, rect.bottom)..lineTo(rect.right - c, rect.bottom);
     canvas.drawPath(corners, p);
   }
-
   @override
   bool shouldRepaint(_FramePainter old) => old.rect != rect;
 }
 
 class _LaserPainter extends CustomPainter {
   _LaserPainter({required this.rect, required Animation<double> animation})
-      : _animation = animation,
-        super(repaint: animation);
-
+      : _animation = animation, super(repaint: animation);
   final Rect rect;
   final Animation<double> _animation;
-
   static const Color _laser = Color(0xFFFF3D00);
-  static final Paint _glow = Paint()
-    ..color = _laser.withValues(alpha: 0.25)
-    ..strokeWidth = 10
-    ..strokeCap = StrokeCap.round;
-  static final Paint _core = Paint()
-    ..color = _laser
-    ..strokeWidth = 2
-    ..strokeCap = StrokeCap.round;
-
+  static final Paint _glow = Paint()..color = _laser.withValues(alpha: 0.25)..strokeWidth = 10..strokeCap = StrokeCap.round;
+  static final Paint _core = Paint()..color = _laser..strokeWidth = 2..strokeCap = StrokeCap.round;
   @override
   void paint(Canvas canvas, Size size) {
     const double margin = 10;
@@ -478,32 +367,19 @@ class _LaserPainter extends CustomPainter {
     canvas.drawLine(a, b, _glow);
     canvas.drawLine(a, b, _core);
   }
-
   @override
   bool shouldRepaint(_LaserPainter old) => old.rect != rect;
 }
 
-// ============================================================================
-// Camera error view
-// ============================================================================
-
 class _CameraErrorView extends StatelessWidget {
-  const _CameraErrorView({
-    required this.error,
-    required this.isRetrying,
-    required this.onRetry,
-    required this.onManualEntry,
-  });
-
+  const _CameraErrorView({required this.error, required this.isRetrying, required this.onRetry, required this.onManualEntry});
   final Object error;
   final bool isRetrying;
   final VoidCallback onRetry;
   final VoidCallback onManualEntry;
-
   @override
   Widget build(BuildContext context) {
     final (String title, String hint) = _describe(error);
-
     return SafeArea(
       child: Center(
         child: SingleChildScrollView(
@@ -511,31 +387,11 @@ class _CameraErrorView extends StatelessWidget {
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              const Icon(
-                Icons.no_photography_outlined,
-                color: Colors.white70,
-                size: 64,
-              ),
+              const Icon(Icons.no_photography_outlined, color: Colors.white70, size: 64),
               const SizedBox(height: 16),
-              Text(
-                title,
-                style: const TextStyle(
-                  color: Colors.white,
-                  fontSize: 16,
-                  fontWeight: FontWeight.w700,
-                ),
-                textAlign: TextAlign.center,
-              ),
+              Text(title, style: const TextStyle(color: Colors.white, fontSize: 16, fontWeight: FontWeight.w700), textAlign: TextAlign.center),
               const SizedBox(height: 8),
-              Text(
-                hint,
-                style: const TextStyle(
-                  color: Colors.white70,
-                  fontSize: 13,
-                  height: 1.6,
-                ),
-                textAlign: TextAlign.center,
-              ),
+              Text(hint, style: const TextStyle(color: Colors.white70, fontSize: 13, height: 1.6), textAlign: TextAlign.center),
               const SizedBox(height: 24),
               Wrap(
                 spacing: 12,
@@ -544,28 +400,14 @@ class _CameraErrorView extends StatelessWidget {
                 children: <Widget>[
                   FilledButton.icon(
                     onPressed: isRetrying ? null : onRetry,
-                    icon: isRetrying
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(
-                              strokeWidth: 2,
-                              valueColor: AlwaysStoppedAnimation<Color>(
-                                Colors.white,
-                              ),
-                            ),
-                          )
-                        : const Icon(Icons.refresh),
+                    icon: isRetrying ? const SizedBox(width: 18, height: 18, child: CircularProgressIndicator(strokeWidth: 2, valueColor: AlwaysStoppedAnimation<Color>(Colors.white))) : const Icon(Icons.refresh),
                     label: const Text('إعادة المحاولة'),
                   ),
                   OutlinedButton.icon(
                     onPressed: onManualEntry,
                     icon: const Icon(Icons.keyboard),
                     label: const Text('إدخال يدوي'),
-                    style: OutlinedButton.styleFrom(
-                      foregroundColor: Colors.white,
-                      side: const BorderSide(color: Colors.white54),
-                    ),
+                    style: OutlinedButton.styleFrom(foregroundColor: Colors.white, side: const BorderSide(color: Colors.white54)),
                   ),
                 ],
               ),
@@ -575,93 +417,59 @@ class _CameraErrorView extends StatelessWidget {
       ),
     );
   }
-
   static (String, String) _describe(Object error) {
     if (error is MobileScannerException) {
       switch (error.errorCode) {
         case MobileScannerErrorCode.permissionDenied:
-          return (
-            'لم يتم منح صلاحية الكاميرا',
-            'افتح إعدادات الجهاز ← التطبيقات ← هذا التطبيق ← الأذونات ← '
-                'الكاميرا، واختر «السماح». ثم ارجع للتطبيق وسيُعاد التشغيل '
-                'تلقائيًا (أو اضغط "إعادة المحاولة").',
-          );
+          return ('لم يتم منح صلاحية الكاميرا', 'افتح إعدادات الجهاز ← التطبيقات ← هذا التطبيق ← الأذونات ← الكاميرا، واختر «السماح». ثم ارجع للتطبيق وسيُعاد التشغيل تلقائيًا.');
         case MobileScannerErrorCode.unsupported:
-          return (
-            'المسح بالكاميرا غير مدعوم',
-            'استخدم قارئ باركود خارجي (HID) أو أدخل الرقم يدويًا.',
-          );
-        default:
-          break;
+          return ('المسح بالكاميرا غير مدعوم', 'استخدم قارئ باركود خارجي (HID) أو أدخل الرقم يدويًا.');
+        default: break;
       }
     }
-    return (
-      'تعذّر تشغيل الكاميرا',
-      'حاول مرة أخرى، أو أدخل الرقم يدويًا.',
-    );
+    return ('تعذّر تشغيل الكاميرا', 'حاول مرة أخرى، أو أدخل الرقم يدويًا.');
   }
 }
-
-// ============================================================================
-// Loading view
-// ============================================================================
 
 class _LoadingView extends StatelessWidget {
   const _LoadingView();
-
   @override
   Widget build(BuildContext context) {
-    return const Center(
-      child: CircularProgressIndicator(
-        valueColor: AlwaysStoppedAnimation<Color>(Colors.white),
-      ),
-    );
+    return const Center(child: CircularProgressIndicator(valueColor: AlwaysStoppedAnimation<Color>(Colors.white)));
   }
 }
 
-// ============================================================================
-// Manual entry sheet
-// ============================================================================
-
 class _ManualEntrySheet extends StatefulWidget {
   const _ManualEntrySheet({required this.title});
-
   final String title;
-
   @override
   State<_ManualEntrySheet> createState() => _ManualEntrySheetState();
 }
-
 class _ManualEntrySheetState extends State<_ManualEntrySheet> {
   late final TextEditingController _controller;
   late final FocusNode _focusNode;
-
   @override
   void initState() {
     super.initState();
     _controller = TextEditingController();
     _focusNode = FocusNode();
   }
-
   @override
   void dispose() {
     _controller.dispose();
     _focusNode.dispose();
     super.dispose();
   }
-
   void _submit() {
     final String value = _controller.text.trim();
     if (value.isEmpty) return;
     Navigator.of(context).pop(value);
   }
-
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final double keyboardInset = MediaQuery.viewInsetsOf(context).bottom;
-
     return Padding(
       padding: EdgeInsets.only(bottom: keyboardInset),
       child: Padding(
@@ -674,18 +482,8 @@ class _ManualEntrySheetState extends State<_ManualEntrySheet> {
               children: <Widget>[
                 Icon(Icons.keyboard, color: scheme.primary),
                 const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    widget.title,
-                    style: theme.textTheme.titleLarge?.copyWith(
-                      fontWeight: FontWeight.w700,
-                    ),
-                  ),
-                ),
-                IconButton(
-                  onPressed: () => Navigator.of(context).pop(),
-                  icon: const Icon(Icons.close),
-                ),
+                Expanded(child: Text(widget.title, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700))),
+                IconButton(onPressed: () => Navigator.of(context).pop(), icon: const Icon(Icons.close)),
               ],
             ),
             const SizedBox(height: 12),
@@ -695,23 +493,12 @@ class _ManualEntrySheetState extends State<_ManualEntrySheet> {
               autofocus: true,
               textInputAction: TextInputAction.done,
               keyboardType: TextInputType.text,
-              inputFormatters: <TextInputFormatter>[
-                FilteringTextInputFormatter.deny(RegExp(r'\s')),
-              ],
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                labelText: 'رقم الباركود',
-                hintText: 'مثال: 6221031001234',
-                prefixIcon: Icon(Icons.qr_code),
-              ),
+              inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.deny(RegExp(r'\s'))],
+              decoration: const InputDecoration(border: OutlineInputBorder(), labelText: 'رقم الباركود', hintText: 'مثال: 6221031001234', prefixIcon: Icon(Icons.qr_code)),
               onSubmitted: (_) => _submit(),
             ),
             const SizedBox(height: 12),
-            FilledButton.icon(
-              onPressed: _submit,
-              icon: const Icon(Icons.check),
-              label: const Text('تأكيد'),
-            ),
+            FilledButton.icon(onPressed: _submit, icon: const Icon(Icons.check), label: const Text('تأكيد')),
           ],
         ),
       ),
