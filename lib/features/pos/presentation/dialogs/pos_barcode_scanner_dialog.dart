@@ -28,10 +28,8 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   bool _isRetrying = false;
   MobileScannerException? _cameraError;
 
-  /// Visual overlay rectangle — widget coordinates, **not** used by the
-  /// scanner. Recomputed only when the available size changes.
   Rect? _overlayRect;
-  Size? _overlayRectSize; // ⬅️ تمت إعادة التسمية
+  Size? _overlayRectSize;
 
   @override
   void initState() {
@@ -270,10 +268,10 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                     MobileScanner(
                       controller: _controller,
                       onDetect: _handleDetection,
+                      // ⬇️ تعديل: إزالة معامل Widget? من errorBuilder
                       errorBuilder: (
                         BuildContext context,
                         MobileScannerException error,
-                        Widget? child,
                       ) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (mounted && _cameraError == null) {
@@ -282,10 +280,8 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                         });
                         return const _LoadingView();
                       },
-                      placeholderBuilder: (
-                        BuildContext context,
-                        Widget? child,
-                      ) =>
+                      // ⬇️ تعديل: إزالة معامل Widget? من placeholderBuilder
+                      placeholderBuilder: (BuildContext context) =>
                           const _LoadingView(),
                     ),
 
