@@ -9,6 +9,18 @@ import 'package:mobile_scanner/mobile_scanner.dart';
 import '../../../../core/utils/logger.dart';
 
 /// Full-screen barcode scanner dialog — stability-first.
+///
+/// Key behaviours:
+/// * Delays the camera start to the first post-frame callback so the
+///   widget tree is mounted before the native camera is touched.
+/// * Pauses the camera on `paused` / `hidden` lifecycle states and resumes
+///   it on `resumed` — this prevents the Android CameraX "already
+///   initialised" crash when the user switches apps mid-scan.
+/// * Never lets a `MobileScannerException` escape to the widget tree —
+///   every error is captured into [_cameraError] and rendered as an
+///   inline [_CameraErrorView] with a retry and manual-entry fallback.
+/// * Emits the first barcode exactly once, then pops the dialog with the
+///   raw string.
 class PosBarcodeScannerDialog extends StatefulWidget {
   const PosBarcodeScannerDialog({super.key});
 
@@ -28,6 +40,8 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
   bool _isRetrying = false;
   MobileScannerException? _cameraError;
 
+  /// Visual overlay rectangle — widget coordinates, **not** used by the
+  /// scanner. Recomputed only when the available size changes.
   Rect? _overlayRect;
   Size? _overlayRectSize;
 
@@ -142,7 +156,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
     try {
       await _controller.stop();
     } on Object {
-      // Ignore
+      // Ignore — controller may already be stopped.
     }
     if (!mounted) return;
 
@@ -268,10 +282,13 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                     MobileScanner(
                       controller: _controller,
                       onDetect: _handleDetection,
-                      // ⬇️ تعديل: إزالة معامل Widget? من errorBuilder
+                      // ⬇️ التواقيع متوافقة مع الإصدار الحالي (5.x/6.x/7.x):
+                      //    نحتفظ بمعامل Widget? الاختياري لأن المحلل الحالي
+                      //    يتوقعه. لن يضر في 7.x لأنه اختياري.
                       errorBuilder: (
                         BuildContext context,
                         MobileScannerException error,
+                        Widget? child,
                       ) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (mounted && _cameraError == null) {
@@ -280,11 +297,14 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                         });
                         return const _LoadingView();
                       },
-                      // ⬇️ تعديل: إزالة معامل Widget? من placeholderBuilder
-                      placeholderBuilder: (BuildContext context) =>
+                      placeholderBuilder: (
+                        BuildContext context,
+                        Widget? child,
+                      ) =>
                           const _LoadingView(),
                     ),
 
+                    // Dimmed mask + corner brackets around the overlay rect.
                     IgnorePointer(
                       child: RepaintBoundary(
                         child: CustomPaint(
@@ -294,6 +314,7 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                       ),
                     ),
 
+                    // Animated laser line inside the overlay rect.
                     IgnorePointer(
                       child: RepaintBoundary(
                         child: CustomPaint(
