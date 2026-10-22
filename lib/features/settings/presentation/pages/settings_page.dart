@@ -57,18 +57,8 @@ class SettingsPage extends ConsumerWidget {
             subtitle: 'إضافة وتعديل فروع الشركة',
             onTap: () => context.pushNamed(AppRouter.branchesName),
           ),
-          _SettingsTile(
-            icon: Icons.account_balance_wallet_outlined,
-            title: 'الخزنة',
-            subtitle: 'الأرصدة النقدية والبطاقة، الحركات المالية',
-            onTap: () => context.pushNamed(AppRouter.cashRegisterName),
-          ),
-          _SettingsTile(
-            icon: Icons.assessment_outlined,
-            title: 'تقارير الخزنة',
-            subtitle: 'التدفق النقدي، حسب التصنيف والحساب',
-            onTap: () => context.pushNamed(AppRouter.cashReportsName),
-          ),
+          // ⬇️ تم حذف رابط "الخزنة" من هنا (موجود في القائمة الجانبية)
+          // ⬇️ تم حذف رابط "تقارير الخزنة" من هنا (موجود في صفحة التقارير)
           _SettingsTile(
             icon: Icons.badge_outlined,
             title: 'الفريق',
@@ -190,7 +180,7 @@ class SettingsPage extends ConsumerWidget {
           const _SettingsTile(
             icon: Icons.info_outline,
             title: 'الإصدار',
-            subtitle: '0.1.0',
+            subtitle: 'v1.0.4', // ⬅️ تم تحديث الإصدار هنا
             enabled: false,
           ),
           const _SettingsTile(
