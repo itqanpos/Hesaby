@@ -80,6 +80,41 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
   }
 
   // ---------------------------------------------------------------------------
+  // Safe Preferences helpers
+  // ---------------------------------------------------------------------------
+
+  Future<String?> _safeRead(String key) async {
+    try {
+      final prefs = await _preferences();
+      return await prefs.readString(key: key);
+    } on Object catch (e) {
+      debugPrint('⚠️ Preferences read failed for $key: $e');
+      return null;
+    }
+  }
+
+  Future<void> _safeWrite(String key, String value) async {
+    try {
+      final prefs = await _preferences();
+      await prefs.writeString(key: key, value: value);
+    } on Object catch (e) {
+      debugPrint('⚠️ Preferences write failed for $key: $e');
+    }
+  }
+
+  Future<void> _safeRemove(String key) async {
+    try {
+      final prefs = await _preferences();
+      await prefs.remove(key: key);
+    } on Object catch (e) {
+      debugPrint('⚠️ Preferences remove failed for $key: $e');
+    }
+  }
+
+  Future<PreferencesStorage> _preferences() =>
+      ref.read(preferencesStorageProvider.future);
+
+  // ---------------------------------------------------------------------------
   // Public API — selection
   // ---------------------------------------------------------------------------
 
@@ -91,13 +126,8 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       return;
     }
 
-    final PreferencesStorage preferences = await _preferences();
-
-    await preferences.writeString(
-      key: _currentCompanyIdKey,
-      value: company.id,
-    );
-    await preferences.remove(key: _currentBranchIdKey);
+    await _safeWrite(_currentCompanyIdKey, company.id);
+    await _safeRemove(_currentBranchIdKey);
 
     if (_isDisposed) {
       return;
@@ -127,11 +157,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       return;
     }
 
-    final PreferencesStorage preferences = await _preferences();
-    await preferences.writeString(
-      key: _currentBranchIdKey,
-      value: branch.id,
-    );
+    await _safeWrite(_currentBranchIdKey, branch.id);
 
     if (_isDisposed) {
       return;
@@ -358,13 +384,9 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
     }
 
     try {
-      final PreferencesStorage preferences = await _preferences();
-      final String? savedCompanyId = await preferences.readString(
-        key: _currentCompanyIdKey,
-      );
-      final String? savedBranchId = await preferences.readString(
-        key: _currentBranchIdKey,
-      );
+      // ⬇️ استخدام الدوال الآمنة للقراءة من التخزين المحلي
+      final String? savedCompanyId = await _safeRead(_currentCompanyIdKey);
+      final String? savedBranchId = await _safeRead(_currentBranchIdKey);
 
       if (_isDisposed) {
         return;
@@ -372,7 +394,6 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
 
       final List<Company> companies;
       try {
-        // ⬇️ إضافة timeout لجلب الشركات
         companies = await ref
             .read(companyRepositoryProvider)
             .getMyCompanies()
@@ -400,8 +421,8 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       }
 
       if (companies.isEmpty) {
-        await preferences.remove(key: _currentCompanyIdKey);
-        await preferences.remove(key: _currentBranchIdKey);
+        await _safeRemove(_currentCompanyIdKey);
+        await _safeRemove(_currentBranchIdKey);
         if (_isDisposed) {
           return;
         }
@@ -418,8 +439,8 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       );
 
       if (selectedCompany == null) {
-        await preferences.remove(key: _currentCompanyIdKey);
-        await preferences.remove(key: _currentBranchIdKey);
+        await _safeRemove(_currentCompanyIdKey);
+        await _safeRemove(_currentBranchIdKey);
         if (_isDisposed) {
           return;
         }
@@ -430,10 +451,7 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
         return;
       }
 
-      await preferences.writeString(
-        key: _currentCompanyIdKey,
-        value: selectedCompany.id,
-      );
+      await _safeWrite(_currentCompanyIdKey, selectedCompany.id);
 
       if (_isDisposed) {
         return;
@@ -448,7 +466,6 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
 
       await _loadBranchesFor(selectedCompany, savedBranchId: savedBranchId);
     } on Object catch (error, stackTrace) {
-      // ⬇️ سطور التشخيص المؤقتة
       debugPrint('🔴 [ANDROID REAL ERROR] type=${error.runtimeType}');
       debugPrint('🔴 [ANDROID REAL ERROR] msg=$error');
       debugPrint('🔴 [STACK] $stackTrace');
@@ -467,11 +484,8 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
     String? savedBranchId,
   }) async {
     try {
-      final PreferencesStorage preferences = await _preferences();
-
       final List<Branch> branches;
       try {
-        // ⬇️ إضافة timeout لجلب الفروع
         branches = await ref
             .read(companyRepositoryProvider)
             .getCompanyBranches(company.id)
@@ -512,12 +526,9 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
       );
 
       if (selectedBranch != null) {
-        await preferences.writeString(
-          key: _currentBranchIdKey,
-          value: selectedBranch.id,
-        );
+        await _safeWrite(_currentBranchIdKey, selectedBranch.id);
       } else {
-        await preferences.remove(key: _currentBranchIdKey);
+        await _safeRemove(_currentBranchIdKey);
       }
 
       if (_isDisposed) {
@@ -550,9 +561,8 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
   }
 
   Future<void> _resetContext() async {
-    final PreferencesStorage preferences = await _preferences();
-    await preferences.remove(key: _currentCompanyIdKey);
-    await preferences.remove(key: _currentBranchIdKey);
+    await _safeRemove(_currentCompanyIdKey);
+    await _safeRemove(_currentBranchIdKey);
 
     if (_isDisposed) {
       return;
@@ -560,9 +570,6 @@ class CompanyContextNotifier extends Notifier<CompanyContextState> {
 
     state = const CompanyContextState();
   }
-
-  Future<PreferencesStorage> _preferences() =>
-      ref.read(preferencesStorageProvider.future);
 
   // ---------------------------------------------------------------------------
   // Selection resolution
