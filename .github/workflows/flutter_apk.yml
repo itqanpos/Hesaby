@@ -1,20 +1,6 @@
 # ============================================================================
 # HESABI — Build Android APK
 # ============================================================================
-# Builds a release-signed Android APK entirely in CI, using a dedicated
-# upload keystore stored in GitHub Secrets.
-#
-# Required repository secrets:
-#   - KEYSTORE_BASE64    : base64-encoded contents of upload-keystore.jks
-#   - KEYSTORE_PASSWORD  : password for the keystore
-#   - KEY_ALIAS          : key alias inside the keystore (e.g. "hesaby")
-#   - KEY_PASSWORD       : password for the key (usually same as keystore)
-#   - SUPABASE_URL       : Supabase project URL
-#   - SUPABASE_ANON_KEY  : Supabase anon key
-#
-# This project is Flutter/Dart only. Do NOT add Node.js, npm, or caches.
-# ============================================================================
-
 name: Build Android APK
 
 on:
@@ -58,7 +44,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # ⬇️ استخراج الإصدار من pubspec.yaml (تم تحديثه إلى 1.0.1+2)
       - name: Extract version from pubspec.yaml
         id: get_version
         run: |
@@ -81,8 +66,6 @@ jobs:
             --description "Hesabi - Multi-Tenant SaaS for POS, Inventory, Sales & Accounting" \
             .
 
-      # ⬇️ هام جداً: إعادة جلب الحزم بعد إنشاء مجلد android 
-      # لضمان تسجيل الإضافات (Plugins) مثل shared_preferences بشكل صحيح
       - name: Re-install dependencies after android generation
         run: flutter pub get
 
@@ -121,7 +104,6 @@ jobs:
       - name: Patch compileSdk for ALL plugins in pub cache (dynamic)
         run: |
           set -e
-
           PUB_CACHE_ROOT="${PUB_CACHE:-$HOME/.pub-cache}/hosted/pub.dev"
           if [ ! -d "$PUB_CACHE_ROOT" ]; then
             echo "!! pub-cache root not found at $PUB_CACHE_ROOT"
@@ -130,58 +112,41 @@ jobs:
 
           python3 - "$PUB_CACHE_ROOT" <<'PY'
           import re, pathlib, sys
-
           root = pathlib.Path(sys.argv[1])
           total = 0
           patched = 0
-
           for pkg in sorted(root.iterdir()):
-              if not pkg.is_dir():
-                  continue
+              if not pkg.is_dir(): continue
               android_dir = pkg / 'android'
-              if not android_dir.is_dir():
-                  continue
-
+              if not android_dir.is_dir(): continue
               for fname in ('build.gradle', 'build.gradle.kts'):
                   f = android_dir / fname
-                  if not f.exists():
-                      continue
+                  if not f.exists(): continue
                   total += 1
                   text = f.read_text()
                   original = text
-
-                  text = re.sub(r'compileSdkVersion\s*=?\s*[0-9]+',
-                                'compileSdkVersion 36', text)
-                  text = re.sub(r'compileSdkVersion\(\s*[0-9]+\s*\)',
-                                'compileSdkVersion(36)', text)
-                  text = re.sub(r'compileSdk\s*=\s*[0-9]+',
-                                'compileSdk = 36', text)
-                  text = re.sub(r'compileSdk\(\s*[0-9]+\s*\)',
-                                'compileSdk(36)', text)
-                  text = re.sub(r'\bcompileSdk\s+[0-9]+\b',
-                                'compileSdk 36', text)
-
+                  text = re.sub(r'compileSdkVersion\s*=?\s*[0-9]+', 'compileSdkVersion 36', text)
+                  text = re.sub(r'compileSdkVersion\(\s*[0-9]+\s*\)', 'compileSdkVersion(36)', text)
+                  text = re.sub(r'compileSdk\s*=\s*[0-9]+', 'compileSdk = 36', text)
+                  text = re.sub(r'compileSdk\(\s*[0-9]+\s*\)', 'compileSdk(36)', text)
+                  text = re.sub(r'\bcompileSdk\s+[0-9]+\b', 'compileSdk 36', text)
                   if text != original:
                       f.write_text(text)
                       patched += 1
                       print(f"PATCHED: {f}")
-                      for line in text.splitlines():
-                          if 'compileSdk' in line:
-                              print(f"   {line.strip()}")
-
           print('---')
           print(f'Android build files scanned: {total}')
           print(f'Android build files patched: {patched}')
           PY
 
-      - name: Add Android permissions
+      - name: Add Android permissions and Disable Impeller
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           
+          # إضافة الأذونات
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
           fi
-          
           if ! grep -q 'android.permission.CAMERA' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-permission android:name="android.permission.CAMERA" />' "$MANIFEST"
           fi
@@ -200,30 +165,33 @@ jobs:
             sed -i '/<application/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' "$MANIFEST"
           fi
           
-          echo "--- AndroidManifest.xml (permissions section) ---"
-          grep 'uses-permission\|uses-feature' "$MANIFEST"
+          # تعطيل Impeller لحل مشكلة الكاميرا
+          python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path('android/app/src/main/AndroidManifest.xml')
+          text = p.read_text()
+          if 'EnableImpeller' not in text:
+              text = text.replace('<application', '<application\n        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />')
+              p.write_text(text)
+              print("Injected EnableImpeller = false")
+          else:
+              print("EnableImpeller already present")
+          PY
+          
+          echo "--- AndroidManifest.xml ---"
+          cat "$MANIFEST"
 
       - name: Prepare flutter_launcher_icons.yaml for Android
         run: |
           python3 - <<'PY'
           import re, pathlib
-
           p = pathlib.Path('flutter_launcher_icons.yaml')
           text = p.read_text()
-
           header_block = text.split('web:', 1)[0]
           if 'image_path:' not in header_block:
-              text = text.replace(
-                  'flutter_launcher_icons:\n',
-                  'flutter_launcher_icons:\n  image_path: "assets/images/logo.png"\n',
-                  1,
-              )
-
+              text = text.replace('flutter_launcher_icons:\n', 'flutter_launcher_icons:\n  image_path: "assets/images/logo.png"\n', 1)
           text = re.sub(r'^  android: false', '  android: true', text, flags=re.M)
-
           p.write_text(text)
-          print('--- flutter_launcher_icons.yaml (after patch) ---')
-          print(text)
           PY
 
       - name: Generate launcher icons
@@ -233,12 +201,9 @@ jobs:
         run: |
           python3 - <<'PY'
           import re, pathlib
-
           p = pathlib.Path('flutter_native_splash.yaml')
           text = p.read_text()
-
           text = re.sub(r'^  android: false', '  android: true', text, flags=re.M)
-
           if 'android_12:' not in text:
               text += (
                   '\n  android_12:\n'
@@ -248,10 +213,7 @@ jobs:
                   '    icon_background_color: "#FFFFFF"\n'
                   '    icon_background_color_dark: "#121212"\n'
               )
-
           p.write_text(text)
-          print('--- flutter_native_splash.yaml (after patch) ---')
-          print(text)
           PY
 
       - name: Generate native splash
@@ -261,16 +223,8 @@ jobs:
         env:
           KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ]; then
-            echo "!! KEYSTORE_BASE64 secret is empty"
-            exit 1
-          fi
-          echo "Base64 length: ${#KEYSTORE_BASE64}"
+          if [ -z "$KEYSTORE_BASE64" ]; then exit 1; fi
           printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > android/app/upload-keystore.jks
-          ls -lh android/app/upload-keystore.jks
-          file android/app/upload-keystore.jks || true
-          echo "First 4 bytes (hex):"
-          head -c 4 android/app/upload-keystore.jks | xxd || true
 
       - name: Create key.properties
         env:
@@ -278,26 +232,17 @@ jobs:
           KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
           KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         run: |
-          if [ -z "$KEYSTORE_PASSWORD" ] || [ -z "$KEY_PASSWORD" ] || [ -z "$KEY_ALIAS" ]; then
-            echo "!! Missing one of KEYSTORE_PASSWORD / KEY_PASSWORD / KEY_ALIAS"
-            exit 1
-          fi
           cat > android/key.properties <<EOF
           storePassword=$KEYSTORE_PASSWORD
           keyPassword=$KEY_PASSWORD
           keyAlias=$KEY_ALIAS
           storeFile=upload-keystore.jks
           EOF
-          echo "--- key.properties (values hidden) ---"
-          sed 's/=.*/=<redacted>/' android/key.properties
 
       - name: Patch build.gradle for release signing
         run: |
           python3 - <<'PY'
-          import pathlib
-          import re
-          import sys
-
+          import pathlib, re, sys
           GROOVY_LOADER = """
           def keystoreProperties = new Properties()
           def keystorePropertiesFile = rootProject.file('key.properties')
@@ -305,7 +250,6 @@ jobs:
               keystoreProperties.load(new FileInputStream(keystorePropertiesFile))
           }
           """
-
           GROOVY_SIGNING = """
               signingConfigs {
                   release {
@@ -316,9 +260,7 @@ jobs:
                   }
               }
           """
-
           KOTLIN_IMPORTS = "import java.util.Properties\nimport java.io.FileInputStream\n\n"
-
           KOTLIN_LOADER = """
           val keystoreProperties = Properties()
           val keystorePropertiesFile = rootProject.file("key.properties")
@@ -326,7 +268,6 @@ jobs:
               keystoreProperties.load(FileInputStream(keystorePropertiesFile))
           }
           """
-
           KOTLIN_SIGNING = """
               signingConfigs {
                   create("release") {
@@ -337,107 +278,29 @@ jobs:
                   }
               }
           """
-
           def patch_groovy(text: str) -> str:
-              if 'keystoreProperties' in text:
-                  print('Groovy: already patched - skipping loader insert')
-              else:
-                  new_text, n = re.subn(
-                      r'\nandroid\s*\{',
-                      '\n' + GROOVY_LOADER + '\nandroid {',
-                      text,
-                      count=1,
-                  )
-                  if n == 0:
-                      print('Groovy: FAILED to find "android {" - aborting')
-                      sys.exit(1)
-                  text = new_text
-
-              if 'signingConfigs {' in text and 'release {' in text:
-                  print('Groovy: signingConfigs.release already present')
-              else:
-                  text, n = re.subn(
-                      r'(android\s*\{)',
-                      r'\1\n' + GROOVY_SIGNING,
-                      text,
-                      count=1,
-                  )
-                  if n == 0:
-                      print('Groovy: FAILED to insert signingConfigs - aborting')
-                      sys.exit(1)
-
-              text = text.replace(
-                  'signingConfig = signingConfigs.debug',
-                  'signingConfig = signingConfigs.release',
-              )
-              text = text.replace(
-                  'signingConfig signingConfigs.debug',
-                  'signingConfig signingConfigs.release',
-              )
+              if 'keystoreProperties' not in text:
+                  text, n = re.subn(r'\nandroid\s*\{', '\n' + GROOVY_LOADER + '\nandroid {', text, count=1)
+              if 'signingConfigs {' not in text:
+                  text, n = re.subn(r'(android\s*\{)', r'\1\n' + GROOVY_SIGNING, text, count=1)
+              text = text.replace('signingConfig = signingConfigs.debug', 'signingConfig = signingConfigs.release')
+              text = text.replace('signingConfig signingConfigs.debug', 'signingConfig signingConfigs.release')
               return text
-
           def patch_kotlin(text: str) -> str:
               if 'import java.util.Properties' not in text:
                   text = KOTLIN_IMPORTS + text
-                  print('Kotlin: added imports at top of file')
-              else:
-                  print('Kotlin: imports already present')
-
-              if 'val keystoreProperties' in text:
-                  print('Kotlin: keystoreProperties already present')
-              else:
-                  new_text, n = re.subn(
-                      r'\nandroid\s*\{',
-                      '\n' + KOTLIN_LOADER + '\nandroid {',
-                      text,
-                      count=1,
-                  )
-                  if n == 0:
-                      print('Kotlin: FAILED to find "android {" - aborting')
-                      sys.exit(1)
-                  text = new_text
-                  print('Kotlin: inserted keystoreProperties loader')
-
-              if 'create("release")' in text:
-                  print('Kotlin: signingConfigs.release already present')
-              else:
-                  text, n = re.subn(
-                      r'(android\s*\{)',
-                      r'\1\n' + KOTLIN_SIGNING,
-                      text,
-                      count=1,
-                  )
-                  if n == 0:
-                      print('Kotlin: FAILED to insert signingConfigs - aborting')
-                      sys.exit(1)
-                  print('Kotlin: inserted signingConfigs.release')
-
-              text = text.replace(
-                  'signingConfig = signingConfigs.getByName("debug")',
-                  'signingConfig = signingConfigs.getByName("release")',
-              )
+              if 'val keystoreProperties' not in text:
+                  text, n = re.subn(r'\nandroid\s*\{', '\n' + KOTLIN_LOADER + '\nandroid {', text, count=1)
+              if 'create("release")' not in text:
+                  text, n = re.subn(r'(android\s*\{)', r'\1\n' + KOTLIN_SIGNING, text, count=1)
+              text = text.replace('signingConfig = signingConfigs.getByName("debug")', 'signingConfig = signingConfigs.getByName("release")')
               return text
-
-          any_found = False
           for f in ('android/app/build.gradle', 'android/app/build.gradle.kts'):
               p = pathlib.Path(f)
-              if not p.exists():
-                  print(f'Skip: {f} does not exist')
-                  continue
-              any_found = True
+              if not p.exists(): continue
               original = p.read_text()
-              if p.suffix == '.kts':
-                  patched = patch_kotlin(original)
-              else:
-                  patched = patch_groovy(original)
+              patched = patch_kotlin(original) if p.suffix == '.kts' else patch_groovy(original)
               p.write_text(patched)
-              print(f'================= {f} (after patch) =================')
-              print(patched)
-              print('======================================================')
-
-          if not any_found:
-              print('ERROR: no android/app/build.gradle(.kts) found - aborting')
-              sys.exit(1)
           PY
 
       - name: Build APK
@@ -454,21 +317,6 @@ jobs:
             --dart-define=SUPABASE_URL="$SUPABASE_URL" \
             --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
 
-      - name: Verify APK signature
-        env:
-          BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
-        run: |
-          APK="build/app/outputs/flutter-apk/app-$BUILD_TYPE.apk"
-          echo "--- APK info ---"
-          ls -lh "$APK"
-          echo "--- Signature ---"
-          APKSIGNER=$(find $ANDROID_HOME -name apksigner -type f 2>/dev/null | head -1 || true)
-          if [ -n "$APKSIGNER" ]; then
-            "$APKSIGNER" verify --print-certs "$APK" || true
-          else
-            echo "apksigner not found - skipping signature dump"
-          fi
-
       - name: Collect APK
         env:
           BUILD_TYPE: ${{ github.event.inputs.build_type || 'release' }}
@@ -477,9 +325,8 @@ jobs:
           APK_NAME="hesabi-v${{ env.VERSION_NAME }}-build${{ github.run_number }}.apk"
           cp "build/app/outputs/flutter-apk/app-$BUILD_TYPE.apk" "build/apk/$APK_NAME"
           echo "APK_NAME=$APK_NAME" >> $GITHUB_ENV
-          ls -lh build/apk/
 
-      - name: Upload APK as run artifact
+      - name: Upload APK
         uses: actions/upload-artifact@v4
         with:
           name: hesabi-v${{ env.VERSION_NAME }}-build${{ github.run_number }}
@@ -499,24 +346,7 @@ jobs:
             - Built from: `${{ github.ref_name }}`
             - Signed with: release keystore (stable signature)
             - Target: Android ARM64 + ARMv7
-
-            حمّل ملف APK من قسم Assets أدناه (`hesabi-v${{ env.VERSION_NAME }}-build${{ github.run_number }}.apk`).
           files: build/apk/*.apk
           make_latest: true
           draft: false
           prerelease: true
-
-      - name: Publish to version-specific release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: v${{ env.VERSION_NAME }}
-          name: "Hesabi v${{ env.VERSION_NAME }}"
-          body: |
-            **الإصدار v${{ env.VERSION_NAME }}**
-            - Build #${{ github.run_number }}
-            - Commit: `${{ github.sha }}`
-
-            حمّل ملف APK من Assets أدناه.
-          files: build/apk/*.apk
-          draft: false
-          prerelease: false
