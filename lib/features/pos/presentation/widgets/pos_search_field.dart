@@ -6,6 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../inventory/presentation/providers/inventory_providers.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/services/barcode_scanner_service.dart';
@@ -21,8 +24,8 @@ import 'pos_results_list.dart';
 /// Responsibilities:
 /// * Keep the local [TextEditingController] in sync with
 ///   `posSearchProvider`.
-/// * **Debounce the notifier update** (see [_debounceDelay]) so a large
-///   catalogue is not filtered on every keystroke.
+/// * **Debounce the notifier update** so a large catalogue is not filtered
+///   on every keystroke.
 /// * Use the shared [posSearchFocusNodeProvider] so the POS page can
 ///   focus this field via keyboard shortcuts (F2).
 /// * Provide a Scan affordance backed by [BarcodeScannerService] when the
@@ -173,11 +176,33 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
     }
 
     final Product product = products.first;
+
+    // ⬇️ جلب المخزون الفعلي قبل الإضافة
+    final double? stock = await _fetchStockFor(ref, product.id);
+    if (!mounted) return;
+
+    // ⬇️ فحص مسبق بناءً على المخزون الفعلي
     final PosCartLine? existing = findExistingCartLine(
       ref.read(posCartProvider),
       product.id,
       product.defaultUnitId,
     );
+
+    if (stock != null) {
+      final double currentQty = existing?.quantity ?? 0;
+      final double newQty = currentQty + 1;
+      if (newQty > stock) {
+        _showMessage(
+          stock <= 0
+              ? 'لا يوجد مخزون متاح من «${product.name}».'
+              : 'الكمية المتاحة من «${product.name}» هي '
+                  '${_formatQty(stock)} فقط. '
+                  'لديك بالفعل ${_formatQty(currentQty)} في السلة.',
+        );
+        _finishQuickAdd();
+        return;
+      }
+    }
 
     if (existing != null) {
       final bool confirmed = await confirmIncreaseExistingLine(
@@ -194,7 +219,7 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
       }
     }
 
-    switch (posQuickAddProduct(ref, product)) {
+    switch (posQuickAddProduct(ref, product, availableStock: stock)) {
       case PosQuickAddResult.success:
         _finishQuickAdd();
       case PosQuickAddResult.noBranch:
@@ -204,7 +229,16 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
       case PosQuickAddResult.noDefaultUnit:
         _showMessage('تعذّر تحديد الوحدة الافتراضية لهذا المنتج.');
       case PosQuickAddResult.rejected:
-        _showMessage('تعذّرت إضافة «${product.name}» إلى السلة.');
+        if (stock != null) {
+          _showMessage(
+            stock <= 0
+                ? 'لا يوجد مخزون متاح من «${product.name}».'
+                : 'الكمية المتاحة من «${product.name}» هي '
+                    '${_formatQty(stock)} فقط.',
+          );
+        } else {
+          _showMessage('تعذّرت إضافة «${product.name}» إلى السلة.');
+        }
     }
   }
 
@@ -292,6 +326,58 @@ class _PosSearchFieldState extends ConsumerState<PosSearchField> {
         ),
       ),
     );
+  }
+
+  // ---------------------------------------------------------------------------
+  // Helpers
+  // ---------------------------------------------------------------------------
+
+  static String _formatQty(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toStringAsFixed(2);
+  }
+}
+
+// ============================================================================
+// Stock helper — mirrors the one in pos_results_list.dart
+// ============================================================================
+
+/// Returns the current stock of [productId] in the active branch, or
+/// `null` if it cannot be determined (no branch, network error, missing
+/// balance). When `null`, the caller should skip the local pre-check and
+/// let the server be the source of truth.
+///
+/// NOTE: assumes [InventoryBalance] exposes a `quantityOnHand` numeric
+/// field. If the field name differs, adjust the accessor below.
+Future<double?> _fetchStockFor(WidgetRef ref, String productId) async {
+  try {
+    final String? branchId = ref.read(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+    if (branchId == null) return null;
+
+    final List<dynamic> balances =
+        await ref.read(inventoryBalancesProvider(branchId).future);
+    for (final dynamic b in balances) {
+      try {
+        if ((b.productId as String?) == productId) {
+          final dynamic qty = b.quantityOnHand;
+          if (qty is num) return qty.toDouble();
+          if (qty is String) return double.tryParse(qty);
+          return null;
+        }
+      } on Object {
+        continue;
+      }
+    }
+    // المنتج غير موجود في الأرصدة → افتراض صفر.
+    return 0;
+  } on Object {
+    return null;
   }
 }
 
