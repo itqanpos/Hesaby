@@ -54,10 +54,9 @@ class _PosCartLineTileState extends ConsumerState<PosCartLineTile> {
     _quantityFocus = FocusNode()..addListener(_onQuantityFocusChange);
     _priceFocus = FocusNode()..addListener(_onPriceFocusChange);
 
-    // ⬇️ إصلاح: إذا كان هذا السطر تمت إضافته للتو، اطلب التركيز على حقل
-    //    الكمية في أول إطار. هذا يغطي الحالة التي يكون فيها
-    //    `focusedCartLineProvider` قد ضُبط **قبل** بناء هذا الـ tile
-    //    (حالة السطر المُضاف حديثًا) — حيث لا ينطلق ref.listen.
+    // ⬇️ إذا كان هذا السطر تمت إضافته للتو، اطلب التركيز على حقل الكمية
+    //    في أول إطار. هذا يغطي الحالة التي يكون فيها
+    //    `focusedCartLineProvider` قد ضُبط **قبل** بناء هذا الـ tile.
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (!mounted) return;
       if (ref.read(focusedCartLineProvider) == widget.line.key) {
@@ -91,14 +90,30 @@ class _PosCartLineTileState extends ConsumerState<PosCartLineTile> {
     }
   }
 
-  /// Requests focus on the quantity field and selects the whole text so
-  /// typing immediately replaces it.
+  /// Requests focus on the quantity field, selects the whole text so typing
+  /// immediately replaces it, and **forces the soft keyboard to appear**.
+  ///
+  /// `FocusNode.requestFocus()` alone is not enough on Android/iOS when it
+  /// is invoked programmatically (from a post-frame callback or a provider
+  /// listener): the field gets focus and the text is selected, but the
+  /// keyboard does not pop up. Explicitly invoking `TextInput.show` on the
+  /// platform channel fixes this.
   void _focusQuantitySelectAll() {
     _quantityFocus.requestFocus();
     _quantityController.selection = TextSelection(
       baseOffset: 0,
       extentOffset: _quantityController.text.length,
     );
+
+    // Defer the keyboard show to the next frame so the focus request has
+    // been processed by the framework first.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_quantityFocus.hasFocus) return;
+      SystemChannels.textInput
+          .invokeMethod<void>('TextInput.show')
+          .ignore();
+    });
   }
 
   void _onQuantityFocusChange() {
