@@ -13,30 +13,21 @@ import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
+import '../../domain/entities/pos_cart_line.dart';
 import '../dialogs/pos_duplicate_line_dialog.dart';
 import '../dialogs/pos_unit_quick_add_sheet.dart';
-import '../../domain/entities/pos_cart_line.dart';
 import '../state/pos_providers.dart';
 import '../state/pos_search_notifier.dart';
 
 /// POS search results.
 ///
 /// Two presentations:
-/// * **Desktop / tablet** (`compact: false`): grid of cards (unchanged).
+/// * **Desktop / tablet** (`compact: false`): grid of cards.
 /// * **Mobile** (`compact: true`): linear list without cards, optimised for
 ///   one-handed search and quick tapping.
-///
-/// Product tap logic (option ج):
-/// * If the product has **only a base unit**, it is added to the cart
-///   directly → search is cleared → the quantity field of the new line is
-///   focused (via `focusedCartLineProvider`).
-/// * If the product has **extra units**, the unit-selection sheet opens; on
-///   confirm → search is cleared → quantity field is focused.
 class PosResultsList extends ConsumerWidget {
   const PosResultsList({super.key, this.compact = false});
 
-  /// When `true`, renders a linear list (mobile). Otherwise, renders the
-  /// grid of cards (desktop / tablet).
   final bool compact;
 
   @override
@@ -72,7 +63,6 @@ class PosResultsList extends ConsumerWidget {
           );
         }
 
-        // ⬇️ وضع الهاتف: قائمة خطية بدون كروت
         if (compact) {
           return _ProductList(
             products: products,
@@ -81,7 +71,6 @@ class PosResultsList extends ConsumerWidget {
           );
         }
 
-        // ⬇️ وضع الكمبيوتر: شبكة الكروت (بدون تغيير)
         return GridView.builder(
           padding: const EdgeInsets.all(12),
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
@@ -115,13 +104,10 @@ class PosResultsList extends ConsumerWidget {
     WidgetRef ref,
     Product product,
   ) async {
-    // Resolve the extra units (all units except the default one).
     List<ProductUnit> extras;
     try {
       extras = await ref.read(productUnitsProvider(product.id).future);
     } on Object {
-      // If units fail to load, fall back to the sheet (it shows a loader
-      // and retries). Safer than guessing.
       if (!context.mounted) return;
       await _openUnitSheet(context, ref, product);
       return;
@@ -145,6 +131,27 @@ class PosResultsList extends ConsumerWidget {
       product.id,
       product.defaultUnitId,
     );
+
+    // ⬇️ فحص مسبق: إذا كان المنتج موجودًا في السلة وله كمية متاحة،
+    //    تأكد من أن الزيادة لن تتجاوزها قبل إظهار نافذة التأكيد.
+    final double? availableStock = existing?.availableStock;
+    if (availableStock != null) {
+      final double currentQty = existing?.quantity ?? 0;
+      final double newQty = currentQty + 1;
+      if (newQty > availableStock) {
+        _show(
+          context,
+          availableStock <= 0
+              ? 'لا يوجد مخزون متاح من «${product.name}».'
+              : 'الكمية المتاحة من «${product.name}» هي '
+                  '${_formatQty(availableStock)} فقط. '
+                  'لديك بالفعل ${_formatQty(currentQty)} في السلة.',
+          isError: true,
+        );
+        return;
+      }
+    }
+
     if (existing != null) {
       final bool confirmed = await confirmIncreaseExistingLine(
         context,
@@ -158,18 +165,35 @@ class PosResultsList extends ConsumerWidget {
     if (!context.mounted) return;
     switch (result) {
       case PosQuickAddResult.success:
-        // Clear the search so the mobile split-view collapses to the cart.
-        // The cart tile will focus its quantity field on the next frame
-        // (via focusedCartLineProvider).
         ref.read(posSearchProvider.notifier).clear();
       case PosQuickAddResult.noBranch:
-        _show(context, 'اختر الفرع أولاً قبل إضافة المنتجات.');
+        _show(context, 'اختر الفرع أولاً قبل إضافة المنتجات.',
+            isError: true);
       case PosQuickAddResult.unitsNotLoaded:
-        _show(context, 'جاري تحميل بيانات الوحدات، حاول مرة أخرى.');
+        _show(context, 'جاري تحميل بيانات الوحدات، حاول مرة أخرى.',
+            isError: true);
       case PosQuickAddResult.noDefaultUnit:
-        _show(context, 'تعذّر تحديد الوحدة الافتراضية لهذا المنتج.');
+        _show(context, 'تعذّر تحديد الوحدة الافتراضية لهذا المنتج.',
+            isError: true);
       case PosQuickAddResult.rejected:
-        _show(context, 'تعذّرت إضافة «${product.name}» إلى السلة.');
+        // ⬇️ حاول إعطاء سبب محدد عند الرفض
+        if (availableStock != null) {
+          _show(
+            context,
+            availableStock <= 0
+                ? 'لا يوجد مخزون متاح من «${product.name}».'
+                : 'الكمية المتاحة من «${product.name}» هي '
+                    '${_formatQty(availableStock)} فقط.',
+            isError: true,
+          );
+        } else {
+          _show(
+            context,
+            'تعذّرت إضافة «${product.name}». '
+                'قد تكون الكمية غير كافية أو السعر خارج النطاق المسموح.',
+            isError: true,
+          );
+        }
     }
   }
 
@@ -187,11 +211,35 @@ class PosResultsList extends ConsumerWidget {
     }
   }
 
-  void _show(BuildContext context, String message) {
+  void _show(
+    BuildContext context,
+    String message, {
+    bool isError = false,
+  }) {
     if (!context.mounted) return;
+    final ThemeData theme = Theme.of(context);
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
-      ..showSnackBar(SnackBar(content: Text(message)));
+      ..showSnackBar(
+        SnackBar(
+          content: Text(
+            message,
+            style: isError
+                ? TextStyle(color: theme.colorScheme.onError)
+                : null,
+          ),
+          backgroundColor:
+              isError ? theme.colorScheme.error : null,
+          duration: Duration(seconds: isError ? 5 : 3),
+        ),
+      );
+  }
+
+  static String _formatQty(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toStringAsFixed(2);
   }
 }
 
@@ -299,7 +347,7 @@ class _ProductList extends StatelessWidget {
 }
 
 // ============================================================================
-// Desktop — grid card (unchanged)
+// Desktop — grid card
 // ============================================================================
 
 class _ProductGridCard extends StatefulWidget {
@@ -360,7 +408,8 @@ class _ProductGridCardState extends State<_ProductGridCard> {
                 CircleAvatar(
                   radius: 24,
                   backgroundColor: scheme.surfaceContainerHighest,
-                  child: Icon(Icons.inventory_2_outlined, color: scheme.primary),
+                  child:
+                      Icon(Icons.inventory_2_outlined, color: scheme.primary),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -389,7 +438,7 @@ class _ProductGridCardState extends State<_ProductGridCard> {
 }
 
 // ============================================================================
-// Public quick-add helper (بدون تغيير)
+// Public quick-add helper
 // ============================================================================
 PosQuickAddResult posQuickAddProduct(WidgetRef ref, Product product) {
   final CompanyContextState state = ref.read(companyContextProvider);
