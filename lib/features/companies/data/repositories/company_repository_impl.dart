@@ -469,11 +469,20 @@ class CompanyRepositoryImpl implements CompanyRepository {
     final String code = (error.code ?? '').toLowerCase();
     final String message = error.message.toLowerCase();
 
+    // ⬇️ إضافة أكواد الصلاحيات والجلسة
+    if (code.startsWith('pgrst301') || code.startsWith('401')) {
+      return CompanyFailureType.unauthorized;
+    }
     if (code.startsWith('42501')) {
       return CompanyFailureType.unauthorized;
     }
     if (code.startsWith('28')) {
       return CompanyFailureType.unauthorized;
+    }
+    
+    // ⬇️ إضافة أكواد الدوال غير الموجودة (Invalid Response)
+    if (code.startsWith('pgrst202') || code.startsWith('pgrst203')) {
+      return CompanyFailureType.invalidResponse;
     }
     if (code.startsWith('23')) {
       return CompanyFailureType.invalidResponse;
