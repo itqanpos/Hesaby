@@ -15,11 +15,6 @@ import '../../domain/repositories/company_members_repository.dart';
 import '../providers/members_providers.dart';
 
 /// Members management page.
-///
-/// Lists every member of the currently selected company, with their role
-/// and the number of permissions denied to them. Tapping a member opens
-/// the permissions editor. Only owner/admin/manager can reach this page —
-/// the underlying RLS rejects other roles.
 class MembersPage extends ConsumerStatefulWidget {
   const MembersPage({super.key});
 
@@ -48,6 +43,26 @@ class _MembersPageState extends ConsumerState<MembersPage> {
     }).toList(growable: false);
   }
 
+  Future<void> _toggleActive(BuildContext context, CompanyMember member) async {
+    try {
+      await ref.read(membersProvider.notifier).updateMember(
+            memberId: member.id,
+            isActive: !member.isActive,
+          );
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(member.isActive ? 'تم تعطيل العضو' : 'تم تفعيل العضو'),
+        ),
+      );
+    } on MemberException catch (e) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('تعذّر تغيير الحالة: ${e.type.name}')),
+      );
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final AsyncValue<List<CompanyMember>> membersAsync =
@@ -59,8 +74,7 @@ class _MembersPageState extends ConsumerState<MembersPage> {
         actions: <Widget>[
           IconButton(
             tooltip: 'تحديث',
-            onPressed: () =>
-                ref.read(membersProvider.notifier).refresh(),
+            onPressed: () => ref.read(membersProvider.notifier).refresh(),
             icon: const Icon(Icons.refresh),
           ),
         ],
@@ -71,8 +85,7 @@ class _MembersPageState extends ConsumerState<MembersPage> {
           title: 'تعذّر تحميل الأعضاء',
           message: _errorMessage(error),
           retryLabel: 'إعادة المحاولة',
-          onRetry: () =>
-              ref.read(membersProvider.notifier).refresh(),
+          onRetry: () => ref.read(membersProvider.notifier).refresh(),
         ),
         data: (List<CompanyMember> members) {
           final List<CompanyMember> visible = _filter(members);
@@ -118,12 +131,18 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                             itemCount: visible.length,
                             separatorBuilder: (_, __) =>
                                 const SizedBox(height: 8),
-                            itemBuilder:
-                                (BuildContext context, int index) {
+                            itemBuilder: (BuildContext context, int index) {
                               final CompanyMember member = visible[index];
                               return _MemberCard(
                                 member: member,
                                 onTap: () => context.pushNamed(
+                                  AppRouter.memberPermissionsName,
+                                  pathParameters: <String, String>{
+                                    'id': member.id,
+                                  },
+                                ),
+                                onToggleActive: () => _toggleActive(context, member),
+                                onEdit: () => context.pushNamed(
                                   AppRouter.memberPermissionsName,
                                   pathParameters: <String, String>{
                                     'id': member.id,
@@ -237,9 +256,7 @@ class _KpiCard extends StatelessWidget {
         color: scheme.surface,
         borderRadius: BorderRadius.circular(12),
         border: Border.all(
-          color: emphasize
-              ? color.withValues(alpha: 0.5)
-              : scheme.outlineVariant,
+          color: emphasize ? color.withValues(alpha: 0.5) : scheme.outlineVariant,
           width: emphasize ? 1.5 : 1,
         ),
       ),
@@ -292,10 +309,17 @@ class _KpiCard extends StatelessWidget {
 // ============================================================================
 
 class _MemberCard extends StatelessWidget {
-  const _MemberCard({required this.member, required this.onTap});
+  const _MemberCard({
+    required this.member,
+    required this.onTap,
+    required this.onToggleActive,
+    required this.onEdit,
+  });
 
   final CompanyMember member;
   final VoidCallback onTap;
+  final VoidCallback onToggleActive;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -348,6 +372,7 @@ class _MemberCard extends StatelessWidget {
                             displayName,
                             style: theme.textTheme.titleSmall?.copyWith(
                               fontWeight: FontWeight.w700,
+                              color: !member.isActive ? scheme.onSurfaceVariant : null,
                             ),
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
@@ -356,8 +381,8 @@ class _MemberCard extends StatelessWidget {
                         if (!member.isActive)
                           _Chip(
                             label: 'معطّل',
-                            background: scheme.surfaceContainerHighest,
-                            foreground: scheme.onSurfaceVariant,
+                            background: scheme.errorContainer,
+                            foreground: scheme.onErrorContainer,
                           ),
                       ],
                     ),
@@ -393,9 +418,31 @@ class _MemberCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              Icon(
-                Icons.chevron_left,
-                color: scheme.onSurfaceVariant,
+              // ⬇️ قائمة منسدلة للتحكم بالعضو
+              PopupMenuButton<String>(
+                tooltip: 'خيارات',
+                onSelected: (value) {
+                  if (value == 'toggle') onToggleActive();
+                  if (value == 'edit') onEdit();
+                },
+                itemBuilder: (context) => [
+                  PopupMenuItem(
+                    value: 'edit',
+                    child: ListTile(
+                      leading: const Icon(Icons.edit_outlined),
+                      title: const Text('تعديل الصلاحيات'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                  PopupMenuItem(
+                    value: 'toggle',
+                    child: ListTile(
+                      leading: Icon(member.isActive ? Icons.visibility_off_outlined : Icons.visibility_outlined),
+                      title: Text(member.isActive ? 'تعطيل' : 'تفعيل'),
+                      contentPadding: EdgeInsets.zero,
+                    ),
+                  ),
+                ],
               ),
             ],
           ),
@@ -406,13 +453,9 @@ class _MemberCard extends StatelessWidget {
 
   static String _displayName(CompanyMember member) {
     final String? name = member.displayName;
-    if (name != null && name.trim().isNotEmpty) {
-      return name.trim();
-    }
+    if (name != null && name.trim().isNotEmpty) return name.trim();
     final String? email = member.email;
-    if (email != null && email.trim().isNotEmpty) {
-      return email.split('@').first;
-    }
+    if (email != null && email.trim().isNotEmpty) return email.split('@').first;
     final String id = member.userId;
     return id.length > 6 ? 'مستخدم ${id.substring(id.length - 6)}' : id;
   }
@@ -420,46 +463,23 @@ class _MemberCard extends StatelessWidget {
   static (Color, Color) _roleColors(ColorScheme scheme, String role) {
     switch (role) {
       case MemberRole.owner:
-        return (
-          const Color(0xFFF57F17).withValues(alpha: 0.15),
-          const Color(0xFFF57F17),
-        );
+        return (const Color(0xFFF57F17).withValues(alpha: 0.15), const Color(0xFFF57F17));
       case MemberRole.admin:
-        return (
-          const Color(0xFF6A1B9A).withValues(alpha: 0.15),
-          const Color(0xFF6A1B9A),
-        );
+        return (const Color(0xFF6A1B9A).withValues(alpha: 0.15), const Color(0xFF6A1B9A));
       case MemberRole.manager:
-        return (
-          const Color(0xFF00838F).withValues(alpha: 0.15),
-          const Color(0xFF00838F),
-        );
+        return (const Color(0xFF00838F).withValues(alpha: 0.15), const Color(0xFF00838F));
       case MemberRole.cashier:
-        return (
-          const Color(0xFF0F7B6C).withValues(alpha: 0.15),
-          const Color(0xFF0F7B6C),
-        );
+        return (const Color(0xFF0F7B6C).withValues(alpha: 0.15), const Color(0xFF0F7B6C));
       case MemberRole.inventoryClerk:
-        return (
-          const Color(0xFF5D4037).withValues(alpha: 0.15),
-          const Color(0xFF5D4037),
-        );
+        return (const Color(0xFF5D4037).withValues(alpha: 0.15), const Color(0xFF5D4037));
       default:
-        return (
-          scheme.surfaceContainerHighest,
-          scheme.onSurfaceVariant,
-        );
+        return (scheme.surfaceContainerHighest, scheme.onSurfaceVariant);
     }
   }
 }
 
 class _Chip extends StatelessWidget {
-  const _Chip({
-    required this.label,
-    required this.background,
-    required this.foreground,
-  });
-
+  const _Chip({required this.label, required this.background, required this.foreground});
   final String label;
   final Color background;
   final Color foreground;
@@ -468,18 +488,12 @@ class _Chip extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     return DecoratedBox(
-      decoration: BoxDecoration(
-        color: background,
-        borderRadius: BorderRadius.circular(999),
-      ),
+      decoration: BoxDecoration(color: background, borderRadius: BorderRadius.circular(999)),
       child: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
         child: Text(
           label,
-          style: theme.textTheme.labelSmall?.copyWith(
-            color: foreground,
-            fontWeight: FontWeight.w700,
-          ),
+          style: theme.textTheme.labelSmall?.copyWith(color: foreground, fontWeight: FontWeight.w700),
         ),
       ),
     );
