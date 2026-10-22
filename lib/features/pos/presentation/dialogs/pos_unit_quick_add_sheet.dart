@@ -4,6 +4,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart';
 
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../inventory/presentation/providers/inventory_providers.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
@@ -41,7 +44,8 @@ class _PosUnitQuickAddSheet extends ConsumerWidget {
     final AsyncValue<List<ProductUnit>> extrasAsync =
         ref.watch(productUnitsProvider(product.id));
 
-    final bool isLoading = unitsAsync.isLoading || extrasAsync.isLoading;
+    final bool isLoading =
+        unitsAsync.isLoading || extrasAsync.isLoading;
 
     return SafeArea(
       top: false,
@@ -122,7 +126,8 @@ class _UnitsList extends ConsumerWidget {
       for (final Unit u in units) u.id: u.name,
     };
 
-    final String baseUnitName = unitNames[product.defaultUnitId] ?? 'وحدة';
+    final String baseUnitName =
+        unitNames[product.defaultUnitId] ?? 'وحدة';
 
     final List<_UnitChoice> choices = <_UnitChoice>[
       _UnitChoice(
@@ -196,27 +201,30 @@ class _UnitsList extends ConsumerWidget {
     WidgetRef ref,
     _UnitChoice choice,
   ) async {
+    // ⬇️ جلب المخزون الفعلي من الفرع الحالي قبل الإضافة
+    final double? stock = await _fetchStockFor(ref, product.id);
+    if (!context.mounted) return;
+
     final PosCartLine? existing = findExistingCartLine(
       ref.read(posCartProvider),
       product.id,
       choice.unitId,
     );
 
-    // ⬇️ فحص مسبق: إذا كان السطر موجودًا وله كمية متاحة، تأكد من أن
-    //    الزيادة لن تتجاوزها قبل إظهار نافذة التأكيد.
-    final double? availableStock = existing?.availableStock;
-    if (availableStock != null) {
+    // ⬇️ فحص مسبق: إذا كان المنتج في السلة والمخزون معروف، تأكد من أن
+    //    الزيادة لن تتجاوز المخزون.
+    if (stock != null) {
       final double currentQty = existing?.quantity ?? 0;
       final double newQty = currentQty + 1;
-      if (newQty > availableStock) {
+      if (newQty > stock) {
         _showError(
           context,
-          availableStock <= 0
+          stock <= 0
               ? 'لا يوجد مخزون متاح من «${product.name}» '
                   '(${choice.unitName}).'
               : 'الكمية المتاحة من «${product.name}» '
                   '(${choice.unitName}) هي '
-                  '${_formatQty(availableStock)} فقط. '
+                  '${_formatQty(stock)} فقط. '
                   'لديك بالفعل ${_formatQty(currentQty)} في السلة.',
         );
         return;
@@ -244,6 +252,7 @@ class _UnitsList extends ConsumerWidget {
           unitPrice: choice.unitPrice,
           minSellingPrice: choice.minSellingPrice,
           maxSellingPrice: choice.maxSellingPrice,
+          availableStock: stock, // ⬅️ تمرير المخزون
         );
 
     if (added) {
@@ -251,17 +260,16 @@ class _UnitsList extends ConsumerWidget {
           '${product.id}::${choice.unitId}';
       onAdded();
     } else {
-      // ⬇️ لم يعد الرفض صامتًا — نعرض سببًا واضحًا
-      final double? afterAvailable = existing?.availableStock;
+      // ⬇️ لم يعد الرفض صامتًا
       _showError(
         context,
-        afterAvailable != null
-            ? (afterAvailable <= 0
+        stock != null
+            ? (stock <= 0
                 ? 'لا يوجد مخزون متاح من «${product.name}» '
                     '(${choice.unitName}).'
                 : 'الكمية المتاحة من «${product.name}» '
                     '(${choice.unitName}) هي '
-                    '${_formatQty(afterAvailable)} فقط.')
+                    '${_formatQty(stock)} فقط.')
             : 'تعذّرت إضافة «${product.name}» (${choice.unitName}). '
                 'قد تكون الكمية غير كافية أو السعر خارج النطاق المسموح.',
       );
@@ -290,6 +298,47 @@ class _UnitsList extends ConsumerWidget {
       return value.toInt().toString();
     }
     return value.toStringAsFixed(2);
+  }
+}
+
+// ============================================================================
+// Stock helper
+// ============================================================================
+
+/// Returns the current stock of [productId] in the active branch, or
+/// `null` if it cannot be determined (no branch, network error, missing
+/// balance). When `null`, the caller should skip the local pre-check and
+/// let the server be the source of truth.
+///
+/// NOTE: assumes [InventoryBalance] exposes a `quantityOnHand` numeric
+/// field. If the field name differs, adjust the accessor below.
+Future<double?> _fetchStockFor(WidgetRef ref, String productId) async {
+  try {
+    final String? branchId = ref.read(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+    if (branchId == null) return null;
+
+    final List<dynamic> balances =
+        await ref.read(inventoryBalancesProvider(branchId).future);
+    for (final dynamic b in balances) {
+      try {
+        if ((b.productId as String?) == productId) {
+          final dynamic qty = b.quantityOnHand;
+          if (qty is num) return qty.toDouble();
+          if (qty is String) return double.tryParse(qty);
+          return null;
+        }
+      } on Object {
+        continue;
+      }
+    }
+    // المنتج غير موجود في الأرصدة → افتراض صفر.
+    return 0;
+  } on Object {
+    return null;
   }
 }
 
