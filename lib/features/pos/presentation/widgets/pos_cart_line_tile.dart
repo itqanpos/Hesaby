@@ -53,6 +53,18 @@ class _PosCartLineTileState extends ConsumerState<PosCartLineTile> {
     );
     _quantityFocus = FocusNode()..addListener(_onQuantityFocusChange);
     _priceFocus = FocusNode()..addListener(_onPriceFocusChange);
+
+    // ⬇️ إصلاح: إذا كان هذا السطر تمت إضافته للتو، اطلب التركيز على حقل
+    //    الكمية في أول إطار. هذا يغطي الحالة التي يكون فيها
+    //    `focusedCartLineProvider` قد ضُبط **قبل** بناء هذا الـ tile
+    //    (حالة السطر المُضاف حديثًا) — حيث لا ينطلق ref.listen.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(focusedCartLineProvider) == widget.line.key) {
+        _focusQuantitySelectAll();
+        ref.read(focusedCartLineProvider.notifier).state = null;
+      }
+    });
   }
 
   @override
@@ -77,6 +89,16 @@ class _PosCartLineTileState extends ConsumerState<PosCartLineTile> {
         !_priceFocus.hasFocus) {
       _priceController.text = _formatNumber(widget.line.unitPrice);
     }
+  }
+
+  /// Requests focus on the quantity field and selects the whole text so
+  /// typing immediately replaces it.
+  void _focusQuantitySelectAll() {
+    _quantityFocus.requestFocus();
+    _quantityController.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _quantityController.text.length,
+    );
   }
 
   void _onQuantityFocusChange() {
@@ -111,8 +133,7 @@ class _PosCartLineTileState extends ConsumerState<PosCartLineTile> {
               ? 'المتاح ${_formatQuantity(available)}'
               : 'كمية مرفوضة';
         });
-        
-        // ⬇️ إظهار رسالة تحذيرية عند رفض الكمية
+
         ScaffoldMessenger.of(context)
           ..hideCurrentSnackBar()
           ..showSnackBar(
@@ -200,16 +221,13 @@ class _PosCartLineTileState extends ConsumerState<PosCartLineTile> {
     final ColorScheme scheme = theme.colorScheme;
     final PosCartLine line = widget.line;
 
-    // ⬇️ مراقبة المنتج المضاف حديثاً لتفعيل التركيز على الكمية
+    // ⬇️ حالة السطر الموجود مسبقًا: عندما يتغيّر provider التركيز
+    //    (مثلاً عند زيادة كمية سطر موجود بعد تأكيد المستخدم).
     ref.listen<String?>(focusedCartLineProvider, (previous, next) {
       if (next == line.key) {
         WidgetsBinding.instance.addPostFrameCallback((_) {
           if (mounted) {
-            _quantityFocus.requestFocus();
-            _quantityController.selection = TextSelection(
-              baseOffset: 0,
-              extentOffset: _quantityController.text.length,
-            );
+            _focusQuantitySelectAll();
             ref.read(focusedCartLineProvider.notifier).state = null;
           }
         });
