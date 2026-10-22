@@ -52,7 +52,12 @@ class SuppliersNotifier extends AsyncNotifier<List<Supplier>> {
       return const <Supplier>[];
     }
 
-    return ref.read(supplierRepositoryProvider).listSuppliers(companyId);
+    // ⬇️ نمرر includeInactive: true لكي يظهر المعطّلون في القائمة
+    // (الصفحة تُصفّي محليًا حسب _StatusFilter: الكل / نشط / معطّل)
+    return ref.read(supplierRepositoryProvider).listSuppliers(
+          companyId,
+          includeInactive: true,
+        );
   }
 
   /// Creates a new supplier for the currently selected company.
