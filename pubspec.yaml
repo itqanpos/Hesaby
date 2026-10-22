@@ -1,7 +1,7 @@
 name: hesabi
 description: "Hesabi - Multi-tenant SaaS for POS, Inventory, Sales and Accounting"
 publish_to: "none"
-version: 1.0.2+3
+version: 1.0.3+4
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -39,9 +39,14 @@ dependencies:
   url_launcher: ^6.3.1
 
   # Media & imaging
-  # ⬇️ تم التثبيت على 7.2.1 (بدون ^) لضمان توحيد الإصدار بين جميع الـ runners
-  #    وحل تعارض التوقيع بين 5.x و7.x.
-  mobile_scanner: 7.2.1
+  # ⬇️ مثبت على 7.1.2 (بدون ^) لضمان توحيد الإصدار بين جميع الـ runners.
+  #    الإصدار 7.2.1 به خطأ Gradle معروف (`Could not find method kotlin()`)
+  #    عند تقييم android/build.gradle داخل الحزمة.
+  #    الإصدار 7.1.2 يحتوي على كل إصلاحات 7.x المهمة:
+  #    - قواعد ProGuard/MLKit (تمنع انهيار الباركود على Android Release)
+  #    - دعم Impeller
+  #    - errorBuilder بدلًا من الانهيار عند فشل CameraX
+  mobile_scanner: 7.1.2
   image_picker: ^1.1.2
 
   # POS — Phase 7 additions
