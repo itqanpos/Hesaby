@@ -2,9 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 
-import '../../../../app/router.dart';
 import '../../../../core/utils/validators.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_text_field.dart';
@@ -17,6 +15,11 @@ import '../providers/auth_provider.dart';
 /// employee login code (e.g. `ahmed01`). When a bare code is entered, the
 /// form appends `@hesaby.local` before calling the auth notifier — that
 /// reserved domain is what `create_employee_user` uses under the hood.
+///
+/// **Self-signup is disabled.** Account creation is provisioned by the
+/// platform admin from the admin dashboard. Users without an account are
+/// instructed to contact the administrator instead of being routed to a
+/// public signup page.
 class LoginForm extends ConsumerStatefulWidget {
   const LoginForm({super.key});
 
@@ -152,12 +155,35 @@ class _LoginFormState extends ConsumerState<LoginForm> {
               isLoading: _isSubmitting,
               onPressed: _isSubmitting ? null : _submit,
             ),
-            const SizedBox(height: 12),
-            TextButton(
-              onPressed: _isSubmitting
-                  ? null
-                  : () => context.goNamed(AppRouter.signupName),
-              child: const Text('ليس لديك حساب؟ أنشئ حسابًا جديدًا'),
+            const SizedBox(height: 16),
+            // ⬇️ رابط إنشاء الحساب أُزيل — التسجيل الآن عبر إدارة المنصة فقط.
+            Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: 12,
+                vertical: 10,
+              ),
+              decoration: BoxDecoration(
+                color: theme.colorScheme.surfaceContainerHighest,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                children: <Widget>[
+                  Icon(
+                    Icons.lock_outline,
+                    size: 18,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      'لإنشاء حساب جديد، تواصل مع إدارة المنصة.',
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ),
+                ],
+              ),
             ),
           ],
         ),
