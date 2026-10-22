@@ -18,18 +18,12 @@ import '../widgets/pos_search_field.dart';
 /// * [PosSearchField]     — name / SKU / barcode search.
 /// * Middle area:
 ///     - **Not searching**: cart fills the entire middle area.
-///     - **Searching**:     search results and cart share the middle area
-///                          using `Flexible` (results 2/5, cart 3/5), so
-///                          the cart always stays visible **and** the
-///                          bottom panel is never pushed above the
-///                          keyboard.
+///     - **Searching**:     search results (compact list, no cards) and cart
+///                          share the middle area using `Flexible`
+///                          (results 2/5, cart 3/5), so the cart stays
+///                          visible **and** the bottom panel is never
+///                          pushed above the keyboard.
 /// * [PosBottomPanel]     — compact totals + pay button.
-///
-/// The previous implementation used a fixed `maxHeight` computed from the
-/// **full** screen height, which caused the bottom panel to overlap the
-/// search results once the soft keyboard pushed the body upwards. Using
-/// `Flexible` instead makes the split responsive to the real available
-/// height at any moment — including with the keyboard open.
 class PosMobileLayout extends ConsumerWidget {
   const PosMobileLayout({super.key});
 
@@ -71,10 +65,10 @@ class _SplitView extends StatelessWidget {
           label: 'نتائج البحث',
           tone: _LabelTone.accent,
         ),
-        // Results take 2/5 of the available height.
+        // ⬇️ compact: true — قائمة خطية بدون كروت على الهاتف
         Flexible(
           flex: 2,
-          child: PosResultsList(),
+          child: PosResultsList(compact: true),
         ),
         _ThinDivider(),
         _SectionLabel(
@@ -82,7 +76,6 @@ class _SplitView extends StatelessWidget {
           label: 'السلة',
           tone: _LabelTone.neutral,
         ),
-        // Cart takes 3/5 of the available height, so it is always visible.
         Flexible(
           flex: 3,
           child: PosCartList(),
