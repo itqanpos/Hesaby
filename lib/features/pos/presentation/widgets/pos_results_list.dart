@@ -15,7 +15,7 @@ import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
 import '../dialogs/pos_duplicate_line_dialog.dart';
 import '../dialogs/pos_unit_quick_add_sheet.dart';
-import '../domain/entities/pos_cart_line.dart';
+import '../../domain/entities/pos_cart_line.dart';
 import '../state/pos_providers.dart';
 import '../state/pos_search_notifier.dart';
 
