@@ -1,0 +1,14 @@
+# supabase/config.toml
+
+# Minimal configuration required by `supabase link` / `supabase functions deploy`.
+# Project reference is read from the GitHub Secret SUPABASE_PROJECT_REF at deploy
+# time; the value below is a fallback for local CLI usage.
+project_id = "emvqitmpdkkuyjzegyxf"
+
+[functions.admin-create-user]
+# JWT must be present and valid (verified by the platform before invocation).
+# Our function additionally checks `profiles.is_platform_admin`.
+verify_jwt = true
+
+[functions.admin-update-user]
+verify_jwt = true
