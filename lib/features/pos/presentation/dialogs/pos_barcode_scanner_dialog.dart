@@ -10,6 +10,8 @@ import '../../../../core/utils/logger.dart';
 
 /// Full-screen barcode scanner dialog — stability-first.
 ///
+/// Compatible with `mobile_scanner: 7.2.1` (pinned).
+///
 /// Key behaviours:
 /// * Delays the camera start to the first post-frame callback so the
 ///   widget tree is mounted before the native camera is touched.
@@ -282,13 +284,11 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                     MobileScanner(
                       controller: _controller,
                       onDetect: _handleDetection,
-                      // ⬇️ التواقيع متوافقة مع الإصدار الحالي (5.x/6.x/7.x):
-                      //    نحتفظ بمعامل Widget? الاختياري لأن المحلل الحالي
-                      //    يتوقعه. لن يضر في 7.x لأنه اختياري.
+                      // ✅ mobile_scanner 7.x — errorBuilder يستقبل معاملين فقط
+                      //    (BuildContext, MobileScannerException).
                       errorBuilder: (
                         BuildContext context,
                         MobileScannerException error,
-                        Widget? child,
                       ) {
                         WidgetsBinding.instance.addPostFrameCallback((_) {
                           if (mounted && _cameraError == null) {
@@ -297,10 +297,9 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
                         });
                         return const _LoadingView();
                       },
-                      placeholderBuilder: (
-                        BuildContext context,
-                        Widget? child,
-                      ) =>
+                      // ✅ mobile_scanner 7.x — placeholderBuilder يستقبل
+                      //    معاملًا واحدًا فقط (BuildContext).
+                      placeholderBuilder: (BuildContext context) =>
                           const _LoadingView(),
                     ),
 
