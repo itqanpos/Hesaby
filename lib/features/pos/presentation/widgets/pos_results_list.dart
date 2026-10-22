@@ -8,6 +8,7 @@ import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../inventory/presentation/providers/inventory_providers.dart';
 import '../../../products/domain/entities/product.dart';
 import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
@@ -23,8 +24,7 @@ import '../state/pos_search_notifier.dart';
 ///
 /// Two presentations:
 /// * **Desktop / tablet** (`compact: false`): grid of cards.
-/// * **Mobile** (`compact: true`): linear list without cards, optimised for
-///   one-handed search and quick tapping.
+/// * **Mobile** (`compact: true`): linear list without cards.
 class PosResultsList extends ConsumerWidget {
   const PosResultsList({super.key, this.compact = false});
 
@@ -126,25 +126,28 @@ class PosResultsList extends ConsumerWidget {
     WidgetRef ref,
     Product product,
   ) async {
+    // ⬇️ جلب مخزون المنتج من الفرع الحالي
+    final double? stock = await _fetchStockFor(ref, product.id);
+    if (!context.mounted) return;
+
     final PosCartLine? existing = findExistingCartLine(
       ref.read(posCartProvider),
       product.id,
       product.defaultUnitId,
     );
 
-    // ⬇️ فحص مسبق: إذا كان المنتج موجودًا في السلة وله كمية متاحة،
-    //    تأكد من أن الزيادة لن تتجاوزها قبل إظهار نافذة التأكيد.
-    final double? availableStock = existing?.availableStock;
-    if (availableStock != null) {
+    // ⬇️ فحص مسبق: إذا كان المنتج موجودًا في السلة والمخزون معروف،
+    //    تأكد من أن الزيادة لن تتجاوزها.
+    if (stock != null) {
       final double currentQty = existing?.quantity ?? 0;
       final double newQty = currentQty + 1;
-      if (newQty > availableStock) {
+      if (newQty > stock) {
         _show(
           context,
-          availableStock <= 0
+          stock <= 0
               ? 'لا يوجد مخزون متاح من «${product.name}».'
               : 'الكمية المتاحة من «${product.name}» هي '
-                  '${_formatQty(availableStock)} فقط. '
+                  '${_formatQty(stock)} فقط. '
                   'لديك بالفعل ${_formatQty(currentQty)} في السلة.',
           isError: true,
         );
@@ -161,7 +164,11 @@ class PosResultsList extends ConsumerWidget {
       if (!context.mounted || !confirmed) return;
     }
 
-    final PosQuickAddResult result = posQuickAddProduct(ref, product);
+    final PosQuickAddResult result = posQuickAddProduct(
+      ref,
+      product,
+      availableStock: stock,
+    );
     if (!context.mounted) return;
     switch (result) {
       case PosQuickAddResult.success:
@@ -176,14 +183,13 @@ class PosResultsList extends ConsumerWidget {
         _show(context, 'تعذّر تحديد الوحدة الافتراضية لهذا المنتج.',
             isError: true);
       case PosQuickAddResult.rejected:
-        // ⬇️ حاول إعطاء سبب محدد عند الرفض
-        if (availableStock != null) {
+        if (stock != null) {
           _show(
             context,
-            availableStock <= 0
+            stock <= 0
                 ? 'لا يوجد مخزون متاح من «${product.name}».'
                 : 'الكمية المتاحة من «${product.name}» هي '
-                    '${_formatQty(availableStock)} فقط.',
+                    '${_formatQty(stock)} فقط.',
             isError: true,
           );
         } else {
@@ -228,8 +234,7 @@ class PosResultsList extends ConsumerWidget {
                 ? TextStyle(color: theme.colorScheme.onError)
                 : null,
           ),
-          backgroundColor:
-              isError ? theme.colorScheme.error : null,
+          backgroundColor: isError ? theme.colorScheme.error : null,
           duration: Duration(seconds: isError ? 5 : 3),
         ),
       );
@@ -240,6 +245,47 @@ class PosResultsList extends ConsumerWidget {
       return value.toInt().toString();
     }
     return value.toStringAsFixed(2);
+  }
+}
+
+// ============================================================================
+// Stock helper — reads the current branch inventory for a product
+// ============================================================================
+
+/// Returns the current stock of [productId] in the active branch, or
+/// `null` if it cannot be determined (no branch, network error, missing
+/// balance). When `null`, the caller should skip the local pre-check and
+/// let the server be the source of truth.
+Future<double?> _fetchStockFor(WidgetRef ref, String productId) async {
+  try {
+    final String? branchId = ref.read(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+    if (branchId == null) return null;
+
+    final List<dynamic> balances =
+        await ref.read(inventoryBalancesProvider(branchId).future);
+    for (final dynamic b in balances) {
+      try {
+        final String? pid = b.productId as String?;
+        if (pid == productId) {
+          // ⚠️ نفترض أن حقل الكمية اسمه `quantityOnHand`.
+          // إذا كان اسمه مختلفًا في InventoryBalance، يُرجى تعديله.
+          final dynamic qty = b.quantityOnHand;
+          if (qty is num) return qty.toDouble();
+          if (qty is String) return double.tryParse(qty);
+          return null;
+        }
+      } on Object {
+        continue;
+      }
+    }
+    // المنتج غير موجود في قائمة الأرصدة → افتراض صفر.
+    return 0;
+  } on Object {
+    return null;
   }
 }
 
@@ -408,8 +454,8 @@ class _ProductGridCardState extends State<_ProductGridCard> {
                 CircleAvatar(
                   radius: 24,
                   backgroundColor: scheme.surfaceContainerHighest,
-                  child:
-                      Icon(Icons.inventory_2_outlined, color: scheme.primary),
+                  child: Icon(Icons.inventory_2_outlined,
+                      color: scheme.primary),
                 ),
                 const SizedBox(height: 8),
                 Text(
@@ -438,9 +484,13 @@ class _ProductGridCardState extends State<_ProductGridCard> {
 }
 
 // ============================================================================
-// Public quick-add helper
+// Public quick-add helper — now accepts availableStock
 // ============================================================================
-PosQuickAddResult posQuickAddProduct(WidgetRef ref, Product product) {
+PosQuickAddResult posQuickAddProduct(
+  WidgetRef ref,
+  Product product, {
+  double? availableStock,
+}) {
   final CompanyContextState state = ref.read(companyContextProvider);
   final String? branchId = state.currentBranch?.id;
   if (branchId == null) return PosQuickAddResult.noBranch;
@@ -468,6 +518,8 @@ PosQuickAddResult posQuickAddProduct(WidgetRef ref, Product product) {
         unitPrice: product.sellingPrice,
         minSellingPrice: product.minSellingPrice,
         maxSellingPrice: product.maxSellingPrice,
+        // ⬇️ تمرير المخزون الفعلي (قد يكون null إذا تعذر الحصول عليه)
+        availableStock: availableStock,
       );
 
   if (added) {
