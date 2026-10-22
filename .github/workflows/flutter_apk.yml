@@ -55,21 +55,10 @@ jobs:
       - name: Display Flutter version
         run: flutter --version
 
-      - name: Verify Supabase secrets are configured
-        env:
-          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
-          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
-        run: |
-          if [ -z "$SUPABASE_URL" ] || [ -z "$SUPABASE_ANON_KEY" ]; then
-            echo "::error::SUPABASE_URL or SUPABASE_ANON_KEY secret is missing. The APK would be built without a backend connection."
-            exit 1
-          fi
-          echo "Supabase secrets are present."
-
       - name: Install dependencies
         run: flutter pub get
 
-      # ⬇️ استخراج الإصدار من pubspec.yaml
+      # ⬇️ استخراج الإصدار من pubspec.yaml (لتغيير الإصدار، قم بتعديله في pubspec.yaml)
       - name: Extract version from pubspec.yaml
         id: get_version
         run: |
@@ -89,8 +78,14 @@ jobs:
             --platforms=android \
             --org com.itqanpos \
             --project-name hesabi \
+            --android-language groovy \
             --description "Hesabi - Multi-Tenant SaaS for POS, Inventory, Sales & Accounting" \
             .
+
+      # ⬇️ هام جداً: إعادة جلب الحزم بعد إنشاء مجلد android 
+      # لضمان تسجيل الإضافات (Plugins) مثل shared_preferences بشكل صحيح
+      - name: Re-install dependencies after android generation
+        run: flutter pub get
 
       - name: Remove default widget test
         run: rm -f test/widget_test.dart
@@ -180,12 +175,10 @@ jobs:
           print(f'Android build files patched: {patched}')
           PY
 
-      # ⬇️ إضافة الصلاحيات (الإنترنت، الكاميرا، البلوتوث...)
       - name: Add Android permissions
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           
-          # 🔥 صلاحية الإنترنت (السبب الرئيسي لعدم عمل التطبيق على الأندرويد)
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
           fi
