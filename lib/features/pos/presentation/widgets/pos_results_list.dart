@@ -9,19 +9,40 @@ import '../../../../shared/widgets/app_loader.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../products/domain/entities/product.dart';
+import '../../../products/domain/entities/product_unit.dart';
 import '../../../products/domain/entities/unit.dart';
 import '../../../products/presentation/providers/product_providers.dart';
 import '../../../products/presentation/providers/unit_providers.dart';
+import '../dialogs/pos_duplicate_line_dialog.dart';
 import '../dialogs/pos_unit_quick_add_sheet.dart';
+import '../domain/entities/pos_cart_line.dart';
 import '../state/pos_providers.dart';
 import '../state/pos_search_notifier.dart';
 
+/// POS search results.
+///
+/// Two presentations:
+/// * **Desktop / tablet** (`compact: false`): grid of cards (unchanged).
+/// * **Mobile** (`compact: true`): linear list without cards, optimised for
+///   one-handed search and quick tapping.
+///
+/// Product tap logic (option ج):
+/// * If the product has **only a base unit**, it is added to the cart
+///   directly → search is cleared → the quantity field of the new line is
+///   focused (via `focusedCartLineProvider`).
+/// * If the product has **extra units**, the unit-selection sheet opens; on
+///   confirm → search is cleared → quantity field is focused.
 class PosResultsList extends ConsumerWidget {
-  const PosResultsList({super.key});
+  const PosResultsList({super.key, this.compact = false});
+
+  /// When `true`, renders a linear list (mobile). Otherwise, renders the
+  /// grid of cards (desktop / tablet).
+  final bool compact;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final AsyncValue<List<Product>> results = ref.watch(posSearchResultsProvider);
+    final AsyncValue<List<Product>> results =
+        ref.watch(posSearchResultsProvider);
     final PosSearchState search = ref.watch(posSearchProvider);
 
     final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
@@ -51,14 +72,23 @@ class PosResultsList extends ConsumerWidget {
           );
         }
 
-        // ⬇️ تحويل القائمة إلى GridView
+        // ⬇️ وضع الهاتف: قائمة خطية بدون كروت
+        if (compact) {
+          return _ProductList(
+            products: products,
+            unitNames: unitNames,
+            onTap: (Product p) => _handleProductTap(context, ref, p),
+          );
+        }
+
+        // ⬇️ وضع الكمبيوتر: شبكة الكروت (بدون تغيير)
         return GridView.builder(
           padding: const EdgeInsets.all(12),
           gridDelegate: const SliverGridDelegateWithMaxCrossAxisExtent(
-            maxCrossAxisExtent: 160, // أقصى عرض للبطاقة
+            maxCrossAxisExtent: 160,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
-            childAspectRatio: 0.9, // نسبة الطول للعرض
+            childAspectRatio: 0.9,
           ),
           itemCount: products.length,
           itemBuilder: (BuildContext context, int index) {
@@ -68,7 +98,7 @@ class PosResultsList extends ConsumerWidget {
             return _ProductGridCard(
               product: product,
               unitName: unitName,
-              onTap: () => _openUnitSheet(context, ref, product),
+              onTap: () => _handleProductTap(context, ref, product),
             );
           },
         );
@@ -76,15 +106,202 @@ class PosResultsList extends ConsumerWidget {
     );
   }
 
-  Future<void> _openUnitSheet(BuildContext context, WidgetRef ref, Product product) async {
-    final bool? added = await showPosUnitQuickAddSheet(context: context, product: product);
+  // ---------------------------------------------------------------------------
+  // Tap handling — option ج
+  // ---------------------------------------------------------------------------
+
+  Future<void> _handleProductTap(
+    BuildContext context,
+    WidgetRef ref,
+    Product product,
+  ) async {
+    // Resolve the extra units (all units except the default one).
+    List<ProductUnit> extras;
+    try {
+      extras = await ref.read(productUnitsProvider(product.id).future);
+    } on Object {
+      // If units fail to load, fall back to the sheet (it shows a loader
+      // and retries). Safer than guessing.
+      if (!context.mounted) return;
+      await _openUnitSheet(context, ref, product);
+      return;
+    }
+    if (!context.mounted) return;
+
+    if (extras.isEmpty) {
+      await _addDirectly(context, ref, product);
+    } else {
+      await _openUnitSheet(context, ref, product);
+    }
+  }
+
+  Future<void> _addDirectly(
+    BuildContext context,
+    WidgetRef ref,
+    Product product,
+  ) async {
+    final PosCartLine? existing = findExistingCartLine(
+      ref.read(posCartProvider),
+      product.id,
+      product.defaultUnitId,
+    );
+    if (existing != null) {
+      final bool confirmed = await confirmIncreaseExistingLine(
+        context,
+        productName: product.name,
+        currentQuantity: existing.quantity,
+      );
+      if (!context.mounted || !confirmed) return;
+    }
+
+    final PosQuickAddResult result = posQuickAddProduct(ref, product);
+    if (!context.mounted) return;
+    switch (result) {
+      case PosQuickAddResult.success:
+        // Clear the search so the mobile split-view collapses to the cart.
+        // The cart tile will focus its quantity field on the next frame
+        // (via focusedCartLineProvider).
+        ref.read(posSearchProvider.notifier).clear();
+      case PosQuickAddResult.noBranch:
+        _show(context, 'اختر الفرع أولاً قبل إضافة المنتجات.');
+      case PosQuickAddResult.unitsNotLoaded:
+        _show(context, 'جاري تحميل بيانات الوحدات، حاول مرة أخرى.');
+      case PosQuickAddResult.noDefaultUnit:
+        _show(context, 'تعذّر تحديد الوحدة الافتراضية لهذا المنتج.');
+      case PosQuickAddResult.rejected:
+        _show(context, 'تعذّرت إضافة «${product.name}» إلى السلة.');
+    }
+  }
+
+  Future<void> _openUnitSheet(
+    BuildContext context,
+    WidgetRef ref,
+    Product product,
+  ) async {
+    final bool? added = await showPosUnitQuickAddSheet(
+      context: context,
+      product: product,
+    );
     if (added == true) {
       ref.read(posSearchProvider.notifier).clear();
     }
   }
+
+  void _show(BuildContext context, String message) {
+    if (!context.mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
 }
 
-// ⬇️ بطاقة المنتج الجديدة (شبكة)
+// ============================================================================
+// Mobile — linear list (no cards)
+// ============================================================================
+
+class _ProductList extends StatelessWidget {
+  const _ProductList({
+    required this.products,
+    required this.unitNames,
+    required this.onTap,
+  });
+
+  final List<Product> products;
+  final Map<String, String> unitNames;
+  final ValueChanged<Product> onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return ListView.separated(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      itemCount: products.length,
+      separatorBuilder: (_, __) => Divider(
+        height: 1,
+        color: scheme.outlineVariant.withValues(alpha: 0.4),
+      ),
+      itemBuilder: (BuildContext context, int index) {
+        final Product product = products[index];
+        final String? unitName = unitNames[product.defaultUnitId];
+
+        return InkWell(
+          onTap: () => onTap(product),
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 10),
+            child: Row(
+              children: <Widget>[
+                Container(
+                  width: 36,
+                  height: 36,
+                  decoration: BoxDecoration(
+                    color: scheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Icon(
+                    Icons.inventory_2_outlined,
+                    size: 18,
+                    color: scheme.onPrimaryContainer,
+                  ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Text(
+                        product.name,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w700,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                      if (unitName != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            unitName,
+                            style: theme.textTheme.bodySmall?.copyWith(
+                              color: scheme.onSurfaceVariant,
+                            ),
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Text(
+                  '${_formatPrice(product.sellingPrice)} ج.م',
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    color: scheme.primary,
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                Icon(Icons.chevron_left, size: 18, color: scheme.outline),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  static String _formatPrice(double value) {
+    if (value == value.roundToDouble()) {
+      return value.toInt().toString();
+    }
+    return value.toStringAsFixed(2);
+  }
+}
+
+// ============================================================================
+// Desktop — grid card (unchanged)
+// ============================================================================
+
 class _ProductGridCard extends StatefulWidget {
   const _ProductGridCard({
     required this.product,
@@ -117,14 +334,22 @@ class _ProductGridCardState extends State<_ProductGridCard> {
         child: AnimatedContainer(
           duration: const Duration(milliseconds: 150),
           decoration: BoxDecoration(
-            color: _isHovered ? scheme.primaryContainer.withValues(alpha: 0.3) : scheme.surface,
+            color: _isHovered
+                ? scheme.primaryContainer.withValues(alpha: 0.3)
+                : scheme.surface,
             borderRadius: BorderRadius.circular(12),
             border: Border.all(
               color: _isHovered ? scheme.primary : scheme.outlineVariant,
               width: _isHovered ? 1.5 : 1,
             ),
             boxShadow: _isHovered
-                ? [BoxShadow(color: scheme.primary.withValues(alpha: 0.2), blurRadius: 8, offset: const Offset(0, 4))]
+                ? [
+                    BoxShadow(
+                      color: scheme.primary.withValues(alpha: 0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 4),
+                    ),
+                  ]
                 : [],
           ),
           child: Padding(
@@ -132,7 +357,6 @@ class _ProductGridCardState extends State<_ProductGridCard> {
             child: Column(
               mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
-                // أيقونة وهمية (لعدم وجود صور)
                 CircleAvatar(
                   radius: 24,
                   backgroundColor: scheme.surfaceContainerHighest,
@@ -141,7 +365,8 @@ class _ProductGridCardState extends State<_ProductGridCard> {
                 const SizedBox(height: 8),
                 Text(
                   widget.product.name,
-                  style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold),
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.bold),
                   textAlign: TextAlign.center,
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
@@ -197,7 +422,8 @@ PosQuickAddResult posQuickAddProduct(WidgetRef ref, Product product) {
       );
 
   if (added) {
-    ref.read(focusedCartLineProvider.notifier).state = '${product.id}::${product.defaultUnitId}';
+    ref.read(focusedCartLineProvider.notifier).state =
+        '${product.id}::${product.defaultUnitId}';
     return PosQuickAddResult.success;
   }
   return PosQuickAddResult.rejected;
