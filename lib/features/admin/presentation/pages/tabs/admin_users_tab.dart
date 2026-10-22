@@ -4,10 +4,12 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 
+import '../../../../../shared/widgets/app_button.dart';
 import '../../../../../shared/widgets/app_empty.dart';
 import '../../../../../shared/widgets/app_error.dart';
 import '../../../../../shared/widgets/app_loader.dart';
 import '../../../../../shared/widgets/app_text_field.dart';
+import '../../../data/services/admin_user_service.dart';
 
 // ============================================================================
 // Models
@@ -120,6 +122,38 @@ class _AdminUsersTabState extends ConsumerState<AdminUsersTab> {
     super.dispose();
   }
 
+  Future<void> _showCreateUserDialog() async {
+    final bool? created = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => const _CreateUserDialog(),
+    );
+    if (created == true) {
+      ref.invalidate(adminUsersProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم إنشاء المستخدم بنجاح')),
+        );
+      }
+    }
+  }
+
+  Future<void> _showEditUserDialog(AdminUser user) async {
+    final bool? updated = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _EditUserDialog(user: user),
+    );
+    if (updated == true) {
+      ref.invalidate(adminUsersProvider);
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم تحديث بيانات المستخدم بنجاح')),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final usersAsync = ref.watch(adminUsersProvider);
@@ -144,21 +178,32 @@ class _AdminUsersTabState extends ConsumerState<AdminUsersTab> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             Padding(
-              padding: const EdgeInsets.all(16),
-              child: AppTextField(
-                controller: _searchController,
-                hint: 'ابحث بالاسم أو البريد الإلكتروني',
-                prefixIcon: Icons.search,
-                suffixIcon: _searchQuery.isEmpty
-                    ? null
-                    : IconButton(
-                        icon: const Icon(Icons.close),
-                        onPressed: () {
-                          _searchController.clear();
-                          setState(() => _searchQuery = '');
-                        },
-                      ),
-                onChanged: (v) => setState(() => _searchQuery = v),
+              padding: const EdgeInsets.fromLTRB(16, 16, 16, 8),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  AppButton(
+                    label: 'إنشاء مستخدم جديد',
+                    icon: Icons.person_add,
+                    onPressed: _showCreateUserDialog,
+                  ),
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _searchController,
+                    hint: 'ابحث بالاسم أو البريد الإلكتروني',
+                    prefixIcon: Icons.search,
+                    suffixIcon: _searchQuery.isEmpty
+                        ? null
+                        : IconButton(
+                            icon: const Icon(Icons.close),
+                            onPressed: () {
+                              _searchController.clear();
+                              setState(() => _searchQuery = '');
+                            },
+                          ),
+                    onChanged: (v) => setState(() => _searchQuery = v),
+                  ),
+                ],
               ),
             ),
             Expanded(
@@ -173,7 +218,11 @@ class _AdminUsersTabState extends ConsumerState<AdminUsersTab> {
                       itemCount: filtered.length,
                       separatorBuilder: (_, __) => const SizedBox(height: 8),
                       itemBuilder: (context, index) {
-                        return _UserCard(user: filtered[index]);
+                        final user = filtered[index];
+                        return _UserCard(
+                          user: user,
+                          onEdit: () => _showEditUserDialog(user),
+                        );
                       },
                     ),
             ),
@@ -185,9 +234,10 @@ class _AdminUsersTabState extends ConsumerState<AdminUsersTab> {
 }
 
 class _UserCard extends StatelessWidget {
-  const _UserCard({required this.user});
+  const _UserCard({required this.user, required this.onEdit});
 
   final AdminUser user;
+  final VoidCallback onEdit;
 
   @override
   Widget build(BuildContext context) {
@@ -251,6 +301,12 @@ class _UserCard extends StatelessWidget {
                   ],
                 ),
               ),
+              IconButton(
+                icon: const Icon(Icons.edit_outlined),
+                onPressed: onEdit,
+                tooltip: 'تعديل بيانات المستخدم',
+                color: scheme.primary,
+              ),
             ],
           ),
           if (user.companies.isNotEmpty) ...[
@@ -283,6 +339,275 @@ class _UserCard extends StatelessWidget {
           ],
         ],
       ),
+    );
+  }
+}
+
+// ============================================================================
+// Create User Dialog
+// ============================================================================
+
+class _CreateUserDialog extends ConsumerStatefulWidget {
+  const _CreateUserDialog();
+
+  @override
+  ConsumerState<_CreateUserDialog> createState() => _CreateUserDialogState();
+}
+
+class _CreateUserDialogState extends ConsumerState<_CreateUserDialog> {
+  final _formKey = GlobalKey<FormState>();
+  final _nameCtrl = TextEditingController();
+  final _emailCtrl = TextEditingController();
+  final _passwordCtrl = TextEditingController();
+  bool _obscure = true;
+  bool _isLoading = false;
+  String? _error;
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final service = AdminUserService(Supabase.instance.client);
+      await service.createUser(
+        email: _emailCtrl.text,
+        password: _passwordCtrl.text,
+        fullName: _nameCtrl.text,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } on AdminUserException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = e.message;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('إنشاء مستخدم جديد'),
+      content: SizedBox(
+        width: 400,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppTextField(
+                  controller: _nameCtrl,
+                  label: 'الاسم الكامل (اختياري)',
+                  prefixIcon: Icons.person_outline,
+                  enabled: !_isLoading,
+                ),
+                const SizedBox(height: 12),
+                AppTextField(
+                  controller: _emailCtrl,
+                  label: 'البريد الإلكتروني',
+                  prefixIcon: Icons.email_outlined,
+                  keyboardType: TextInputType.emailAddress,
+                  enabled: !_isLoading,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'مطلوب';
+                    if (!v.contains('@')) return 'بريد غير صالح';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                AppTextField(
+                  controller: _passwordCtrl,
+                  label: 'كلمة المرور',
+                  prefixIcon: Icons.lock_outline,
+                  obscureText: _obscure,
+                  enabled: !_isLoading,
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                  validator: (v) {
+                    if (v == null || v.length < 6) return '6 أحرف على الأقل';
+                    return null;
+                  },
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ]
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
+          child: const Text('إلغاء'),
+        ),
+        AppButton(
+          label: 'إنشاء',
+          isLoading: _isLoading,
+          onPressed: _isLoading ? null : _submit,
+        ),
+      ],
+    );
+  }
+}
+
+// ============================================================================
+// Edit User Dialog
+// ============================================================================
+
+class _EditUserDialog extends ConsumerStatefulWidget {
+  final AdminUser user;
+  const _EditUserDialog({required this.user});
+
+  @override
+  ConsumerState<_EditUserDialog> createState() => _EditUserDialogState();
+}
+
+class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
+  final _formKey = GlobalKey<FormState>();
+  late final TextEditingController _nameCtrl;
+  late final TextEditingController _emailCtrl;
+  final _passwordCtrl = TextEditingController();
+  late bool _isAdmin;
+  bool _obscure = true;
+  bool _isLoading = false;
+  String? _error;
+
+  @override
+  void initState() {
+    super.initState();
+    _nameCtrl = TextEditingController(text: widget.user.fullName);
+    _emailCtrl = TextEditingController(text: widget.user.email);
+    _isAdmin = widget.user.isAdmin;
+  }
+
+  @override
+  void dispose() {
+    _nameCtrl.dispose();
+    _emailCtrl.dispose();
+    _passwordCtrl.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    setState(() {
+      _isLoading = true;
+      _error = null;
+    });
+
+    try {
+      final service = AdminUserService(Supabase.instance.client);
+      await service.updateUser(
+        userId: widget.user.id,
+        email: _emailCtrl.text.trim() != widget.user.email ? _emailCtrl.text : null,
+        password: _passwordCtrl.text.isNotEmpty ? _passwordCtrl.text : null,
+        fullName: _nameCtrl.text,
+        isPlatformAdmin: _isAdmin,
+      );
+      if (mounted) Navigator.of(context).pop(true);
+    } on AdminUserException catch (e) {
+      if (mounted) {
+        setState(() {
+          _isLoading = false;
+          _error = e.message;
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      title: const Text('تعديل بيانات المستخدم'),
+      content: SizedBox(
+        width: 400,
+        child: Form(
+          key: _formKey,
+          child: SingleChildScrollView(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                AppTextField(
+                  controller: _nameCtrl,
+                  label: 'الاسم الكامل',
+                  prefixIcon: Icons.person_outline,
+                  enabled: !_isLoading,
+                ),
+                const SizedBox(height: 12),
+                AppTextField(
+                  controller: _emailCtrl,
+                  label: 'البريد الإلكتروني',
+                  prefixIcon: Icons.email_outlined,
+                  keyboardType: TextInputType.emailAddress,
+                  enabled: !_isLoading,
+                  validator: (v) {
+                    if (v == null || v.trim().isEmpty) return 'مطلوب';
+                    if (!v.contains('@')) return 'بريد غير صالح';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 12),
+                AppTextField(
+                  controller: _passwordCtrl,
+                  label: 'كلمة مرور جديدة (اختياري)',
+                  hint: 'اتركه فارغاً لعدم التغيير',
+                  prefixIcon: Icons.lock_outline,
+                  obscureText: _obscure,
+                  enabled: !_isLoading,
+                  suffixIcon: IconButton(
+                    icon: Icon(_obscure ? Icons.visibility : Icons.visibility_off),
+                    onPressed: () => setState(() => _obscure = !_obscure),
+                  ),
+                  validator: (v) {
+                    if (v != null && v.isNotEmpty && v.length < 6) return '6 أحرف على الأقل';
+                    return null;
+                  },
+                ),
+                const SizedBox(height: 16),
+                SwitchListTile(
+                  title: const Text('صلاحية أدمن (Platform Admin)'),
+                  subtitle: const Text('يمنح هذا المستخدم حق الوصول للوحة تحكم المنصة'),
+                  value: _isAdmin,
+                  onChanged: _isLoading ? null : (v) => setState(() => _isAdmin = v),
+                  contentPadding: EdgeInsets.zero,
+                ),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ]
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: [
+        TextButton(
+          onPressed: _isLoading ? null : () => Navigator.of(context).pop(false),
+          child: const Text('إلغاء'),
+        ),
+        AppButton(
+          label: 'حفظ التعديلات',
+          isLoading: _isLoading,
+          onPressed: _isLoading ? null : _submit,
+        ),
+      ],
     );
   }
 }
