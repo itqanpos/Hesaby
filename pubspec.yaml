@@ -1,7 +1,7 @@
 name: hesabi
 description: "Hesabi - Multi-tenant SaaS for POS, Inventory, Sales and Accounting"
 publish_to: "none"
-version: 1.0.1+2
+version: 1.0.2+3
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -39,7 +39,7 @@ dependencies:
   url_launcher: ^6.3.1
 
   # Media & imaging
-  mobile_scanner: ^5.2.3
+  mobile_scanner: ^7.2.1
   image_picker: ^1.1.2
 
   # POS — Phase 7 additions
