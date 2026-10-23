@@ -149,8 +149,9 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final bool includeInactive =
         ref.watch(employeesIncludeInactiveProvider);
     
-    // ⬇️ فحص صريح: مالك، أدمن، مدير، أو أدمن منصة
-    final CompanyMember? currentMember = ref.watch(currentMemberProvider).valueOrNull;
+    // ⬇️ فحص صريح مع الاعتماد على حالة التحميل لتجنب اختفاء الزر
+    final AsyncValue<CompanyMember?> memberAsync = ref.watch(currentMemberProvider);
+    final CompanyMember? currentMember = memberAsync.valueOrNull;
     final String? role = currentMember?.role;
     
     final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
@@ -161,7 +162,8 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final bool canManage = isPlatformAdmin ||
         isCompanyOwner ||
         isCompanyAdmin ||
-        isCompanyManager;
+        isCompanyManager ||
+        memberAsync.isLoading; // نعتبره مديراً أثناء التحميل
 
     return AppShell(
       appBar: AppBar(
