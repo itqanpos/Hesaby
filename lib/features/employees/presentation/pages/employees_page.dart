@@ -149,32 +149,31 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final AsyncValue<List<Employee>> async = ref.watch(employeesProvider);
     final bool includeInactive =
         ref.watch(employeesIncludeInactiveProvider);
-    
-    // ⬇️ فحص صريح للصلاحيات: مالك، أدمن، أو مدير الشركة الحالية
-    final CompanyMember? currentMember = ref.watch(currentMemberProvider).valueOrNull;
-    final String? role = currentMember?.role;
-    
+
+    // ⬇️ فحص شامل للصلاحيات
+    final AsyncValue<CompanyMember?> memberAsync =
+        ref.watch(currentMemberProvider);
+    final CompanyMember? currentMember = memberAsync.valueOrNull;
     final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
-    final bool isCompanyOwner = role == MemberRole.owner;
-    final bool isCompanyAdmin = role == MemberRole.admin;
-    final bool isCompanyManager = role == MemberRole.manager;
-    
-    // يظهر الزر إذا كان أدمن منصة، أو صاحب شركة (مالك/أدمن/مدير)
+
+    // صاحب الشركة أو المدير يملك canManageMembers == true
+    final bool isCompanyManager = currentMember?.canManageMembers ?? false;
+
+    // نعتبر المستخدم مديراً إذا كان أدمن منصة أو مدير شركة.
+    // ولتفادي اختفاء الزر أثناء التحميل، نعتبره مديراً مؤقتاً إذا كان الـ provider لا يزال يحمّل.
     final bool canManage = isPlatformAdmin ||
-        isCompanyOwner ||
-        isCompanyAdmin ||
-        isCompanyManager;
+        isCompanyManager ||
+        memberAsync.isLoading;
 
     return AppShell(
       appBar: AppBar(
         title: const Text('الفريق'),
         actions: <Widget>[
-          if (canManage) // سيظهر الآن لكل صاحب شركة
+          if (canManage) // سيظهر الآن لمالك الشركة فوراً
             IconButton(
               tooltip: 'الصلاحيات والأدوار',
               icon: const Icon(Icons.admin_panel_settings_outlined),
-              onPressed: () =>
-                  context.pushNamed(AppRouter.membersName),
+              onPressed: () => context.pushNamed(AppRouter.membersName),
             ),
           IconButton(
             tooltip: includeInactive
