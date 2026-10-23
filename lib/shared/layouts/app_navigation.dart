@@ -204,8 +204,11 @@ List<_NavSection> _visibleSections(WidgetRef ref) {
     }
   }
 
-  // ⬇️ هنا يتم إضافة مدخل لوحة تحكم المنصة (يظهر فقط إذا كان isAdmin == true)
-  final bool isAdmin = ref.watch(isPlatformAdminProvider);
+  // ⬇️ التعديل الجذري: إظهار القسم إذا كان أدمن منصة أو إيميله مطابق للإيميل الرئيسي
+  final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
+  final String? email = ref.watch(authProvider).session?.email;
+  final bool isAdmin = isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
+
   if (isAdmin) {
     result.add(
       const _NavSection(
@@ -504,7 +507,7 @@ class _Footer extends StatelessWidget {
           Text('حسابي', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
           const Spacer(),
           Text(
-            'v1.0.5', // ⬅️ تم تحديث الإصدار هنا
+            'v1.0.5',
             style: theme.textTheme.labelSmall?.copyWith(
               color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
             ),
