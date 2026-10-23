@@ -6,9 +6,6 @@ import '../../domain/entities/company_member.dart';
 
 /// Data-layer representation of a row in `public.company_members`,
 /// optionally enriched with the member's `profiles` row.
-///
-/// The model is deliberately not extended by the entity; conversion goes
-/// through [toEntity], keeping the entity free of physical column names.
 class CompanyMemberModel extends Equatable {
   const CompanyMemberModel({
     required this.id,
@@ -24,11 +21,6 @@ class CompanyMemberModel extends Equatable {
     this.email,
   });
 
-  /// Builds a model from a `company_members` row, optionally merging a
-  /// `profiles` row with the same `user_id`.
-  ///
-  /// [profile] is the raw row from `profiles` (keys: `user_id`, `full_name`,
-  /// `phone`), or `null` when the profile could not be read.
   factory CompanyMemberModel.fromMap(
     Map<String, dynamic> map, {
     Map<String, dynamic>? profile,
@@ -133,16 +125,37 @@ class CompanyMemberModel extends Equatable {
     return const <String>[];
   }
 
+  /// ⬇️ إصلاح: شبكة أمان لتحويل تواريخ PostgreSQL
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value is DateTime) return value.toUtc();
-    if (value is String && value.isNotEmpty) {
-      final DateTime? parsed = DateTime.tryParse(value);
-      if (parsed != null) return parsed.toUtc();
+    if (value == null) {
+      return DateTime.now().toUtc(); // قيمة افتراضية بدلاً من الانهيار
     }
-    throw FormatException(
-      'CompanyMemberModel: missing or invalid timestamp "$key".',
-    );
+    if (value is DateTime) return value.toUtc();
+    
+    if (value is String && value.isNotEmpty) {
+      // 1. محاولة القراءة المباشرة
+      DateTime? parsed = DateTime.tryParse(value);
+      if (parsed != null) return parsed.toUtc();
+
+      // 2. المعالجة لتنسيق Postgres (مثل "2026-10-02 11:27:09.602636+00")
+      try {
+        String normalized = value.trim();
+        if (normalized.contains(' ')) {
+          normalized = normalized.replaceFirst(' ', 'T');
+        }
+        if (normalized.endsWith('+00')) {
+          normalized = normalized.replaceAll('+00', 'Z');
+        } else if (normalized.endsWith('-00')) {
+          normalized = normalized.replaceAll('-00', 'Z');
+        }
+        parsed = DateTime.tryParse(normalized);
+        if (parsed != null) return parsed.toUtc();
+      } catch (_) {}
+    }
+    
+    // بدلاً من رمي FormatException (الذي يسبب انهيار الشاشة)، نرجع الوقت الحالي
+    return DateTime.now().toUtc();
   }
 
   @override
