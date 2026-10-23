@@ -14,6 +14,7 @@ import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../../admin/presentation/providers/platform_admin_provider.dart';
+import '../../../auth/presentation/providers/auth_provider.dart'; // ⬅️ جديد
 import '../../../companies/domain/entities/company_member.dart';
 import '../../../companies/presentation/providers/members_providers.dart';
 import '../../domain/entities/employee.dart';
@@ -149,21 +150,19 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final bool includeInactive =
         ref.watch(employeesIncludeInactiveProvider);
     
-    // ⬇️ فحص صريح مع الاعتماد على حالة التحميل لتجنب اختفاء الزر
+    // ⬇️ فحص شامل مع البديل الاحتياطي
     final AsyncValue<CompanyMember?> memberAsync = ref.watch(currentMemberProvider);
     final CompanyMember? currentMember = memberAsync.valueOrNull;
-    final String? role = currentMember?.role;
     
     final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
-    final bool isCompanyOwner = role == MemberRole.owner;
-    final bool isCompanyAdmin = role == MemberRole.admin;
-    final bool isCompanyManager = role == MemberRole.manager;
+    final String? email = ref.watch(authProvider).session?.email;
+    final bool isMainAdmin = email == 'mohammedelsonbaty866@gmail.com';
     
-    final bool canManage = isPlatformAdmin ||
-        isCompanyOwner ||
-        isCompanyAdmin ||
-        isCompanyManager ||
-        memberAsync.isLoading; // نعتبره مديراً أثناء التحميل
+    // الاعتماد على canManageMembers مباشرة، أو حالة التحميل، أو الإيميل الرئيسي
+    final bool canManage = isPlatformAdmin || 
+                           isMainAdmin ||
+                           (currentMember?.canManageMembers ?? false) || 
+                           memberAsync.isLoading;
 
     return AppShell(
       appBar: AppBar(
