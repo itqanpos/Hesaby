@@ -1,23 +1,11 @@
 // supabase/functions/admin-update-user/index.ts
-//
-// Updates an existing user's email / password / full_name / admin flag.
-//
-// SECURITY: identical to admin-create-user.
-//
-// Request body:
-//   { userId: string, email?: string, password?: string,
-//     fullName?: string, isPlatformAdmin?: boolean }
-// Response:
-//   200 { user_id, message }
-//   4xx { error }
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -26,14 +14,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-interface UpdateUserBody {
-  userId?: string;
-  email?: string;
-  password?: string;
-  fullName?: string;
-  isPlatformAdmin?: boolean;
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -48,7 +28,6 @@ serve(async (req: Request): Promise<Response> => {
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // --- 1. Verify the caller is a platform admin ---------------------------
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
       auth: { persistSession: false, autoRefreshToken: false },
@@ -65,10 +44,11 @@ serve(async (req: Request): Promise<Response> => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    // ⬇️ استخدام user_id بدلاً من id
     const { data: callerProfile, error: callerProfileError } = await adminClient
       .from("profiles")
       .select("is_platform_admin")
-      .eq("id", callerId)
+      .eq("user_id", callerId)
       .maybeSingle();
 
     if (callerProfileError) {
@@ -78,17 +58,14 @@ serve(async (req: Request): Promise<Response> => {
       return json({ error: "Forbidden: platform admin only" }, 403);
     }
 
-    // --- 2. Validate input --------------------------------------------------
-    const body = (await req.json()) as UpdateUserBody;
+    const body = await req.json();
     const userId = (body.userId ?? "").trim();
     if (!userId) return json({ error: "معرّف المستخدم مطلوب" }, 400);
 
-    // Prevent self-demotion.
     if (userId === callerId && body.isPlatformAdmin === false) {
       return json({ error: "لا يمكنك إزالة صلاحية الأدمن عن نفسك" }, 400);
     }
 
-    // --- 3. Update auth.users (email / password) ----------------------------
     const authUpdates: Record<string, unknown> = {};
     if (body.email && body.email.trim()) {
       const email = body.email.trim().toLowerCase();
@@ -110,14 +87,10 @@ serve(async (req: Request): Promise<Response> => {
         authUpdates,
       );
       if (updateAuthError) {
-        return json(
-          { error: "تعذّر تحديث بيانات الدخول", details: updateAuthError.message },
-          400,
-        );
+        return json({ error: "تعذّر تحديث بيانات الدخول", details: updateAuthError.message }, 400);
       }
     }
 
-    // --- 4. Update profiles (full_name / is_platform_admin) -----------------
     const profileUpdates: Record<string, unknown> = {};
     if (body.fullName !== undefined) {
       profileUpdates.full_name = body.fullName.trim() || null;
@@ -127,15 +100,13 @@ serve(async (req: Request): Promise<Response> => {
     }
 
     if (Object.keys(profileUpdates).length > 0) {
+      // ⬇️ استخدام user_id بدلاً من id
       const { error: updateProfileError } = await adminClient
         .from("profiles")
         .update(profileUpdates)
-        .eq("id", userId);
+        .eq("user_id", userId);
       if (updateProfileError) {
-        return json(
-          { error: "تعذّر تحديث الملف الشخصي", details: updateProfileError.message },
-          500,
-        );
+        return json({ error: "تعذّر تحديث الملف الشخصي", details: updateProfileError.message }, 500);
       }
     }
 
