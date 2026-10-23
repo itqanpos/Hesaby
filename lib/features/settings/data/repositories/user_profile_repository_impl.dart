@@ -7,18 +7,6 @@ import '../../domain/entities/user_profile.dart';
 import '../../domain/repositories/user_profile_repository.dart';
 
 /// Concrete implementation of [UserProfileRepository] backed by Supabase.
-///
-/// Talks directly to the `profiles` table. A separate datasource layer is
-/// omitted on purpose: the surface is only two operations (read + update of
-/// the current user's own row), so a datasource would add indirection
-/// without value — same reasoning as `CompanySettingsRepositoryImpl`.
-///
-/// **Important:** every read and write is scoped to `auth.uid()` on the
-/// client side as well as in the database. This is not a security measure
-/// (RLS already enforces it) but a correctness one: a platform admin sees
-/// every row through `profiles_platform_admin_select_all`, so an unfiltered
-/// `maybeSingle()` would fail with "multiple rows returned". Scoping by
-/// user id keeps the query result deterministic for every caller.
 class UserProfileRepositoryImpl implements UserProfileRepository {
   const UserProfileRepositoryImpl(this._client);
 
@@ -41,10 +29,6 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
         );
       }
 
-      // Filter by the current user id explicitly. RLS would return only
-      // this row for a regular user, but a platform admin sees every row,
-      // so `maybeSingle()` needs a deterministic single-row filter to
-      // avoid throwing "multiple rows returned".
       final Map<String, dynamic>? row = await client
           .from('profiles')
           .select()
@@ -95,9 +79,6 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
         'phone': phone,
       };
 
-      // Same reasoning as [getMyProfile]: scope by user_id so the returned
-      // row is exactly the current user's, regardless of the caller's
-      // platform-admin status.
       final Map<String, dynamic>? row = await client
           .from('profiles')
           .update(payload)
@@ -174,16 +155,39 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
     return null;
   }
 
+  /// ⬇️ شبكة الأمان للتواريخ: تحويل تنسيق Postgres إلى تنسيق يفهمه Dart على الأندرويد
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value is DateTime) return value.toUtc();
-    if (value is String && value.isNotEmpty) {
-      final DateTime? parsed = DateTime.tryParse(value);
-      if (parsed != null) return parsed.toUtc();
+    if (value == null) {
+      throw FormatException('UserProfile: "$key" is missing.');
     }
-    throw FormatException(
-      'UserProfile: "$key" is not a valid timestamp.',
-    );
+    
+    if (value is DateTime) {
+      return value.toUtc();
+    }
+    
+    if (value is String && value.isNotEmpty) {
+      // 1. محاولة القراءة المباشرة
+      DateTime? parsed = DateTime.tryParse(value);
+      if (parsed != null) return parsed.toUtc();
+
+      // 2. المعالجة لتنسيق Postgres (مثل "2026-10-02 11:27:09.602636+00")
+      try {
+        String normalized = value.trim();
+        if (normalized.contains(' ')) {
+          normalized = normalized.replaceFirst(' ', 'T');
+        }
+        if (normalized.endsWith('+00')) {
+          normalized = normalized.replaceAll('+00', 'Z');
+        } else if (normalized.endsWith('-00')) {
+          normalized = normalized.replaceAll('-00', 'Z');
+        }
+        parsed = DateTime.tryParse(normalized);
+        if (parsed != null) return parsed.toUtc();
+      } catch (_) {}
+    }
+    
+    throw FormatException('UserProfile: "$key" is not a valid timestamp.');
   }
 
   // ---------------------------------------------------------------------------
