@@ -13,6 +13,7 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
+import '../../../admin/presentation/providers/platform_admin_provider.dart'; // ⬅️ استيراد بروفايدر الأدمن
 import '../../../companies/presentation/providers/members_providers.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
@@ -20,12 +21,6 @@ import '../providers/employee_providers.dart';
 import '../widgets/employee_form_sheet.dart';
 
 /// Employees / Team page.
-///
-/// The AppBar "shield" action opens the permissions page — visible only
-/// when the current user is a manager (owner / admin / manager).
-///
-/// **Interaction model:** tapping a card does nothing — edit / login /
-/// toggle / delete are reached only from the per-card overflow menu.
 class EmployeesPage extends ConsumerStatefulWidget {
   const EmployeesPage({super.key});
 
@@ -153,13 +148,17 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final AsyncValue<List<Employee>> async = ref.watch(employeesProvider);
     final bool includeInactive =
         ref.watch(employeesIncludeInactiveProvider);
-    final bool canManage = ref.watch(isManagerProvider);
+    
+    // ⬇️ التعديل هنا: إظهار الزر إذا كان مديراً أو أدمن منصة
+    final bool isManager = ref.watch(isManagerProvider);
+    final bool isAdmin = ref.watch(isPlatformAdminProvider);
+    final bool canManage = isManager || isAdmin;
 
     return AppShell(
       appBar: AppBar(
         title: const Text('الفريق'),
         actions: <Widget>[
-          if (canManage)
+          if (canManage) // ⬅️ سيظهر الزر الآن للأدمن
             IconButton(
               tooltip: 'الصلاحيات',
               icon: const Icon(Icons.admin_panel_settings_outlined),
