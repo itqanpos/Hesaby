@@ -504,7 +504,7 @@ class _Footer extends StatelessWidget {
           Text('حسابي', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
           const Spacer(),
           Text(
-            'v1.0.4', // ⬅️ تم تحديث الإصدار هنا
+            'v1.0.5', // ⬅️ تم تحديث الإصدار هنا
             style: theme.textTheme.labelSmall?.copyWith(
               color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
             ),
