@@ -180,7 +180,7 @@ class SettingsPage extends ConsumerWidget {
           const _SettingsTile(
             icon: Icons.info_outline,
             title: 'الإصدار',
-            subtitle: 'v1.0.4', // ⬅️ تم تحديث الإصدار هنا
+            subtitle: 'v1.0.5', // ⬅️ تم تحديث الإصدار هنا
             enabled: false,
           ),
           const _SettingsTile(
