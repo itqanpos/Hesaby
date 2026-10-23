@@ -1,27 +1,11 @@
 // supabase/functions/admin-create-user/index.ts
-//
-// Provisions a new user via the Supabase Admin API.
-//
-// SECURITY:
-// * The caller's JWT is verified by Supabase (verify_jwt = true).
-// * We then re-check `profiles.is_platform_admin` using the service role
-//   before touching `auth.admin.*`.
-// * The service-role key NEVER leaves this function; it is not embedded in
-//   the Flutter app.
-//
-// Request body:
-//   { email: string, password: string, fullName?: string }
-// Response:
-//   200 { user_id, email, message }
-//   4xx { error, details? }
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
-  "Access-Control-Allow-Headers":
-    "authorization, x-client-info, apikey, content-type",
+  "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
   "Access-Control-Allow-Methods": "POST, OPTIONS",
 };
 
@@ -30,12 +14,6 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
-}
-
-interface CreateUserBody {
-  email?: string;
-  password?: string;
-  fullName?: string;
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -50,7 +28,6 @@ serve(async (req: Request): Promise<Response> => {
     const SERVICE_ROLE_KEY = Deno.env.get("SUPABASE_SERVICE_ROLE_KEY")!;
     const ANON_KEY = Deno.env.get("SUPABASE_ANON_KEY")!;
 
-    // --- 1. Verify the caller is a platform admin ---------------------------
     const userClient = createClient(SUPABASE_URL, ANON_KEY, {
       global: { headers: { Authorization: authHeader } },
       auth: { persistSession: false, autoRefreshToken: false },
@@ -65,10 +42,11 @@ serve(async (req: Request): Promise<Response> => {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
+    // ⬇️ استخدام user_id بدلاً من id
     const { data: callerProfile, error: callerProfileError } = await adminClient
       .from("profiles")
       .select("is_platform_admin")
-      .eq("id", userData.user.id)
+      .eq("user_id", userData.user.id)
       .maybeSingle();
 
     if (callerProfileError) {
@@ -78,8 +56,7 @@ serve(async (req: Request): Promise<Response> => {
       return json({ error: "Forbidden: platform admin only" }, 403);
     }
 
-    // --- 2. Validate input --------------------------------------------------
-    const body = (await req.json()) as CreateUserBody;
+    const body = await req.json();
     const email = (body.email ?? "").trim().toLowerCase();
     const password = body.password ?? "";
     const fullName = (body.fullName ?? "").trim();
@@ -91,7 +68,6 @@ serve(async (req: Request): Promise<Response> => {
       return json({ error: "كلمة المرور يجب أن تكون 6 أحرف على الأقل" }, 400);
     }
 
-    // --- 3. Create the user (auto-confirm, admin-provisioned) ---------------
     const { data: created, error: createError } = await adminClient.auth.admin.createUser({
       email,
       password,
@@ -103,21 +79,19 @@ serve(async (req: Request): Promise<Response> => {
       return json({ error: "تعذّر إنشاء المستخدم", details: createError?.message }, 400);
     }
 
-    // --- 4. Ensure the profile row exists with the correct full_name --------
-    // The handle_new_user trigger normally creates it; we upsert defensively.
+    // ⬇️ استخدام user_id بدلاً من id في Upsert
     const { error: profileUpsertError } = await adminClient
       .from("profiles")
       .upsert(
         {
-          id: created.user.id,
+          user_id: created.user.id,
           full_name: fullName || null,
           is_platform_admin: false,
         },
-        { onConflict: "id" },
+        { onConflict: "user_id" },
       );
 
     if (profileUpsertError) {
-      // Log but do not fail — user exists, admin can fix the profile later.
       console.error("Profile upsert failed:", profileUpsertError);
     }
 
