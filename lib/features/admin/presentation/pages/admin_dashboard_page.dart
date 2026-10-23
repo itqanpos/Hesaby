@@ -7,6 +7,7 @@ import 'package:go_router/go_router.dart';
 import '../../../../app/router.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
+import '../../../auth/presentation/providers/auth_provider.dart'; // ⬅️ أضفنا هذا
 import '../providers/platform_admin_provider.dart';
 import 'tabs/admin_companies_tab.dart';
 import 'tabs/admin_users_tab.dart';
@@ -18,9 +19,12 @@ class AdminDashboardPage extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    final bool isAdmin = ref.watch(isPlatformAdminProvider);
+    final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
+    final String? email = ref.watch(authProvider).session?.email;
+    
+    // ⬇️ السماح بالدخول إذا كان أدمن منصة أو يملك الإيميل الرئيسي
+    final bool isAdmin = isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
 
-    // Security check: Only platform admins can access this page.
     if (!isAdmin) {
       return AppShell(
         appBar: AppBar(
