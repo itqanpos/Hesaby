@@ -135,21 +135,13 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                               final CompanyMember member = visible[index];
                               return _MemberCard(
                                 member: member,
-                                // الضغط على البطاقة يفتح الصلاحيات
-                                onTap: () => context.pushNamed(
-                                  AppRouter.memberPermissionsName,
-                                  pathParameters: <String, String>{
-                                    'id': member.id,
-                                  },
-                                ),
-                                onToggleActive: () => _toggleActive(context, member),
-                                // زر الصلاحيات المباشر
                                 onEditPermissions: () => context.pushNamed(
                                   AppRouter.memberPermissionsName,
                                   pathParameters: <String, String>{
                                     'id': member.id,
                                   },
                                 ),
+                                onToggleActive: () => _toggleActive(context, member),
                               );
                             },
                           ),
@@ -307,21 +299,19 @@ class _KpiCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Member card
+// Member card (New Layout)
 // ============================================================================
 
 class _MemberCard extends StatelessWidget {
   const _MemberCard({
     required this.member,
-    required this.onTap,
-    required this.onToggleActive,
     required this.onEditPermissions,
+    required this.onToggleActive,
   });
 
   final CompanyMember member;
-  final VoidCallback onTap;
-  final VoidCallback onToggleActive;
   final VoidCallback onEditPermissions;
+  final VoidCallback onToggleActive;
 
   @override
   Widget build(BuildContext context) {
@@ -332,123 +322,130 @@ class _MemberCard extends StatelessWidget {
     final String? email = member.email;
     final (Color roleBg, Color roleFg) = _roleColors(scheme, member.role);
 
-    return Material(
-      color: scheme.surface,
-      borderRadius: BorderRadius.circular(14),
-      child: InkWell(
+    return Container(
+      decoration: BoxDecoration(
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(14),
-        onTap: onTap,
-        child: Container(
-          decoration: BoxDecoration(
-            borderRadius: BorderRadius.circular(14),
-            border: Border.all(color: scheme.outlineVariant),
-          ),
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-          child: Row(
-            children: <Widget>[
-              CircleAvatar(
-                radius: 20,
-                backgroundColor: member.isActive
-                    ? scheme.primaryContainer
-                    : scheme.surfaceContainerHighest,
-                foregroundColor: member.isActive
-                    ? scheme.onPrimaryContainer
-                    : scheme.onSurfaceVariant,
-                child: Text(
-                  displayName.characters.first.toUpperCase(),
-                  style: theme.textTheme.titleMedium?.copyWith(
-                    fontWeight: FontWeight.w700,
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: <Widget>[
+          // ---- الصف الأول: الصورة والبيانات الأساسية ----
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 12, 12, 8),
+            child: Row(
+              children: <Widget>[
+                CircleAvatar(
+                  radius: 20,
+                  backgroundColor: member.isActive
+                      ? scheme.primaryContainer
+                      : scheme.surfaceContainerHighest,
+                  foregroundColor: member.isActive
+                      ? scheme.onPrimaryContainer
+                      : scheme.onSurfaceVariant,
+                  child: Text(
+                    displayName.characters.first.toUpperCase(),
+                    style: theme.textTheme.titleMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
-              ),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            displayName,
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontWeight: FontWeight.w700,
-                              color: !member.isActive ? scheme.onSurfaceVariant : null,
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: <Widget>[
+                      Row(
+                        children: <Widget>[
+                          Expanded(
+                            child: Text(
+                              displayName,
+                              style: theme.textTheme.titleSmall?.copyWith(
+                                fontWeight: FontWeight.w700,
+                                color: !member.isActive ? scheme.onSurfaceVariant : null,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
                           ),
-                        ),
-                        if (!member.isActive)
-                          _Chip(
-                            label: 'معطّل',
-                            background: scheme.errorContainer,
-                            foreground: scheme.onErrorContainer,
-                          ),
-                      ],
-                    ),
-                    const SizedBox(height: 2),
-                    if (email != null && email.isNotEmpty)
-                      Text(
-                        email,
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    const SizedBox(height: 6),
-                    Row(
-                      children: <Widget>[
-                        _Chip(
-                          label: MemberRole.label(member.role),
-                          background: roleBg,
-                          foreground: roleFg,
-                        ),
-                        if (member.deniedCount > 0) ...<Widget>[
-                          const SizedBox(width: 6),
-                          _Chip(
-                            label: '${member.deniedCount} مُلغاة',
-                            background: scheme.errorContainer,
-                            foreground: scheme.onErrorContainer,
-                          ),
+                          if (!member.isActive)
+                            _Chip(
+                              label: 'معطّل',
+                              background: scheme.errorContainer,
+                              foreground: scheme.onErrorContainer,
+                            ),
                         ],
+                      ),
+                      if (email != null && email.isNotEmpty) ...[
+                        const SizedBox(height: 2),
+                        Text(
+                          email,
+                          style: theme.textTheme.bodySmall?.copyWith(
+                            color: scheme.onSurfaceVariant,
+                          ),
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                        ),
                       ],
-                    ),
-                  ],
-                ),
-              ),
-              const SizedBox(width: 4),
-              
-              // ⬇️ زر الصلاحيات المباشر
-              IconButton(
-                tooltip: 'تعديل الصلاحيات',
-                icon: const Icon(Icons.security),
-                color: scheme.primary,
-                onPressed: onEditPermissions,
-              ),
-
-              // ⬇️ قائمة منسدلة للتعطيل/التفعيل فقط
-              PopupMenuButton<String>(
-                tooltip: 'خيارات أخرى',
-                onSelected: (value) {
-                  if (value == 'toggle') onToggleActive();
-                },
-                itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'toggle',
-                    child: ListTile(
-                      leading: Icon(member.isActive ? Icons.visibility_off_outlined : Icons.visibility_outlined),
-                      title: Text(member.isActive ? 'تعطيل العضو' : 'تفعيل العضو'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
+                      const SizedBox(height: 6),
+                      Row(
+                        children: <Widget>[
+                          _Chip(
+                            label: MemberRole.label(member.role),
+                            background: roleBg,
+                            foreground: roleFg,
+                          ),
+                          if (member.deniedCount > 0) ...[
+                            const SizedBox(width: 6),
+                            _Chip(
+                              label: '${member.deniedCount} مُلغاة',
+                              background: scheme.errorContainer,
+                              foreground: scheme.onErrorContainer,
+                            ),
+                          ],
+                        ],
+                      ),
+                    ],
                   ),
-                ],
-              ),
-            ],
+                ),
+              ],
+            ),
           ),
-        ),
+
+          // ---- الصف الثاني: أزرار الإجراءات ----
+          Divider(height: 1, color: scheme.outlineVariant),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 2),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: <Widget>[
+                TextButton.icon(
+                  onPressed: onEditPermissions,
+                  icon: const Icon(Icons.security, size: 18),
+                  label: const Text('الصلاحيات'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: scheme.primary,
+                  ),
+                ),
+                const SizedBox(width: 4),
+                TextButton.icon(
+                  onPressed: onToggleActive,
+                  icon: Icon(
+                    member.isActive ? Icons.visibility_off_outlined : Icons.visibility_outlined,
+                    size: 18,
+                  ),
+                  label: Text(member.isActive ? 'تعطيل' : 'تفعيل'),
+                  style: TextButton.styleFrom(
+                    foregroundColor: member.isActive ? scheme.error : const Color(0xFF0F7B6C),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ],
       ),
     );
   }
