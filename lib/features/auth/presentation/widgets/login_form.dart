@@ -17,9 +17,7 @@ import '../providers/auth_provider.dart';
 /// reserved domain is what `create_employee_user` uses under the hood.
 ///
 /// **Self-signup is disabled.** Account creation is provisioned by the
-/// platform admin from the admin dashboard. Users without an account are
-/// instructed to contact the administrator instead of being routed to a
-/// public signup page.
+/// platform admin from the admin dashboard.
 class LoginForm extends ConsumerStatefulWidget {
   const LoginForm({super.key});
 
@@ -98,14 +96,16 @@ class _LoginFormState extends ConsumerState<LoginForm> {
           children: <Widget>[
             Text(
               'تسجيل الدخول',
-              style: theme.textTheme.headlineSmall?.copyWith(
+              style: theme.textTheme.titleLarge?.copyWith(
                 fontWeight: FontWeight.w700,
               ),
             ),
             const SizedBox(height: 8),
             Text(
-              'أدخل بريدك الإلكتروني أو كود الدخول',
-              style: theme.textTheme.bodyMedium,
+              'أدخل بريدك الإلكتروني أو كود الدخول للمتابعة',
+              style: theme.textTheme.bodyMedium?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
             ),
             const SizedBox(height: 24),
             AppTextField(
@@ -146,7 +146,7 @@ class _LoginFormState extends ConsumerState<LoginForm> {
               const SizedBox(height: 16),
               _FailureBanner(message: _failureMessage(failure)),
             ],
-            const SizedBox(height: 24),
+            const SizedBox(height: 28),
             AppButton(
               label: 'تسجيل الدخول',
               icon: Icons.login,
@@ -155,36 +155,7 @@ class _LoginFormState extends ConsumerState<LoginForm> {
               isLoading: _isSubmitting,
               onPressed: _isSubmitting ? null : _submit,
             ),
-            const SizedBox(height: 16),
-            // ⬇️ رابط إنشاء الحساب أُزيل — التسجيل الآن عبر إدارة المنصة فقط.
-            Container(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 12,
-                vertical: 10,
-              ),
-              decoration: BoxDecoration(
-                color: theme.colorScheme.surfaceContainerHighest,
-                borderRadius: BorderRadius.circular(10),
-              ),
-              child: Row(
-                children: <Widget>[
-                  Icon(
-                    Icons.lock_outline,
-                    size: 18,
-                    color: theme.colorScheme.onSurfaceVariant,
-                  ),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      'لإنشاء حساب جديد، تواصل مع إدارة المنصة.',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: theme.colorScheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-            ),
+            // ⬇️ تمت إزالة رسالة "تواصل مع إدارة المنصة" بناءً على طلبك
           ],
         ),
       ),
