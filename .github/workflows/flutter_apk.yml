@@ -154,13 +154,15 @@ jobs:
           if ! grep -q 'android.hardware.camera' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' "$MANIFEST"
           fi
-          # Disable Impeller
+          
+          # Disable Impeller (حقن الوسم بشكل صحيح قبل إغلاق application)
           if ! grep -q 'EnableImpeller' "$MANIFEST"; then
             python3 - <<'PY'
           import pathlib
           p = pathlib.Path('android/app/src/main/AndroidManifest.xml')
           text = p.read_text()
-          text = text.replace('<application', '<application\n        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />')
+          # ⬇️ إصلاح الخطأ: إضافة الوسم قبل </application> مباشرة
+          text = text.replace('</application>', '    <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />\n    </application>')
           p.write_text(text)
           print("Injected EnableImpeller = false")
           PY
@@ -213,8 +215,6 @@ jobs:
 
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
-
-      # تمت إزالة flutter_native_splash لتجنب خطأ XML
 
       - name: Decode keystore
         env:
