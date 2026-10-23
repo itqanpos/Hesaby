@@ -13,7 +13,8 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
-import '../../../admin/presentation/providers/platform_admin_provider.dart'; // ⬅️ استيراد بروفايدر الأدمن
+import '../../../admin/presentation/providers/platform_admin_provider.dart';
+import '../../../companies/domain/entities/company_member.dart';
 import '../../../companies/presentation/providers/members_providers.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
@@ -149,18 +150,28 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final bool includeInactive =
         ref.watch(employeesIncludeInactiveProvider);
     
-    // ⬇️ التعديل هنا: إظهار الزر إذا كان مديراً أو أدمن منصة
-    final bool isManager = ref.watch(isManagerProvider);
-    final bool isAdmin = ref.watch(isPlatformAdminProvider);
-    final bool canManage = isManager || isAdmin;
+    // ⬇️ فحص صريح للصلاحيات: مالك، أدمن، أو مدير الشركة الحالية
+    final CompanyMember? currentMember = ref.watch(currentMemberProvider).valueOrNull;
+    final String? role = currentMember?.role;
+    
+    final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
+    final bool isCompanyOwner = role == MemberRole.owner;
+    final bool isCompanyAdmin = role == MemberRole.admin;
+    final bool isCompanyManager = role == MemberRole.manager;
+    
+    // يظهر الزر إذا كان أدمن منصة، أو صاحب شركة (مالك/أدمن/مدير)
+    final bool canManage = isPlatformAdmin ||
+        isCompanyOwner ||
+        isCompanyAdmin ||
+        isCompanyManager;
 
     return AppShell(
       appBar: AppBar(
         title: const Text('الفريق'),
         actions: <Widget>[
-          if (canManage) // ⬅️ سيظهر الزر الآن للأدمن
+          if (canManage) // سيظهر الآن لكل صاحب شركة
             IconButton(
-              tooltip: 'الصلاحيات',
+              tooltip: 'الصلاحيات والأدوار',
               icon: const Icon(Icons.admin_panel_settings_outlined),
               onPressed: () =>
                   context.pushNamed(AppRouter.membersName),
@@ -665,8 +676,6 @@ class _Badge extends StatelessWidget {
 // Create login dialog
 // ============================================================================
 
-/// Opens the "create login" dialog for [employee]. Returns `true` on
-/// success.
 Future<bool?> showCreateLoginDialog({
   required BuildContext context,
   required Employee employee,
