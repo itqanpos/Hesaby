@@ -6,7 +6,7 @@ import 'package:go_router/go_router.dart';
 
 import '../features/admin/presentation/pages/admin_companies_page.dart';
 import '../features/admin/presentation/pages/admin_dashboard_page.dart';
-import '../features/admin/presentation/providers/admin_app_config_provider.dart'; // ⬅️ جديد
+import '../features/admin/presentation/providers/admin_app_config_provider.dart';
 import '../features/auth/presentation/pages/create_company_page.dart';
 import '../features/auth/presentation/pages/login_page.dart';
 import '../features/auth/presentation/pages/signup_page.dart';
@@ -56,6 +56,8 @@ import '../features/sales/presentation/pages/sales_page.dart';
 import '../features/settings/presentation/pages/company_settings_page.dart';
 import '../features/settings/presentation/pages/profile_page.dart';
 import '../features/settings/presentation/pages/settings_page.dart';
+// ⬇️ إضافة استيراد بروفايدر المستخدم للتحقق من صلاحية الأدمن
+import '../features/settings/presentation/providers/user_profile_providers.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
@@ -69,8 +71,6 @@ abstract final class AppRouter {
   static const String loginPath = '/login';
   static const String loginName = 'login';
 
-  /// Kept for backward compatibility (deep links, old QR codes).
-  /// The route redirects everyone to [loginPath] — self-signup is disabled.
   static const String signupPath = '/signup';
   static const String signupName = 'signup';
 
@@ -233,7 +233,6 @@ abstract final class AppRouter {
   static const String posPath = '/pos';
   static const String posName = 'pos';
 
-  // ⬇️ دالة مساعدة: هل المسار يحتاج ميزة معينة؟
   static String? _featureFlagForPath(String path) {
     if (path.startsWith(posPath)) return 'pos';
     if (path.startsWith(inventoryPath)) return 'inventory';
@@ -256,29 +255,54 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (auth.isUnauthenticated) {
-        // ⬇️ التسجيل الذاتي مغلق: الزائر غير المسجل يُوجَّه دائمًا إلى
-        //    صفحة الدخول، حتى لو فتح /signup مباشرة.
         if (location == AppRouter.loginPath) {
           return null;
         }
         return AppRouter.loginPath;
       }
 
-      // ⬇️ المستخدم المسجل: صفحات الدخول/التسجيل/التحميل كلها تُعيده للرئيسية.
+      // ⬇️ التوجيه الذكي بعد تسجيل الدخول ⬇️
       if (location == AppRouter.loginPath ||
-          location == AppRouter.signupPath ||
-          location == AppRouter.loadingPath) {
+          location == AppRouter.signupPath) {
+        final profileAsync = ref.read(userProfileProvider);
+        
+        // إذا كانت بيانات المستخدم لم تُحمّل بعد، نعرض شاشة التحميل
+        if (!profileAsync.hasValue) {
+          return AppRouter.loadingPath;
+        }
+        
+        // إذا كان أدمن، يتوجه للوحة التحكم مباشرة
+        if (profileAsync.value?.isPlatformAdmin == true) {
+          return AppRouter.adminDashboardPath;
+        }
+        
+        // مستخدم عادي يتوجه للرئيسية
         return AppRouter.homePath;
       }
 
-      // ⬇️ حماية Feature Flags
+      // ⬇️ شاشة التحميل المؤقتة أثناء جلب بيانات المستخدم ⬇️
+      if (location == AppRouter.loadingPath) {
+        final profileAsync = ref.read(userProfileProvider);
+        
+        if (!profileAsync.hasValue) {
+          return null; // ابقَ في شاشة التحميل
+        }
+        
+        if (profileAsync.value?.isPlatformAdmin == true) {
+          return AppRouter.adminDashboardPath;
+        }
+        
+        return AppRouter.homePath;
+      }
+      // ⬆️ نهاية التوجيه الذكي ⬆️
+
+      // حماية Feature Flags
       final String? flagKey = AppRouter._featureFlagForPath(location);
       if (flagKey != null) {
         final appConfig = ref.read(adminAppConfigProvider).valueOrNull;
         final bool isEnabled =
             appConfig?.featureFlags[flagKey] as bool? ?? true;
         if (!isEnabled) {
-          // الميزة معطلة → نوجهه للرئيسية
           return AppRouter.homePath;
         }
       }
@@ -298,8 +322,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const LoginPage(),
       ),
-      // ⬇️ مسار /signup محفوظ للتوافق، لكنه يعرض رسالة "التسجيل مغلق"
-      //    في الحالات النادرة التي يصل فيها المستخدم قبل تطبيق redirect.
       GoRoute(
         path: AppRouter.signupPath,
         name: AppRouter.signupName,
@@ -682,6 +704,15 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
 
   ref.listen<AuthState>(authProvider, (AuthState? previous, AuthState next) {
     if (previous?.status != next.status) {
+      router.refresh();
+    }
+  });
+
+  // ⬇️ الاستماع لتحميل بيانات المستخدم، لتحديث الراوتر بعد تسجيل الدخول
+  ref.listen(userProfileProvider, (prev, next) {
+    final bool wasLoaded = prev?.hasValue ?? false;
+    final bool isLoaded = next.hasValue;
+    if (!wasLoaded && isLoaded) {
       router.refresh();
     }
   });
