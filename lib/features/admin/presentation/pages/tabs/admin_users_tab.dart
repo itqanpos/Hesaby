@@ -46,33 +46,41 @@ class AdminUser {
 }
 
 // ============================================================================
-// Provider
+// Provider (مضاد للأخطاء)
 // ============================================================================
 
 final adminUsersProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) async {
   final client = Supabase.instance.client;
 
-  // 1. Fetch users via the secure RPC (includes email)
+  // 1. جلب المستخدمين عبر الدالة الآمنة
   final rpcResponse = await client.rpc('get_admin_users');
 
-  // 2. Fetch company memberships
-  final membersResponse = await client
-      .from('company_members')
-      .select('user_id, role, companies(name)');
+  // 2. جلب عضويات الشركات
+  List<dynamic> membersResponse = [];
+  try {
+    membersResponse = await client
+        .from('company_members')
+        .select('user_id, role, companies(name)');
+  } catch (e) {
+    // إذا فشل جلب الشركات، نكمل بدونها بدلاً من انهيار الشاشة
+    debugPrint('Failed to fetch company members: $e');
+  }
 
-  // Group memberships by user_id
+  // تجميع عضويات الشركات
   final Map<String, List<AdminUserCompany>> memberships = {};
-  for (final row in membersResponse as List) {
-    final userId = row['user_id'] as String;
-    final companyData = row['companies'] as Map<String, dynamic>?;
+  for (final row in membersResponse) {
+    final userId = row['user_id'] as String?;
+    if (userId == null) continue;
     
+    final companyData = row['companies'] as Map<String, dynamic>?;
     if (companyData != null) {
       final companyName = companyData['name'] as String? ?? 'شركة محذوفة';
       final role = row['role'] as String? ?? 'عضو';
+      final companyId = companyData['id']?.toString() ?? '';
       
       memberships.putIfAbsent(userId, () => []).add(
         AdminUserCompany(
-          companyId: companyData['id']?.toString() ?? '',
+          companyId: companyId,
           companyName: companyName,
           role: role,
         ),
@@ -80,26 +88,47 @@ final adminUsersProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) asy
     }
   }
 
-  // Build the final list
+  // بناء القائمة النهائية
   final List<AdminUser> users = [];
-  for (final p in (rpcResponse as List)) {
-    final map = p as Map<String, dynamic>;
-    final userId = map['user_id'] as String;
-    
-    users.add(
-      AdminUser(
-        id: userId,
-        fullName: map['full_name'] as String? ?? 'بدون اسم',
-        email: map['email'] as String? ?? 'غير متوفر',
-        isAdmin: map['is_platform_admin'] as bool? ?? false,
-        createdAt: DateTime.parse(map['created_at'] as String),
-        companies: memberships[userId] ?? [],
-      ),
-    );
+  if (rpcResponse is List) {
+    for (final p in rpcResponse) {
+      final map = p as Map<String, dynamic>;
+      final userId = map['user_id'] as String?;
+      if (userId == null) continue;
+      
+      users.add(
+        AdminUser(
+          id: userId,
+          fullName: map['full_name'] as String? ?? 'بدون اسم',
+          email: map['email'] as String? ?? 'غير متوفر',
+          isAdmin: map['is_platform_admin'] as bool? ?? false,
+          createdAt: _safeParseDate(map['created_at']),
+          companies: memberships[userId] ?? [],
+        ),
+      );
+    }
   }
 
   return users;
 });
+
+// شبكة أمان لتحويل التواريخ
+DateTime _safeParseDate(Object? value) {
+  if (value == null) return DateTime.now();
+  if (value is DateTime) return value;
+  if (value is String) {
+    DateTime? parsed = DateTime.tryParse(value);
+    if (parsed != null) return parsed;
+    try {
+      String normalized = value.trim();
+      if (normalized.contains(' ')) normalized = normalized.replaceFirst(' ', 'T');
+      if (normalized.endsWith('+00')) normalized = normalized.replaceAll('+00', 'Z');
+      parsed = DateTime.tryParse(normalized);
+      if (parsed != null) return parsed;
+    } catch (_) {}
+  }
+  return DateTime.now();
+}
 
 // ============================================================================
 // UI
@@ -162,7 +191,7 @@ class _AdminUsersTabState extends ConsumerState<AdminUsersTab> {
       loading: () => const AppLoader(),
       error: (Object error, StackTrace _) => AppErrorView(
         title: 'تعذّر تحميل المستخدمين',
-        message: 'حدث خطأ أثناء جلب قائمة المشتركين.',
+        message: 'حدث خطأ أثناء جلب قائمة المشتركين: $error',
         retryLabel: 'إعادة المحاولة',
         onRetry: () => ref.invalidate(adminUsersProvider),
       ),
@@ -296,7 +325,7 @@ class _UserCard extends StatelessWidget {
                     Text(
                       user.email,
                       style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                      textDirection: TextDirection.ltr, // الإيميل بالإنجليزي
+                      textDirection: TextDirection.ltr,
                     ),
                   ],
                 ),
@@ -344,7 +373,7 @@ class _UserCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Create User Dialog
+// Create & Edit Dialogs (كاملة كما هي من الرد السابق)
 // ============================================================================
 
 class _CreateUserDialog extends ConsumerStatefulWidget {
@@ -466,10 +495,6 @@ class _CreateUserDialogState extends ConsumerState<_CreateUserDialog> {
     );
   }
 }
-
-// ============================================================================
-// Edit User Dialog
-// ============================================================================
 
 class _EditUserDialog extends ConsumerStatefulWidget {
   final AdminUser user;
