@@ -6,15 +6,10 @@ import '../../../../core/utils/logger.dart';
 import '../../domain/entities/user_profile.dart';
 import '../../domain/repositories/user_profile_repository.dart';
 
-/// Concrete implementation of [UserProfileRepository] backed by Supabase.
 class UserProfileRepositoryImpl implements UserProfileRepository {
   const UserProfileRepositoryImpl(this._client);
 
   final supabase.SupabaseClient? _client;
-
-  // ---------------------------------------------------------------------------
-  // Read
-  // ---------------------------------------------------------------------------
 
   @override
   Future<UserProfile> getMyProfile() async {
@@ -29,17 +24,30 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
         );
       }
 
+      // 1. محاولة جلب الملف الشخصي
       final Map<String, dynamic>? row = await client
           .from('profiles')
           .select()
           .eq('user_id', userId)
           .maybeSingle();
 
+      // 2. إذا لم يوجد الملف (مثلاً تم إنشاء الحساب ولم يتم إنشاء بروفايل)، نقوم بإنشائه فوراً
       if (row == null) {
-        throw const UserProfileException(
-          type: UserProfileFailureType.notFound,
-          cause: 'No profiles row for the current user.',
-        );
+        AppLogger.warning('UserProfile not found. Auto-creating profile for $userId.');
+        
+        final Map<String, dynamic> newProfile = <String, dynamic>{
+          'user_id': userId,
+          'full_name': client.auth.currentUser?.userMetadata?['full_name'] ?? 'مستخدم جديد',
+          'is_platform_admin': false,
+        };
+
+        final Map<String, dynamic> createdRow = await client
+            .from('profiles')
+            .insert(newProfile)
+            .select()
+            .single();
+
+        return _fromMap(createdRow);
       }
 
       return _fromMap(row);
@@ -53,10 +61,6 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
       throw _mapUnknown(error, stackTrace, operation: 'getMyProfile');
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Update
-  // ---------------------------------------------------------------------------
 
   @override
   Future<UserProfile> updateMyProfile({
@@ -105,10 +109,6 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Mapping
-  // ---------------------------------------------------------------------------
-
   static UserProfile _fromMap(Map<String, dynamic> map) {
     return UserProfile(
       userId: _requireString(map, 'user_id'),
@@ -122,19 +122,13 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
 
   static String _requireString(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value is String && value.isNotEmpty) {
-      return value;
-    }
-    throw FormatException(
-      'UserProfile: missing or invalid "$key".',
-    );
+    if (value is String && value.isNotEmpty) return value;
+    throw FormatException('UserProfile: missing or invalid "$key".');
   }
 
   static String? _optionalString(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value == null) {
-      return null;
-    }
+    if (value == null) return null;
     if (value is String) {
       final String trimmed = value.trim();
       return trimmed.isEmpty ? null : trimmed;
@@ -155,44 +149,28 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
     return null;
   }
 
-  /// ⬇️ شبكة الأمان للتواريخ: تحويل تنسيق Postgres إلى تنسيق يفهمه Dart على الأندرويد
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value == null) {
-      throw FormatException('UserProfile: "$key" is missing.');
-    }
+    if (value == null) return DateTime.now().toUtc(); // إذا كان التاريخ مفقوداً، نضع التاريخ الحالي
     
-    if (value is DateTime) {
-      return value.toUtc();
-    }
+    if (value is DateTime) return value.toUtc();
     
     if (value is String && value.isNotEmpty) {
-      // 1. محاولة القراءة المباشرة
       DateTime? parsed = DateTime.tryParse(value);
       if (parsed != null) return parsed.toUtc();
 
-      // 2. المعالجة لتنسيق Postgres (مثل "2026-10-02 11:27:09.602636+00")
       try {
         String normalized = value.trim();
-        if (normalized.contains(' ')) {
-          normalized = normalized.replaceFirst(' ', 'T');
-        }
-        if (normalized.endsWith('+00')) {
-          normalized = normalized.replaceAll('+00', 'Z');
-        } else if (normalized.endsWith('-00')) {
-          normalized = normalized.replaceAll('-00', 'Z');
-        }
+        if (normalized.contains(' ')) normalized = normalized.replaceFirst(' ', 'T');
+        if (normalized.endsWith('+00')) normalized = normalized.replaceAll('+00', 'Z');
+        else if (normalized.endsWith('-00')) normalized = normalized.replaceAll('-00', 'Z');
+        
         parsed = DateTime.tryParse(normalized);
         if (parsed != null) return parsed.toUtc();
       } catch (_) {}
     }
-    
-    throw FormatException('UserProfile: "$key" is not a valid timestamp.');
+    return DateTime.now().toUtc();
   }
-
-  // ---------------------------------------------------------------------------
-  // Client
-  // ---------------------------------------------------------------------------
 
   supabase.SupabaseClient _requireClient() {
     final supabase.SupabaseClient? client = _client;
@@ -210,111 +188,36 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
 // Error mapping
 // ============================================================================
 
-UserProfileException _mapPostgrest(
-  supabase.PostgrestException error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
+UserProfileException _mapPostgrest(supabase.PostgrestException error, StackTrace stackTrace, {required String operation}) {
   final UserProfileFailureType type = _classifyPostgrest(error);
-
-  AppLogger.warning(
-    'UserProfile PostgREST error during "$operation" '
-    'mapped to ${type.name} (code: ${error.code ?? 'n/a'}).',
-  );
-
-  return UserProfileException(
-    type: type,
-    cause: error,
-    stackTrace: stackTrace,
-  );
+  AppLogger.warning('UserProfile PostgREST error during "$operation" mapped to ${type.name}.');
+  return UserProfileException(type: type, cause: error, stackTrace: stackTrace);
 }
 
-UserProfileException _mapAuth(
-  supabase.AuthException error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  AppLogger.warning(
-    'UserProfile auth error during "$operation" mapped to unauthorized.',
-  );
-  return UserProfileException(
-    type: UserProfileFailureType.unauthorized,
-    cause: error,
-    stackTrace: stackTrace,
-  );
+UserProfileException _mapAuth(supabase.AuthException error, StackTrace stackTrace, {required String operation}) {
+  return UserProfileException(type: UserProfileFailureType.unauthorized, cause: error, stackTrace: stackTrace);
 }
 
-UserProfileException _mapUnknown(
-  Object error,
-  StackTrace stackTrace, {
-  required String operation,
-}) {
-  final UserProfileFailureType type = _looksLikeNetwork(error)
-      ? UserProfileFailureType.network
-      : UserProfileFailureType.unknown;
-
-  AppLogger.error(
-    'Unhandled user-profile error during "$operation" '
-    '(runtimeType: ${error.runtimeType}, mapped: ${type.name}).',
-    error,
-    stackTrace,
-  );
-
-  return UserProfileException(
-    type: type,
-    cause: error,
-    stackTrace: stackTrace,
-  );
+UserProfileException _mapUnknown(Object error, StackTrace stackTrace, {required String operation}) {
+  final UserProfileFailureType type = _looksLikeNetwork(error) ? UserProfileFailureType.network : UserProfileFailureType.unknown;
+  AppLogger.error('Unhandled user-profile error during "$operation".', error, stackTrace);
+  return UserProfileException(type: type, cause: error, stackTrace: stackTrace);
 }
 
-UserProfileFailureType _classifyPostgrest(
-  supabase.PostgrestException error,
-) {
+UserProfileFailureType _classifyPostgrest(supabase.PostgrestException error) {
   final String code = (error.code ?? '').toUpperCase();
   final String message = error.message.toLowerCase();
-  final String full = error.toString().toLowerCase();
-
-  if (code == '23514') {
-    return UserProfileFailureType.invalidInput;
-  }
-  if (code == 'PGRST116') {
-    return UserProfileFailureType.notFound;
-  }
-  if (code.startsWith('42501') || code.startsWith('28')) {
-    return UserProfileFailureType.unauthorized;
-  }
-  if (code.startsWith('42')) {
-    return UserProfileFailureType.invalidResponse;
-  }
-
-  if (message.contains('permission denied') ||
-      message.contains('row level security') ||
-      message.contains('jwt')) {
-    return UserProfileFailureType.unauthorized;
-  }
-
-  if (full.contains('profiles_full_name_length') ||
-      full.contains('profiles_phone_length')) {
-    return UserProfileFailureType.invalidInput;
-  }
-
-  if (_messageLooksLikeNetwork(message)) {
-    return UserProfileFailureType.network;
-  }
-
+  if (code == '23514') return UserProfileFailureType.invalidInput;
+  if (code == 'PGRST116') return UserProfileFailureType.notFound;
+  if (code.startsWith('42501') || code.startsWith('28')) return UserProfileFailureType.unauthorized;
+  if (code.startsWith('42')) return UserProfileFailureType.invalidResponse;
+  if (message.contains('permission denied') || message.contains('row level security')) return UserProfileFailureType.unauthorized;
+  if (_messageLooksLikeNetwork(message)) return UserProfileFailureType.network;
   return UserProfileFailureType.unknown;
 }
 
-bool _looksLikeNetwork(Object error) =>
-    _messageLooksLikeNetwork(error.toString().toLowerCase());
+bool _looksLikeNetwork(Object error) => _messageLooksLikeNetwork(error.toString().toLowerCase());
 
 bool _messageLooksLikeNetwork(String value) {
-  return value.contains('socket') ||
-      value.contains('network') ||
-      value.contains('connection') ||
-      value.contains('timeout') ||
-      value.contains('timed out') ||
-      value.contains('unreachable') ||
-      value.contains('failed host lookup') ||
-      value.contains('clientexception');
+  return value.contains('socket') || value.contains('network') || value.contains('connection') || value.contains('timeout');
 }
