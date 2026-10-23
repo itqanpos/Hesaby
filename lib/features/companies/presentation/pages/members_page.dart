@@ -135,6 +135,7 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                               final CompanyMember member = visible[index];
                               return _MemberCard(
                                 member: member,
+                                // الضغط على البطاقة يفتح الصلاحيات
                                 onTap: () => context.pushNamed(
                                   AppRouter.memberPermissionsName,
                                   pathParameters: <String, String>{
@@ -142,7 +143,8 @@ class _MembersPageState extends ConsumerState<MembersPage> {
                                   },
                                 ),
                                 onToggleActive: () => _toggleActive(context, member),
-                                onEdit: () => context.pushNamed(
+                                // زر الصلاحيات المباشر
+                                onEditPermissions: () => context.pushNamed(
                                   AppRouter.memberPermissionsName,
                                   pathParameters: <String, String>{
                                     'id': member.id,
@@ -313,13 +315,13 @@ class _MemberCard extends StatelessWidget {
     required this.member,
     required this.onTap,
     required this.onToggleActive,
-    required this.onEdit,
+    required this.onEditPermissions,
   });
 
   final CompanyMember member;
   final VoidCallback onTap;
   final VoidCallback onToggleActive;
-  final VoidCallback onEdit;
+  final VoidCallback onEditPermissions;
 
   @override
   Widget build(BuildContext context) {
@@ -418,27 +420,27 @@ class _MemberCard extends StatelessWidget {
                 ),
               ),
               const SizedBox(width: 4),
-              // ⬇️ قائمة منسدلة للتحكم بالعضو
+              
+              // ⬇️ زر الصلاحيات المباشر
+              IconButton(
+                tooltip: 'تعديل الصلاحيات',
+                icon: const Icon(Icons.security),
+                color: scheme.primary,
+                onPressed: onEditPermissions,
+              ),
+
+              // ⬇️ قائمة منسدلة للتعطيل/التفعيل فقط
               PopupMenuButton<String>(
-                tooltip: 'خيارات',
+                tooltip: 'خيارات أخرى',
                 onSelected: (value) {
                   if (value == 'toggle') onToggleActive();
-                  if (value == 'edit') onEdit();
                 },
                 itemBuilder: (context) => [
-                  PopupMenuItem(
-                    value: 'edit',
-                    child: ListTile(
-                      leading: const Icon(Icons.edit_outlined),
-                      title: const Text('تعديل الصلاحيات'),
-                      contentPadding: EdgeInsets.zero,
-                    ),
-                  ),
                   PopupMenuItem(
                     value: 'toggle',
                     child: ListTile(
                       leading: Icon(member.isActive ? Icons.visibility_off_outlined : Icons.visibility_outlined),
-                      title: Text(member.isActive ? 'تعطيل' : 'تفعيل'),
+                      title: Text(member.isActive ? 'تعطيل العضو' : 'تفعيل العضو'),
                       contentPadding: EdgeInsets.zero,
                     ),
                   ),
