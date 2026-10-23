@@ -1,7 +1,7 @@
 name: hesabi
 description: "Hesabi - Multi-tenant SaaS for POS, Inventory, Sales and Accounting"
 publish_to: "none"
-version: 1.0.4+5
+version: 1.0.5+6
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -13,71 +13,36 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
-  # State management
   flutter_riverpod: ^2.6.1
-
-  # Routing
   go_router: ^14.6.2
-
-  # Backend
   supabase_flutter: ^2.8.0
-
-  # Storage
   flutter_secure_storage: ^9.2.2
   shared_preferences: ^2.3.3
-
-  # UI
   google_fonts: ^6.2.1
-
-  # Utilities
   intl: ^0.20.3
   logger: ^2.4.0
   equatable: ^2.0.5
   uuid: ^4.5.1
-
-  # Phase T-1 — external links (WhatsApp, phone dialer, web URLs).
   url_launcher: ^6.3.1
 
-  # Media & imaging
-  # ⬇️ مثبت على 7.1.2 (بدون ^) لضمان توحيد الإصدار بين جميع الـ runners.
-  #    الإصدار 7.2.1 به خطأ Gradle معروف (`Could not find method kotlin()`)
-  #    عند تقييم android/build.gradle داخل الحزمة.
-  #    الإصدار 7.1.2 يحتوي على كل إصلاحات 7.x المهمة:
-  #    - قواعد ProGuard/MLKit (تمنع انهيار الباركود على Android Release)
-  #    - دعم Impeller
-  #    - errorBuilder بدلًا من الانهيار عند فشل CameraX
-  mobile_scanner: 7.1.2
+  # ⬇️ ترقية mobile_scanner إلى 7.4.2 (يحتوي على إصلاح ProGuard و ML Kit)
+  mobile_scanner: 7.4.2
   image_picker: ^1.1.2
-
-  # POS — Phase 7 additions
   printing: ^5.13.4
   pdf: ^3.11.1
   image: ^4.2.0
-
-  # POS — Phase D additions (thermal printer via Bluetooth / USB / Network)
   flutter_pos_printer_platform_image_3: ^1.2.0
   esc_pos_utils_plus: ^2.0.4
-
-  # Offline support — Phase O-1 (network status detection)
   connectivity_plus: ^6.1.0
 
 dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
-
-  # App icon + splash generators.
   flutter_launcher_icons: ^0.14.1
   flutter_native_splash: ^2.4.3
 
 flutter:
   uses-material-design: true
-
-  # Assets
-  #
-  # `assets/images/logo.png` is the master 1024×1024 image used by both
-  # `flutter_launcher_icons` (launcher icon) and `flutter_native_splash`.
-  # It is also kept in the bundle so future in-app usages (login header,
-  # receipt header) can reference it with `Image.asset('assets/images/logo.png')`.
   assets:
     - assets/images/
