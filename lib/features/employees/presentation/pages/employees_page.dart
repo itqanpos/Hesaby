@@ -21,7 +21,6 @@ import '../../domain/repositories/employee_repository.dart';
 import '../providers/employee_providers.dart';
 import '../widgets/employee_form_sheet.dart';
 
-/// Employees / Team page.
 class EmployeesPage extends ConsumerStatefulWidget {
   const EmployeesPage({super.key});
 
@@ -149,31 +148,31 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final AsyncValue<List<Employee>> async = ref.watch(employeesProvider);
     final bool includeInactive =
         ref.watch(employeesIncludeInactiveProvider);
-
-    // ⬇️ فحص شامل للصلاحيات
-    final AsyncValue<CompanyMember?> memberAsync =
-        ref.watch(currentMemberProvider);
-    final CompanyMember? currentMember = memberAsync.valueOrNull;
+    
+    // ⬇️ فحص صريح: مالك، أدمن، مدير، أو أدمن منصة
+    final CompanyMember? currentMember = ref.watch(currentMemberProvider).valueOrNull;
+    final String? role = currentMember?.role;
+    
     final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
-
-    // صاحب الشركة أو المدير يملك canManageMembers == true
-    final bool isCompanyManager = currentMember?.canManageMembers ?? false;
-
-    // نعتبر المستخدم مديراً إذا كان أدمن منصة أو مدير شركة.
-    // ولتفادي اختفاء الزر أثناء التحميل، نعتبره مديراً مؤقتاً إذا كان الـ provider لا يزال يحمّل.
+    final bool isCompanyOwner = role == MemberRole.owner;
+    final bool isCompanyAdmin = role == MemberRole.admin;
+    final bool isCompanyManager = role == MemberRole.manager;
+    
     final bool canManage = isPlatformAdmin ||
-        isCompanyManager ||
-        memberAsync.isLoading;
+        isCompanyOwner ||
+        isCompanyAdmin ||
+        isCompanyManager;
 
     return AppShell(
       appBar: AppBar(
         title: const Text('الفريق'),
         actions: <Widget>[
-          if (canManage) // سيظهر الآن لمالك الشركة فوراً
+          if (canManage)
             IconButton(
               tooltip: 'الصلاحيات والأدوار',
               icon: const Icon(Icons.admin_panel_settings_outlined),
-              onPressed: () => context.pushNamed(AppRouter.membersName),
+              onPressed: () =>
+                  context.pushNamed(AppRouter.membersName),
             ),
           IconButton(
             tooltip: includeInactive
