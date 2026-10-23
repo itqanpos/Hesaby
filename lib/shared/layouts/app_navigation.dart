@@ -103,7 +103,6 @@ const List<_NavSection> _sections = <_NavSection>[
         color: Color(0xFF00838F),
         requiredPermission: MemberPermission.returnsView,
       ),
-      // ⬇️ جديد: الخزنة
       _NavDestination(
         label: 'الخزنة',
         path: '/cash',
@@ -205,6 +204,7 @@ List<_NavSection> _visibleSections(WidgetRef ref) {
     }
   }
 
+  // ⬇️ هنا يتم إضافة مدخل لوحة تحكم المنصة (يظهر فقط إذا كان isAdmin == true)
   final bool isAdmin = ref.watch(isPlatformAdminProvider);
   if (isAdmin) {
     result.add(
@@ -504,7 +504,7 @@ class _Footer extends StatelessWidget {
           Text('حسابي', style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.w700, color: scheme.onSurfaceVariant)),
           const Spacer(),
           Text(
-            'v1.0.4',
+            'v1.0.4', // ⬅️ تم تحديث الإصدار هنا
             style: theme.textTheme.labelSmall?.copyWith(
               color: scheme.onSurfaceVariant.withValues(alpha: 0.75),
             ),
