@@ -143,7 +143,6 @@ jobs:
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
           
-          # إضافة الأذونات
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
           fi
@@ -165,21 +164,13 @@ jobs:
             sed -i '/<application/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' "$MANIFEST"
           fi
           
-          # تعطيل Impeller لحل مشكلة الكاميرا
-          python3 - <<'PY'
-          import pathlib
-          p = pathlib.Path('android/app/src/main/AndroidManifest.xml')
-          text = p.read_text()
-          if 'EnableImpeller' not in text:
-              text = text.replace('<application', '<application\n        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />')
-              p.write_text(text)
-              print("Injected EnableImpeller = false")
-          else:
-              print("EnableImpeller already present")
-          PY
+          # إضافة EnableImpeller بطريقة آمنة
+          if ! grep -q 'EnableImpeller' "$MANIFEST"; then
+            sed -i '/<application/i\        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />' "$MANIFEST"
+          fi
           
-          echo "--- AndroidManifest.xml ---"
-          cat "$MANIFEST"
+          echo "--- AndroidManifest.xml (permissions and impeller section) ---"
+          grep 'uses-permission\|uses-feature\|EnableImpeller' "$MANIFEST"
 
       - name: Prepare flutter_launcher_icons.yaml for Android
         run: |
@@ -197,27 +188,7 @@ jobs:
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
-      - name: Prepare flutter_native_splash.yaml for Android
-        run: |
-          python3 - <<'PY'
-          import re, pathlib
-          p = pathlib.Path('flutter_native_splash.yaml')
-          text = p.read_text()
-          text = re.sub(r'^  android: false', '  android: true', text, flags=re.M)
-          if 'android_12:' not in text:
-              text += (
-                  '\n  android_12:\n'
-                  '    image: assets/images/logo.png\n'
-                  '    color: "#FFFFFF"\n'
-                  '    color_dark: "#121212"\n'
-                  '    icon_background_color: "#FFFFFF"\n'
-                  '    icon_background_color_dark: "#121212"\n'
-              )
-          p.write_text(text)
-          PY
-
-      - name: Generate native splash
-        run: dart run flutter_native_splash:create
+      # ⬇️ تمت إزالة خطوة flutter_native_splash بالكامل لتجنب خطأ XML
 
       - name: Decode keystore
         env:
