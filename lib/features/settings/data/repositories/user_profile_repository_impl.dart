@@ -24,21 +24,22 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
         );
       }
 
-      // 1. محاولة جلب الملف الشخصي
       final Map<String, dynamic>? row = await client
           .from('profiles')
           .select()
           .eq('user_id', userId)
           .maybeSingle();
 
-      // 2. إذا لم يوجد الملف، نقوم بإنشائه فوراً
       if (row == null) {
         AppLogger.warning('UserProfile not found. Auto-creating profile for $userId.');
         
+        // ⬇️ إرسال التواريخ صراحةً لتجنب خطأ Not Null Violation
         final Map<String, dynamic> newProfile = <String, dynamic>{
           'user_id': userId,
           'full_name': client.auth.currentUser?.userMetadata?['full_name'] ?? 'مستخدم جديد',
           'is_platform_admin': false,
+          'created_at': DateTime.now().toUtc().toIso8601String(),
+          'updated_at': DateTime.now().toUtc().toIso8601String(),
         };
 
         final Map<String, dynamic> createdRow = await client
@@ -81,6 +82,7 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
       final Map<String, dynamic> payload = <String, dynamic>{
         'full_name': fullName,
         'phone': phone,
+        'updated_at': DateTime.now().toUtc().toIso8601String(), // ⬅️ تحديث التاريخ
       };
 
       final Map<String, dynamic>? row = await client
@@ -161,7 +163,6 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
 
       try {
         String normalized = value.trim();
-        // ⬇️ تم إضافة الأقواس {} لحل مشكلة الـ Linter
         if (normalized.contains(' ')) {
           normalized = normalized.replaceFirst(' ', 'T');
         }
@@ -213,7 +214,7 @@ UserProfileException _mapUnknown(Object error, StackTrace stackTrace, {required 
 UserProfileFailureType _classifyPostgrest(supabase.PostgrestException error) {
   final String code = (error.code ?? '').toUpperCase();
   final String message = error.message.toLowerCase();
-  if (code == '23514') return UserProfileFailureType.invalidInput;
+  if (code == '23514' || code == '23502') return UserProfileFailureType.invalidInput; // 23502 = Not Null Violation
   if (code == 'PGRST116') return UserProfileFailureType.notFound;
   if (code.startsWith('42501') || code.startsWith('28')) return UserProfileFailureType.unauthorized;
   if (code.startsWith('42')) return UserProfileFailureType.invalidResponse;
