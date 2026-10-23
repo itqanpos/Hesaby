@@ -31,7 +31,7 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
           .eq('user_id', userId)
           .maybeSingle();
 
-      // 2. إذا لم يوجد الملف (مثلاً تم إنشاء الحساب ولم يتم إنشاء بروفايل)، نقوم بإنشائه فوراً
+      // 2. إذا لم يوجد الملف، نقوم بإنشائه فوراً
       if (row == null) {
         AppLogger.warning('UserProfile not found. Auto-creating profile for $userId.');
         
@@ -151,7 +151,7 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
 
   static DateTime _requireTimestamp(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
-    if (value == null) return DateTime.now().toUtc(); // إذا كان التاريخ مفقوداً، نضع التاريخ الحالي
+    if (value == null) return DateTime.now().toUtc();
     
     if (value is DateTime) return value.toUtc();
     
@@ -161,9 +161,15 @@ class UserProfileRepositoryImpl implements UserProfileRepository {
 
       try {
         String normalized = value.trim();
-        if (normalized.contains(' ')) normalized = normalized.replaceFirst(' ', 'T');
-        if (normalized.endsWith('+00')) normalized = normalized.replaceAll('+00', 'Z');
-        else if (normalized.endsWith('-00')) normalized = normalized.replaceAll('-00', 'Z');
+        // ⬇️ تم إضافة الأقواس {} لحل مشكلة الـ Linter
+        if (normalized.contains(' ')) {
+          normalized = normalized.replaceFirst(' ', 'T');
+        }
+        if (normalized.endsWith('+00')) {
+          normalized = normalized.replaceAll('+00', 'Z');
+        } else if (normalized.endsWith('-00')) {
+          normalized = normalized.replaceAll('-00', 'Z');
+        }
         
         parsed = DateTime.tryParse(normalized);
         if (parsed != null) return parsed.toUtc();
