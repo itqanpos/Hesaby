@@ -1,6 +1,4 @@
-# ============================================================================
-# HESABI — Build Android APK
-# ============================================================================
+# .github/workflows/flutter_apk.yml
 name: Build Android APK
 
 on:
@@ -85,19 +83,14 @@ jobs:
               sed -i 's/minSdk = flutter\.minSdkVersion/minSdk = 23/' "$f" || true
               sed -i 's/minSdkVersion 21/minSdkVersion 23/' "$f" || true
               sed -i 's/minSdk = 21/minSdk = 23/' "$f" || true
-
               sed -i 's/compileSdkVersion flutter\.compileSdkVersion/compileSdkVersion 36/' "$f" || true
               sed -i 's/compileSdk = flutter\.compileSdkVersion/compileSdk = 36/' "$f" || true
               sed -i 's/compileSdkVersion [0-9]*/compileSdkVersion 36/' "$f" || true
               sed -i 's/compileSdk = [0-9]*/compileSdk = 36/' "$f" || true
-
               sed -i 's/targetSdkVersion flutter\.targetSdkVersion/targetSdkVersion 36/' "$f" || true
               sed -i 's/targetSdk = flutter\.targetSdkVersion/targetSdk = 36/' "$f" || true
               sed -i 's/targetSdkVersion [0-9]*/targetSdkVersion 36/' "$f" || true
               sed -i 's/targetSdk = [0-9]*/targetSdk = 36/' "$f" || true
-
-              echo "--- $f (sdk section) ---"
-              grep -n 'minSdk\|compileSdk\|targetSdk' "$f" || true
             fi
           done
 
@@ -109,7 +102,6 @@ jobs:
             echo "!! pub-cache root not found at $PUB_CACHE_ROOT"
             exit 1
           fi
-
           python3 - "$PUB_CACHE_ROOT" <<'PY'
           import re, pathlib, sys
           root = pathlib.Path(sys.argv[1])
@@ -133,7 +125,6 @@ jobs:
                   if text != original:
                       f.write_text(text)
                       patched += 1
-                      print(f"PATCHED: {f}")
           print('---')
           print(f'Android build files scanned: {total}')
           print(f'Android build files patched: {patched}')
@@ -142,7 +133,7 @@ jobs:
       - name: Add Android permissions and Disable Impeller
         run: |
           MANIFEST=android/app/src/main/AndroidManifest.xml
-          
+          # Permissions
           if ! grep -q 'android.permission.INTERNET' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-permission android:name="android.permission.INTERNET" />' "$MANIFEST"
           fi
@@ -163,14 +154,49 @@ jobs:
           if ! grep -q 'android.hardware.camera' "$MANIFEST"; then
             sed -i '/<application/i\    <uses-feature android:name="android.hardware.camera" android:required="false" />' "$MANIFEST"
           fi
-          
-          # إضافة EnableImpeller بطريقة آمنة
+          # Disable Impeller
           if ! grep -q 'EnableImpeller' "$MANIFEST"; then
-            sed -i '/<application/i\        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />' "$MANIFEST"
+            python3 - <<'PY'
+          import pathlib
+          p = pathlib.Path('android/app/src/main/AndroidManifest.xml')
+          text = p.read_text()
+          text = text.replace('<application', '<application\n        <meta-data android:name="io.flutter.embedding.android.EnableImpeller" android:value="false" />')
+          p.write_text(text)
+          print("Injected EnableImpeller = false")
+          PY
           fi
-          
-          echo "--- AndroidManifest.xml (permissions and impeller section) ---"
-          grep 'uses-permission\|uses-feature\|EnableImpeller' "$MANIFEST"
+
+      - name: Create ProGuard rules for mobile_scanner
+        run: |
+          mkdir -p android/app
+          cat > android/app/proguard-rules.pro <<'EOF'
+          -keep class com.google.mlkit.** { *; }
+          -keep class com.google.android.gms.internal.mlkit_vision_barcode.** { *; }
+          -keep class com.google.android.libraries.barhopper.** { *; }
+          -keep class dev.steenbakker.mobile_scanner.** { *; }
+          EOF
+
+      - name: Link ProGuard rules in build.gradle.kts
+        run: |
+          python3 - <<'PY'
+          import pathlib, re
+          p = pathlib.Path('android/app/build.gradle.kts')
+          if not p.exists():
+              print("build.gradle.kts not found")
+              raise SystemExit(0)
+          text = p.read_text()
+          if 'proguard-rules.pro' not in text:
+              text = re.sub(
+                  r'(buildTypes\s*\{[\s\S]*?release\s*\{)',
+                  r'\1\n            proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")',
+                  text,
+                  count=1,
+              )
+              p.write_text(text)
+              print("Linked proguard-rules.pro in build.gradle.kts")
+          else:
+              print("proguard-rules.pro already linked")
+          PY
 
       - name: Prepare flutter_launcher_icons.yaml for Android
         run: |
@@ -188,7 +214,7 @@ jobs:
       - name: Generate launcher icons
         run: dart run flutter_launcher_icons
 
-      # ⬇️ تمت إزالة خطوة flutter_native_splash بالكامل لتجنب خطأ XML
+      # تمت إزالة flutter_native_splash لتجنب خطأ XML
 
       - name: Decode keystore
         env:
