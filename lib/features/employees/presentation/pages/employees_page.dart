@@ -13,10 +13,6 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
-import '../../../admin/presentation/providers/platform_admin_provider.dart';
-import '../../../auth/presentation/providers/auth_provider.dart'; // ⬅️ جديد
-import '../../../companies/domain/entities/company_member.dart';
-import '../../../companies/presentation/providers/members_providers.dart';
 import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
 import '../providers/employee_providers.dart';
@@ -149,32 +145,18 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
     final AsyncValue<List<Employee>> async = ref.watch(employeesProvider);
     final bool includeInactive =
         ref.watch(employeesIncludeInactiveProvider);
-    
-    // ⬇️ فحص شامل مع البديل الاحتياطي
-    final AsyncValue<CompanyMember?> memberAsync = ref.watch(currentMemberProvider);
-    final CompanyMember? currentMember = memberAsync.valueOrNull;
-    
-    final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
-    final String? email = ref.watch(authProvider).session?.email;
-    final bool isMainAdmin = email == 'mohammedelsonbaty866@gmail.com';
-    
-    // الاعتماد على canManageMembers مباشرة، أو حالة التحميل، أو الإيميل الرئيسي
-    final bool canManage = isPlatformAdmin || 
-                           isMainAdmin ||
-                           (currentMember?.canManageMembers ?? false) || 
-                           memberAsync.isLoading;
 
     return AppShell(
       appBar: AppBar(
         title: const Text('الفريق'),
         actions: <Widget>[
-          if (canManage)
-            IconButton(
-              tooltip: 'الصلاحيات والأدوار',
-              icon: const Icon(Icons.admin_panel_settings_outlined),
-              onPressed: () =>
-                  context.pushNamed(AppRouter.membersName),
-            ),
+          // ⬇️ الزر يظهر دائماً في هذه الصفحة (لأن صفحة الفريق مخصصة للإدارة)
+          IconButton(
+            tooltip: 'الصلاحيات والأدوار',
+            icon: const Icon(Icons.admin_panel_settings_outlined),
+            onPressed: () =>
+                context.pushNamed(AppRouter.membersName),
+          ),
           IconButton(
             tooltip: includeInactive
                 ? 'إخفاء غير النشطين'
