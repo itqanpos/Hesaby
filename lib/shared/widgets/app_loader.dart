@@ -2,7 +2,13 @@
 
 import 'package:flutter/material.dart';
 
-/// Centred progress indicator with an optional message.
+/// A smart loader that automatically adapts to its context.
+///
+/// * When used for a full page (e.g. `loading: () => const AppLoader()`),
+///   it renders a list of [AppSkeletonCard]s to give a faster perceived
+///   loading experience.
+/// * When used in a small area (e.g. inside a button or a small card),
+///   it falls back to a standard [CircularProgressIndicator].
 class AppLoader extends StatelessWidget {
   const AppLoader({super.key, this.message, this.size = 32});
 
@@ -11,27 +17,39 @@ class AppLoader extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final String? messageText = message;
+    // LayoutBuilder allows us to know the available height.
+    return LayoutBuilder(
+      builder: (BuildContext context, BoxConstraints constraints) {
+        // If the loader is placed in a large area (like a page body)
+        // and there's no custom message, show the skeleton list.
+        final bool isFullPage = constraints.maxHeight > 300 || constraints.maxHeight.isInfinite;
+        
+        if (isFullPage && message == null) {
+          return const AppSkeletonList();
+        }
 
-    return Center(
-      child: Column(
-        mainAxisSize: MainAxisSize.min,
-        children: <Widget>[
-          SizedBox(
-            width: size,
-            height: size,
-            child: const CircularProgressIndicator(strokeWidth: 3),
+        // Otherwise, show the normal spinner (for buttons, small widgets, etc.)
+        return Center(
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              SizedBox(
+                width: size,
+                height: size,
+                child: const CircularProgressIndicator(strokeWidth: 3),
+              ),
+              if (message != null) ...<Widget>[
+                const SizedBox(height: 16),
+                Text(
+                  message!,
+                  style: Theme.of(context).textTheme.bodyMedium,
+                  textAlign: TextAlign.center,
+                ),
+              ],
+            ],
           ),
-          if (messageText != null) ...<Widget>[
-            const SizedBox(height: 16),
-            Text(
-              messageText,
-              style: Theme.of(context).textTheme.bodyMedium,
-              textAlign: TextAlign.center,
-            ),
-          ],
-        ],
-      ),
+        );
+      },
     );
   }
 }
@@ -56,7 +74,8 @@ class _ShimmerBox extends StatefulWidget {
   State<_ShimmerBox> createState() => _ShimmerBoxState();
 }
 
-class _ShimmerBoxState extends State<_ShimmerBox> with SingleTickerProviderStateMixin {
+class _ShimmerBoxState extends State<_ShimmerBox>
+    with SingleTickerProviderStateMixin {
   late final AnimationController _controller;
 
   @override
@@ -81,7 +100,7 @@ class _ShimmerBoxState extends State<_ShimmerBox> with SingleTickerProviderState
     return AnimatedBuilder(
       animation: _controller,
       builder: (context, child) {
-        final double opacity = 0.1 + (_controller.value * 0.1);
+        final double opacity = 0.05 + (_controller.value * 0.1);
         return Container(
           width: widget.width,
           height: widget.height,
@@ -103,10 +122,12 @@ class AppSkeletonCard extends StatelessWidget {
   Widget build(BuildContext context) {
     return Card(
       elevation: 0,
-      margin: const EdgeInsets.symmetric(vertical: 4),
+      margin: const EdgeInsets.symmetric(vertical: 4, horizontal: 4),
       shape: RoundedRectangleBorder(
         borderRadius: BorderRadius.circular(14),
-        side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
+        side: BorderSide(
+          color: Theme.of(context).colorScheme.outlineVariant.withValues(alpha: 0.5),
+        ),
       ),
       child: Padding(
         padding: const EdgeInsets.all(12),
@@ -123,7 +144,7 @@ class AppSkeletonCard extends StatelessWidget {
                   const _ShimmerBox(width: 90, height: 12),
                   const SizedBox(height: 8),
                   Row(
-                    children: const [
+                    children: const <Widget>[
                       _ShimmerBox(width: 60, height: 20, borderRadius: 10),
                       SizedBox(width: 6),
                       _ShimmerBox(width: 60, height: 20, borderRadius: 10),
@@ -141,7 +162,7 @@ class AppSkeletonCard extends StatelessWidget {
 
 /// A list of skeleton cards to display during initial load.
 class AppSkeletonList extends StatelessWidget {
-  const AppSkeletonList({super.key, this.itemCount = 6});
+  const AppSkeletonList({super.key, this.itemCount = 8});
 
   final int itemCount;
 
@@ -151,7 +172,9 @@ class AppSkeletonList extends StatelessWidget {
       padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       itemCount: itemCount,
       physics: const NeverScrollableScrollPhysics(),
-      itemBuilder: (context, index) => const AppSkeletonCard(),
+      itemBuilder: (BuildContext context, int index) {
+        return const AppSkeletonCard();
+      },
     );
   }
 }
