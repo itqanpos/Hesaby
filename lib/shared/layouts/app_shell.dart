@@ -7,14 +7,9 @@ import '../../core/network/operation_trigger.dart';
 import '../../core/responsive/responsive_helper.dart';
 import '../../features/admin/presentation/providers/admin_app_config_provider.dart';
 import '../../features/admin/presentation/providers/platform_admin_provider.dart';
-import '../widgets/offline_banner.dart';
+import '../widgets/sync_status_indicator.dart'; // ⬅️ تم استبدال offline_banner
 import 'app_navigation.dart';
 
-/// Standard page scaffold used across HESABI.
-///
-/// Adds the app-wide navigation based on screen width, an offline banner,
-/// a global announcement banner (controlled by the platform admin), and
-/// a full-screen maintenance mode gate.
 class AppShell extends ConsumerWidget {
   const AppShell({
     super.key,
@@ -56,8 +51,6 @@ class AppShell extends ConsumerWidget {
     // -------------------------------------------------------------------------
     // Maintenance mode gate
     // -------------------------------------------------------------------------
-    // If maintenance mode is ON and the current user is NOT a platform admin,
-    // show a full-screen maintenance page instead of the normal content.
     final AppConfig? appConfig =
         ref.watch(adminAppConfigProvider).valueOrNull;
     final bool isAdmin = ref.watch(isPlatformAdminProvider);
@@ -89,7 +82,7 @@ class AppShell extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (announcementBanner != null) announcementBanner,
-          const OfflineBanner(),
+          const SyncStatusIndicator(), // ⬅️ استخدام المؤشر الجديد
           Expanded(
             child: Center(
               child: ConstrainedBox(
