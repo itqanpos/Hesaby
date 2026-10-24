@@ -9,6 +9,7 @@ import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/platform_admin_provider.dart';
+import 'tabs/admin_overview_tab.dart';
 import 'tabs/admin_audit_log_tab.dart';
 import 'tabs/admin_companies_tab.dart';
 import 'tabs/admin_users_tab.dart';
@@ -23,7 +24,6 @@ class AdminDashboardPage extends ConsumerWidget {
     final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
     final String? email = ref.watch(authProvider).session?.email;
 
-    // السماح بالدخول إذا كان أدمن منصة أو يملك الإيميل الرئيسي.
     final bool isAdmin =
         isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
 
@@ -45,7 +45,7 @@ class AdminDashboardPage extends ConsumerWidget {
     }
 
     return DefaultTabController(
-      length: 4,
+      length: 5,
       child: AppShell(
         appBar: AppBar(
           leading: IconButton(
@@ -58,6 +58,7 @@ class AdminDashboardPage extends ConsumerWidget {
             isScrollable: true,
             tabAlignment: TabAlignment.center,
             tabs: <Widget>[
+              Tab(icon: Icon(Icons.insights), text: 'نظرة عامة'),
               Tab(icon: Icon(Icons.history), text: 'سجل التدقيق'),
               Tab(icon: Icon(Icons.storefront_outlined), text: 'الاشتراكات'),
               Tab(icon: Icon(Icons.people_outline), text: 'المشتركون'),
@@ -67,6 +68,7 @@ class AdminDashboardPage extends ConsumerWidget {
         ),
         body: const TabBarView(
           children: <Widget>[
+            AdminOverviewTab(),
             AdminAuditLogTab(),
             AdminCompaniesTab(),
             AdminUsersTab(),
