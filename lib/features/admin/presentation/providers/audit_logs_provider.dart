@@ -62,7 +62,8 @@ class AuditLogEntry {
   // ---- Factory من صفّ قاعدة البيانات ----
   factory AuditLogEntry.fromRow(Map<String, Object?> row) {
     return AuditLogEntry(
-      id: _readString(row, 'id') ?? (throw const FormatException('audit row: missing id')),
+      id: _readString(row, 'id') ??
+          (throw const FormatException('audit row: missing id')),
       createdAt: _readTimestamp(row, 'created_at'),
       actorUserId: _readString(row, 'actor_user_id'),
       actorEmail: _readString(row, 'actor_email'),
@@ -101,7 +102,8 @@ class AuditLogFilters {
     String? search,
   }) {
     return AuditLogFilters(
-      actionPrefix: clearActionPrefix ? null : (actionPrefix ?? this.actionPrefix),
+      actionPrefix:
+          clearActionPrefix ? null : (actionPrefix ?? this.actionPrefix),
       entityType: clearEntityType ? null : (entityType ?? this.entityType),
       search: search ?? this.search,
     );
@@ -112,14 +114,16 @@ class AuditLogFilters {
 }
 
 /// Action prefixes المعروضة في الشرائح. null = "الكل".
-const List<({String? value, String label})> kAuditActionChips = <({String? value, String label})>[
+const List<({String? value, String label})> kAuditActionChips =
+    <({String? value, String label})>[
   (value: null, label: 'الكل'),
   (value: 'company.', label: 'الشركات'),
   (value: 'user.', label: 'المستخدمون'),
 ];
 
 /// Entity types المعروضة في الشرائح. null = "الكل".
-const List<({String? value, String label})> kAuditEntityChips = <({String? value, String label})>[
+const List<({String? value, String label})> kAuditEntityChips =
+    <({String? value, String label})>[
   (value: null, label: 'الكل'),
   (value: 'company', label: 'شركة'),
   (value: 'user', label: 'مستخدم'),
@@ -251,7 +255,8 @@ class AuditLogNotifier extends AutoDisposeAsyncNotifier<AuditLogPage> {
                   ? null
                   : filters.actionPrefix,
           'p_entity_type': filters.entityType,
-          'p_search': filters.search.trim().isEmpty ? null : filters.search.trim(),
+          'p_search':
+              filters.search.trim().isEmpty ? null : filters.search.trim(),
           'p_limit': limit,
           'p_offset': offset,
         },
@@ -284,9 +289,10 @@ class AuditLogNotifier extends AutoDisposeAsyncNotifier<AuditLogPage> {
   }
 }
 
-final AsyncNotifierProvider<AuditLogNotifier, AuditLogPage>
+// ✅ الإصلاح: AutoDisposeAsyncNotifier ↔ AsyncNotifierProvider.autoDispose
+final AutoDisposeAsyncNotifierProvider<AuditLogNotifier, AuditLogPage>
     auditLogNotifierProvider =
-    AsyncNotifierProvider<AuditLogNotifier, AuditLogPage>(
+    AsyncNotifierProvider.autoDispose<AuditLogNotifier, AuditLogPage>(
   AuditLogNotifier.new,
 );
 
@@ -314,8 +320,7 @@ List<Map<String, Object?>> _asRows(Object? raw) {
       'get_audit_logs returned ${raw.runtimeType}, expected List.',
     );
   }
-  final List<Map<String, Object?>> result =
-      <Map<String, Object?>>[];
+  final List<Map<String, Object?>> result = <Map<String, Object?>>[];
   for (final Object? element in raw) {
     if (element is! Map) {
       throw StateError(
