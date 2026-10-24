@@ -1,7 +1,7 @@
 // supabase/functions/admin-create-user/index.ts
 
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
+import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
 const corsHeaders: Record<string, string> = {
   "Access-Control-Allow-Origin": "*",
@@ -14,6 +14,46 @@ function json(body: unknown, status = 200): Response {
     status,
     headers: { ...corsHeaders, "Content-Type": "application/json" },
   });
+}
+
+/// Best-effort audit write. Never fails the request on audit errors.
+///
+/// The caller runs with the service_role key, which we granted EXECUTE
+/// on audit_log_insert() via the A1 migration. If this ever fails, we log
+/// to console but the primary operation still succeeds — audit is a
+/// secondary concern that should not break user flows.
+async function writeAudit(
+  adminClient: SupabaseClient,
+  params: {
+    actorId: string;
+    action: string;
+    entityId: string;
+    entityLabel: string | null;
+    before?: Record<string, unknown> | null;
+    after?: Record<string, unknown> | null;
+  },
+): Promise<void> {
+  try {
+    const { error } = await adminClient.rpc("audit_log_insert", {
+      p_actor_user_id: params.actorId,
+      p_action: params.action,
+      p_entity_type: "user",
+      p_entity_id: params.entityId,
+      p_entity_label: params.entityLabel,
+      p_reason: null,
+      p_before: params.before ?? null,
+      p_after: params.after ?? null,
+      p_metadata: null,
+    });
+    if (error) {
+      console.error(
+        `audit_log_insert(${params.action}) returned error:`,
+        error.message,
+      );
+    }
+  } catch (e) {
+    console.error(`audit_log_insert(${params.action}) threw:`, e);
+  }
 }
 
 serve(async (req: Request): Promise<Response> => {
@@ -38,15 +78,16 @@ serve(async (req: Request): Promise<Response> => {
       return json({ error: "Invalid session", details: userError?.message }, 401);
     }
 
+    const callerId = userData.user.id;
+
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
       auth: { persistSession: false, autoRefreshToken: false },
     });
 
-    // ⬇️ استخدام user_id بدلاً من id
     const { data: callerProfile, error: callerProfileError } = await adminClient
       .from("profiles")
       .select("is_platform_admin")
-      .eq("user_id", userData.user.id)
+      .eq("user_id", callerId)
       .maybeSingle();
 
     if (callerProfileError) {
@@ -79,7 +120,6 @@ serve(async (req: Request): Promise<Response> => {
       return json({ error: "تعذّر إنشاء المستخدم", details: createError?.message }, 400);
     }
 
-    // ⬇️ استخدام user_id بدلاً من id في Upsert
     const { error: profileUpsertError } = await adminClient
       .from("profiles")
       .upsert(
@@ -94,6 +134,19 @@ serve(async (req: Request): Promise<Response> => {
     if (profileUpsertError) {
       console.error("Profile upsert failed:", profileUpsertError);
     }
+
+    // ---- Audit (best-effort) ----
+    await writeAudit(adminClient, {
+      actorId: callerId,
+      action: "user.create",
+      entityId: created.user.id,
+      entityLabel: email,
+      after: {
+        email,
+        full_name: fullName || null,
+        is_platform_admin: false,
+      },
+    });
 
     return json({
       user_id: created.user.id,
