@@ -15,8 +15,8 @@ import 'tabs/admin_companies_tab.dart';
 import 'tabs/admin_users_tab.dart';
 import 'tabs/admin_sync_tab.dart';
 import 'tabs/admin_app_control_tab.dart';
+import 'tabs/admin_expenses_tab.dart'; // ⬅️ التبويب الجديد
 
-/// Platform Admin Dashboard.
 class AdminDashboardPage extends ConsumerWidget {
   const AdminDashboardPage({super.key});
 
@@ -25,8 +25,7 @@ class AdminDashboardPage extends ConsumerWidget {
     final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
     final String? email = ref.watch(authProvider).session?.email;
 
-    final bool isAdmin =
-        isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
+    final bool isAdmin = isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
 
     if (!isAdmin) {
       return AppShell(
@@ -46,7 +45,7 @@ class AdminDashboardPage extends ConsumerWidget {
     }
 
     return DefaultTabController(
-      length: 6,
+      length: 7, // ⬅️ زيادة العدد
       child: AppShell(
         appBar: AppBar(
           leading: IconButton(
@@ -62,6 +61,7 @@ class AdminDashboardPage extends ConsumerWidget {
               Tab(icon: Icon(Icons.insights), text: 'نظرة عامة'),
               Tab(icon: Icon(Icons.history), text: 'سجل التدقيق'),
               Tab(icon: Icon(Icons.storefront_outlined), text: 'الاشتراكات'),
+              Tab(icon: Icon(Icons.money_off), text: 'المصروفات'), // ⬅️ التبويب الجديد
               Tab(icon: Icon(Icons.sync), text: 'المزامنة'),
               Tab(icon: Icon(Icons.people_outline), text: 'المشتركون'),
               Tab(icon: Icon(Icons.settings_suggest_outlined), text: 'التحكم'),
@@ -73,6 +73,7 @@ class AdminDashboardPage extends ConsumerWidget {
             AdminOverviewTab(),
             AdminAuditLogTab(),
             AdminCompaniesTab(),
+            AdminExpensesTab(), // ⬅️ التبويب الجديد
             AdminSyncTab(),
             AdminUsersTab(),
             AdminAppControlTab(),
