@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-// ⬇️ تم حذف استيراد intl و app_button
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../../shared/widgets/app_empty.dart';
@@ -10,7 +10,29 @@ import '../../../../../shared/widgets/app_error.dart';
 import '../../../../../shared/widgets/app_loader.dart';
 import '../../../../../shared/widgets/app_text_field.dart';
 
-// ... (الموديل والبروفايدر كما هما بدون تغيير) ...
+// ============================================================================
+// Models
+// ============================================================================
+
+class SubscriptionPlan {
+  const SubscriptionPlan({required this.id, required this.name, required this.label, required this.price, this.durationDays});
+  final String id;
+  final String name;
+  final String label;
+  final double price;
+  final int? durationDays;
+
+  factory SubscriptionPlan.fromMap(Map<String, dynamic> map) {
+    return SubscriptionPlan(
+      id: map['id'] as String,
+      name: map['name'] as String,
+      label: map['label'] as String,
+      price: (map['price'] as num).toDouble(),
+      durationDays: map['duration_days'] as int?,
+    );
+  }
+}
+
 class AdminCompany {
   const AdminCompany({
     required this.id,
@@ -20,8 +42,7 @@ class AdminCompany {
     required this.createdAt,
     this.phone,
     this.suspensionReason,
-    this.trialEndsAt,
-    this.subscribedUntil,
+    this.subscriptionEnd,
   });
 
   final String id;
@@ -31,8 +52,7 @@ class AdminCompany {
   final DateTime createdAt;
   final String? phone;
   final String? suspensionReason;
-  final DateTime? trialEndsAt;
-  final DateTime? subscribedUntil;
+  final DateTime? subscriptionEnd;
 
   factory AdminCompany.fromMap(Map<String, dynamic> map) {
     return AdminCompany(
@@ -43,8 +63,7 @@ class AdminCompany {
       createdAt: _parseDate(map['created_at']),
       phone: map['phone'] as String?,
       suspensionReason: map['suspension_reason'] as String?,
-      trialEndsAt: map['trial_ends_at'] != null ? _parseDate(map['trial_ends_at']) : null,
-      subscribedUntil: map['subscribed_until'] != null ? _parseDate(map['subscribed_until']) : null,
+      subscriptionEnd: map['subscription_end'] != null ? _parseDate(map['subscription_end']) : null,
     );
   }
 
@@ -65,18 +84,27 @@ class AdminCompany {
   }
 }
 
+// ============================================================================
+// Providers
+// ============================================================================
+
 final adminCompaniesProvider = FutureProvider.autoDispose<List<AdminCompany>>((ref) async {
   final client = Supabase.instance.client;
-  final response = await client
-      .from('companies')
-      .select()
-      .order('created_at', ascending: false);
-
+  final response = await client.from('companies').select().order('created_at', ascending: false);
   final List<dynamic> data = response as List<dynamic>;
-  return data
-      .map((e) => AdminCompany.fromMap(e as Map<String, dynamic>))
-      .toList();
+  return data.map((e) => AdminCompany.fromMap(e as Map<String, dynamic>)).toList();
 });
+
+final subscriptionPlansProvider = FutureProvider.autoDispose<List<SubscriptionPlan>>((ref) async {
+  final client = Supabase.instance.client;
+  final response = await client.from('subscription_plans').select();
+  final List<dynamic> data = response as List<dynamic>;
+  return data.map((e) => SubscriptionPlan.fromMap(e as Map<String, dynamic>)).toList();
+});
+
+// ============================================================================
+// UI
+// ============================================================================
 
 class AdminCompaniesTab extends ConsumerStatefulWidget {
   const AdminCompaniesTab({super.key});
@@ -99,45 +127,32 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
     if (company.isActive) {
       final String? reason = await _showSuspensionDialog(context);
       if (reason == null) return;
-
       try {
-        await Supabase.instance.client.from('companies').update({
-          'is_active': false,
-          'suspension_reason': reason,
-        }).eq('id', company.id);
+        await Supabase.instance.client.from('companies').update({'is_active': false, 'suspension_reason': reason}).eq('id', company.id);
         ref.invalidate(adminCompaniesProvider);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تم إيقاف الشركة بنجاح.')),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('خطأ: $e')),
-          );
-        }
-      }
+      } catch (e) { _showError(context, e); }
     } else {
       try {
-        await Supabase.instance.client.from('companies').update({
-          'is_active': true,
-          'suspension_reason': null,
-        }).eq('id', company.id);
+        await Supabase.instance.client.from('companies').update({'is_active': true, 'suspension_reason': null}).eq('id', company.id);
         ref.invalidate(adminCompaniesProvider);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('تم تفعيل الشركة بنجاح.')),
-          );
-        }
-      } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text('خطأ: $e')),
-          );
-        }
-      }
+      } catch (e) { _showError(context, e); }
     }
+  }
+
+  Future<void> _showRenewSubscriptionDialog(AdminCompany company) async {
+    final bool? renewed = await showDialog<bool>(
+      context: context,
+      barrierDismissible: false,
+      builder: (_) => _RenewSubscriptionDialog(company: company),
+    );
+    if (renewed == true) {
+      ref.invalidate(adminCompaniesProvider);
+      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تجديد الاشتراك بنجاح.')));
+    }
+  }
+
+  void _showError(BuildContext context, Object e) {
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e')));
   }
 
   Future<String?> _showSuspensionDialog(BuildContext context) async {
@@ -148,21 +163,15 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
         title: const Text('إيقاف الشركة'),
         content: TextField(
           controller: controller,
-          decoration: const InputDecoration(
-            labelText: 'سبب الإيقاف (سيُسجل في سجل التدقيق)',
-            border: OutlineInputBorder(),
-          ),
+          decoration: const InputDecoration(labelText: 'سبب الإيقاف', border: OutlineInputBorder()),
           maxLines: 2,
         ),
         actions: [
-          TextButton(
-            onPressed: () => Navigator.of(context).pop(),
-            child: const Text('إلغاء'),
-          ),
+          TextButton(onPressed: () => Navigator.pop(context), child: const Text('إلغاء')),
           FilledButton(
             onPressed: () {
               final reason = controller.text.trim();
-              if (reason.isNotEmpty) Navigator.of(context).pop(reason);
+              if (reason.isNotEmpty) Navigator.pop(context, reason);
             },
             child: const Text('إيقاف'),
           ),
@@ -184,10 +193,7 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
         onRetry: () => ref.invalidate(adminCompaniesProvider),
       ),
       data: (List<AdminCompany> companies) {
-        final filtered = companies.where((c) {
-          final q = _searchQuery.toLowerCase();
-          return c.name.toLowerCase().contains(q);
-        }).toList();
+        final filtered = companies.where((c) => c.name.toLowerCase().contains(_searchQuery.toLowerCase())).toList();
 
         return Column(
           children: [
@@ -202,11 +208,7 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
             ),
             Expanded(
               child: filtered.isEmpty
-                  ? const AppEmptyView(
-                      icon: Icons.storefront_outlined,
-                      title: 'لا توجد شركات',
-                      message: 'لم يتم العثور على أي شركة تطابق بحثك.',
-                    )
+                  ? const AppEmptyView(icon: Icons.storefront_outlined, title: 'لا توجد شركات', message: '')
                   : ListView.separated(
                       padding: const EdgeInsets.symmetric(horizontal: 16),
                       itemCount: filtered.length,
@@ -216,6 +218,7 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
                         return _CompanyCard(
                           company: company,
                           onToggleStatus: () => _toggleCompanyStatus(company),
+                          onRenew: () => _showRenewSubscriptionDialog(company),
                         );
                       },
                     ),
@@ -228,9 +231,10 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
 }
 
 class _CompanyCard extends StatelessWidget {
-  const _CompanyCard({required this.company, required this.onToggleStatus});
+  const _CompanyCard({required this.company, required this.onToggleStatus, required this.onRenew});
   final AdminCompany company;
   final VoidCallback onToggleStatus;
+  final VoidCallback onRenew;
 
   @override
   Widget build(BuildContext context) {
@@ -260,17 +264,33 @@ class _CompanyCard extends StatelessWidget {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(company.name, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
-                    Text(
-                      'اشتراك: ${company.subscriptionStatus}',
-                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
-                    ),
+                    if (company.subscriptionEnd != null)
+                      Text(
+                        'ينتهي: ${DateFormat('yyyy/MM/dd').format(company.subscriptionEnd!)}',
+                        style: theme.textTheme.bodySmall?.copyWith(color: scheme.primary),
+                      )
+                    else
+                      Text('الاشتراك: ${company.subscriptionStatus}', style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant)),
                   ],
                 ),
               ),
               Switch(
                 value: isActive,
                 onChanged: (_) => onToggleStatus(),
-                activeThumbColor: const Color(0xFF0F7B6C), // ⬅️ تم إصلاح التحذير
+                activeThumbColor: const Color(0xFF0F7B6C),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          const Divider(height: 1),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton.icon(
+                onPressed: onRenew,
+                icon: const Icon(Icons.workspace_premium, size: 18),
+                label: const Text('تجديد الاشتراك'),
+                style: TextButton.styleFrom(foregroundColor: const Color(0xFFEF6C00)),
               ),
             ],
           ),
@@ -279,14 +299,117 @@ class _CompanyCard extends StatelessWidget {
             Container(
               padding: const EdgeInsets.all(8),
               decoration: BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(8)),
-              child: Text(
-                'سبب الإيقاف: ${company.suspensionReason}',
-                style: theme.textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer),
-              ),
+              child: Text('سبب الإيقاف: ${company.suspensionReason}', style: theme.textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer)),
             ),
           ]
         ],
       ),
+    );
+  }
+}
+
+// ============================================================================
+// Renew Subscription Dialog
+// ============================================================================
+
+class _RenewSubscriptionDialog extends ConsumerStatefulWidget {
+  final AdminCompany company;
+  const _RenewSubscriptionDialog({required this.company});
+  @override
+  ConsumerState<_RenewSubscriptionDialog> createState() => _RenewSubscriptionDialogState();
+}
+
+class _RenewSubscriptionDialogState extends ConsumerState<_RenewSubscriptionDialog> {
+  String? _selectedPlanId;
+  bool _isLoading = false;
+  String? _error;
+
+  Future<void> _submit() async {
+    if (_selectedPlanId == null) {
+      setState(() => _error = 'الرجاء اختيار الخطة');
+      return;
+    }
+    setState(() { _isLoading = true; _error = null; });
+
+    try {
+      final client = Supabase.instance.client;
+      final plans = await ref.read(subscriptionPlansProvider.future);
+      final plan = plans.firstWhere((p) => p.id == _selectedPlanId);
+
+      // حساب تاريخ الانتهاء
+      DateTime? expiryDate;
+      if (plan.durationDays != null) {
+        final now = DateTime.now();
+        // إذا كان هناك اشتراك سابق لم ينته، نضيف عليه
+        final baseDate = (widget.company.subscriptionEnd != null && widget.company.subscriptionEnd!.isAfter(now))
+            ? widget.company.subscriptionEnd!
+            : now;
+        expiryDate = baseDate.add(Duration(days: plan.durationDays!));
+      }
+
+      // 1. تسجيل الدفعة
+      await client.from('subscription_payments').insert({
+        'company_id': widget.company.id,
+        'plan_id': plan.id,
+        'amount': plan.price,
+        'expiry_date': expiryDate?.toUtc().toIso8601String(),
+        'created_by': client.auth.currentUser?.id,
+      });
+
+      // 2. تحديث الشركة
+      await client.from('companies').update({
+        'plan_id': plan.id,
+        'subscription_start': DateTime.now().toUtc().toIso8601String(),
+        'subscription_end': expiryDate?.toUtc().toIso8601String(),
+        'subscription_status': plan.name,
+        'is_active': true, // تفعيل الشركة تلقائياً عند التجديد
+        'suspension_reason': null,
+      }).eq('id', widget.company.id);
+
+      if (mounted) Navigator.pop(context, true);
+    } catch (e) {
+      if (mounted) setState(() { _isLoading = false; _error = 'خطأ: $e'; });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final plansAsync = ref.watch(subscriptionPlansProvider);
+
+    return AlertDialog(
+      title: Text('تجديد اشتراك: ${widget.company.name}'),
+      content: SizedBox(
+        width: 400,
+        child: plansAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (e, _) => Text('خطأ في تحميل الخطط: $e'),
+          data: (plans) {
+            return Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                ...plans.map((p) => RadioListTile<String>(
+                  title: Text(p.label),
+                  subtitle: Text('${p.price} ج.م'),
+                  value: p.id,
+                  groupValue: _selectedPlanId,
+                  onChanged: (v) => setState(() => _selectedPlanId = v),
+                )),
+                if (_error != null) ...[
+                  const SizedBox(height: 12),
+                  Text(_error!, style: TextStyle(color: Theme.of(context).colorScheme.error)),
+                ]
+              ],
+            );
+          },
+        ),
+      ),
+      actions: [
+        TextButton(onPressed: _isLoading ? null : () => Navigator.pop(context), child: const Text('إلغاء')),
+        FilledButton(
+          onPressed: _isLoading ? null : _submit,
+          child: _isLoading ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Text('تأكيد الدفع والتجديد'),
+        ),
+      ],
     );
   }
 }
