@@ -2,8 +2,8 @@
 
 import 'package:flutter/material.dart';
 
-import '../../../../companies/domain/entities/company.dart';
-import '../../../../companies/domain/entities/company_subscription.dart';
+import '../../../companies/domain/entities/company.dart';
+import '../../../companies/domain/entities/company_subscription.dart';
 
 // ============================================================================
 // Public API
@@ -651,19 +651,25 @@ class _RenewView extends StatelessWidget {
               ?.copyWith(fontWeight: FontWeight.w700),
         ),
         const SizedBox(height: 6),
-        for (final ({String value, String label}) opt
-            in kBillingCycleOptions) ...<Widget>[
-          RadioListTile<String>(
-            value: opt.value,
-            groupValue: billingCycle,
-            onChanged: (String? v) {
-              if (v != null) onBillingCycleChanged(v);
-            },
-            title: Text(opt.label),
-            dense: true,
-            contentPadding: EdgeInsets.zero,
+        RadioGroup<String>(
+          groupValue: billingCycle,
+          onChanged: (String? v) {
+            if (v != null) onBillingCycleChanged(v);
+          },
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: <Widget>[
+              for (final ({String value, String label}) opt
+                  in kBillingCycleOptions)
+                RadioListTile<String>(
+                  value: opt.value,
+                  title: Text(opt.label),
+                  dense: true,
+                  contentPadding: EdgeInsets.zero,
+                ),
+            ],
           ),
-        ],
+        ),
         if (isLifetime) ...<Widget>[
           const SizedBox(height: 6),
           Container(
