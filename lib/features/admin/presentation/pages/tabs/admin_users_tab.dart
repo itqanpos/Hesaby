@@ -395,7 +395,7 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
         password: _passwordCtrl.text.isNotEmpty ? _passwordCtrl.text : null,
         fullName: _nameCtrl.text,
         isPlatformAdmin: _isAdmin,
-        isBanned: _isBanned, // إرسال حالة الحظر
+        isBanned: _isBanned,
       );
       if (mounted) Navigator.of(context).pop(true);
     } on AdminUserException catch (e) {
@@ -431,7 +431,7 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
                 value: _isBanned,
                 onChanged: (v) => setState(() => _isBanned = v),
                 contentPadding: EdgeInsets.zero,
-                activeColor: Theme.of(context).colorScheme.error,
+                activeThumbColor: Theme.of(context).colorScheme.error, // ⬅️ تم إصلاح التحذير
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
