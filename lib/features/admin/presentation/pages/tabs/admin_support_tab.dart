@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../../../shared/widgets/app_button.dart';
 import '../../../../../shared/widgets/app_empty.dart';
 import '../../../../../shared/widgets/app_error.dart';
 import '../../../../../shared/widgets/app_loader.dart';
@@ -35,14 +34,19 @@ class SupportTicket {
   final String? companyName;
 
   factory SupportTicket.fromMap(Map<String, dynamic> map) {
+    String? compName;
+    if (map['companies'] != null && map['companies'] is Map) {
+      compName = (map['companies'] as Map)['name'] as String?;
+    }
+
     return SupportTicket(
       id: map['id'] as String,
-      subject: map['subject'] as String,
-      description: map['description'] as String,
+      subject: map['subject'] as String? ?? 'بدون عنوان',
+      description: map['description'] as String? ?? '',
       status: map['status'] as String? ?? 'new',
       priority: map['priority'] as String? ?? 'medium',
       createdAt: _parseDate(map['created_at']),
-      companyName: map['companies'] != null ? (map['companies'] as Map)['name'] as String? : null,
+      companyName: compName,
     );
   }
 
@@ -97,7 +101,7 @@ class TicketReply {
   factory TicketReply.fromMap(Map<String, dynamic> map) {
     return TicketReply(
       id: map['id'] as String,
-      message: map['message'] as String,
+      message: map['message'] as String? ?? '',
       isAdminReply: map['is_admin_reply'] as bool? ?? false,
       createdAt: SupportTicket._parseDate(map['created_at']),
     );
@@ -116,7 +120,10 @@ final ticketsProvider = FutureProvider.autoDispose<List<SupportTicket>>((ref) as
       .order('created_at', ascending: false);
 
   final List<dynamic> data = response as List<dynamic>;
-  return data.map((e) => SupportTicket.fromMap(e as Map<String, dynamic>)).toList();
+  return data
+      .where((e) => e is Map)
+      .map((e) => SupportTicket.fromMap(Map<String, dynamic>.from(e as Map)))
+      .toList();
 });
 
 // ============================================================================
@@ -188,9 +195,9 @@ class _TicketCard extends StatelessWidget {
         padding: const EdgeInsets.all(12),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
+          children: <Widget>[
             Row(
-              children: [
+              children: <Widget>[
                 Expanded(
                   child: Text(
                     ticket.subject,
@@ -200,7 +207,10 @@ class _TicketCard extends StatelessWidget {
                 Container(
                   padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                   decoration: BoxDecoration(color: statusColor, borderRadius: BorderRadius.circular(6)),
-                  child: Text(ticket.statusLabel, style: TextStyle(color: statusFg, fontSize: 10, fontWeight: FontWeight.bold)),
+                  child: Text(
+                    ticket.statusLabel,
+                    style: TextStyle(color: statusFg, fontSize: 10, fontWeight: FontWeight.bold),
+                  ),
                 ),
               ],
             ),
@@ -213,12 +223,15 @@ class _TicketCard extends StatelessWidget {
             ),
             const SizedBox(height: 8),
             Row(
-              children: [
+              children: <Widget>[
                 Icon(Icons.business, size: 14, color: scheme.outline),
                 const SizedBox(width: 4),
                 Text(ticket.companyName ?? 'شركة غير معروفة', style: theme.textTheme.labelSmall),
                 const Spacer(),
-                Text(DateFormat('yyyy/MM/dd HH:mm').format(ticket.createdAt), style: theme.textTheme.labelSmall?.copyWith(color: scheme.outline)),
+                Text(
+                  DateFormat('yyyy/MM/dd HH:mm').format(ticket.createdAt),
+                  style: theme.textTheme.labelSmall?.copyWith(color: scheme.outline),
+                ),
               ],
             )
           ],
@@ -280,7 +293,12 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
           .order('created_at', ascending: true);
       if (mounted) {
         setState(() {
-          _replies = (response as List).map((e) => TicketReply.fromMap(e)).toList();
+          // ⬇️ إصلاح تحويل الأنواع
+          final List<dynamic> data = response as List<dynamic>;
+          _replies = data
+              .where((e) => e is Map)
+              .map((e) => TicketReply.fromMap(Map<String, dynamic>.from(e as Map)))
+              .toList();
           _isLoading = false;
         });
       }
@@ -305,7 +323,9 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
       _replyController.clear();
       await _loadReplies();
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      }
     } finally {
       if (mounted) setState(() => _isSending = false);
     }
@@ -314,10 +334,13 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
   Future<void> _updateStatus(String newStatus) async {
     try {
       await Supabase.instance.client.from('support_tickets').update({'status': newStatus}).eq('id', widget.ticketId);
-      if (mounted) setState(() => _currentStatus = newStatus);
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تحديث الحالة')));
+      if (!mounted) return;
+      setState(() => _currentStatus = newStatus);
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم تحديث الحالة')));
     } catch (e) {
-      if (mounted) ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e')));
+      }
     }
   }
 
@@ -330,13 +353,13 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
     return Scaffold(
       appBar: AppBar(
         title: Text(ticket.subject),
-        actions: [
+        actions: <Widget>[
           PopupMenuButton<String>(
             onSelected: _updateStatus,
-            itemBuilder: (context) => [
-              const PopupMenuItem(value: 'new', child: Text('جديدة')),
-              const PopupMenuItem(value: 'in_progress', child: Text('قيد المعالجة')),
-              const PopupMenuItem(value: 'resolved', child: Text('تم الحل')),
+            itemBuilder: (context) => const <PopupMenuEntry<String>>[
+              PopupMenuItem<String>(value: 'new', child: Text('جديدة')),
+              PopupMenuItem<String>(value: 'in_progress', child: Text('قيد المعالجة')),
+              PopupMenuItem<String>(value: 'resolved', child: Text('تم الحل')),
             ],
             child: Container(
               margin: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
@@ -352,18 +375,18 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
         ],
       ),
       body: Column(
-        children: [
+        children: <Widget>[
           Expanded(
             child: ListView(
               padding: const EdgeInsets.all(16),
-              children: [
+              children: <Widget>[
                 // وصف التذكرة الأصلي
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
+                    children: <Widget>[
                       Text(ticket.description, style: theme.textTheme.bodyMedium),
                       const SizedBox(height: 8),
                       Text('بواسطة: ${ticket.companyName ?? "شركة"}', style: theme.textTheme.labelSmall),
@@ -389,7 +412,7 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
               border: Border(top: BorderSide(color: scheme.outlineVariant)),
             ),
             child: Row(
-              children: [
+              children: <Widget>[
                 Expanded(
                   child: AppTextField(
                     controller: _replyController,
@@ -400,7 +423,9 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
                 const SizedBox(width: 8),
                 IconButton.filled(
                   onPressed: _isSending ? null : _sendReply,
-                  icon: _isSending ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2)) : const Icon(Icons.send),
+                  icon: _isSending
+                      ? const SizedBox(width: 20, height: 20, child: CircularProgressIndicator(strokeWidth: 2))
+                      : const Icon(Icons.send),
                 )
               ],
             ),
@@ -418,7 +443,7 @@ class _ReplyBubble extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    final isAdmin = reply.isAdminReply;
+    final bool isAdmin = reply.isAdminReply;
 
     return Align(
       alignment: isAdmin ? Alignment.centerLeft : Alignment.centerRight,
@@ -437,12 +462,18 @@ class _ReplyBubble extends StatelessWidget {
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(reply.message, style: TextStyle(color: isAdmin ? scheme.onPrimaryContainer : scheme.onSurface)),
+          children: <Widget>[
+            Text(
+              reply.message,
+              style: TextStyle(color: isAdmin ? scheme.onPrimaryContainer : scheme.onSurface),
+            ),
             const SizedBox(height: 4),
             Text(
               DateFormat('HH:mm').format(reply.createdAt),
-              style: TextStyle(fontSize: 10, color: (isAdmin ? scheme.onPrimaryContainer : scheme.onSurface).withValues(alpha: 0.6)),
+              style: TextStyle(
+                fontSize: 10,
+                color: (isAdmin ? scheme.onPrimaryContainer : scheme.onSurface).withValues(alpha: 0.6),
+              ),
             )
           ],
         ),
