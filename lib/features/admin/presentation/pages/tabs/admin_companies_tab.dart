@@ -2,19 +2,15 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
+// ⬇️ تم حذف استيراد intl و app_button
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../../../shared/widgets/app_button.dart';
 import '../../../../../shared/widgets/app_empty.dart';
 import '../../../../../shared/widgets/app_error.dart';
 import '../../../../../shared/widgets/app_loader.dart';
 import '../../../../../shared/widgets/app_text_field.dart';
 
-// ============================================================================
-// Models
-// ============================================================================
-
+// ... (الموديل والبروفايدر كما هما بدون تغيير) ...
 class AdminCompany {
   const AdminCompany({
     required this.id,
@@ -69,10 +65,6 @@ class AdminCompany {
   }
 }
 
-// ============================================================================
-// Provider
-// ============================================================================
-
 final adminCompaniesProvider = FutureProvider.autoDispose<List<AdminCompany>>((ref) async {
   final client = Supabase.instance.client;
   final response = await client
@@ -85,10 +77,6 @@ final adminCompaniesProvider = FutureProvider.autoDispose<List<AdminCompany>>((r
       .map((e) => AdminCompany.fromMap(e as Map<String, dynamic>))
       .toList();
 });
-
-// ============================================================================
-// UI
-// ============================================================================
 
 class AdminCompaniesTab extends ConsumerStatefulWidget {
   const AdminCompaniesTab({super.key});
@@ -109,7 +97,6 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
 
   Future<void> _toggleCompanyStatus(AdminCompany company) async {
     if (company.isActive) {
-      // إيقاف الشركة - نطلب سبباً
       final String? reason = await _showSuspensionDialog(context);
       if (reason == null) return;
 
@@ -132,7 +119,6 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
         }
       }
     } else {
-      // تفعيل الشركة
       try {
         await Supabase.instance.client.from('companies').update({
           'is_active': true,
@@ -284,7 +270,7 @@ class _CompanyCard extends StatelessWidget {
               Switch(
                 value: isActive,
                 onChanged: (_) => onToggleStatus(),
-                activeColor: const Color(0xFF0F7B6C),
+                activeThumbColor: const Color(0xFF0F7B6C), // ⬅️ تم إصلاح التحذير
               ),
             ],
           ),
