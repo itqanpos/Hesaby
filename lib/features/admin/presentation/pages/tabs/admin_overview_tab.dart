@@ -5,7 +5,6 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-import '../../../../../shared/widgets/app_empty.dart';
 import '../../../../../shared/widgets/app_error.dart';
 import '../../../../../shared/widgets/app_loader.dart';
 
@@ -33,14 +32,19 @@ class OverviewData {
   final List<Map<String, dynamic>> recentCompanies;
 
   factory OverviewData.fromJson(Map<String, dynamic> json) {
+    // ⬇️ إصلاح: تحويل صريح لأنواع البيانات
+    final List<dynamic> rawRecent = (json['recent_companies'] as List<dynamic>?) ?? <dynamic>[];
     return OverviewData(
-      totalCompanies: json['total_companies'] as int? ?? 0,
-      activeCompanies: json['active_companies'] as int? ?? 0,
-      suspendedCompanies: json['suspended_companies'] as int? ?? 0,
-      totalUsers: json['total_users'] as int? ?? 0,
-      totalInvoices: json['total_invoices'] as int? ?? 0,
+      totalCompanies: (json['total_companies'] as num?)?.toInt() ?? 0,
+      activeCompanies: (json['active_companies'] as num?)?.toInt() ?? 0,
+      suspendedCompanies: (json['suspended_companies'] as num?)?.toInt() ?? 0,
+      totalUsers: (json['total_users'] as num?)?.toInt() ?? 0,
+      totalInvoices: (json['total_invoices'] as num?)?.toInt() ?? 0,
       totalRevenue: (json['total_revenue'] as num?)?.toDouble() ?? 0,
-      recentCompanies: List<Map<String, dynamic>>.from(json['recent_companies'] ?? []),
+      recentCompanies: rawRecent
+          .whereType<Map>()
+          .map((e) => Map<String, dynamic>.from(e))
+          .toList(growable: false),
     );
   }
 }
@@ -138,44 +142,55 @@ class AdminOverviewTab extends ConsumerWidget {
                   child: Center(child: Text('لا توجد شركات مسجلة بعد.')),
                 )
               else
-                ...data.recentCompanies.map((c) => Card(
-                  elevation: 0,
-                  margin: const EdgeInsets.only(bottom: 8),
-                  shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(12),
-                    side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
-                  ),
-                  child: ListTile(
-                    leading: CircleAvatar(
-                      backgroundColor: c['is_active'] == true 
-                          ? Theme.of(context).colorScheme.primaryContainer 
-                          : Theme.of(context).colorScheme.errorContainer,
-                      child: Icon(
-                        Icons.business, 
-                        color: c['is_active'] == true 
-                            ? Theme.of(context).colorScheme.onPrimaryContainer
-                            : Theme.of(context).colorScheme.onErrorContainer,
-                      ),
+                ...data.recentCompanies.map((c) {
+                  // ⬇️ إصلاح: تحويل صريح
+                  final String name = (c['name'] as String?) ?? 'بدون اسم';
+                  final bool isActive = (c['is_active'] as bool?) ?? false;
+                  final String createdAt = (c['created_at'] as String?) ?? '';
+                  final DateTime? dt = DateTime.tryParse(createdAt);
+                  final String dateStr = dt != null
+                      ? DateFormat('yyyy/MM/dd').format(dt.toLocal())
+                      : '—';
+
+                  return Card(
+                    elevation: 0,
+                    margin: const EdgeInsets.only(bottom: 8),
+                    shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(12),
+                      side: BorderSide(color: Theme.of(context).colorScheme.outlineVariant),
                     ),
-                    title: Text(c['name'] as String),
-                    subtitle: Text('انضمت: ${DateFormat('yyyy/MM/dd').format(DateTime.parse(c['created_at']).toLocal())}'),
-                    trailing: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-                      decoration: BoxDecoration(
-                        color: c['is_active'] == true ? const Color(0xFFC8E6C9) : Theme.of(context).colorScheme.errorContainer,
-                        borderRadius: BorderRadius.circular(8),
+                    child: ListTile(
+                      leading: CircleAvatar(
+                        backgroundColor: isActive 
+                            ? Theme.of(context).colorScheme.primaryContainer 
+                            : Theme.of(context).colorScheme.errorContainer,
+                        child: Icon(
+                          Icons.business, 
+                          color: isActive 
+                              ? Theme.of(context).colorScheme.onPrimaryContainer
+                              : Theme.of(context).colorScheme.onErrorContainer,
+                        ),
                       ),
-                      child: Text(
-                        c['is_active'] == true ? 'نشطة' : 'موقوفة',
-                        style: TextStyle(
-                          fontSize: 10,
-                          fontWeight: FontWeight.bold,
-                          color: c['is_active'] == true ? const Color(0xFF1B5E20) : Theme.of(context).colorScheme.onErrorContainer,
+                      title: Text(name),
+                      subtitle: Text('انضمت: $dateStr'),
+                      trailing: Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                        decoration: BoxDecoration(
+                          color: isActive ? const Color(0xFFC8E6C9) : Theme.of(context).colorScheme.errorContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          isActive ? 'نشطة' : 'موقوفة',
+                          style: TextStyle(
+                            fontSize: 10,
+                            fontWeight: FontWeight.bold,
+                            color: isActive ? const Color(0xFF1B5E20) : Theme.of(context).colorScheme.onErrorContainer,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-                )),
+                  );
+                }),
             ],
           ),
         );
