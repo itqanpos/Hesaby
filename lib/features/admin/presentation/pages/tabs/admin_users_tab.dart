@@ -163,7 +163,7 @@ final adminUsersProvider =
   //    includeInactive: لا نفلتر بـ is_active — نُظهر الكل ونعرض الحالة.
   List<Map<String, Object?>> memberRows = <Map<String, Object?>>[];
   try {
-    final Object? raw = await client
+    final Object raw = await client
         .from('company_members')
         .select(
           'user_id, role, is_active, '
