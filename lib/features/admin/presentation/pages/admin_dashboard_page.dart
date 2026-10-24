@@ -17,6 +17,7 @@ import 'tabs/admin_sync_tab.dart';
 import 'tabs/admin_app_control_tab.dart';
 import 'tabs/admin_expenses_tab.dart';
 import 'tabs/admin_support_tab.dart';
+import 'tabs/admin_storage_tab.dart';
 
 /// Platform Admin Dashboard.
 class AdminDashboardPage extends ConsumerWidget {
@@ -49,7 +50,7 @@ class AdminDashboardPage extends ConsumerWidget {
     }
 
     return DefaultTabController(
-      length: 8, // ⬅️ أصبحت 8 تبويبات
+      length: 9, // ⬅️ أصبحت 9 تبويبات
       child: AppShell(
         appBar: AppBar(
           leading: IconButton(
@@ -67,6 +68,7 @@ class AdminDashboardPage extends ConsumerWidget {
               Tab(icon: Icon(Icons.storefront_outlined), text: 'الاشتراكات'),
               Tab(icon: Icon(Icons.money_off), text: 'المصروفات'),
               Tab(icon: Icon(Icons.support_agent), text: 'الدعم الفني'),
+              Tab(icon: Icon(Icons.dns), text: 'قاعدة البيانات'),
               Tab(icon: Icon(Icons.sync), text: 'المزامنة'),
               Tab(icon: Icon(Icons.people_outline), text: 'المشتركون'),
               Tab(icon: Icon(Icons.settings_suggest_outlined), text: 'التحكم'),
@@ -80,6 +82,7 @@ class AdminDashboardPage extends ConsumerWidget {
             AdminCompaniesTab(),
             AdminExpensesTab(),
             AdminSupportTab(),
+            AdminStorageTab(),
             AdminSyncTab(),
             AdminUsersTab(),
             AdminAppControlTab(),
