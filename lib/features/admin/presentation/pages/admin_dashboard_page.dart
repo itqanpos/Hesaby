@@ -7,8 +7,9 @@ import 'package:go_router/go_router.dart';
 import '../../../../app/router.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
-import '../../../auth/presentation/providers/auth_provider.dart'; // ⬅️ أضفنا هذا
+import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/platform_admin_provider.dart';
+import 'tabs/admin_audit_log_tab.dart';
 import 'tabs/admin_companies_tab.dart';
 import 'tabs/admin_users_tab.dart';
 import 'tabs/admin_app_control_tab.dart';
@@ -21,9 +22,10 @@ class AdminDashboardPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
     final String? email = ref.watch(authProvider).session?.email;
-    
-    // ⬇️ السماح بالدخول إذا كان أدمن منصة أو يملك الإيميل الرئيسي
-    final bool isAdmin = isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
+
+    // السماح بالدخول إذا كان أدمن منصة أو يملك الإيميل الرئيسي.
+    final bool isAdmin =
+        isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
 
     if (!isAdmin) {
       return AppShell(
@@ -43,7 +45,7 @@ class AdminDashboardPage extends ConsumerWidget {
     }
 
     return DefaultTabController(
-      length: 3,
+      length: 4,
       child: AppShell(
         appBar: AppBar(
           leading: IconButton(
@@ -53,7 +55,10 @@ class AdminDashboardPage extends ConsumerWidget {
           ),
           title: const Text('لوحة تحكم المنصة'),
           bottom: const TabBar(
+            isScrollable: true,
+            tabAlignment: TabAlignment.center,
             tabs: <Widget>[
+              Tab(icon: Icon(Icons.history), text: 'سجل التدقيق'),
               Tab(icon: Icon(Icons.storefront_outlined), text: 'الاشتراكات'),
               Tab(icon: Icon(Icons.people_outline), text: 'المشتركون'),
               Tab(icon: Icon(Icons.settings_suggest_outlined), text: 'التحكم'),
@@ -62,6 +67,7 @@ class AdminDashboardPage extends ConsumerWidget {
         ),
         body: const TabBarView(
           children: <Widget>[
+            AdminAuditLogTab(),
             AdminCompaniesTab(),
             AdminUsersTab(),
             AdminAppControlTab(),
