@@ -120,9 +120,10 @@ final ticketsProvider = FutureProvider.autoDispose<List<SupportTicket>>((ref) as
       .order('created_at', ascending: false);
 
   final List<dynamic> data = response as List<dynamic>;
+  // ⬇️ إصلاح: استخدام whereType كما يطلب الـ Linter
   return data
-      .where((e) => e is Map)
-      .map((e) => SupportTicket.fromMap(Map<String, dynamic>.from(e as Map)))
+      .whereType<Map<String, dynamic>>()
+      .map((e) => SupportTicket.fromMap(e))
       .toList();
 });
 
@@ -251,7 +252,7 @@ class _TicketCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Ticket Detail Page (للعرض والرد)
+// Ticket Detail Page
 // ============================================================================
 
 class _TicketDetailPage extends ConsumerStatefulWidget {
@@ -293,11 +294,11 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
           .order('created_at', ascending: true);
       if (mounted) {
         setState(() {
-          // ⬇️ إصلاح تحويل الأنواع
           final List<dynamic> data = response as List<dynamic>;
+          // ⬇️ إصلاح: استخدام whereType كما يطلب الـ Linter
           _replies = data
-              .where((e) => e is Map)
-              .map((e) => TicketReply.fromMap(Map<String, dynamic>.from(e as Map)))
+              .whereType<Map<String, dynamic>>()
+              .map((e) => TicketReply.fromMap(e))
               .toList();
           _isLoading = false;
         });
@@ -380,7 +381,6 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
             child: ListView(
               padding: const EdgeInsets.all(16),
               children: <Widget>[
-                // وصف التذكرة الأصلي
                 Container(
                   padding: const EdgeInsets.all(12),
                   decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(12)),
@@ -394,8 +394,6 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
                   ),
                 ),
                 const SizedBox(height: 24),
-
-                // الردود
                 if (_isLoading)
                   const Center(child: CircularProgressIndicator())
                 else
@@ -403,8 +401,6 @@ class _TicketDetailPageState extends ConsumerState<_TicketDetailPage> {
               ],
             ),
           ),
-          
-          // صندوق الرد
           Container(
             padding: const EdgeInsets.all(12),
             decoration: BoxDecoration(
