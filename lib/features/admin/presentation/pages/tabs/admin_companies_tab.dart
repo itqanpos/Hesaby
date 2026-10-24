@@ -21,6 +21,13 @@ import '../../dialogs/admin_company_actions_dialog.dart';
 import '../../dialogs/admin_company_payments_dialog.dart';
 import '../../providers/admin_companies_provider.dart';
 
+/// هل الشركة على ترخيص "مدى الحياة"؟
+///
+/// مصدر الحقيقة في DB هو `companies.is_lifetime`، لكن هذا الملف يعتمد على
+/// `billing_cycle == 'lifetime'` (مطابق لما تفعله دالة SQL في A1) لتجنّب
+/// الاعتماد على وجود حقل `isLifetime` في `Company` قبل إضافته.
+bool _isLifetime(Company c) => c.billingCycle == 'lifetime';
+
 class AdminCompaniesTab extends ConsumerStatefulWidget {
   const AdminCompaniesTab({super.key});
 
@@ -49,10 +56,18 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
     return companies.where((Company c) {
       if (_statusFilter != _StatusFilter.all) {
         final CompanySubscription sub = CompanySubscription.fromCompany(c);
+        final bool lifetime = _isLifetime(c);
         final bool matches = switch (_statusFilter) {
-          _StatusFilter.active => sub.isActive && !c.isSuspended,
-          _StatusFilter.trial => sub.isTrial && !c.isSuspended,
-          _StatusFilter.expired => sub.isExpired || c.isSuspended,
+          // نشط = مدفوع، غير منتهٍ، غير lifetime، غير محظور.
+          _StatusFilter.active =>
+            !c.isSuspended && !lifetime && sub.isActive,
+          _StatusFilter.trial =>
+            !c.isSuspended && !lifetime && sub.isTrial,
+          // منتهي/محظور = محظور (أي نوع) أو منتهي (غير lifetime).
+          _StatusFilter.expired =>
+            c.isSuspended || (!lifetime && sub.isExpired),
+          // مدى الحياة = lifetime وغير محظور.
+          _StatusFilter.lifetime => !c.isSuspended && lifetime,
           _StatusFilter.all => true,
         };
         if (!matches) return false;
@@ -74,8 +89,7 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
   // ---------------------------------------------------------------------------
 
   Future<void> _openActions(Company company) async {
-    final AdminSubscriptionChoice? choice =
-        await showAdminCompanyActionsDialog(
+    final AdminSubscriptionChoice? choice = await showAdminCompanyActionsDialog(
       context: context,
       company: company,
     );
@@ -84,64 +98,98 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
     final client = Supabase.instance.client;
 
     try {
-      if (choice.action == AdminSubscriptionAction.cancel) {
-        await client.rpc('admin_update_subscription', params: {
-          'p_company_id': company.id,
-          'p_status': 'cancelled',
-          'p_plan_id': company.planId,
-          'p_billing_cycle': company.billingCycle,
-          'p_subscribed_until': company.subscribedUntil?.toIso8601String(),
-        });
-      } else if (choice.action == AdminSubscriptionAction.suspend) {
-        await client.rpc('admin_suspend_company', params: {
-          'p_company_id': company.id,
-          'p_suspend': true,
-          'p_reason': 'تم الحظر من قبل الإدارة',
-        });
-      } else if (choice.action == AdminSubscriptionAction.unsuspend) {
-        await client.rpc('admin_suspend_company', params: {
-          'p_company_id': company.id,
-          'p_suspend': false,
-        });
-      } else if (choice.action == AdminSubscriptionAction.renew) {
-        final CompanySubscription sub =
-            CompanySubscription.fromCompany(company);
-        final DateTime now = DateTime.now().toUtc();
-        final DateTime? until = sub.subscribedUntil;
-        final DateTime base =
-            (sub.isActive && until != null && until.isAfter(now))
-                ? until
-                : now;
-        final Duration duration = choice.billingCycle == 'yearly'
-            ? const Duration(days: 365)
-            : const Duration(days: 30);
-        final DateTime newUntil = base.add(duration);
+      bool showSnackbar = true;
 
-        await client.rpc('admin_update_subscription', params: {
-          'p_company_id': company.id,
-          'p_status': 'active',
-          'p_plan_id': choice.planId,
-          'p_billing_cycle': choice.billingCycle,
-          'p_subscribed_until': newUntil.toIso8601String(),
-        });
-      } else if (choice.action == AdminSubscriptionAction.viewPayments) {
-        if (!mounted) return;
-        await showAdminCompanyPaymentsDialog(
-          context: context,
-          company: company,
-        );
-        return;
+      switch (choice.action) {
+        case AdminSubscriptionAction.cancel:
+          await client.rpc('admin_update_subscription', params: <String, Object?>{
+            'p_company_id': company.id,
+            'p_status': 'cancelled',
+            'p_plan_id': company.planId,
+            'p_billing_cycle': company.billingCycle,
+            'p_subscribed_until': company.subscribedUntil?.toIso8601String(),
+          });
+
+        case AdminSubscriptionAction.suspend:
+          final String? reason = choice.reason;
+          if (reason == null || reason.trim().length < 5) {
+            // دفاعي: الحوار يفرض السبب، لكن لا نفترض.
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('سبب الإيقاف مطلوب.')),
+            );
+            return;
+          }
+          await client.rpc('admin_suspend_company', params: <String, Object?>{
+            'p_company_id': company.id,
+            'p_suspend': true,
+            'p_reason': reason.trim(),
+          });
+
+        case AdminSubscriptionAction.unsuspend:
+          await client.rpc('admin_suspend_company', params: <String, Object?>{
+            'p_company_id': company.id,
+            'p_suspend': false,
+          });
+
+        case AdminSubscriptionAction.renew:
+          final String? cycle = choice.billingCycle;
+          final String? planId = choice.planId;
+          if (cycle == null || planId == null) {
+            if (!mounted) return;
+            ScaffoldMessenger.of(context).showSnackBar(
+              const SnackBar(content: Text('بيانات التجديد غير مكتملة.')),
+            );
+            return;
+          }
+
+          // احسب subscribed_until فقط إذا لم يكن lifetime.
+          String? newUntilIso;
+          if (cycle != 'lifetime') {
+            final CompanySubscription sub =
+                CompanySubscription.fromCompany(company);
+            final DateTime now = DateTime.now().toUtc();
+            final DateTime? until = sub.subscribedUntil;
+            final DateTime base =
+                (sub.isActive && until != null && until.isAfter(now))
+                    ? until
+                    : now;
+            final Duration duration = cycle == 'yearly'
+                ? const Duration(days: 365)
+                : const Duration(days: 30);
+            newUntilIso = base.add(duration).toIso8601String();
+          }
+          // lifetime → newUntilIso = null → SQL يضبط is_lifetime=true تلقائيًا.
+
+          await client.rpc('admin_update_subscription', params: <String, Object?>{
+            'p_company_id': company.id,
+            'p_status': 'active',
+            'p_plan_id': planId,
+            'p_billing_cycle': cycle,
+            'p_subscribed_until': newUntilIso,
+          });
+
+        case AdminSubscriptionAction.viewPayments:
+          if (!mounted) return;
+          await showAdminCompanyPaymentsDialog(
+            context: context,
+            company: company,
+          );
+          if (!mounted) return;
+          // نُحدّث القائمة لأن الحوار قد يُغيّر حالة الاشتراك (مثلًا دفع فاتورة).
+          showSnackbar = false;
       }
 
-      // ⬇️ تمت إضافة await هنا
       await ref.read(adminCompaniesProvider.notifier).refresh();
 
       if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(content: Text('تم تحديث بيانات الشركة')),
-        );
+      if (showSnackbar) {
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('تم تحديث بيانات الشركة')),
+          );
+      }
     } on PostgrestException catch (error) {
       if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
@@ -158,6 +206,11 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
   // ---------------------------------------------------------------------------
   // Export
   // ---------------------------------------------------------------------------
+  //
+  // ملاحظة: الخط الافتراضي في PDF هو Helvetica (لا يدعم العربية) — الأسماء
+  // العربية ستظهر كمربعات. إصلاحه يتطلب تضمين خط عربي (Cairo/Noto Naskh) في
+  // assets + تحميله عبر rootBundle. مُدرج كـ follow-up خارج نطاق هذه المرحلة
+  // لأنه يحتاج ملف font في المستودع.
 
   Future<void> _exportReport(List<Company> companies) async {
     try {
@@ -168,7 +221,8 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
           'Plan',
           'Billing Cycle',
           'Subscribed Until',
-          'Is Suspended',
+          'Suspended',
+          'Suspension Reason',
           'Max Users',
           'Max Branches',
           'Phone',
@@ -176,22 +230,26 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
         ],
       ];
 
-      for (final c in companies) {
-        final sub = CompanySubscription.fromCompany(c);
+      for (final Company c in companies) {
+        final CompanySubscription sub = CompanySubscription.fromCompany(c);
+        final bool lifetime = _isLifetime(c);
         final String status = c.isSuspended
             ? 'Suspended'
-            : sub.isActive
-                ? 'Active'
-                : sub.isTrial
-                    ? 'Trial'
-                    : 'Expired';
+            : lifetime
+                ? 'Lifetime'
+                : sub.isActive
+                    ? 'Active'
+                    : sub.isTrial
+                        ? 'Trial'
+                        : 'Expired';
         rows.add(<String>[
           c.name,
           status,
           c.planId ?? '-',
           c.billingCycle ?? '-',
-          c.subscribedUntil?.toIso8601String() ?? '-',
+          lifetime ? 'Lifetime' : (c.subscribedUntil?.toIso8601String() ?? '-'),
           c.isSuspended ? 'Yes' : 'No',
+          c.suspensionReason ?? '-',
           c.maxUsers.toString(),
           c.maxBranches.toString(),
           c.phone ?? '-',
@@ -230,9 +288,9 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
                 data: rows.skip(1).toList(),
                 headerStyle: pw.TextStyle(
                   fontWeight: pw.FontWeight.bold,
-                  fontSize: 9,
+                  fontSize: 8,
                 ),
-                cellStyle: const pw.TextStyle(fontSize: 8),
+                cellStyle: const pw.TextStyle(fontSize: 7),
                 headerDecoration:
                     const pw.BoxDecoration(color: PdfColors.grey300),
                 cellPadding: const pw.EdgeInsets.all(3),
@@ -316,7 +374,7 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
                   const SizedBox(width: 8),
                   IconButton.filledTonal(
                     tooltip: 'تصدير PDF',
-                    onPressed: () => _exportReport(all),
+                    onPressed: () => _exportReport(filtered),
                     icon: const Icon(Icons.download),
                   ),
                 ],
@@ -382,7 +440,7 @@ class _AdminCompaniesTabState extends ConsumerState<AdminCompaniesTab> {
 // Status filter
 // ============================================================================
 
-enum _StatusFilter { all, active, trial, expired }
+enum _StatusFilter { all, active, trial, expired, lifetime }
 
 class _StatusFilterBar extends StatelessWidget {
   const _StatusFilterBar({
@@ -417,7 +475,8 @@ class _StatusFilterBar extends StatelessWidget {
         _StatusFilter.all => 'الكل',
         _StatusFilter.active => 'نشط',
         _StatusFilter.trial => 'تجربة',
-        _StatusFilter.expired => 'منتهي',
+        _StatusFilter.expired => 'منتهي/محظور',
+        _StatusFilter.lifetime => 'مدى الحياة',
       };
 }
 
@@ -438,6 +497,9 @@ class _KpiRow extends StatelessWidget {
     for (final Company c in companies) {
       if (c.isSuspended) {
         expired++;
+      } else if (_isLifetime(c)) {
+        // مدى الحياة يُحسب ضمن "نشط" في KPI (لكن الفلتر يفصله).
+        active++;
       } else {
         final CompanySubscription sub = CompanySubscription.fromCompany(c);
         if (sub.isExpired) {
@@ -557,6 +619,7 @@ class _CompanyCard extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final CompanySubscription sub = CompanySubscription.fromCompany(company);
+    final bool lifetime = _isLifetime(company);
     final _BadgeVisual badge = _resolveBadge(company, sub, scheme);
 
     return Material(
@@ -587,7 +650,9 @@ class _CompanyCard extends StatelessWidget {
                     ? scheme.onErrorContainer
                     : scheme.onPrimaryContainer,
                 child: Text(
-                  company.name.characters.first.toUpperCase(),
+                  company.name.isEmpty
+                      ? '?'
+                      : company.name.characters.first.toUpperCase(),
                   style: theme.textTheme.titleMedium?.copyWith(
                     fontWeight: FontWeight.w800,
                   ),
@@ -628,7 +693,7 @@ class _CompanyCard extends StatelessWidget {
                           ),
                         ),
                         if (!company.isSuspended &&
-                            sub.isActive &&
+                            (lifetime || sub.isActive) &&
                             sub.plan != null) ...<Widget>[
                           const SizedBox(width: 6),
                           Text(
@@ -647,6 +712,40 @@ class _CompanyCard extends StatelessWidget {
                         color: scheme.onSurfaceVariant,
                       ),
                     ),
+                    // سبب الإيقاف (إن وُجد) — A3
+                    if (company.isSuspended &&
+                        company.suspensionReason != null &&
+                        company.suspensionReason!.isNotEmpty) ...<Widget>[
+                      const SizedBox(height: 6),
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 6,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: scheme.errorContainer.withValues(alpha: 0.5),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: <Widget>[
+                            Icon(Icons.info_outline,
+                                size: 12, color: scheme.error),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                company.suspensionReason!,
+                                style: theme.textTheme.labelSmall?.copyWith(
+                                  color: scheme.error,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -671,6 +770,13 @@ class _CompanyCard extends StatelessWidget {
         label: 'محظور',
         background: scheme.error,
         foreground: scheme.onError,
+      );
+    }
+    if (_isLifetime(company)) {
+      return _BadgeVisual(
+        label: 'مدى الحياة',
+        background: const Color(0xFFE1BEE7),
+        foreground: const Color(0xFF6A1B9A),
       );
     }
     if (sub.isExpired) {
