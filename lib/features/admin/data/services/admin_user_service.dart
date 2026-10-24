@@ -2,19 +2,11 @@
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-/// Service layer for calling the `admin-create-user` and `admin-update-user`
-/// Edge Functions.
-///
-/// The heavy lifting (creating auth users, updating credentials) happens on
-/// the server. This class only marshals the request and translates errors.
 class AdminUserService {
   const AdminUserService(this._client);
 
   final SupabaseClient _client;
 
-  /// Creates a new user. Returns the new user's UUID.
-  ///
-  /// Throws [AdminUserException] on any failure with an Arabic message.
   Future<String> createUser({
     required String email,
     required String password,
@@ -53,13 +45,13 @@ class AdminUserService {
     }
   }
 
-  /// Updates an existing user's email / password / full name / admin flag.
   Future<void> updateUser({
     required String userId,
     String? email,
     String? password,
     String? fullName,
     bool? isPlatformAdmin,
+    bool? isBanned, // ⬅️ تمت إضافة هذا المتغير
   }) async {
     try {
       final FunctionResponse response = await _client.functions.invoke(
@@ -71,6 +63,7 @@ class AdminUserService {
           if (password != null && password.isNotEmpty) 'password': password,
           if (fullName != null) 'fullName': fullName.trim(),
           if (isPlatformAdmin != null) 'isPlatformAdmin': isPlatformAdmin,
+          if (isBanned != null) 'isBanned': isBanned, // ⬅️ تمرير المتغير للـ Edge Function
         },
       );
 
@@ -87,10 +80,6 @@ class AdminUserService {
       throw AdminUserException('تعذّر الاتصال بالخادم: $error');
     }
   }
-
-  // ---------------------------------------------------------------------------
-  // Error mapping
-  // ---------------------------------------------------------------------------
 
   static String _extractError(FunctionResponse response) {
     final Object? data = response.data;
@@ -138,7 +127,6 @@ class AdminUserService {
   }
 }
 
-/// Thrown when an admin user operation fails. Message is user-facing Arabic.
 class AdminUserException implements Exception {
   const AdminUserException(this.message);
   final String message;
