@@ -18,26 +18,32 @@ class AuditLogEntry {
     required this.id,
     required this.actorEmail,
     required this.action,
-    required this.targetType,
+    required this.entityType,
+    required this.entityLabel,
+    required this.reason,
     required this.createdAt,
-    this.details,
+    this.metadata,
   });
 
   final String id;
   final String actorEmail;
   final String action;
-  final String targetType;
+  final String entityType;
+  final String? entityLabel;
+  final String? reason;
   final DateTime createdAt;
-  final Map<String, dynamic>? details;
+  final Map<String, dynamic>? metadata;
 
   factory AuditLogEntry.fromMap(Map<String, dynamic> map) {
     return AuditLogEntry(
       id: map['id'] as String,
       actorEmail: map['actor_email'] as String? ?? 'غير معروف',
       action: map['action'] as String? ?? 'حركة غير مسماة',
-      targetType: map['target_type'] as String? ?? '',
+      entityType: map['entity_type'] as String? ?? '',
+      entityLabel: map['entity_label'] as String?,
+      reason: map['reason'] as String?,
       createdAt: _parseDate(map['created_at']),
-      details: map['details'] as Map<String, dynamic>?,
+      metadata: map['metadata'] as Map<String, dynamic>?,
     );
   }
 
@@ -91,7 +97,7 @@ class AdminAuditLogTab extends ConsumerWidget {
       loading: () => const AppLoader(),
       error: (Object error, StackTrace _) => AppErrorView(
         title: 'تعذّر تحميل السجل',
-        message: 'حدث خطأ أثناء جلب سجل التدقيق.',
+        message: 'حدث خطأ أثناء جلب سجل التدقيق: $error',
         retryLabel: 'إعادة المحاولة',
         onRetry: () => ref.invalidate(auditLogsProvider),
       ),
@@ -153,12 +159,30 @@ class _AuditLogCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Text(
-                  entry.action,
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                  ),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        entry.action,
+                        style: theme.textTheme.titleSmall?.copyWith(
+                          fontWeight: FontWeight.w800,
+                          color: color,
+                        ),
+                      ),
+                    ),
+                    if (entry.entityLabel != null)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: scheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(4),
+                        ),
+                        child: Text(
+                          entry.entityLabel!,
+                          style: theme.textTheme.labelSmall?.copyWith(fontWeight: FontWeight.bold),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 4),
                 Text(
@@ -168,15 +192,14 @@ class _AuditLogCard extends StatelessWidget {
                   ),
                   textDirection: TextDirection.ltr,
                 ),
-                if (entry.details != null && entry.details!.isNotEmpty) ...<Widget>[
+                if (entry.reason != null && entry.reason!.isNotEmpty) ...[
                   const SizedBox(height: 4),
                   Text(
-                    'التفاصيل: ${entry.details.toString()}',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
+                    'السبب: ${entry.reason}',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: scheme.error,
+                      fontWeight: FontWeight.w600,
                     ),
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
                   ),
                 ],
                 const SizedBox(height: 6),
