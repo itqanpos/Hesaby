@@ -157,7 +157,7 @@ final adminUsersProvider =
   //    ملاحظة (U5): الكتابة في audit_logs لعمليات المستخدمين تتم من Edge Functions
   //    (admin-create-user / admin-update-user) — راجع C6. لا يمكن للعميل
   //    استدعاء audit_log_insert مباشرة (REVOKE صريح من authenticated).
-  final Object? rpcResponse = await client.rpc('get_admin_users');
+  final Object rpcResponse = await client.rpc('get_admin_users');
 
   // 2. عضويات الشركات (مع id الشركة وحالتها).
   //    includeInactive: لا نفلتر بـ is_active — نُظهر الكل ونعرض الحالة.
