@@ -12,7 +12,6 @@ import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
-import '../../../companies/presentation/providers/company_context_state.dart';
 
 // ============================================================================
 // Models (مبسطة للشركة)
@@ -81,6 +80,7 @@ class CompanyTicketReply {
 // ============================================================================
 
 final companyTicketsProvider = FutureProvider.autoDispose<List<CompanyTicket>>((ref) async {
+  // استخدام select لجلب الـ id فقط، وتجنب إعادة البناء غير الضرورية
   final companyId = ref.watch(companyContextProvider.select((s) => s.currentCompany?.id));
   if (companyId == null) return [];
 
