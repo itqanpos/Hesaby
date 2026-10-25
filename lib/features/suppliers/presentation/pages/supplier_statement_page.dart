@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
@@ -27,12 +28,8 @@ import '../providers/supplier_statement_providers.dart';
 
 enum _PeriodPreset { all, thisMonth, last30Days, thisYear, custom }
 
-/// Full account statement page for a single supplier.
 class SupplierStatementPage extends ConsumerStatefulWidget {
-  const SupplierStatementPage({
-    super.key,
-    required this.supplier,
-  });
+  const SupplierStatementPage({super.key, required this.supplier});
 
   final Supplier supplier;
 
@@ -86,9 +83,10 @@ class _SupplierStatementPageState
         toDate: _toDate,
       );
 
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
+  Future<void> _refresh() async {
+    ref.invalidate(supplierStatementProvider(_args));
+    await ref.read(supplierStatementProvider(_args).future);
+  }
 
   Future<void> _selectPreset(_PeriodPreset preset) async {
     if (preset == _PeriodPreset.custom) {
@@ -118,7 +116,7 @@ class _SupplierStatementPageState
       supplierName: widget.supplier.name,
     );
     if (saved == true && mounted) {
-      ref.invalidate(supplierStatementProvider(_args));
+      await _refresh();
     }
   }
 
@@ -155,8 +153,7 @@ class _SupplierStatementPageState
     setState(() => _isPrinting = true);
     try {
       final Uint8List? logo = await _loadLogoBytes();
-      final Uint8List bytes =
-          await PdfSupplierStatementBuilder.build(
+      final Uint8List bytes = await PdfSupplierStatementBuilder.build(
         statement: statement,
         style: _readA4Style(),
         logoBytes: logo,
@@ -201,10 +198,6 @@ class _SupplierStatementPageState
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     return AppShell(
@@ -234,14 +227,14 @@ class _SupplierStatementPageState
               title: 'تعذّر تحميل كشف الحساب',
               message: _errorMessage(error),
               retryLabel: 'إعادة المحاولة',
-              onRetry: () =>
-                  ref.invalidate(supplierStatementProvider(_args)),
+              onRetry: _refresh,
             ),
             data: (SupplierStatement statement) => _StatementBody(
               statement: statement,
               preset: _preset,
               customRange: _customRange,
               onSelectPreset: _selectPreset,
+              onRefresh: _refresh,
             ),
           ),
     );
@@ -258,28 +251,39 @@ class _StatementBody extends StatelessWidget {
     required this.preset,
     required this.customRange,
     required this.onSelectPreset,
+    required this.onRefresh,
   });
 
   final SupplierStatement statement;
   final _PeriodPreset preset;
   final DateTimeRange? customRange;
   final Future<void> Function(_PeriodPreset) onSelectPreset;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
+    final _ComputedStatement computed = _ComputedStatement.from(statement);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _SupplierInfoCard(statement: statement),
+        _SupplierInfoCard(
+          statement: statement,
+          closingBalance: computed.closingBalance,
+        ),
         const SizedBox(height: 8),
         _PeriodChips(
           preset: preset,
           customRange: customRange,
           onSelect: onSelectPreset,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Expanded(
-          child: _EntriesList(statement: statement),
+          child: _EntriesList(
+            statement: statement,
+            computed: computed,
+            onRefresh: onRefresh,
+          ),
         ),
       ],
     );
@@ -287,13 +291,80 @@ class _StatementBody extends StatelessWidget {
 }
 
 // ============================================================================
+// Computed statement — رصيد محسوب من الصفر
+// ============================================================================
+
+class _ComputedStatement {
+  const _ComputedStatement({
+    required this.openingBalance,
+    required this.chronologicalEntries,
+    required this.closingBalance,
+  });
+
+  final double openingBalance;
+  final List<_AugEntry> chronologicalEntries; // الأقدم أولاً
+  final double closingBalance;
+
+  factory _ComputedStatement.from(SupplierStatement statement) {
+    // ترتيب: الأقدم أولاً، وفي نفس اليوم: المشتريات قبل المدفوعات
+    final List<SupplierStatementEntry> sorted =
+        List<SupplierStatementEntry>.of(statement.entries)
+          ..sort((SupplierStatementEntry a, SupplierStatementEntry b) {
+            final int c = a.date.compareTo(b.date);
+            if (c != 0) return c;
+            if (a.isPurchase && !b.isPurchase) return -1;
+            if (!a.isPurchase && b.isPurchase) return 1;
+            return 0;
+          });
+
+    double balance = statement.openingBalance;
+    final List<_AugEntry> augmented = <_AugEntry>[];
+    for (final SupplierStatementEntry e in sorted) {
+      // ⬇️ نأخذ القيمة من الحقل غير الصفري، ونستخدم isPurchase للتصنيف.
+      //    بذلك نتجنب أي خلل في تسمية debit/credit داخل الـ entity.
+      final double amount = _extractAmount(e);
+      if (e.isPurchase) {
+        balance += amount;
+      } else {
+        balance -= amount;
+      }
+      augmented.add(_AugEntry(entry: e, runningBalance: balance));
+    }
+
+    return _ComputedStatement(
+      openingBalance: statement.openingBalance,
+      chronologicalEntries: augmented,
+      closingBalance: balance,
+    );
+  }
+
+  static double _extractAmount(SupplierStatementEntry e) {
+    final double d = e.debit.abs();
+    final double c = e.credit.abs();
+    if (d > 0) return d;
+    if (c > 0) return c;
+    return 0;
+  }
+}
+
+class _AugEntry {
+  const _AugEntry({required this.entry, required this.runningBalance});
+  final SupplierStatementEntry entry;
+  final double runningBalance;
+}
+
+// ============================================================================
 // Info card
 // ============================================================================
 
 class _SupplierInfoCard extends StatelessWidget {
-  const _SupplierInfoCard({required this.statement});
+  const _SupplierInfoCard({
+    required this.statement,
+    required this.closingBalance,
+  });
 
   final SupplierStatement statement;
+  final double closingBalance;
 
   @override
   Widget build(BuildContext context) {
@@ -305,8 +376,18 @@ class _SupplierInfoCard extends StatelessWidget {
     if (supplier.hasCode) meta.add('كود: ${supplier.code}');
     if (supplier.hasPhone) meta.add(supplier.phone!);
 
-    final double balance = statement.closingBalance;
-    final bool isOwed = balance > 0;
+    final bool weOwe = closingBalance > 0.01;
+    final bool theyOweUs = closingBalance < -0.01;
+    final String balanceLabel = weOwe
+        ? 'مستحق للمورد'
+        : theyOweUs
+            ? 'لك عند المورد'
+            : 'الرصيد مسدد';
+    final Color balanceColor = weOwe
+        ? scheme.error
+        : theyOweUs
+            ? const Color(0xFF1B5E20)
+            : scheme.onSurfaceVariant;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -355,14 +436,17 @@ class _SupplierInfoCard extends StatelessWidget {
             Row(
               children: <Widget>[
                 Text(
-                  isOwed ? 'مستحق للمورد' : 'الرصيد',
-                  style: theme.textTheme.bodyMedium,
+                  balanceLabel,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: balanceColor,
+                  ),
                 ),
                 const Spacer(),
                 Text(
-                  AppFormatters.money(balance.abs()),
+                  AppFormatters.money(closingBalance.abs()),
                   style: theme.textTheme.titleLarge?.copyWith(
-                    color: isOwed ? scheme.error : scheme.primary,
+                    color: balanceColor,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -428,129 +512,251 @@ class _PeriodChips extends StatelessWidget {
 }
 
 // ============================================================================
-// Entries list (Table View)
+// Entries list — fast ListView + pull-to-refresh
 // ============================================================================
 
 class _EntriesList extends StatelessWidget {
-  const _EntriesList({required this.statement});
+  const _EntriesList({
+    required this.statement,
+    required this.computed,
+    required this.onRefresh,
+  });
 
   final SupplierStatement statement;
+  final _ComputedStatement computed;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
     if (statement.isEmpty) {
-      return AppEmptyView(
-        icon: Icons.receipt_long_outlined,
-        title: 'لا توجد حركات',
-        message: 'لم تُسجَّل أي حركة على هذا المورد في الفترة المحددة.',
-        action: _OpeningBalanceTile(
-          openingBalance: statement.openingBalance,
+      return RefreshIndicator(
+        onRefresh: onRefresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: <Widget>[
+            SizedBox(
+              height: 320,
+              child: AppEmptyView(
+                icon: Icons.receipt_long_outlined,
+                title: 'لا توجد حركات',
+                message:
+                    'لم تُسجَّل أي حركة على هذا المورد في الفترة المحددة.',
+              ),
+            ),
+          ],
         ),
       );
     }
 
-    // 1. Sort oldest first to calculate cumulative paid accurately
-    final List<SupplierStatementEntry> chronological = List<SupplierStatementEntry>.of(statement.entries)
-      ..sort((a, b) => a.date.compareTo(b.date));
+    final List<_AugEntry> display =
+        computed.chronologicalEntries.reversed.toList(growable: false);
 
-    // 2. Calculate cumulative paid
-    double runningPaid = 0;
-    final List<_EntryWithCumulative> augmented = [];
-    for (final entry in chronological) {
-      runningPaid += entry.credit;
-      augmented.add(_EntryWithCumulative(entry, runningPaid));
-    }
+    // ترتيب العناصر: 0 = رصيد افتتاحي (إن ≠ 0)، 1 = رأس الجدول،
+    // 2..n+1 = الحركات، n+2 = الرصيد النهائي.
+    final bool showOpening = computed.openingBalance.abs() > 0.01;
+    final int headerIndex = showOpening ? 1 : 0;
+    final int firstRowIndex = headerIndex + 1;
+    final int closingIndex = firstRowIndex + display.length;
 
-    // 3. Reverse for display (newest first)
-    final displayEntries = augmented.reversed.toList();
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      color: scheme.primary,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 16),
+        itemCount: closingIndex + 1,
+        itemBuilder: (BuildContext context, int index) {
+          if (showOpening && index == 0) {
+            return _OpeningBalanceTile(
+              openingBalance: computed.openingBalance,
+            );
+          }
+          if (index == headerIndex) {
+            return const _TableHeaderRow();
+          }
+          if (index == closingIndex) {
+            return _ClosingBalanceCard(
+              closingBalance: computed.closingBalance,
+              entryCount: display.length,
+            );
+          }
+          final int entryIdx = index - firstRowIndex;
+          return _EntryRow(aug: display[entryIdx]);
+        },
+      ),
+    );
+  }
+}
 
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
+// ============================================================================
+// Table header row
+// ============================================================================
 
-    return SingleChildScrollView(
-      child: Column(
-        children: [
-          _OpeningBalanceTile(openingBalance: statement.openingBalance),
-          const SizedBox(height: 8),
-          
-          // Table
-          SingleChildScrollView(
-            scrollDirection: Axis.horizontal,
-            child: DataTable(
-              headingRowColor: WidgetStateProperty.all(scheme.surfaceContainerHighest),
-              dataRowMinHeight: 48,
-              dataRowMaxHeight: 64,
-              columnSpacing: 16,
-              columns: const [
-                DataColumn(label: Text('التاريخ', style: TextStyle(fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('البيان', style: TextStyle(fontWeight: FontWeight.bold))),
-                DataColumn(label: Text('مدين (+)', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
-                DataColumn(label: Text('دائن (−)', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
-                DataColumn(label: Text('الدفعة الحالية', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
-                DataColumn(label: Text('إجمالي المدفوع', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
-                DataColumn(label: Text('الرصيد', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
-              ],
-              rows: displayEntries.map((augmentedEntry) {
-                final entry = augmentedEntry.entry;
-                final isPurchase = entry.isPurchase;
-                final description = entry.hasDescription ? entry.description! : (isPurchase ? 'فاتورة مشتريات' : 'دفعة');
-                
-                return DataRow(
-                  cells: [
-                    DataCell(Text(AppFormatters.date(entry.date), style: const TextStyle(fontSize: 12))),
-                    DataCell(
-                      SizedBox(
-                        width: 150, // Fixed width for description to avoid layout jump
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: [
-                            Text(description, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
-                            if (entry.hasReference)
-                              Text(entry.reference!, style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
-                          ],
-                        ),
-                      ),
-                    ),
-                    DataCell(Text(
-                      entry.isDebit ? AppFormatters.money(entry.debit) : '-',
-                      style: TextStyle(fontSize: 12, color: entry.isDebit ? scheme.error : null),
-                    )),
-                    DataCell(Text(
-                      entry.isCredit ? AppFormatters.money(entry.credit) : '-',
-                      style: TextStyle(fontSize: 12, color: entry.isCredit ? scheme.primary : null),
-                    )),
-                    DataCell(Text(
-                      entry.isCredit ? AppFormatters.money(entry.credit) : '-',
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: entry.isCredit ? scheme.primary : null),
-                    )),
-                    DataCell(Text(
-                      augmentedEntry.cumulativePaid > 0 ? AppFormatters.money(augmentedEntry.cumulativePaid) : '-',
-                      style: const TextStyle(fontSize: 12),
-                    )),
-                    DataCell(Text(
-                      AppFormatters.money(entry.balanceAfter ?? 0),
-                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: (entry.balanceAfter ?? 0) > 0 ? scheme.error : scheme.primary),
-                    )),
-                  ],
-                );
-              }).toList(),
-            ),
+class _TableHeaderRow extends StatelessWidget {
+  const _TableHeaderRow();
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    const TextStyle style =
+        TextStyle(fontSize: 11, fontWeight: FontWeight.w800);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      color: scheme.surfaceContainerHighest,
+      child: Row(
+        children: const <Widget>[
+          SizedBox(width: 54, child: Text('التاريخ', style: style)),
+          Expanded(child: Text('البيان', style: style)),
+          SizedBox(
+            width: 60,
+            child: Text('مدين', style: style, textAlign: TextAlign.right),
           ),
-          
-          const SizedBox(height: 8),
-          _ClosingBalanceCard(statement: statement),
-          const SizedBox(height: 24),
+          SizedBox(
+            width: 60,
+            child: Text('دائن', style: style, textAlign: TextAlign.right),
+          ),
+          SizedBox(
+            width: 76,
+            child: Text('الرصيد', style: style, textAlign: TextAlign.right),
+          ),
         ],
       ),
     );
   }
 }
 
-class _EntryWithCumulative {
-  const _EntryWithCumulative(this.entry, this.cumulativePaid);
-  final SupplierStatementEntry entry;
-  final double cumulativePaid;
+// ============================================================================
+// Entry row
+// ============================================================================
+
+class _EntryRow extends StatelessWidget {
+  const _EntryRow({required this.aug});
+
+  final _AugEntry aug;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final SupplierStatementEntry entry = aug.entry;
+    final bool isPurchase = entry.isPurchase;
+    final double amount = _ComputedStatement._extractAmount(entry);
+    final double debit = isPurchase ? amount : 0;
+    final double credit = isPurchase ? 0 : amount;
+    final double balance = aug.runningBalance;
+
+    final bool weOwe = balance > 0.01;
+    final bool theyOweUs = balance < -0.01;
+    final Color balanceColor = weOwe
+        ? scheme.error
+        : theyOweUs
+            ? const Color(0xFF1B5E20)
+            : scheme.onSurfaceVariant;
+    final String balanceText = (weOwe || theyOweUs)
+        ? '${weOwe ? '+' : '−'}${AppFormatters.money(balance.abs())}'
+        : '0.00';
+
+    final String description = entry.hasDescription
+        ? entry.description!
+        : (isPurchase ? 'فاتورة مشتريات' : 'دفعة');
+    final Color typeColor =
+        isPurchase ? scheme.error : const Color(0xFF1B5E20);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.5),
+            width: 0.5,
+          ),
+        ),
+      ),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          SizedBox(
+            width: 54,
+            child: Text(
+              DateFormat('dd/MM').format(entry.date.toLocal()),
+              style: const TextStyle(fontSize: 11),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: typeColor,
+                  ),
+                ),
+                if (entry.hasReference)
+                  Text(
+                    entry.reference!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          SizedBox(
+            width: 60,
+            child: Text(
+              debit > 0 ? AppFormatters.money(debit) : '—',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                color: debit > 0 ? scheme.error : scheme.onSurfaceVariant,
+                fontWeight: debit > 0 ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 60,
+            child: Text(
+              credit > 0 ? AppFormatters.money(credit) : '—',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                color: credit > 0
+                    ? const Color(0xFF1B5E20)
+                    : scheme.onSurfaceVariant,
+                fontWeight:
+                    credit > 0 ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+          SizedBox(
+            width: 76,
+            child: Text(
+              balanceText,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: balanceColor,
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }
 
 // ============================================================================
@@ -566,41 +772,41 @@ class _OpeningBalanceTile extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final bool weOwe = openingBalance > 0.01;
+    final bool theyOweUs = openingBalance < -0.01;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
-          children: <Widget>[
-            Icon(
-              Icons.play_circle_outline,
-              size: 18,
-              color: scheme.onSurfaceVariant,
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      color: scheme.surfaceContainerHigh,
+      child: Row(
+        children: <Widget>[
+          Icon(
+            Icons.play_circle_outline,
+            size: 16,
+            color: scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'رصيد افتتاحي',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w700,
             ),
-            const SizedBox(width: 8),
-            Text(
-              'رصيد افتتاحي',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+          ),
+          const Spacer(),
+          Text(
+            theyOweUs
+                ? '−${AppFormatters.money(openingBalance.abs())}'
+                : AppFormatters.money(openingBalance),
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: weOwe
+                  ? scheme.error
+                  : theyOweUs
+                      ? const Color(0xFF1B5E20)
+                      : scheme.onSurfaceVariant,
             ),
-            const Spacer(),
-            Text(
-              AppFormatters.money(openingBalance),
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: openingBalance > 0
-                    ? scheme.error
-                    : scheme.onSurface,
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -611,71 +817,84 @@ class _OpeningBalanceTile extends StatelessWidget {
 // ============================================================================
 
 class _ClosingBalanceCard extends StatelessWidget {
-  const _ClosingBalanceCard({required this.statement});
+  const _ClosingBalanceCard({
+    required this.closingBalance,
+    required this.entryCount,
+  });
 
-  final SupplierStatement statement;
+  final double closingBalance;
+  final int entryCount;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final bool owed = statement.isOwedToSupplier;
+    final bool weOwe = closingBalance > 0.01;
+    final bool theyOweUs = closingBalance < -0.01;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: owed ? scheme.errorContainer : scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(
-                  owed
-                      ? Icons.warning_amber_outlined
-                      : Icons.check_circle_outline,
-                  color: owed
-                      ? scheme.onErrorContainer
-                      : scheme.onPrimaryContainer,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  owed
-                      ? 'الرصيد النهائي (مستحق للمورد)'
-                      : 'الرصيد النهائي',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: owed
-                        ? scheme.onErrorContainer
-                        : scheme.onPrimaryContainer,
+    final Color bg = weOwe
+        ? scheme.errorContainer
+        : theyOweUs
+            ? scheme.primaryContainer
+            : scheme.surfaceContainerHighest;
+    final Color fg = weOwe
+        ? scheme.onErrorContainer
+        : theyOweUs
+            ? scheme.onPrimaryContainer
+            : scheme.onSurfaceVariant;
+    final IconData icon = weOwe
+        ? Icons.warning_amber_outlined
+        : theyOweUs
+            ? Icons.account_balance_wallet_outlined
+            : Icons.check_circle_outline;
+    final String label = weOwe
+        ? 'الرصيد النهائي — مستحق للمورد'
+        : theyOweUs
+            ? 'الرصيد النهائي — لك عند المورد'
+            : 'الرصيد النهائي — مسدد';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(icon, color: fg, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: fg,
+                      ),
+                    ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                AppFormatters.money(closingBalance.abs()),
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: fg,
                 ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              AppFormatters.money(statement.closingBalance.abs()),
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: owed
-                    ? scheme.onErrorContainer
-                    : scheme.onPrimaryContainer,
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'عدد الحركات: '
-              '${AppFormatters.integer(statement.entryCount)}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: owed
-                    ? scheme.onErrorContainer
-                    : scheme.onPrimaryContainer,
+              const SizedBox(height: 6),
+              Text(
+                'عدد الحركات: ${AppFormatters.integer(entryCount)}',
+                style: theme.textTheme.bodySmall?.copyWith(color: fg),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
