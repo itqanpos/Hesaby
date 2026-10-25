@@ -28,13 +28,13 @@ abstract final class PurchaseStatus {
 /// PostgreSQL, or Flutter widgets.
 ///
 /// Money representation:
-/// `subtotal`, `discount`, `taxAmount` and `total` are exposed as `double`,
-/// matching `numeric(15,4)` in the database. The same rationale documented
-/// on `Product` applies.
+/// `subtotal`, `discount`, `taxAmount`, `total`, `paidAmount` are exposed
+/// as `double`, matching `numeric(15,4)` in the database.
 ///
-/// A purchase always belongs to exactly one company; [companyId] is part of
-/// the entity so that the presentation layer can verify tenant coherence
-/// without an extra query.
+/// `paidAmount` represents the **initial** amount paid at creation time.
+/// Subsequent partial payments are recorded in the `supplier_payments`
+/// table (see `PurchaseDetailPage`). The total amount paid for a purchase
+/// is therefore `paidAmount + sum(supplier_payments)`.
 @immutable
 class Purchase extends Equatable {
   const Purchase({
@@ -48,6 +48,8 @@ class Purchase extends Equatable {
     required this.discount,
     required this.taxAmount,
     required this.total,
+    required this.paidAmount,
+    required this.paymentMethod,
     required this.createdAt,
     required this.updatedAt,
     this.invoiceNumber,
@@ -90,6 +92,16 @@ class Purchase extends Equatable {
   /// Net total = subtotal - discount + taxAmount.
   final double total;
 
+  /// Initial amount paid at the time the purchase was created.
+  ///
+  /// Additional payments are recorded separately in `supplier_payments`;
+  /// the total amount paid is `paidAmount + sum(supplier_payments)`.
+  final double paidAmount;
+
+  /// Payment method used for the initial payment
+  /// (`cash` | `card` | `instapay` | `bank_transfer` | `other`).
+  final String paymentMethod;
+
   /// Optional free-form notes.
   final String? notes;
 
@@ -123,8 +135,7 @@ class Purchase extends Equatable {
   bool get canEdit => isDraft;
 
   /// Whether the purchase can still be confirmed or cancelled.
-  bool get canTransition =>
-      isDraft || isConfirmed;
+  bool get canTransition => isDraft || isConfirmed;
 
   bool get hasInvoiceNumber =>
       invoiceNumber != null && invoiceNumber!.trim().isNotEmpty;
@@ -134,6 +145,9 @@ class Purchase extends Equatable {
   bool get wasConfirmed => confirmedAt != null;
 
   bool get wasCancelled => cancelledAt != null;
+
+  /// Whether an initial payment was recorded at creation time.
+  bool get hasInitialPayment => paidAmount > 0;
 
   /// Net total after subtracting the discount (before tax).
   double get netAfterDiscount => subtotal - discount;
@@ -151,6 +165,8 @@ class Purchase extends Equatable {
         discount,
         taxAmount,
         total,
+        paidAmount,
+        paymentMethod,
         notes,
         createdBy,
         confirmedAt,
@@ -162,5 +178,5 @@ class Purchase extends Equatable {
   @override
   String toString() =>
       'Purchase(id: $id, companyId: $companyId, supplierId: $supplierId, '
-      'status: $status, total: $total)';
+      'status: $status, total: $total, paid: $paidAmount)';
 }
