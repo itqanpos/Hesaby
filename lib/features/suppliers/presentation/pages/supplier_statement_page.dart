@@ -291,7 +291,7 @@ class _StatementBody extends StatelessWidget {
 }
 
 // ============================================================================
-// Computed statement — رصيد محسوب من الصفر
+// Computed statement — حساب دقيق ومرتب
 // ============================================================================
 
 class _ComputedStatement {
@@ -306,29 +306,45 @@ class _ComputedStatement {
   final double closingBalance;
 
   factory _ComputedStatement.from(SupplierStatement statement) {
-    // ترتيب: الأقدم أولاً، وفي نفس اليوم: المشتريات قبل المدفوعات
-    final List<SupplierStatementEntry> sorted =
-        List<SupplierStatementEntry>.of(statement.entries)
-          ..sort((SupplierStatementEntry a, SupplierStatementEntry b) {
-            final int c = a.date.compareTo(b.date);
-            if (c != 0) return c;
-            if (a.isPurchase && !b.isPurchase) return -1;
-            if (!a.isPurchase && b.isPurchase) return 1;
-            return 0;
-          });
+    // 1. نضع فهرساً للحركات الأصلية لضمان استقرار الترتيب
+    final List<_IndexedEntry> indexed = [];
+    for (int i = 0; i < statement.entries.length; i++) {
+      indexed.add(_IndexedEntry(statement.entries[i], i));
+    }
 
+    // 2. الترتيب من الأقدم للأحدث
+    indexed.sort((a, b) {
+      final int c = a.entry.date.compareTo(b.entry.date);
+      if (c != 0) return c;
+
+      // الفواتير قبل الدفعات في نفس اللحظة
+      if (a.entry.isPurchase && !b.entry.isPurchase) return -1;
+      if (!a.entry.isPurchase && b.entry.isPurchase) return 1;
+
+      // في نفس اليوم، نعكس الترتيب الأصلي
+      // (حتى تظهر الدفعة المضافة حديثاً في الأعلى بعد عكس القائمة)
+      return b.originalIndex.compareTo(a.originalIndex);
+    });
+
+    // 3. حساب الرصيد التراكمي
     double balance = statement.openingBalance;
-    final List<_AugEntry> augmented = <_AugEntry>[];
-    for (final SupplierStatementEntry e in sorted) {
-      // ⬇️ نأخذ القيمة من الحقل غير الصفري، ونستخدم isPurchase للتصنيف.
-      //    بذلك نتجنب أي خلل في تسمية debit/credit داخل الـ entity.
+    final List<_AugEntry> augmented = [];
+    for (final item in indexed) {
+      final SupplierStatementEntry e = item.entry;
       final double amount = _extractAmount(e);
+      final double previous = balance;
+
       if (e.isPurchase) {
-        balance += amount;
+        balance += amount; // فاتورة تزيد الرصيد
       } else {
-        balance -= amount;
+        balance -= amount; // دفعة تقلل الرصيد
       }
-      augmented.add(_AugEntry(entry: e, runningBalance: balance));
+
+      augmented.add(_AugEntry(
+        entry: e,
+        previousBalance: previous,
+        currentBalance: balance,
+      ));
     }
 
     return _ComputedStatement(
@@ -347,10 +363,21 @@ class _ComputedStatement {
   }
 }
 
-class _AugEntry {
-  const _AugEntry({required this.entry, required this.runningBalance});
+class _IndexedEntry {
+  _IndexedEntry(this.entry, this.originalIndex);
   final SupplierStatementEntry entry;
-  final double runningBalance;
+  final int originalIndex;
+}
+
+class _AugEntry {
+  const _AugEntry({
+    required this.entry,
+    required this.previousBalance,
+    required this.currentBalance,
+  });
+  final SupplierStatementEntry entry;
+  final double previousBalance;
+  final double currentBalance;
 }
 
 // ============================================================================
@@ -512,7 +539,7 @@ class _PeriodChips extends StatelessWidget {
 }
 
 // ============================================================================
-// Entries list — fast ListView + pull-to-refresh
+// Entries list
 // ============================================================================
 
 class _EntriesList extends StatelessWidget {
@@ -554,8 +581,6 @@ class _EntriesList extends StatelessWidget {
     final List<_AugEntry> display =
         computed.chronologicalEntries.reversed.toList(growable: false);
 
-    // ترتيب العناصر: 0 = رصيد افتتاحي (إن ≠ 0)، 1 = رأس الجدول،
-    // 2..n+1 = الحركات، n+2 = الرصيد النهائي.
     final bool showOpening = computed.openingBalance.abs() > 0.01;
     final int headerIndex = showOpening ? 1 : 0;
     final int firstRowIndex = headerIndex + 1;
@@ -612,16 +637,16 @@ class _TableHeaderRow extends StatelessWidget {
           SizedBox(width: 54, child: Text('التاريخ', style: style)),
           Expanded(child: Text('البيان', style: style)),
           SizedBox(
-            width: 60,
-            child: Text('مدين', style: style, textAlign: TextAlign.right),
+            width: 68,
+            child: Text('الرصيد', style: style, textAlign: TextAlign.right),
           ),
           SizedBox(
-            width: 60,
-            child: Text('دائن', style: style, textAlign: TextAlign.right),
+            width: 68,
+            child: Text('المدفوع', style: style, textAlign: TextAlign.right),
           ),
           SizedBox(
             width: 76,
-            child: Text('الرصيد', style: style, textAlign: TextAlign.right),
+            child: Text('الرصيد الحالي', style: style, textAlign: TextAlign.right),
           ),
         ],
       ),
@@ -645,26 +670,25 @@ class _EntryRow extends StatelessWidget {
     final SupplierStatementEntry entry = aug.entry;
     final bool isPurchase = entry.isPurchase;
     final double amount = _ComputedStatement._extractAmount(entry);
-    final double debit = isPurchase ? amount : 0;
-    final double credit = isPurchase ? 0 : amount;
-    final double balance = aug.runningBalance;
+    final double paid = isPurchase ? 0.0 : amount;
+    
+    final double prevBal = aug.previousBalance;
+    final double currBal = aug.currentBalance;
 
-    final bool weOwe = balance > 0.01;
-    final bool theyOweUs = balance < -0.01;
-    final Color balanceColor = weOwe
-        ? scheme.error
-        : theyOweUs
-            ? const Color(0xFF1B5E20)
-            : scheme.onSurfaceVariant;
-    final String balanceText = (weOwe || theyOweUs)
-        ? '${weOwe ? '+' : '−'}${AppFormatters.money(balance.abs())}'
-        : '0.00';
+    final bool prevWeOwe = prevBal > 0.01;
+    final bool prevTheyOweUs = prevBal < -0.01;
+    final Color prevColor = prevWeOwe ? scheme.error : (prevTheyOweUs ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant);
+    final String prevText = (prevWeOwe || prevTheyOweUs) ? '${prevWeOwe ? '+' : '−'}${AppFormatters.money(prevBal.abs())}' : '0.00';
 
-    final String description = entry.hasDescription
-        ? entry.description!
-        : (isPurchase ? 'فاتورة مشتريات' : 'دفعة');
-    final Color typeColor =
-        isPurchase ? scheme.error : const Color(0xFF1B5E20);
+    final bool currWeOwe = currBal > 0.01;
+    final bool currTheyOweUs = currBal < -0.01;
+    final Color currColor = currWeOwe ? scheme.error : (currTheyOweUs ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant);
+    final String currText = (currWeOwe || currTheyOweUs) ? '${currWeOwe ? '+' : '−'}${AppFormatters.money(currBal.abs())}' : '0.00';
+
+    final String baseDesc = entry.hasDescription ? entry.description! : (isPurchase ? 'فاتورة مشتريات' : 'دفعة');
+    final String amountLabel = isPurchase ? ' (+${AppFormatters.money(amount)})' : '';
+    final String description = '$baseDesc$amountLabel';
+    final Color typeColor = isPurchase ? scheme.error : const Color(0xFF1B5E20);
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -714,42 +738,42 @@ class _EntryRow extends StatelessWidget {
               ],
             ),
           ),
+          // Previous Balance (الرصيد)
           SizedBox(
-            width: 60,
+            width: 68,
             child: Text(
-              debit > 0 ? AppFormatters.money(debit) : '—',
+              prevText,
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 11,
-                color: debit > 0 ? scheme.error : scheme.onSurfaceVariant,
-                fontWeight: debit > 0 ? FontWeight.w600 : FontWeight.normal,
+                fontWeight: FontWeight.w600,
+                color: prevColor,
               ),
             ),
           ),
+          // Paid (المدفوع)
           SizedBox(
-            width: 60,
+            width: 68,
             child: Text(
-              credit > 0 ? AppFormatters.money(credit) : '—',
+              paid > 0 ? AppFormatters.money(paid) : '—',
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 11,
-                color: credit > 0
-                    ? const Color(0xFF1B5E20)
-                    : scheme.onSurfaceVariant,
-                fontWeight:
-                    credit > 0 ? FontWeight.w600 : FontWeight.normal,
+                color: paid > 0 ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant,
+                fontWeight: paid > 0 ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
           ),
+          // Current Balance (الرصيد الحالي)
           SizedBox(
             width: 76,
             child: Text(
-              balanceText,
+              currText,
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 11,
                 fontWeight: FontWeight.w800,
-                color: balanceColor,
+                color: currColor,
               ),
             ),
           ),
