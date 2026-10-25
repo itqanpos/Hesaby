@@ -13,17 +13,6 @@ import '../../domain/repositories/sales_repository.dart';
 import '../models/sale_models.dart';
 
 /// Offline-first decorator around [CustomerRepository].
-///
-/// **Behavior:**
-/// * [listCustomers] caches the full unfiltered list on every online read.
-/// * When the network fails during [listCustomers], it falls back to the
-///   cache (filtering + sorting happens in-memory).
-/// * [getCustomer] falls back to looking up the customer inside the cached
-///   list — enough for POS workflows.
-/// * Mutations (create / update / delete / payments / adjustments / statements)
-///   delegate to the remote directly: they need the server and cannot be
-///   safely cached.
-/// * [prefetchCustomers] proactively fills the cache once online.
 class CachedCustomerRepositoryImpl implements CustomerRepository {
   CachedCustomerRepositoryImpl({
     required CustomerRepository remote,
@@ -35,10 +24,6 @@ class CachedCustomerRepositoryImpl implements CustomerRepository {
   final Ref _ref;
 
   static const String _customersPrefix = 'customers';
-
-  // ---------------------------------------------------------------------------
-  // Serialization (entity → map compatible with CustomerModel.fromMap)
-  // ---------------------------------------------------------------------------
 
   static Map<String, Object?> _customerToMap(Customer c) {
     return <String, Object?>{
@@ -65,10 +50,6 @@ class CachedCustomerRepositoryImpl implements CustomerRepository {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Reads — cache fallback
-  // ---------------------------------------------------------------------------
-
   @override
   Future<List<Customer>> listCustomers(
     String companyId, {
@@ -80,7 +61,6 @@ class CachedCustomerRepositoryImpl implements CustomerRepository {
         includeInactive: includeInactive,
       );
 
-      // Cache only the "active only" snapshot — that's what POS needs.
       if (!includeInactive) {
         final cache = await _cache();
         if (cache != null) {
@@ -117,33 +97,14 @@ class CachedCustomerRepositoryImpl implements CustomerRepository {
 
   @override
   Future<Customer> getCustomer(String customerId) async {
-    try {
-      return await _remote.getCustomer(customerId);
-    } on CustomerException catch (error) {
-      if (error.type == CustomerFailureType.network) {
-        // Try to find it in the cached list of the current company.
-        final String? companyId = _ref.read(
-          Provider((Ref ref) => null),
-        ) as String?; // placeholder — see prefetch/usage below
-        // We don't have direct company context here; the simplest is to
-        // try all cached company buckets.
-        final cache = await _cache();
-        if (cache != null) {
-          // Iterate over prefixes is not possible; try per known company.
-          // Instead, we cache customers under their company, and callers
-          // know the company. For `getCustomer` we accept a slower path:
-          // rethrow if not found.
-          AppLogger.warning(
-            'CachedCustomerRepository: getCustomer offline fallback not applicable (no company context). Rethrowing.',
-          );
-        }
-      }
-      rethrow;
-    }
+    // No offline fallback: `getCustomer` is only called from management
+    // screens (not POS). Offline users will see a network error, which is
+    // acceptable. POS uses `listCustomers` (cached).
+    return _remote.getCustomer(customerId);
   }
 
   // ---------------------------------------------------------------------------
-  // Mutations — delegate directly (need server)
+  // Mutations — delegate directly
   // ---------------------------------------------------------------------------
 
   @override
@@ -279,9 +240,6 @@ class CachedCustomerRepositoryImpl implements CustomerRepository {
   // Prefetch
   // ---------------------------------------------------------------------------
 
-  /// Loads every active customer of [companyId] and caches it.
-  ///
-  /// Called automatically once per online session to keep the cache warm.
   Future<void> prefetchCustomers(String companyId) async {
     try {
       final List<Customer> customers =
