@@ -7,21 +7,6 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../utils/logger.dart';
 
 /// Generic JSON-based local cache backed by [SharedPreferences].
-///
-/// Used as a fallback for read operations when the network is unavailable.
-/// No external database — just JSON blobs, so it works on every platform
-/// (web, mobile, desktop) with zero extra dependencies.
-///
-/// **Key format:** `hesabi.cache.<prefix>.<companyId>`
-///
-/// **Payload format:**
-/// ```json
-/// {
-///   "v": 1,
-///   "saved_at": "2026-10-25T10:30:00Z",
-///   "items": [ {...}, {...} ]
-/// }
-/// ```
 class JsonLocalCache {
   const JsonLocalCache(this._prefs);
 
@@ -32,7 +17,6 @@ class JsonLocalCache {
   String _key(String prefix, String companyId) =>
       'hesabi.cache.$prefix.$companyId';
 
-  /// Saves a list of JSON-safe maps.
   Future<void> saveList({
     required String prefix,
     required String companyId,
@@ -45,12 +29,13 @@ class JsonLocalCache {
         'items': items,
       });
       await _prefs.setString(_key(prefix, companyId), encoded);
-    } on Object catch (error, stackTrace) {
-      AppLogger.warning('JsonLocalCache: save failed for $prefix/$companyId: $error');
+    } on Object catch (error) {
+      AppLogger.warning(
+        'JsonLocalCache: save failed for $prefix/$companyId: $error',
+      );
     }
   }
 
-  /// Loads a cached list, or returns `null` if not present / corrupt.
   List<Map<String, dynamic>>? loadList({
     required String prefix,
     required String companyId,
@@ -71,12 +56,13 @@ class JsonLocalCache {
           .map((e) => Map<String, dynamic>.from(e))
           .toList(growable: false);
     } on Object catch (error) {
-      AppLogger.warning('JsonLocalCache: load failed for $prefix/$companyId: $error');
+      AppLogger.warning(
+        'JsonLocalCache: load failed for $prefix/$companyId: $error',
+      );
       return null;
     }
   }
 
-  /// Returns the timestamp of the last successful save, or `null`.
   DateTime? savedAt({
     required String prefix,
     required String companyId,
@@ -94,7 +80,6 @@ class JsonLocalCache {
     }
   }
 
-  /// Removes the cache for a specific prefix + company.
   Future<void> clear({
     required String prefix,
     required String companyId,
@@ -102,11 +87,11 @@ class JsonLocalCache {
     await _prefs.remove(_key(prefix, companyId));
   }
 
-  /// Removes ALL cache keys for a given company.
   Future<void> clearAllForCompany(String companyId) async {
     final String suffix = '.$companyId';
-    final Iterable<String> keys = _prefs.getKeys()
-        .where((k) => k.startsWith('hesabi.cache.') && k.endsWith(suffix));
+    final Iterable<String> keys = _prefs.getKeys().where(
+      (k) => k.startsWith('hesabi.cache.') && k.endsWith(suffix),
+    );
     for (final String key in keys.toList()) {
       await _prefs.remove(key);
     }
