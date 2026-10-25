@@ -94,8 +94,6 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
 
     return AppShell(
       appBar: AppBar(
-        // Explicit back button — this page is opened via go_router push
-        // from the purchases list, so `pop()` is the correct target.
         leading: IconButton(
           tooltip: 'رجوع',
           icon: const Icon(Icons.arrow_back),
@@ -178,10 +176,12 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
             for (final Unit unit in units) unit.id: unit.name,
           };
 
-          final double totalPaid = payments.fold<double>(
+          // ⬇️ الإصلاح الجذري: المدفوع = الدفعة الأولية + مجموع الدفعات اللاحقة
+          final double additionalPayments = payments.fold<double>(
             0,
             (double s, SupplierPayment p) => s + p.amount,
           );
+          final double totalPaid = purchase.paidAmount + additionalPayments;
           final double remaining =
               (purchase.total - totalPaid).clamp(0.0, double.infinity);
 
@@ -205,6 +205,9 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
                 const SizedBox(height: 16),
                 _PaymentsCard(
                   supplierName: supplierName,
+                  purchaseTotal: purchase.total,
+                  initialPaidAmount: purchase.paidAmount,
+                  initialPaymentMethod: purchase.paymentMethod,
                   payments: payments,
                   totalPaid: totalPaid,
                   remaining: remaining,
@@ -850,6 +853,9 @@ class _TotalsCard extends StatelessWidget {
 class _PaymentsCard extends StatelessWidget {
   const _PaymentsCard({
     required this.supplierName,
+    required this.purchaseTotal,
+    required this.initialPaidAmount,
+    required this.initialPaymentMethod,
     required this.payments,
     required this.totalPaid,
     required this.remaining,
@@ -858,6 +864,9 @@ class _PaymentsCard extends StatelessWidget {
   });
 
   final String supplierName;
+  final double purchaseTotal;
+  final double initialPaidAmount;
+  final String initialPaymentMethod;
   final List<SupplierPayment> payments;
   final double totalPaid;
   final double remaining;
@@ -870,6 +879,7 @@ class _PaymentsCard extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     final bool isFullyPaid = remaining <= 0;
+    final bool hasAnyPayment = initialPaidAmount > 0 || payments.isNotEmpty;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -903,10 +913,11 @@ class _PaymentsCard extends StatelessWidget {
 
             const SizedBox(height: 12),
 
+            // ⬇️ الإجمالي يقرأ من purchase.total مباشرة (كان totalPaid + remaining)
             _summaryRow(
               theme,
               label: 'إجمالي الفاتورة',
-              value: AppFormatters.money(totalPaid + remaining),
+              value: AppFormatters.money(purchaseTotal),
             ),
             const SizedBox(height: 4),
             _summaryRow(
@@ -963,14 +974,24 @@ class _PaymentsCard extends StatelessWidget {
 
             const Divider(height: 24),
 
-            if (payments.isEmpty)
+            if (!hasAnyPayment)
               Text(
                 'لا توجد دفعات مسجلة على هذه الفاتورة بعد.',
                 style: theme.textTheme.bodySmall?.copyWith(
                   color: scheme.onSurfaceVariant,
                 ),
               )
-            else
+            else ...<Widget>[
+              // ⬇️ الدفعة الأولية (عند إنشاء الفاتورة)
+              if (initialPaidAmount > 0)
+                Padding(
+                  padding: const EdgeInsets.only(bottom: 6),
+                  child: _InitialPaymentRow(
+                    amount: initialPaidAmount,
+                    method: initialPaymentMethod,
+                  ),
+                ),
+              // ⬇️ الدفعات اللاحقة
               for (int i = 0; i < payments.length; i++)
                 Padding(
                   padding: EdgeInsets.only(
@@ -978,6 +999,7 @@ class _PaymentsCard extends StatelessWidget {
                   ),
                   child: _PaymentRow(payment: payments[i]),
                 ),
+            ],
           ],
         ),
       ),
@@ -1007,6 +1029,80 @@ class _PaymentsCard extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+/// A row that represents the initial payment made when the purchase was
+/// created (stored on `purchases.paid_amount`, not in `supplier_payments`).
+class _InitialPaymentRow extends StatelessWidget {
+  const _InitialPaymentRow({required this.amount, required this.method});
+
+  final double amount;
+  final String method;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F7B6C).withValues(alpha: 0.06),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: const Color(0xFF0F7B6C).withValues(alpha: 0.25),
+        ),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+        child: Row(
+          children: <Widget>[
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: const Color(0xFF0F7B6C).withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Icon(
+                Icons.payments_outlined,
+                size: 16,
+                color: Color(0xFF0F7B6C),
+              ),
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: <Widget>[
+                  Text(
+                    'دفعة عند الإنشاء · ${_paymentMethodLabel(method)}',
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    'مسجَّلة مع إنشاء الفاتورة',
+                    style: theme.textTheme.labelSmall?.copyWith(
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            Text(
+              AppFormatters.money(amount),
+              style: theme.textTheme.titleSmall?.copyWith(
+                color: const Color(0xFF0F7B6C),
+                fontWeight: FontWeight.w800,
+              ),
+            ),
+          ],
+        ),
+      ),
     );
   }
 }
@@ -1195,6 +1291,23 @@ String _statusLabel(String status) {
       return (scheme.errorContainer, scheme.onErrorContainer);
     default:
       return (scheme.surfaceContainerHighest, scheme.onSurfaceVariant);
+  }
+}
+
+/// Arabic labels for the initial payment method stored on
+/// `purchases.payment_method`.
+String _paymentMethodLabel(String method) {
+  switch (method) {
+    case 'cash':
+      return 'نقدي';
+    case 'card':
+      return 'بطاقة';
+    case 'bank_transfer':
+      return 'تحويل بنكي';
+    case 'instapay':
+      return 'InstaPay';
+    default:
+      return method;
   }
 }
 
