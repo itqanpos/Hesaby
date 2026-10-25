@@ -176,14 +176,23 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
             for (final Unit unit in units) unit.id: unit.name,
           };
 
-          // ⬇️ الإصلاح الجذري: المدفوع = الدفعة الأولية + مجموع الدفعات اللاحقة
-          final double additionalPayments = payments.fold<double>(
-            0,
-            (double s, SupplierPayment p) => s + p.amount,
-          );
-          final double totalPaid = purchase.paidAmount + additionalPayments;
+          // ⬇️ الإصلاح: منع حساب الدفعة الأولية مرتين
+          final bool hasAutoInitialPayment = payments.any((p) => p.notes == 'دفعة عند الإنشاء');
+          final double dbPaymentsSum = payments.fold<double>(0, (s, p) => s + p.amount);
+          
+          // إذا كانت الدفعة موجودة في الجدول (البيانات الحديثة)، نعتمد على مجموع الجدول فقط.
+          // إذا لم تكن موجودة (بيانات قديمة)، نضيف purchase.paidAmount.
+          final double totalPaid = hasAutoInitialPayment 
+              ? dbPaymentsSum 
+              : purchase.paidAmount + dbPaymentsSum;
+              
           final double remaining =
               (purchase.total - totalPaid).clamp(0.0, double.infinity);
+
+          // فصل الدفعات اليدوية لعرضها بشكل منفصل تحت الدفعة الأولية
+          final List<SupplierPayment> manualPayments = payments
+              .where((p) => p.notes != 'دفعة عند الإنشاء')
+              .toList();
 
           return SingleChildScrollView(
             padding: const EdgeInsets.only(bottom: 24),
@@ -208,7 +217,7 @@ class _PurchaseDetailPageState extends ConsumerState<PurchaseDetailPage> {
                   purchaseTotal: purchase.total,
                   initialPaidAmount: purchase.paidAmount,
                   initialPaymentMethod: purchase.paymentMethod,
-                  payments: payments,
+                  payments: manualPayments, // نمرر الدفعات اليدوية فقط
                   totalPaid: totalPaid,
                   remaining: remaining,
                   canPay: !purchase.isCancelled,
@@ -640,7 +649,7 @@ class _HeaderCard extends StatelessWidget {
 }
 
 // -----------------------------------------------------------------------------
-// Items card
+// Items card (Converted to DataTable)
 // -----------------------------------------------------------------------------
 
 class _ItemsCard extends StatelessWidget {
@@ -657,12 +666,13 @@ class _ItemsCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
 
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: theme.colorScheme.surface,
+        color: scheme.surface,
         borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: theme.colorScheme.outlineVariant),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Padding(
         padding: const EdgeInsets.all(16),
@@ -677,89 +687,44 @@ class _ItemsCard extends StatelessWidget {
                 style: theme.textTheme.bodySmall,
               )
             else
-              for (int i = 0; i < items.length; i++)
-                Padding(
-                  padding: EdgeInsets.only(
-                    bottom: i == items.length - 1 ? 0 : 8,
-                  ),
-                  child: _ItemRow(
-                    item: items[i],
-                    productName: productNames[items[i].productId] ??
-                        'منتج محذوف',
-                    unitName: unitNames[items[i].unitId] ?? 'وحدة',
-                  ),
+              SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                child: DataTable(
+                  headingRowColor: WidgetStateProperty.all(scheme.surfaceContainerHighest),
+                  dataRowMinHeight: 40,
+                  dataRowMaxHeight: 60,
+                  columnSpacing: 16,
+                  columns: const [
+                    DataColumn(label: Text('المنتج', style: TextStyle(fontWeight: FontWeight.bold))),
+                    DataColumn(label: Text('الكمية', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                    DataColumn(label: Text('السعر', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                    DataColumn(label: Text('الإجمالي', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                  ],
+                  rows: items.map((item) {
+                    return DataRow(
+                      cells: [
+                        DataCell(
+                          SizedBox(
+                            width: 140,
+                            child: Text(
+                              productNames[item.productId] ?? 'منتج محذوف',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(fontWeight: FontWeight.w600),
+                            ),
+                          ),
+                        ),
+                        DataCell(Text('${AppFormatters.quantity(item.quantity)} ${unitNames[item.unitId] ?? ''}')),
+                        DataCell(Text(AppFormatters.money(item.unitCost))),
+                        DataCell(Text(
+                          AppFormatters.money(item.lineTotal),
+                          style: TextStyle(color: scheme.primary, fontWeight: FontWeight.bold),
+                        )),
+                      ],
+                    );
+                  }).toList(),
                 ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _ItemRow extends StatelessWidget {
-  const _ItemRow({
-    required this.item,
-    required this.productName,
-    required this.unitName,
-  });
-
-  final PurchaseItem item;
-  final String productName;
-  final String unitName;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(12),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Text(
-              productName,
-              style: theme.textTheme.titleSmall,
-              overflow: TextOverflow.ellipsis,
-            ),
-            const SizedBox(height: 4),
-            Row(
-              children: <Widget>[
-                Text(
-                  '${AppFormatters.quantity(item.quantity)} $unitName',
-                  style: theme.textTheme.bodySmall,
-                ),
-                const SizedBox(width: 12),
-                Text(
-                  '× ${AppFormatters.money(item.unitCost)}',
-                  style: theme.textTheme.bodySmall,
-                ),
-                const Spacer(),
-                Text(
-                  AppFormatters.money(item.lineTotal),
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ],
-            ),
-            if (item.hasNotes) ...<Widget>[
-              const SizedBox(height: 4),
-              Text(
-                item.notes!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  fontStyle: FontStyle.italic,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
               ),
-            ],
           ],
         ),
       ),
@@ -913,7 +878,6 @@ class _PaymentsCard extends StatelessWidget {
 
             const SizedBox(height: 12),
 
-            // ⬇️ الإجمالي يقرأ من purchase.total مباشرة (كان totalPaid + remaining)
             _summaryRow(
               theme,
               label: 'إجمالي الفاتورة',
@@ -982,7 +946,7 @@ class _PaymentsCard extends StatelessWidget {
                 ),
               )
             else ...<Widget>[
-              // ⬇️ الدفعة الأولية (عند إنشاء الفاتورة)
+              // الدفعة الأولية (عند إنشاء الفاتورة)
               if (initialPaidAmount > 0)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 6),
@@ -991,7 +955,7 @@ class _PaymentsCard extends StatelessWidget {
                     method: initialPaymentMethod,
                   ),
                 ),
-              // ⬇️ الدفعات اللاحقة
+              // الدفعات اللاحقة (اليدوية)
               for (int i = 0; i < payments.length; i++)
                 Padding(
                   padding: EdgeInsets.only(
@@ -1033,8 +997,6 @@ class _PaymentsCard extends StatelessWidget {
   }
 }
 
-/// A row that represents the initial payment made when the purchase was
-/// created (stored on `purchases.paid_amount`, not in `supplier_payments`).
 class _InitialPaymentRow extends StatelessWidget {
   const _InitialPaymentRow({required this.amount, required this.method});
 
@@ -1294,8 +1256,6 @@ String _statusLabel(String status) {
   }
 }
 
-/// Arabic labels for the initial payment method stored on
-/// `purchases.payment_method`.
 String _paymentMethodLabel(String method) {
   switch (method) {
     case 'cash':
