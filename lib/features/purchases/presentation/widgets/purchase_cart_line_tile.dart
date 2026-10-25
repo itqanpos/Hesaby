@@ -2,19 +2,20 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../../../core/utils/formatters.dart';
 import '../../domain/entities/purchase_cart_line.dart';
+import '../state/purchase_providers.dart';
 
 /// A single line in the purchase cart — single-row layout.
 ///
-/// Layout (RTL):
-/// ```
-/// ┌──────────────────────────────────────────────────────────────┐
-/// │ بيبسي 1 لتر  [2] قطعة  [10.00] 20.00 ج.م  ✕                  │
-/// └──────────────────────────────────────────────────────────────┘
-/// ```
-class PurchaseCartLineTile extends StatefulWidget {
+/// Quantity and unit cost are edited **by typing** in each field. The tile
+/// commits values on submit / focus-loss. When the corresponding line is
+/// added via [PurchaseResultsList], [focusedCartLineProvider] is set to its
+/// key, and the tile auto-focuses its quantity field — matching the POS
+/// mobile experience.
+class PurchaseCartLineTile extends ConsumerStatefulWidget {
   const PurchaseCartLineTile({
     super.key,
     required this.line,
@@ -24,21 +25,17 @@ class PurchaseCartLineTile extends StatefulWidget {
   });
 
   final PurchaseCartLine line;
-
-  /// Commits a new quantity. Returns `true` when accepted.
   final bool Function(double quantity) onSetQuantity;
-
-  /// Commits a new unit cost. Returns `true` when accepted.
   final bool Function(double cost) onSetCost;
-
   final VoidCallback onRemove;
 
   @override
-  State<PurchaseCartLineTile> createState() =>
+  ConsumerState<PurchaseCartLineTile> createState() =>
       _PurchaseCartLineTileState();
 }
 
-class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
+class _PurchaseCartLineTileState
+    extends ConsumerState<PurchaseCartLineTile> {
   late final TextEditingController _quantityController;
   late final TextEditingController _costController;
   late final FocusNode _quantityFocus;
@@ -58,6 +55,15 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
     );
     _quantityFocus = FocusNode()..addListener(_onQuantityFocusChange);
     _costFocus = FocusNode()..addListener(_onCostFocusChange);
+
+    // إذا تمت إضافة هذا السطر للتو، اطلب التركيز في أول إطار.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (ref.read(focusedCartLineProvider) == widget.line.key) {
+        _focusQuantitySelectAll();
+        ref.read(focusedCartLineProvider.notifier).state = null;
+      }
+    });
   }
 
   @override
@@ -82,6 +88,26 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
         !_costFocus.hasFocus) {
       _costController.text = _formatNumber(widget.line.unitCost);
     }
+  }
+
+  // ---------------------------------------------------------------------------
+  // Focus — rule 29: explicit TextInput.show
+  // ---------------------------------------------------------------------------
+
+  void _focusQuantitySelectAll() {
+    _quantityFocus.requestFocus();
+    _quantityController.selection = TextSelection(
+      baseOffset: 0,
+      extentOffset: _quantityController.text.length,
+    );
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted) return;
+      if (!_quantityFocus.hasFocus) return;
+      SystemChannels.textInput
+          .invokeMethod<void>('TextInput.show')
+          .ignore();
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -185,12 +211,24 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
     final ColorScheme scheme = theme.colorScheme;
     final PurchaseCartLine line = widget.line;
 
+    // يلتقط تغييرات provider بعد أن يكون الـ tile موجودًا بالفعل
+    // (مثال: زيادة سطر موجود عبر البحث).
+    ref.listen<String?>(focusedCartLineProvider, (previous, next) {
+      if (next == line.key) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (mounted) {
+            _focusQuantitySelectAll();
+            ref.read(focusedCartLineProvider.notifier).state = null;
+          }
+        });
+      }
+    });
+
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
-          // ---- Product name ----
           Expanded(
             flex: 4,
             child: Text(
@@ -203,8 +241,6 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
             ),
           ),
           const SizedBox(width: 6),
-
-          // ---- Quantity ----
           SizedBox(
             width: 52,
             child: _CompactField(
@@ -215,8 +251,6 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
             ),
           ),
           const SizedBox(width: 4),
-
-          // ---- Unit name ----
           SizedBox(
             width: 44,
             child: Text(
@@ -230,8 +264,6 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
             ),
           ),
           const SizedBox(width: 4),
-
-          // ---- Unit cost ----
           SizedBox(
             width: 68,
             child: _CompactField(
@@ -242,8 +274,6 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
             ),
           ),
           const SizedBox(width: 6),
-
-          // ---- Line total ----
           SizedBox(
             width: 72,
             child: Text(
@@ -257,8 +287,6 @@ class _PurchaseCartLineTileState extends State<PurchaseCartLineTile> {
               overflow: TextOverflow.ellipsis,
             ),
           ),
-
-          // ---- Remove ----
           _IconTap(
             tooltip: 'حذف من السلة',
             icon: Icons.close,
@@ -351,11 +379,7 @@ class _IconTap extends StatelessWidget {
       borderRadius: BorderRadius.circular(8),
       child: Padding(
         padding: const EdgeInsets.all(4),
-        child: Icon(
-          icon,
-          size: 18,
-          color: scheme.onSurfaceVariant,
-        ),
+        child: Icon(icon, size: 18, color: scheme.onSurfaceVariant),
       ),
     );
 
