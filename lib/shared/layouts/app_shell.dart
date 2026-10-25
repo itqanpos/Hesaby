@@ -7,6 +7,7 @@ import '../../core/network/operation_trigger.dart';
 import '../../core/responsive/responsive_helper.dart';
 import '../../features/admin/presentation/providers/admin_app_config_provider.dart';
 import '../../features/admin/presentation/providers/platform_admin_provider.dart';
+import '../widgets/company_status_banner.dart'; // ⬅️ إضافة استيراد البانر
 import '../widgets/sync_status_indicator.dart';
 import '../widgets/update_available_banner.dart';
 import 'app_navigation.dart';
@@ -85,6 +86,7 @@ class AppShell extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (announcementBanner != null) announcementBanner,
+          const CompanyStatusBanner(), // ⬅️ البانر الجديد للشركات الموقوفة
           const SyncStatusIndicator(),
           const UpdateAvailableBanner(),
           Expanded(
