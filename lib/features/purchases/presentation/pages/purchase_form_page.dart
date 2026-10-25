@@ -1,8 +1,10 @@
 // lib/features/purchases/presentation/pages/purchase_form_page.dart
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show LogicalKeyboardKey;
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
+import '../../../../core/responsive/responsive_helper.dart';
 import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_error.dart';
@@ -23,6 +25,7 @@ import '../../domain/repositories/purchase_repository.dart';
 import '../providers/purchase_providers.dart';
 import '../state/purchase_cart_notifier.dart';
 import '../state/purchase_providers.dart';
+import 'purchase_desktop_layout.dart';
 import 'purchase_mobile_layout.dart';
 
 class PurchaseFormPage extends ConsumerStatefulWidget {
@@ -148,6 +151,7 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
   }
 
   Future<void> _save({required bool andConfirm}) async {
+    if (_isSubmitting) return;
     FocusScope.of(context).unfocus();
 
     final PurchaseCart cart = ref.read(purchaseCartProvider);
@@ -168,18 +172,20 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
     if (cart.paidAmount > 0) {
       final overview = ref.read(cashOverviewProvider).valueOrNull;
       if (overview != null) {
-        final targetType = _mapPaymentMethodToAccountType(cart.paymentMethod);
+        final targetType =
+            _mapPaymentMethodToAccountType(cart.paymentMethod);
         double currentBalance = 0.0;
-        
         for (final balance in overview.balances) {
           if (balance.account.type == targetType) {
             currentBalance = balance.balance;
             break;
           }
         }
-
         if (cart.paidAmount > currentBalance) {
-          _snack('الرصيد غير كافٍ في الخزنة. المتاح: ${AppFormatters.money(currentBalance)}');
+          _snack(
+            'الرصيد غير كافٍ في الخزنة. المتاح: '
+            '${AppFormatters.money(currentBalance)}',
+          );
           return;
         }
       }
@@ -245,7 +251,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
       }
 
       if (andConfirm) {
-        // ⬇️ التحقق من الحالة قبل التأكيد
         if (saved.status != 'confirmed') {
           await notifier.confirmPurchase(saved.id);
         }
@@ -316,10 +321,45 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
       appBar: AppBar(
         title: Text(_isEditMode ? 'تعديل فاتورة' : 'فاتورة جديدة'),
       ),
-      body: PurchaseMobileLayout(
-        onSaveDraft: () => _save(andConfirm: false),
-        onSaveAndConfirm: () => _save(andConfirm: true),
-        isSubmitting: _isSubmitting,
+      body: CallbackShortcuts(
+        bindings: <ShortcutActivator, VoidCallback>{
+          const SingleActivator(LogicalKeyboardKey.escape): () {
+            ref.read(purchaseSearchProvider.notifier).clear();
+          },
+          const SingleActivator(LogicalKeyboardKey.f9): () {
+            if (!_isSubmitting) {
+              _save(andConfirm: true);
+            }
+          },
+        },
+        child: Focus(
+          autofocus: true,
+          child: LayoutBuilder(
+            builder: (BuildContext context, BoxConstraints constraints) {
+              final double width = constraints.maxWidth.isFinite
+                  ? constraints.maxWidth
+                  : ResponsiveHelper.contentMaxWidth;
+              final DeviceType deviceType =
+                  ResponsiveHelper.deviceTypeOf(width);
+
+              return switch (deviceType) {
+                DeviceType.mobile => PurchaseMobileLayout(
+                    onSaveDraft: () => _save(andConfirm: false),
+                    onSaveAndConfirm: () => _save(andConfirm: true),
+                    isSubmitting: _isSubmitting,
+                  ),
+                DeviceType.tablet ||
+                DeviceType.desktop ||
+                DeviceType.wideDesktop =>
+                  PurchaseDesktopLayout(
+                    onSaveDraft: () => _save(andConfirm: false),
+                    onSaveAndConfirm: () => _save(andConfirm: true),
+                    isSubmitting: _isSubmitting,
+                  ),
+              };
+            },
+          ),
+        ),
       ),
     );
   }
