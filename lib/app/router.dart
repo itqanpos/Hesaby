@@ -56,8 +56,9 @@ import '../features/sales/presentation/pages/sales_page.dart';
 import '../features/settings/presentation/pages/company_settings_page.dart';
 import '../features/settings/presentation/pages/profile_page.dart';
 import '../features/settings/presentation/pages/settings_page.dart';
-// ⬇️ إضافة استيراد بروفايدر المستخدم للتحقق من صلاحية الأدمن
 import '../features/settings/presentation/providers/user_profile_providers.dart';
+// ⬇️ استيراد صفحة الدعم الفني للشركات
+import '../features/support/presentation/pages/company_support_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
@@ -233,6 +234,10 @@ abstract final class AppRouter {
   static const String posPath = '/pos';
   static const String posName = 'pos';
 
+  // ⬇️ مسار الدعم الفني
+  static const String supportPath = '/support';
+  static const String supportName = 'support';
+
   static String? _featureFlagForPath(String path) {
     if (path.startsWith(posPath)) return 'pos';
     if (path.startsWith(inventoryPath)) return 'inventory';
@@ -261,31 +266,26 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         return AppRouter.loginPath;
       }
 
-      // ⬇️ التوجيه الذكي بعد تسجيل الدخول ⬇️
       if (location == AppRouter.loginPath ||
           location == AppRouter.signupPath) {
         final profileAsync = ref.read(userProfileProvider);
         
-        // إذا كانت بيانات المستخدم لم تُحمّل بعد، نعرض شاشة التحميل
         if (!profileAsync.hasValue) {
           return AppRouter.loadingPath;
         }
         
-        // إذا كان أدمن، يتوجه للوحة التحكم مباشرة
         if (profileAsync.value?.isPlatformAdmin == true) {
           return AppRouter.adminDashboardPath;
         }
         
-        // مستخدم عادي يتوجه للرئيسية
         return AppRouter.homePath;
       }
 
-      // ⬇️ شاشة التحميل المؤقتة أثناء جلب بيانات المستخدم ⬇️
       if (location == AppRouter.loadingPath) {
         final profileAsync = ref.read(userProfileProvider);
         
         if (!profileAsync.hasValue) {
-          return null; // ابقَ في شاشة التحميل
+          return null; 
         }
         
         if (profileAsync.value?.isPlatformAdmin == true) {
@@ -294,7 +294,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         
         return AppRouter.homePath;
       }
-      // ⬆️ نهاية التوجيه الذكي ⬆️
 
       // حماية Feature Flags
       final String? flagKey = AppRouter._featureFlagForPath(location);
@@ -534,6 +533,13 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const ReturnsPage(),
       ),
+      // ⬇️ مسار الدعم الفني الجديد
+      GoRoute(
+        path: AppRouter.supportPath,
+        name: AppRouter.supportName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const CompanySupportPage(),
+      ),
       GoRoute(
         path: AppRouter.settingsPath,
         name: AppRouter.settingsName,
@@ -708,7 +714,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
     }
   });
 
-  // ⬇️ الاستماع لتحميل بيانات المستخدم، لتحديث الراوتر بعد تسجيل الدخول
   ref.listen(userProfileProvider, (prev, next) {
     final bool wasLoaded = prev?.hasValue ?? false;
     final bool isLoaded = next.hasValue;
