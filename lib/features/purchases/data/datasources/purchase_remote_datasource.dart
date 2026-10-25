@@ -77,7 +77,6 @@ class PurchaseRemoteDataSource {
   // Writes
   // ---------------------------------------------------------------------------
 
-  // ⬇️ إضافة paidAmount و paymentMethod
   Future<PurchaseModel> createPurchase({
     required String companyId,
     required String branchId,
@@ -106,8 +105,9 @@ class PurchaseRemoteDataSource {
       'invoice_number': effectiveInvoiceNumber,
       'discount': discount,
       'tax_amount': taxAmount,
-      'paid_amount': paidAmount,          // ⬅️ جديد
-      'payment_method': paymentMethod,    // ⬅️ جديد
+      'paid_amount': paidAmount,
+      'payment_method': paymentMethod,
+      'status': 'draft', // ⬅️ إضافة صريحة للحالة
       if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
       if (createdBy != null) 'created_by': createdBy,
     };
@@ -150,7 +150,6 @@ class PurchaseRemoteDataSource {
     return PurchaseModel.fromMap(finalRow);
   }
 
-  // ⬇️ إضافة paidAmount و paymentMethod
   Future<PurchaseModel> updateDraft({
     required String purchaseId,
     required String companyId,
@@ -173,8 +172,8 @@ class PurchaseRemoteDataSource {
       'purchase_date': _formatDate(purchaseDate),
       'discount': discount,
       'tax_amount': taxAmount,
-      'paid_amount': paidAmount,          // ⬅️ جديد
-      'payment_method': paymentMethod,    // ⬅️ جديد
+      'paid_amount': paidAmount,
+      'payment_method': paymentMethod,
       'invoice_number':
           (invoiceNumber != null && invoiceNumber.trim().isNotEmpty)
               ? invoiceNumber.trim()
