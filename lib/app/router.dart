@@ -18,6 +18,7 @@ import '../features/companies/presentation/pages/branches_page.dart';
 import '../features/companies/presentation/pages/company_profile_page.dart';
 import '../features/companies/presentation/pages/member_permissions_page.dart';
 import '../features/companies/presentation/pages/members_page.dart';
+import '../features/companies/presentation/pages/my_account_page.dart'; // ⬅️ استيراد جديد
 import '../features/companies/presentation/pages/subscription_page.dart';
 import '../features/employees/presentation/pages/advances_page.dart';
 import '../features/employees/presentation/pages/employees_page.dart';
@@ -57,7 +58,6 @@ import '../features/settings/presentation/pages/company_settings_page.dart';
 import '../features/settings/presentation/pages/profile_page.dart';
 import '../features/settings/presentation/pages/settings_page.dart';
 import '../features/settings/presentation/providers/user_profile_providers.dart';
-// ⬇️ استيراد صفحة الدعم الفني للشركات
 import '../features/support/presentation/pages/company_support_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
@@ -166,8 +166,16 @@ abstract final class AppRouter {
   static const String printerSettingsPath = '/settings/printer';
   static const String printerSettingsName = 'printer-settings';
 
+  // ⬇️ المسار الجديد الموحد
+  static const String accountPath = '/account';
+  static const String accountName = 'account';
+
+  // ⬇️ مسارات قديمة (نبقيها للتوافق فقط)
   static const String subscriptionPath = '/subscription';
   static const String subscriptionName = 'subscription';
+
+  static const String supportPath = '/support';
+  static const String supportName = 'support';
 
   static const String adminDashboardPath = '/admin/dashboard';
   static const String adminDashboardName = 'admin-dashboard';
@@ -234,10 +242,6 @@ abstract final class AppRouter {
   static const String posPath = '/pos';
   static const String posName = 'pos';
 
-  // ⬇️ مسار الدعم الفني
-  static const String supportPath = '/support';
-  static const String supportName = 'support';
-
   static String? _featureFlagForPath(String path) {
     if (path.startsWith(posPath)) return 'pos';
     if (path.startsWith(inventoryPath)) return 'inventory';
@@ -247,7 +251,6 @@ abstract final class AppRouter {
   }
 }
 
-/// Provides the application router.
 final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
   final GoRouter router = GoRouter(
     initialLocation: AppRouter.homePath,
@@ -260,9 +263,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (auth.isUnauthenticated) {
-        if (location == AppRouter.loginPath) {
-          return null;
-        }
+        if (location == AppRouter.loginPath) return null;
         return AppRouter.loginPath;
       }
 
@@ -270,40 +271,29 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
           location == AppRouter.signupPath) {
         final profileAsync = ref.read(userProfileProvider);
         
-        if (!profileAsync.hasValue) {
-          return AppRouter.loadingPath;
-        }
+        if (!profileAsync.hasValue) return AppRouter.loadingPath;
         
         if (profileAsync.value?.isPlatformAdmin == true) {
           return AppRouter.adminDashboardPath;
         }
-        
         return AppRouter.homePath;
       }
 
       if (location == AppRouter.loadingPath) {
         final profileAsync = ref.read(userProfileProvider);
-        
-        if (!profileAsync.hasValue) {
-          return null; 
-        }
+        if (!profileAsync.hasValue) return null; 
         
         if (profileAsync.value?.isPlatformAdmin == true) {
           return AppRouter.adminDashboardPath;
         }
-        
         return AppRouter.homePath;
       }
 
-      // حماية Feature Flags
       final String? flagKey = AppRouter._featureFlagForPath(location);
       if (flagKey != null) {
         final appConfig = ref.read(adminAppConfigProvider).valueOrNull;
-        final bool isEnabled =
-            appConfig?.featureFlags[flagKey] as bool? ?? true;
-        if (!isEnabled) {
-          return AppRouter.homePath;
-        }
+        final bool isEnabled = appConfig?.featureFlags[flagKey] as bool? ?? true;
+        if (!isEnabled) return AppRouter.homePath;
       }
 
       return null;
@@ -339,11 +329,23 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const CreateCompanyPage(),
       ),
+      // ⬇️ المسار الجديد الموحد
+      GoRoute(
+        path: AppRouter.accountPath,
+        name: AppRouter.accountName,
+        builder: (BuildContext context, GoRouterState state) =>
+            const MyAccountPage(),
+      ),
+      // ⬇️ المسارات القديمة نعيد توجيهها للمسار الجديد
       GoRoute(
         path: AppRouter.subscriptionPath,
         name: AppRouter.subscriptionName,
-        builder: (BuildContext context, GoRouterState state) =>
-            const SubscriptionPage(),
+        redirect: (context, state) => AppRouter.accountPath,
+      ),
+      GoRoute(
+        path: AppRouter.supportPath,
+        name: AppRouter.supportName,
+        redirect: (context, state) => AppRouter.accountPath,
       ),
       GoRoute(
         path: AppRouter.adminDashboardPath,
@@ -532,13 +534,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.returnsName,
         builder: (BuildContext context, GoRouterState state) =>
             const ReturnsPage(),
-      ),
-      // ⬇️ مسار الدعم الفني الجديد
-      GoRoute(
-        path: AppRouter.supportPath,
-        name: AppRouter.supportName,
-        builder: (BuildContext context, GoRouterState state) =>
-            const CompanySupportPage(),
       ),
       GoRoute(
         path: AppRouter.settingsPath,
@@ -733,7 +728,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
   return router;
 });
 
-/// Branded loading screen shown while session restoration is in flight.
 class _AuthLoadingPage extends StatelessWidget {
   const _AuthLoadingPage();
 
