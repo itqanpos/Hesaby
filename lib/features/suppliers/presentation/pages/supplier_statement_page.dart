@@ -132,7 +132,6 @@ class _SupplierStatementPageState
     );
   }
 
-  /// Loads the company logo bytes for PDF printing.
   Future<Uint8List?> _loadLogoBytes() async {
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
@@ -166,7 +165,6 @@ class _SupplierStatementPageState
       final String fileName =
           'supplier-statement-${statement.supplier.name}.pdf';
 
-      // ---- Direct print path when enabled ----
       final bool direct =
           ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
               false;
@@ -187,7 +185,6 @@ class _SupplierStatementPageState
         }
       }
 
-      // ---- Fallback: system dialog ----
       await Printing.layoutPdf(
         name: fileName,
         onLayout: (PdfPageFormat _) async => bytes,
@@ -212,9 +209,6 @@ class _SupplierStatementPageState
   Widget build(BuildContext context) {
     return AppShell(
       appBar: AppBar(
-        // Explicit back button that returns to the suppliers list. The
-        // page is opened via `Navigator.push` from `SuppliersPage`, so a
-        // simple `maybePop()` is the correct navigation target.
         leading: IconButton(
           tooltip: 'رجوع',
           icon: const Icon(Icons.arrow_back),
@@ -434,7 +428,7 @@ class _PeriodChips extends StatelessWidget {
 }
 
 // ============================================================================
-// Entries list
+// Entries list (Table View)
 // ============================================================================
 
 class _EntriesList extends StatelessWidget {
@@ -455,32 +449,108 @@ class _EntriesList extends StatelessWidget {
       );
     }
 
-    // Force the display order to be newest-first, regardless of the
-    // ordering returned upstream by [SupplierStatement.build].
-    final List<SupplierStatementEntry> sorted =
-        List<SupplierStatementEntry>.of(statement.entries)
-          ..sort(
-            (SupplierStatementEntry a, SupplierStatementEntry b) =>
-                b.date.compareTo(a.date),
-          );
+    // 1. Sort oldest first to calculate cumulative paid accurately
+    final List<SupplierStatementEntry> chronological = List<SupplierStatementEntry>.of(statement.entries)
+      ..sort((a, b) => a.date.compareTo(b.date));
 
-    return ListView.separated(
-      padding: const EdgeInsets.only(bottom: 24),
-      itemCount: sorted.length + 2,
-      separatorBuilder: (_, __) => const SizedBox(height: 6),
-      itemBuilder: (BuildContext context, int index) {
-        if (index == 0) {
-          return _OpeningBalanceTile(
-            openingBalance: statement.openingBalance,
-          );
-        }
-        if (index == sorted.length + 1) {
-          return _ClosingBalanceCard(statement: statement);
-        }
-        return _EntryCard(entry: sorted[index - 1]);
-      },
+    // 2. Calculate cumulative paid
+    double runningPaid = 0;
+    final List<_EntryWithCumulative> augmented = [];
+    for (final entry in chronological) {
+      runningPaid += entry.credit;
+      augmented.add(_EntryWithCumulative(entry, runningPaid));
+    }
+
+    // 3. Reverse for display (newest first)
+    final displayEntries = augmented.reversed.toList();
+
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return SingleChildScrollView(
+      child: Column(
+        children: [
+          _OpeningBalanceTile(openingBalance: statement.openingBalance),
+          const SizedBox(height: 8),
+          
+          // Table
+          SingleChildScrollView(
+            scrollDirection: Axis.horizontal,
+            child: DataTable(
+              headingRowColor: WidgetStateProperty.all(scheme.surfaceContainerHighest),
+              dataRowMinHeight: 48,
+              dataRowMaxHeight: 64,
+              columnSpacing: 16,
+              columns: const [
+                DataColumn(label: Text('التاريخ', style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text('البيان', style: TextStyle(fontWeight: FontWeight.bold))),
+                DataColumn(label: Text('مدين (+)', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                DataColumn(label: Text('دائن (−)', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                DataColumn(label: Text('الدفعة الحالية', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                DataColumn(label: Text('إجمالي المدفوع', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+                DataColumn(label: Text('الرصيد', style: TextStyle(fontWeight: FontWeight.bold)), numeric: true),
+              ],
+              rows: displayEntries.map((augmentedEntry) {
+                final entry = augmentedEntry.entry;
+                final isPurchase = entry.isPurchase;
+                final description = entry.hasDescription ? entry.description! : (isPurchase ? 'فاتورة مشتريات' : 'دفعة');
+                
+                return DataRow(
+                  cells: [
+                    DataCell(Text(AppFormatters.date(entry.date), style: const TextStyle(fontSize: 12))),
+                    DataCell(
+                      SizedBox(
+                        width: 150, // Fixed width for description to avoid layout jump
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Text(description, maxLines: 1, overflow: TextOverflow.ellipsis, style: const TextStyle(fontSize: 12, fontWeight: FontWeight.w600)),
+                            if (entry.hasReference)
+                              Text(entry.reference!, style: TextStyle(fontSize: 10, color: scheme.onSurfaceVariant), maxLines: 1, overflow: TextOverflow.ellipsis),
+                          ],
+                        ),
+                      ),
+                    ),
+                    DataCell(Text(
+                      entry.isDebit ? AppFormatters.money(entry.debit) : '-',
+                      style: TextStyle(fontSize: 12, color: entry.isDebit ? scheme.error : null),
+                    )),
+                    DataCell(Text(
+                      entry.isCredit ? AppFormatters.money(entry.credit) : '-',
+                      style: TextStyle(fontSize: 12, color: entry.isCredit ? scheme.primary : null),
+                    )),
+                    DataCell(Text(
+                      entry.isCredit ? AppFormatters.money(entry.credit) : '-',
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.bold, color: entry.isCredit ? scheme.primary : null),
+                    )),
+                    DataCell(Text(
+                      augmentedEntry.cumulativePaid > 0 ? AppFormatters.money(augmentedEntry.cumulativePaid) : '-',
+                      style: const TextStyle(fontSize: 12),
+                    )),
+                    DataCell(Text(
+                      AppFormatters.money(entry.balanceAfter ?? 0),
+                      style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: (entry.balanceAfter ?? 0) > 0 ? scheme.error : scheme.primary),
+                    )),
+                  ],
+                );
+              }).toList(),
+            ),
+          ),
+          
+          const SizedBox(height: 8),
+          _ClosingBalanceCard(statement: statement),
+          const SizedBox(height: 24),
+        ],
+      ),
     );
   }
+}
+
+class _EntryWithCumulative {
+  const _EntryWithCumulative(this.entry, this.cumulativePaid);
+  final SupplierStatementEntry entry;
+  final double cumulativePaid;
 }
 
 // ============================================================================
@@ -533,129 +603,6 @@ class _OpeningBalanceTile extends StatelessWidget {
         ),
       ),
     );
-  }
-}
-
-// ============================================================================
-// Entry card
-// ============================================================================
-
-class _EntryCard extends StatelessWidget {
-  const _EntryCard({required this.entry});
-
-  final SupplierStatementEntry entry;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    final Color accent = entry.isDebit ? scheme.error : scheme.primary;
-    final IconData icon = entry.isPurchase
-        ? Icons.receipt_long_outlined
-        : Icons.payments_outlined;
-    final String description = entry.hasDescription
-        ? entry.description!
-        : (entry.isPurchase ? 'فاتورة مشتريات' : 'دفعة');
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(icon, size: 18, color: accent),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Text(
-                        description,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _metaLine(),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      '${entry.isDebit ? '+' : '−'}'
-                      '${AppFormatters.money(entry.isDebit ? entry.debit : entry.credit)}',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: accent,
-                        fontWeight: FontWeight.w800,
-                      ),
-                    ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'الرصيد: '
-                      '${AppFormatters.money(entry.balanceAfter ?? 0)}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-            if (entry.hasNotes) ...<Widget>[
-              const SizedBox(height: 6),
-              Text(
-                entry.notes!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                  fontStyle: FontStyle.italic,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  String _metaLine() {
-    final String date = AppFormatters.dateTime(entry.date);
-    if (entry.hasReference) {
-      return '$date · ${entry.reference}';
-    }
-    return date;
   }
 }
 
