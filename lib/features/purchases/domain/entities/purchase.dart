@@ -35,6 +35,11 @@ abstract final class PurchaseStatus {
 /// Subsequent partial payments are recorded in the `supplier_payments`
 /// table (see `PurchaseDetailPage`). The total amount paid for a purchase
 /// is therefore `paidAmount + sum(supplier_payments)`.
+///
+/// `paidAmount` and `paymentMethod` default to `0` and `'cash'` so that
+/// legacy call sites (and tests written before those fields existed) keep
+/// compiling without modification. Production code always passes values
+/// coming from `PurchaseModel` (i.e. from the database).
 @immutable
 class Purchase extends Equatable {
   const Purchase({
@@ -48,10 +53,10 @@ class Purchase extends Equatable {
     required this.discount,
     required this.taxAmount,
     required this.total,
-    required this.paidAmount,
-    required this.paymentMethod,
     required this.createdAt,
     required this.updatedAt,
+    this.paidAmount = 0,
+    this.paymentMethod = 'cash',
     this.invoiceNumber,
     this.notes,
     this.createdBy,
