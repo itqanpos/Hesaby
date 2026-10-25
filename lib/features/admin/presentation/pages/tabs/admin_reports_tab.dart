@@ -7,9 +7,6 @@ import 'package:intl/intl.dart' hide TextDirection;
 import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../../shared/widgets/app_button.dart';
-import '../../../../../shared/widgets/app_empty.dart';
-import '../../../../../shared/widgets/app_error.dart';
-import '../../../../../shared/widgets/app_loader.dart';
 
 // ============================================================================
 // Providers
