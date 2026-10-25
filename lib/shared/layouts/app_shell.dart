@@ -7,9 +7,11 @@ import '../../core/network/operation_trigger.dart';
 import '../../core/responsive/responsive_helper.dart';
 import '../../features/admin/presentation/providers/admin_app_config_provider.dart';
 import '../../features/admin/presentation/providers/platform_admin_provider.dart';
-import '../widgets/sync_status_indicator.dart'; // ⬅️ تم استبدال offline_banner
+import '../widgets/sync_status_indicator.dart';
+import '../widgets/update_available_banner.dart';
 import 'app_navigation.dart';
 
+/// Standard page scaffold used across HESABI.
 class AppShell extends ConsumerWidget {
   const AppShell({
     super.key,
@@ -54,7 +56,8 @@ class AppShell extends ConsumerWidget {
     final AppConfig? appConfig =
         ref.watch(adminAppConfigProvider).valueOrNull;
     final bool isAdmin = ref.watch(isPlatformAdminProvider);
-    final bool underMaintenance = (appConfig?.maintenanceMode ?? false) && !isAdmin;
+    final bool underMaintenance =
+        (appConfig?.maintenanceMode ?? false) && !isAdmin;
 
     if (underMaintenance) {
       return _MaintenanceView(
@@ -82,7 +85,8 @@ class AppShell extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (announcementBanner != null) announcementBanner,
-          const SyncStatusIndicator(), // ⬅️ استخدام المؤشر الجديد
+          const SyncStatusIndicator(),
+          const UpdateAvailableBanner(),
           Expanded(
             child: Center(
               child: ConstrainedBox(
