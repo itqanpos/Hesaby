@@ -22,6 +22,11 @@ final NotifierProvider<PurchaseSearchNotifier, PurchaseSearchState>
   PurchaseSearchNotifier.new,
 );
 
+/// يتتبع السطر الذي تمت إضافته للتو لتوجيه التركيز إلى حقل الكمية.
+/// القيمة = `key` الخاص بالسطر (`productId::unitId`).
+final StateProvider<String?> focusedCartLineProvider =
+    StateProvider<String?>((ref) => null);
+
 /// Filtered product list for the purchase search.
 ///
 /// Watches the shared `productsProvider` (POS/sales cache) and filters by
