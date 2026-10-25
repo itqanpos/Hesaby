@@ -10,7 +10,8 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../../support/presentation/pages/company_support_page.dart';
-import '../domain/entities/company_subscription.dart';
+// ⬇️ تصحيح المسار: كان ../domain/ والآن ../../domain/
+import '../../domain/entities/company_subscription.dart';
 import '../providers/company_context_provider.dart';
 import '../providers/subscription_providers.dart';
 
@@ -99,7 +100,7 @@ class _MyAccountPageState extends ConsumerState<MyAccountPage> {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
+    // ⬇️ تم حذف المتغير theme غير المستخدم
     final CompanySubscription? subscription = ref.watch(subscriptionProvider);
 
     return AppShell(
@@ -107,8 +108,7 @@ class _MyAccountPageState extends ConsumerState<MyAccountPage> {
       body: ListView(
         padding: const EdgeInsets.all(16),
         children: <Widget>[
-          // ⬇️ القسم الأول: تفاصيل الاشتراك
-          _SectionHeader(title: 'تفاصيل الاشتراك', icon: Icons.workspace_premium),
+          const _SectionHeader(title: 'تفاصيل الاشتراك', icon: Icons.workspace_premium),
           const SizedBox(height: 8),
           _SubscriptionCard(
             subscription: subscription,
@@ -117,8 +117,7 @@ class _MyAccountPageState extends ConsumerState<MyAccountPage> {
 
           const SizedBox(height: 24),
 
-          // ⬇️ القسم الثاني: الدعم الفني
-          _SectionHeader(title: 'تذاكر الدعم الفني', icon: Icons.support_agent),
+          const _SectionHeader(title: 'تذاكر الدعم الفني', icon: Icons.support_agent),
           const SizedBox(height: 8),
           const _SupportSection(),
 
