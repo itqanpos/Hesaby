@@ -1,7 +1,6 @@
 // lib/features/products/data/repositories/cached_product_repository.dart
 
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 
 import '../../../../core/cache/json_local_cache.dart';
 import '../../../../core/cache/local_cache_provider.dart';
@@ -13,16 +12,6 @@ import '../models/product_model.dart';
 import '../models/product_unit_model.dart';
 
 /// Offline-first decorator around [ProductRepository].
-///
-/// **Behavior:**
-/// * On every successful online read, the result is cached.
-/// * When the network fails (`ProductFailureType.network`), reads fall back
-///   to the cache automatically.
-/// * Mutations (create / update / delete) are **not** cached — they go
-///   straight to the server (product creation while offline is not part of
-///   the "field rep" workflow; sales are, and those already use
-///   `OfflineWriter`).
-/// * [prefetchCatalog] populates the cache proactively on app start.
 class CachedProductRepositoryImpl implements ProductRepository {
   CachedProductRepositoryImpl({
     required ProductRepository remote,
@@ -35,10 +24,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
 
   static const String _productsPrefix = 'products';
   static const String _unitsPrefix = 'product_units';
-
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
 
   Future<JsonLocalCache?> _cache() async {
     try {
@@ -81,10 +66,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
     };
   }
 
-  // ---------------------------------------------------------------------------
-  // Reads — with cache fallback
-  // ---------------------------------------------------------------------------
-
   @override
   Future<List<Product>> listProducts(
     String companyId, {
@@ -98,7 +79,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
         categoryId: categoryId,
       );
 
-      // Cache only the full unfiltered list so we have everything offline.
       if (!includeInactive && categoryId == null) {
         final cache = await _cache();
         if (cache != null) {
@@ -135,7 +115,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
 
   @override
   Future<Product> getProduct(String productId) async {
-    // No cache fallback for single product — the list cache is enough.
     return _remote.getProduct(productId);
   }
 
@@ -162,9 +141,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
         sortAscending: sortAscending,
       );
 
-      // If this is the first page of the unfiltered catalog, cache it as
-      // a full snapshot (offset=0, no filter). This makes future offline
-      // searches work.
       if (offset == 0 &&
           categoryId == null &&
           isActive == null &&
@@ -193,7 +169,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
                 .map((m) => ProductModel.fromMap(m).toEntity())
                 .toList(growable: false);
 
-            // Filter in-memory
             if (isActive != null) {
               all = all.where((p) => p.isActive == isActive).toList();
             }
@@ -209,7 +184,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
               }).toList();
             }
 
-            // Sort in-memory
             int compare(Product a, Product b) {
               int result;
               switch (sortField) {
@@ -219,6 +193,9 @@ class CachedProductRepositoryImpl implements ProductRepository {
                 case ProductSortField.sellingPrice:
                   result = a.sellingPrice.compareTo(b.sellingPrice);
                   break;
+                case ProductSortField.costPrice:
+                  result = a.costPrice.compareTo(b.costPrice);
+                  break;
                 case ProductSortField.createdAt:
                   result = a.createdAt.compareTo(b.createdAt);
                   break;
@@ -227,7 +204,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
             }
             all.sort(compare);
 
-            // Paginate
             final int start = offset.clamp(0, all.length);
             final int end = (offset + limit).clamp(0, all.length);
             final List<Product> page = all.sublist(start, end);
@@ -281,7 +257,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
 
       final cache = await _cache();
       if (cache != null) {
-        // Cache per product (using productId as the "company" in the key)
         await cache.saveList(
           prefix: _unitsPrefix,
           companyId: productId,
@@ -310,7 +285,7 @@ class CachedProductRepositoryImpl implements ProductRepository {
   }
 
   // ---------------------------------------------------------------------------
-  // Mutations — delegate directly, no cache
+  // Mutations — delegate directly
   // ---------------------------------------------------------------------------
 
   @override
@@ -423,9 +398,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
   // Prefetch
   // ---------------------------------------------------------------------------
 
-  /// Loads the full catalog + all product units into the cache.
-  ///
-  /// Called automatically once per online session to keep the cache fresh.
   Future<void> prefetchCatalog(String companyId) async {
     try {
       final List<Product> products = await _remote.listProducts(
@@ -442,7 +414,6 @@ class CachedProductRepositoryImpl implements ProductRepository {
         items: products.map(_productToMap).toList(growable: false),
       );
 
-      // Cache units for each product (best-effort, parallel).
       await Future.wait<void>(
         products.map((Product p) async {
           try {
@@ -466,13 +437,4 @@ class CachedProductRepositoryImpl implements ProductRepository {
       AppLogger.warning('Catalog prefetch failed: $error');
     }
   }
-}
-
-// ============================================================================
-// Helpers
-// ============================================================================
-
-extension on supabase.PostgrestException {
-  // Reserved for potential error classification in the future.
-  String? get _unused => code;
 }
