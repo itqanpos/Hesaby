@@ -3,12 +3,14 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../app/router.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/platform_admin_provider.dart';
+import 'admin_notifications_page.dart';
 import 'tabs/admin_overview_tab.dart';
 import 'tabs/admin_audit_log_tab.dart';
 import 'tabs/admin_companies_tab.dart';
@@ -18,8 +20,19 @@ import 'tabs/admin_app_control_tab.dart';
 import 'tabs/admin_expenses_tab.dart';
 import 'tabs/admin_support_tab.dart';
 import 'tabs/admin_storage_tab.dart';
+import 'tabs/admin_versions_tab.dart';
+import 'tabs/admin_reports_tab.dart';
 
-/// Platform Admin Dashboard.
+// عدد الإشعارات غير المقروءة
+final unreadNotificationsCountProvider = FutureProvider.autoDispose<int>((ref) async {
+  final client = Supabase.instance.client;
+  final response = await client
+      .from('admin_notifications')
+      .select('id')
+      .eq('is_read', false);
+  return (response as List).length;
+});
+
 class AdminDashboardPage extends ConsumerWidget {
   const AdminDashboardPage({super.key});
 
@@ -27,10 +40,7 @@ class AdminDashboardPage extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final bool isPlatformAdmin = ref.watch(isPlatformAdminProvider);
     final String? email = ref.watch(authProvider).session?.email;
-
-    // ⬇️ السماح بالدخول إذا كان أدمن منصة أو يملك الإيميل الرئيسي
-    final bool isAdmin =
-        isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
+    final bool isAdmin = isPlatformAdmin || email == 'mohammedelsonbaty866@gmail.com';
 
     if (!isAdmin) {
       return AppShell(
@@ -49,8 +59,10 @@ class AdminDashboardPage extends ConsumerWidget {
       );
     }
 
+    final int unreadCount = ref.watch(unreadNotificationsCountProvider).valueOrNull ?? 0;
+
     return DefaultTabController(
-      length: 9, // ⬅️ أصبحت 9 تبويبات
+      length: 11,
       child: AppShell(
         appBar: AppBar(
           leading: IconButton(
@@ -59,6 +71,36 @@ class AdminDashboardPage extends ConsumerWidget {
             onPressed: () => context.goNamed(AppRouter.homeName),
           ),
           title: const Text('لوحة تحكم المنصة'),
+          actions: <Widget>[
+            Stack(
+              children: <Widget>[
+                IconButton(
+                  tooltip: 'الإشعارات',
+                  icon: const Icon(Icons.notifications_outlined),
+                  onPressed: () async {
+                    await Navigator.of(context).push(
+                      MaterialPageRoute(builder: (_) => const AdminNotificationsPage()),
+                    );
+                    ref.invalidate(unreadNotificationsCountProvider);
+                  },
+                ),
+                if (unreadCount > 0)
+                  Positioned(
+                    right: 6, top: 6,
+                    child: Container(
+                      padding: const EdgeInsets.all(2),
+                      decoration: const BoxDecoration(color: Colors.red, shape: BoxShape.circle),
+                      constraints: const BoxConstraints(minWidth: 16, minHeight: 16),
+                      child: Text(
+                        unreadCount > 99 ? '99+' : unreadCount.toString(),
+                        style: const TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold),
+                        textAlign: TextAlign.center,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ],
           bottom: const TabBar(
             isScrollable: true,
             tabAlignment: TabAlignment.center,
@@ -68,6 +110,8 @@ class AdminDashboardPage extends ConsumerWidget {
               Tab(icon: Icon(Icons.storefront_outlined), text: 'الاشتراكات'),
               Tab(icon: Icon(Icons.money_off), text: 'المصروفات'),
               Tab(icon: Icon(Icons.support_agent), text: 'الدعم الفني'),
+              Tab(icon: Icon(Icons.system_update), text: 'الإصدارات'),
+              Tab(icon: Icon(Icons.bar_chart), text: 'التقارير'),
               Tab(icon: Icon(Icons.dns), text: 'قاعدة البيانات'),
               Tab(icon: Icon(Icons.sync), text: 'المزامنة'),
               Tab(icon: Icon(Icons.people_outline), text: 'المشتركون'),
@@ -82,6 +126,8 @@ class AdminDashboardPage extends ConsumerWidget {
             AdminCompaniesTab(),
             AdminExpensesTab(),
             AdminSupportTab(),
+            AdminVersionsTab(),
+            AdminReportsTab(),
             AdminStorageTab(),
             AdminSyncTab(),
             AdminUsersTab(),
