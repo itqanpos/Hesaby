@@ -5,48 +5,89 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router.dart';
+import '../../domain/entities/company_subscription.dart';
+import '../providers/company_status_provider.dart';
 import '../providers/subscription_providers.dart';
 
 /// Central choke point for **write-operation** gating.
 ///
-/// The rule (Phase T-1 decisions): an account whose subscription is
-/// **expired** or **cancelled** can still navigate, search, and read every
-/// page — but must not be able to create, edit, delete, or record any new
-/// data until it is renewed.
+/// The rule: an account whose company is **suspended** (by the platform
+/// admin), or whose subscription is **expired** / **cancelled**, can still
+/// navigate, search, and read every page — but must not be able to create,
+/// edit, delete, or record any new data until it is renewed.
 ///
 /// ## Usage
 ///
 /// Call [ensureCanWrite] **before** the actual write action. It returns
 /// `true` when the operation is allowed, and `false` (after showing an
 /// informative dialog) when the account is blocked.
-///
-/// ```dart
-/// Future<void> _onCheckout() async {
-///   final bool ok = await SubscriptionGuard.ensureCanWrite(
-///     context: context,
-///     ref: ref,
-///   );
-///   if (!ok) return;
-///   // … proceed with the actual write.
-/// }
-/// ```
-///
-/// When no company is selected (e.g. during onboarding, or in tests),
-/// the guard returns `true` — it only cares about the subscription state
-/// of the currently selected company.
 abstract final class SubscriptionGuard {
   /// Returns `true` when the current company may perform write operations.
   ///
-  /// Safe defaults:
-  /// * No company selected         → `true` (no guard).
-  /// * Unknown subscription state  → `true` (fail open at the UI layer;
-  ///   the database RLS still protects the tenant's data).
-  /// * `trial`, `active`           → `true`.
-  /// * `expired`, `cancelled`      → `false` + shows a dialog.
+  /// Checks in order:
+  /// 1. **Suspension/Expiration** via `companyCanWriteProvider` (Admin block).
+  /// 2. **Subscription status** via `isSubscriptionBlockedProvider`.
   static Future<bool> ensureCanWrite({
     required BuildContext context,
     required WidgetRef ref,
   }) async {
+    // ⬇️ 1. فحص الإيقاف الإداري (من لوحة تحكم المنصة) أو انتهاء التاريخ
+    if (!ref.read(companyCanWriteProvider)) {
+      final CompanyStatusInfo info = ref.read(companyStatusProvider);
+      
+      if (!context.mounted) return false;
+      
+      await showDialog<void>(
+        context: context,
+        builder: (BuildContext dialogContext) => AlertDialog(
+          icon: Container(
+            width: 56,
+            height: 56,
+            decoration: BoxDecoration(
+              color: Theme.of(context).colorScheme.errorContainer,
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              info.isSuspended ? Icons.block : Icons.hourglass_bottom,
+              color: Theme.of(context).colorScheme.onErrorContainer,
+              size: 28,
+            ),
+          ),
+          title: Text(
+            info.isSuspended ? 'الحساب موقوف' : 'انتهت صلاحية الاشتراك',
+          ),
+          content: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              Text(
+                info.reason?.isNotEmpty == true
+                    ? info.reason!
+                    : 'لا يمكن إجراء عمليات جديدة في الوقت الحالي.',
+                style: Theme.of(context).textTheme.bodyMedium,
+              ),
+              const SizedBox(height: 10),
+              Text(
+                'يمكنك تصفح البيانات والتقارير كالمعتاد، لكن العمليات الجديدة '
+                '(بيع، شراء، تعديل) معطلة حتى يتم التجديد أو إعادة التفعيل.',
+                style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                      color: Theme.of(context).colorScheme.onSurfaceVariant,
+                    ),
+              ),
+            ],
+          ),
+          actions: <Widget>[
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop(),
+              child: const Text('حسناً'),
+            ),
+          ],
+        ),
+      );
+      return false;
+    }
+
+    // ⬇️ 2. الفحص الأصلي للاشتراك (فترة السماح، إلغاء، إلخ)
     final bool blocked = ref.read(isSubscriptionBlockedProvider);
     if (!blocked) return true;
 
@@ -56,16 +97,16 @@ abstract final class SubscriptionGuard {
   }
 
   /// Synchronous variant for cases where awaiting a dialog is not possible
-  /// (e.g. inside a `Listenable`). It does **not** show the dialog; the
-  /// caller is expected to surface the block through other UI (e.g. a
-  /// SnackBar).
+  /// (e.g. inside a `Listenable`). It does **not** show the dialog.
   static bool isWriteAllowed(WidgetRef ref) {
+    // يجب أن يمر كلا الفحصين ليكون مسموحاً
+    if (!ref.read(companyCanWriteProvider)) return false;
     return !ref.read(isSubscriptionBlockedProvider);
   }
 }
 
 // ============================================================================
-// Blocked dialog
+// Blocked dialog (Subscription-based)
 // ============================================================================
 
 Future<void> _showBlockedDialog(BuildContext context) async {
