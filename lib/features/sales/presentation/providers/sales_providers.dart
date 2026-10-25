@@ -11,6 +11,7 @@ import '../../../../core/utils/logger.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../data/datasources/sales_remote_datasource.dart';
+import '../../data/repositories/cached_customer_repository.dart';
 import '../../data/repositories/sales_repository_impl.dart';
 import '../../data/services/sales_cache_service.dart';
 import '../../domain/entities/customer_adjustment.dart';
@@ -24,7 +25,11 @@ import '../../domain/repositories/sales_repository.dart';
 // Repository providers
 // ============================================================================
 
-/// The application's customer repository.
+/// The application's customer repository (Offline-First).
+///
+/// Wrapped in [CachedCustomerRepositoryImpl] so POS searches keep working
+/// when the device goes offline: the underlying cache is populated on every
+/// successful online read of `listCustomers`.
 final Provider<CustomerRepository> customerRepositoryProvider =
     Provider<CustomerRepository>((ref) {
   SupabaseClient? client;
@@ -33,7 +38,12 @@ final Provider<CustomerRepository> customerRepositoryProvider =
   } on Object {
     client = null;
   }
-  return CustomerRepositoryImpl(SalesRemoteDataSource(client));
+  final CustomerRepository remote =
+      CustomerRepositoryImpl(SalesRemoteDataSource(client));
+  return CachedCustomerRepositoryImpl(
+    remote: remote,
+    ref: ref,
+  );
 });
 
 /// The application's sales repository.
