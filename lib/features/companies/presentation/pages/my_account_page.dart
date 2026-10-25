@@ -8,13 +8,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
-import '../../../../shared/widgets/app_error.dart';
-import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
-import '../../../support/presentation/pages/company_support_page.dart'; // لاستخدام نفس الموديلات
-import '../../../support/presentation/pages/company_support_page.dart' show CompanyTicket, CompanyTicketReply;
+import '../../../support/presentation/pages/company_support_page.dart';
+import '../domain/entities/company_subscription.dart';
 import '../providers/company_context_provider.dart';
-import '../providers/company_context_state.dart';
 import '../providers/subscription_providers.dart';
 
 class MyAccountPage extends ConsumerStatefulWidget {
@@ -44,7 +41,6 @@ class _MyAccountPageState extends ConsumerState<MyAccountPage> {
     setState(() => _isRequestingRenewal = true);
 
     try {
-      // نرسل الطلب كتذكرة دعم ليصل إشعار فوري للأدمن
       await Supabase.instance.client.from('support_tickets').insert({
         'company_id': companyId,
         'user_id': userId,
@@ -59,9 +55,9 @@ class _MyAccountPageState extends ConsumerState<MyAccountPage> {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم إرسال طلب التجديد بنجاح. سيتواصل معك فريق الدعم.')),
       );
-      // تحديث قائمة التذاكر
+      
       ref.invalidate(companyTicketsProvider);
-      Navigator.pop(context); // إغلاق النافذة
+      Navigator.pop(context);
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('خطأ: $e')));
@@ -104,9 +100,7 @@ class _MyAccountPageState extends ConsumerState<MyAccountPage> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final scheme = theme.colorScheme;
-    final subscription = ref.watch(subscriptionProvider);
-    final contextState = ref.watch(companyContextProvider);
+    final CompanySubscription? subscription = ref.watch(subscriptionProvider);
 
     return AppShell(
       appBar: AppBar(title: const Text('حسابي')),
@@ -126,7 +120,7 @@ class _MyAccountPageState extends ConsumerState<MyAccountPage> {
           // ⬇️ القسم الثاني: الدعم الفني
           _SectionHeader(title: 'تذاكر الدعم الفني', icon: Icons.support_agent),
           const SizedBox(height: 8),
-          _SupportSection(),
+          const _SupportSection(),
 
           const SizedBox(height: 32),
         ],
@@ -142,7 +136,7 @@ class _MyAccountPageState extends ConsumerState<MyAccountPage> {
 class _SubscriptionCard extends StatelessWidget {
   const _SubscriptionCard({required this.subscription, required this.onRenew});
 
-  final dynamic subscription;
+  final CompanySubscription? subscription;
   final VoidCallback onRenew;
 
   @override
@@ -151,7 +145,10 @@ class _SubscriptionCard extends StatelessWidget {
     final scheme = theme.colorScheme;
 
     final String planName = subscription?.plan?.label ?? 'تجربة مجانية';
-    final String status = subscription?.isExpired == true ? 'منتهي' : (subscription?.isTrial == true ? 'تجريبي' : 'نشط');
+    final String status = subscription?.isExpired == true
+        ? 'منتهي'
+        : (subscription?.isTrial == true ? 'تجريبي' : 'نشط');
+    
     final int? daysLeft = subscription?.daysRemaining;
     final DateTime? endDate = subscription?.subscribedUntil;
 
@@ -238,7 +235,9 @@ class _SupportSection extends ConsumerWidget {
               children: [
                 const AppEmptyView(icon: Icons.support_agent, title: 'لا توجد تذاكر', message: 'إذا واجهت مشكلة، يمكنك فتح تذكرة جديدة.'),
                 const SizedBox(height: 12),
-                AppButton(label: 'فتح تذكرة جديدة', icon: Icons.add, onPressed: () => _showNewTicketDialog(context, ref)),
+                AppButton(label: 'فتح صفحة الدعم', icon: Icons.add, onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CompanySupportPage()));
+                }),
               ],
             ),
           );
@@ -262,19 +261,15 @@ class _SupportSection extends ConsumerWidget {
                 label: 'فتح تذكرة جديدة',
                 icon: Icons.add,
                 variant: AppButtonVariant.outline,
-                onPressed: () => _showNewTicketDialog(context, ref),
+                onPressed: () {
+                  Navigator.push(context, MaterialPageRoute(builder: (_) => const CompanySupportPage()));
+                },
               ),
             ),
           ],
         );
       },
     );
-  }
-
-  void _showNewTicketDialog(BuildContext context, WidgetRef ref) {
-    // هذه الدالة موجودة بالفعل داخل صفحة الدعم، يمكننا إعادة استخدامها
-    // أو نقلها لملف مشترك. للتبسيط سنفتح صفحة الدعم الكاملة
-    Navigator.push(context, MaterialPageRoute(builder: (_) => const CompanySupportPage()));
   }
 }
 
