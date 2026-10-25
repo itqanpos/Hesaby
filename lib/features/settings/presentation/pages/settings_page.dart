@@ -40,6 +40,13 @@ class SettingsPage extends ConsumerWidget {
             subtitle: 'الاسم، الهاتف، كلمة المرور',
             onTap: () => context.pushNamed(AppRouter.profileName),
           ),
+          // ⬇️ رابط الدعم الفني الجديد
+          _SettingsTile(
+            icon: Icons.support_agent,
+            title: 'الدعم الفني',
+            subtitle: 'تواصل معنا لحل أي مشكلة',
+            onTap: () => context.pushNamed(AppRouter.supportName),
+          ),
 
           const SizedBox(height: 8),
 
@@ -57,8 +64,6 @@ class SettingsPage extends ConsumerWidget {
             subtitle: 'إضافة وتعديل فروع الشركة',
             onTap: () => context.pushNamed(AppRouter.branchesName),
           ),
-          // ⬇️ تم حذف رابط "الخزنة" من هنا (موجود في القائمة الجانبية)
-          // ⬇️ تم حذف رابط "تقارير الخزنة" من هنا (موجود في صفحة التقارير)
           _SettingsTile(
             icon: Icons.badge_outlined,
             title: 'الفريق',
@@ -119,6 +124,13 @@ class SettingsPage extends ConsumerWidget {
           if (isPlatformAdmin) ...<Widget>[
             const SizedBox(height: 8),
             const _SectionHeader(title: 'لوحة المالك'),
+            // ⬇️ رابط لوحة تحكم المنصة
+            _SettingsTile(
+              icon: Icons.dashboard_outlined,
+              title: 'لوحة تحكم المنصة',
+              subtitle: 'إدارة المستخدمين، الحالة العامة، والتحكم',
+              onTap: () => context.pushNamed(AppRouter.adminDashboardName),
+            ),
             _SettingsTile(
               icon: Icons.admin_panel_settings_outlined,
               title: 'إدارة الشركات',
@@ -180,7 +192,7 @@ class SettingsPage extends ConsumerWidget {
           const _SettingsTile(
             icon: Icons.info_outline,
             title: 'الإصدار',
-            subtitle: 'v1.0.5', // ⬅️ تم تحديث الإصدار هنا
+            subtitle: 'v1.0.5',
             enabled: false,
           ),
           const _SettingsTile(
