@@ -1337,3 +1337,55 @@ class _InfrastructureFooter extends StatelessWidget {
     );
   }
 }
+// في نهاية ملف home_page.dart، أضف هذا الكلاس الجديد:
+
+class _SubscriptionExpiryBanner extends ConsumerWidget {
+  const _SubscriptionExpiryBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final sub = ref.watch(subscriptionProvider);
+    if (sub == null) return const SizedBox.shrink();
+
+    final bool isExpired = sub.isExpired;
+    final int? daysLeft = sub.daysRemaining;
+    final bool isExpiringSoon = !isExpired && daysLeft != null && daysLeft <= 7;
+
+    if (!isExpired && !isExpiringSoon) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final Color bg = isExpired ? const Color(0xFFC62828) : const Color(0xFFEF6C00);
+    final String title = isExpired
+        ? 'انتهى اشتراكك'
+        : 'اشتراكك ينتهي خلال $daysLeft أيام';
+    final String subtitle = isExpired
+        ? 'الحساب الآن للقراءة فقط. جدّد الآن لمتابعة العمل.'
+        : 'جدّد الآن لتجنب توقف الخدمة.';
+
+    return Material(
+      color: bg,
+      child: InkWell(
+        onTap: () => context.pushNamed(AppRouter.accountName),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: <Widget>[
+              const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 24),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                    Text(subtitle, style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 11)),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_left, color: Colors.white),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
