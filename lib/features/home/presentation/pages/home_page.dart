@@ -12,9 +12,11 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
+import '../../../companies/domain/entities/company_subscription.dart';
 import '../../../companies/domain/repositories/company_repository.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../companies/presentation/providers/subscription_providers.dart';
 import '../../../companies/presentation/widgets/branch_selector.dart';
 import '../../../companies/presentation/widgets/company_selector.dart';
 import '../../../companies/presentation/widgets/subscription_banner.dart';
@@ -27,25 +29,6 @@ import '../../../settings/domain/entities/user_profile.dart';
 import '../../../settings/presentation/providers/user_profile_providers.dart';
 
 /// Dashboard Home — the primary navigation hub.
-///
-/// Layout (top → bottom):
-/// 1. Subscription reminder (only when trial / expiring / expired).
-/// 2. Greeting + company/branch context.
-/// 3. **Onboarding / context area** — one of:
-///    * loading spinner while companies are being fetched,
-///    * error card with a retry button,
-///    * **onboarding card** when the user has no company yet (fresh
-///      Google sign-up), pushing them to `/create-company`,
-///    * **choose-company card** when the user is a member of several
-///      companies but has not picked one yet,
-///    * the full dashboard otherwise.
-/// 4. Infrastructure footer.
-///
-/// Pull-to-refresh invalidates the three providers the dashboard reads
-/// (`salesProvider`, `lowStockProvider`, `receivablesProvider`) so a
-/// manual swipe gives the user an authoritative refetch. The same
-/// invalidation surface is also applied centrally after any write, so the
-/// UI never lags behind a POS sale, purchase, or product edit.
 class HomePage extends ConsumerWidget {
   const HomePage({super.key});
 
@@ -84,6 +67,7 @@ class HomePage extends ConsumerWidget {
           physics: const AlwaysScrollableScrollPhysics(),
           padding: const EdgeInsets.only(top: 8, bottom: 32),
           children: <Widget>[
+            const _SubscriptionExpiryBanner(),
             const SubscriptionBanner(),
             const _GreetingCard(),
             const SizedBox(height: 16),
@@ -98,7 +82,79 @@ class HomePage extends ConsumerWidget {
 }
 
 // ============================================================================
-// Context area — decides what to show below the greeting.
+// Subscription Expiry Banner
+// ============================================================================
+
+class _SubscriptionExpiryBanner extends ConsumerWidget {
+  const _SubscriptionExpiryBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final CompanySubscription? sub = ref.watch(subscriptionProvider);
+    if (sub == null) return const SizedBox.shrink();
+
+    final bool isExpired = sub.isExpired;
+    final int? daysLeft = sub.daysRemaining;
+    final bool isExpiringSoon =
+        !isExpired && daysLeft != null && daysLeft <= 7;
+
+    if (!isExpired && !isExpiringSoon) return const SizedBox.shrink();
+
+    final Color bg =
+        isExpired ? const Color(0xFFC62828) : const Color(0xFFEF6C00);
+    final String title =
+        isExpired ? 'انتهى اشتراكك' : 'اشتراكك ينتهي خلال $daysLeft أيام';
+    final String subtitle = isExpired
+        ? 'الحساب الآن للقراءة فقط. جدّد الآن لمتابعة العمل.'
+        : 'جدّد الآن لتجنب توقف الخدمة.';
+
+    return Material(
+      color: bg,
+      child: InkWell(
+        onTap: () => context.pushNamed(AppRouter.accountName),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
+          child: Row(
+            children: <Widget>[
+              const Icon(
+                Icons.warning_amber_rounded,
+                color: Colors.white,
+                size: 24,
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    Text(
+                      title,
+                      style: const TextStyle(
+                        color: Colors.white,
+                        fontWeight: FontWeight.bold,
+                        fontSize: 13,
+                      ),
+                    ),
+                    Text(
+                      subtitle,
+                      style: TextStyle(
+                        color: Colors.white.withValues(alpha: 0.85),
+                        fontSize: 11,
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              const Icon(Icons.chevron_left, color: Colors.white),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Context area
 // ============================================================================
 
 class _ContextArea extends ConsumerWidget {
@@ -108,7 +164,6 @@ class _ContextArea extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // 1) Still loading the very first list of companies.
     if (state.isLoadingCompanies && state.companies.isEmpty) {
       return const Padding(
         padding: EdgeInsets.symmetric(vertical: 48),
@@ -116,7 +171,6 @@ class _ContextArea extends ConsumerWidget {
       );
     }
 
-    // 2) Loaded, but the request failed.
     if (state.companiesFailure != null && state.companies.isEmpty) {
       return AppErrorView(
         title: 'تعذّر تحميل بيانات الشركات',
@@ -126,19 +180,14 @@ class _ContextArea extends ConsumerWidget {
       );
     }
 
-    // 3) No company at all — brand-new Google user, or a user whose
-    //    membership list is empty. Push them into the onboarding flow.
     if (state.companies.isEmpty) {
       return const _OnboardingCard();
     }
 
-    // 4) Companies exist but none is selected (multi-company user who has
-    //    not picked one yet). Offer a compact chooser.
     if (state.currentCompany == null) {
       return const _ChooseCompanyCard();
     }
 
-    // 5) Full dashboard.
     return const _DashboardContent();
   }
 
@@ -159,7 +208,7 @@ class _ContextArea extends ConsumerWidget {
 }
 
 // ============================================================================
-// Onboarding card — shown when the user has no company yet.
+// Onboarding card
 // ============================================================================
 
 class _OnboardingCard extends ConsumerWidget {
@@ -262,8 +311,7 @@ class _OnboardingCard extends ConsumerWidget {
 }
 
 // ============================================================================
-// Choose-company card — shown when several companies exist and none is
-// currently selected.
+// Choose-company card
 // ============================================================================
 
 class _ChooseCompanyCard extends StatelessWidget {
@@ -333,7 +381,7 @@ class _ChooseCompanyCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Dashboard content — full widget tree for a selected company.
+// Dashboard content
 // ============================================================================
 
 class _DashboardContent extends StatelessWidget {
@@ -564,7 +612,7 @@ class _PosHeroBanner extends StatelessWidget {
 }
 
 // ============================================================================
-// KPI grid (2 x 2)
+// KPI grid
 // ============================================================================
 
 class _KpiGrid extends ConsumerWidget {
@@ -578,7 +626,6 @@ class _KpiGrid extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // ---- Today's sales + invoices ----
     final List<Sale> sales =
         ref.watch(salesProvider).valueOrNull ?? const <Sale>[];
     final DateTime now = DateTime.now();
@@ -593,12 +640,10 @@ class _KpiGrid extends ConsumerWidget {
       }
     }
 
-    // ---- Low stock count ----
     final int lowStockCount =
         (ref.watch(lowStockProvider).valueOrNull ?? const <LowStockItem>[])
             .length;
 
-    // ---- Receivables total ----
     final double receivables =
         ref.watch(receivablesProvider).valueOrNull?.totalBalance ?? 0;
 
@@ -746,7 +791,7 @@ class _KpiCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Quick actions (4 tiles)
+// Quick actions
 // ============================================================================
 
 class _QuickActionsGrid extends StatelessWidget {
@@ -1325,7 +1370,6 @@ class _InfrastructureFooter extends StatelessWidget {
             ),
           ),
           const Spacer(),
-          // ⬇️ تم تحديث رقم الإصدار إلى v1.0.0
           Text(
             'v1.0.5',
             style: theme.textTheme.bodySmall?.copyWith(
@@ -1333,58 +1377,6 @@ class _InfrastructureFooter extends StatelessWidget {
             ),
           ),
         ],
-      ),
-    );
-  }
-}
-// في نهاية ملف home_page.dart، أضف هذا الكلاس الجديد:
-
-class _SubscriptionExpiryBanner extends ConsumerWidget {
-  const _SubscriptionExpiryBanner();
-
-  @override
-  Widget build(BuildContext context, WidgetRef ref) {
-    final sub = ref.watch(subscriptionProvider);
-    if (sub == null) return const SizedBox.shrink();
-
-    final bool isExpired = sub.isExpired;
-    final int? daysLeft = sub.daysRemaining;
-    final bool isExpiringSoon = !isExpired && daysLeft != null && daysLeft <= 7;
-
-    if (!isExpired && !isExpiringSoon) return const SizedBox.shrink();
-
-    final theme = Theme.of(context);
-    final Color bg = isExpired ? const Color(0xFFC62828) : const Color(0xFFEF6C00);
-    final String title = isExpired
-        ? 'انتهى اشتراكك'
-        : 'اشتراكك ينتهي خلال $daysLeft أيام';
-    final String subtitle = isExpired
-        ? 'الحساب الآن للقراءة فقط. جدّد الآن لمتابعة العمل.'
-        : 'جدّد الآن لتجنب توقف الخدمة.';
-
-    return Material(
-      color: bg,
-      child: InkWell(
-        onTap: () => context.pushNamed(AppRouter.accountName),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-          child: Row(
-            children: <Widget>[
-              const Icon(Icons.warning_amber_rounded, color: Colors.white, size: 24),
-              const SizedBox(width: 12),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(title, style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
-                    Text(subtitle, style: TextStyle(color: Colors.white.withValues(alpha: 0.85), fontSize: 11)),
-                  ],
-                ),
-              ),
-              const Icon(Icons.chevron_left, color: Colors.white),
-            ],
-          ),
-        ),
       ),
     );
   }
