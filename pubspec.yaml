@@ -1,7 +1,7 @@
 name: hesabi
 description: "Hesabi - Multi-tenant SaaS for POS, Inventory, Sales and Accounting"
 publish_to: "none"
-version: 1.0.5+6
+version: 1.0.6+7
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -54,6 +54,9 @@ dependencies:
 
   # App version info (for update notifications)
   package_info_plus: ^8.1.0
+
+  # ⬇️ صوت الباركود (WAV مولد برمجياً، بدون ملف خارجي)
+  audioplayers: ^6.1.0
 
 dev_dependencies:
   flutter_test:
