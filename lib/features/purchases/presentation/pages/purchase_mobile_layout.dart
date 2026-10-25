@@ -18,9 +18,10 @@ import '../widgets/purchase_search_field.dart';
 /// * [PurchaseSearchField] — name / SKU / barcode search with scanner.
 /// * Middle area:
 ///     - **Not searching**: cart fills the middle area.
-///     - **Searching**:     search results and cart share the middle area
-///                          (results 2/5, cart 3/5). The cart always stays
-///                          visible while the user browses results.
+///     - **Searching**:     search results (linear list, no cards) and cart
+///                          share the middle area (results 2/5, cart 3/5).
+///                          The cart always stays visible while the user
+///                          browses results.
 /// * [PurchaseBottomPanel] — totals + save actions.
 ///
 /// Mirrors `PosMobileLayout` for consistency.
@@ -32,13 +33,8 @@ class PurchaseMobileLayout extends ConsumerWidget {
     required this.isSubmitting,
   });
 
-  /// Invoked when the user taps "حفظ كمسودة".
   final VoidCallback onSaveDraft;
-
-  /// Invoked when the user taps "حفظ وتأكيد".
   final VoidCallback onSaveAndConfirm;
-
-  /// Whether a save is in progress.
   final bool isSubmitting;
 
   @override
@@ -85,7 +81,7 @@ class _SplitView extends StatelessWidget {
         ),
         Flexible(
           flex: 2,
-          child: PurchaseResultsList(),
+          child: PurchaseResultsList(compact: true), // ← التغيير الوحيد
         ),
         _ThinDivider(),
         _SectionLabel(
