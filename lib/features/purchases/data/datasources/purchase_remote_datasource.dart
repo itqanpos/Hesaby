@@ -97,6 +97,7 @@ class PurchaseRemoteDataSource {
     final String effectiveInvoiceNumber =
         await _resolveInvoiceNumber(client, companyId, invoiceNumber);
 
+    // ⬇️ استخدام paid_amount = 0 مبدئياً لتجنب مشكلة القيد (paid_amount <= total)
     final Map<String, dynamic> headerPayload = <String, dynamic>{
       'company_id': companyId,
       'branch_id': branchId,
@@ -105,9 +106,9 @@ class PurchaseRemoteDataSource {
       'invoice_number': effectiveInvoiceNumber,
       'discount': discount,
       'tax_amount': taxAmount,
-      'paid_amount': paidAmount,
+      'paid_amount': 0.0, // ⬅️ تم التعديل
       'payment_method': paymentMethod,
-      'status': 'draft', // ⬅️ إضافة صريحة للحالة
+      'status': 'draft',
       if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
       if (createdBy != null) 'created_by': createdBy,
     };
@@ -141,6 +142,14 @@ class PurchaseRemoteDataSource {
       }
     }
 
+    // ⬇️ تحديث المبلغ المدفوع بعد إدراج البنود (ليكون المجموع قد تم حسابه)
+    if (paidAmount > 0) {
+      await client
+          .from('purchases')
+          .update(<String, dynamic>{'paid_amount': paidAmount})
+          .eq('id', purchaseId);
+    }
+
     final Map<String, dynamic> finalRow = await client
         .from('purchases')
         .select()
@@ -166,13 +175,14 @@ class PurchaseRemoteDataSource {
   }) async {
     final SupabaseClient client = _requireClient();
 
+    // ⬇️ استخدام paid_amount = 0 مبدئياً هنا أيضاً
     final Map<String, dynamic> headerPayload = <String, dynamic>{
       'branch_id': branchId,
       'supplier_id': supplierId,
       'purchase_date': _formatDate(purchaseDate),
       'discount': discount,
       'tax_amount': taxAmount,
-      'paid_amount': paidAmount,
+      'paid_amount': 0.0, // ⬅️ تم التعديل
       'payment_method': paymentMethod,
       'invoice_number':
           (invoiceNumber != null && invoiceNumber.trim().isNotEmpty)
@@ -200,6 +210,14 @@ class PurchaseRemoteDataSource {
         purchaseId: purchaseId,
         items: items,
       );
+    }
+
+    // ⬇️ تحديث المبلغ المدفوع بعد إدراج البنود
+    if (paidAmount > 0) {
+      await client
+          .from('purchases')
+          .update(<String, dynamic>{'paid_amount': paidAmount})
+          .eq('id', purchaseId);
     }
 
     final Map<String, dynamic> finalRow = await client
