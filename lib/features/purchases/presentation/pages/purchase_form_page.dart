@@ -165,7 +165,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
       return;
     }
 
-    // ⬇️ التحقق من رصيد الخزنة قبل الحفظ
     if (cart.paidAmount > 0) {
       final overview = ref.read(cashOverviewProvider).valueOrNull;
       if (overview != null) {
@@ -224,8 +223,8 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
               : cart.invoiceNumber.trim(),
           discount: cart.discount,
           taxAmount: cart.taxAmount,
-          paidAmount: cart.paidAmount,          // ⬅️ إرسال المبلغ المدفوع
-          paymentMethod: cart.paymentMethod,    // ⬅️ إرسال طريقة الدفع
+          paidAmount: cart.paidAmount,
+          paymentMethod: cart.paymentMethod,
           notes: cart.notes.trim().isEmpty ? null : cart.notes.trim(),
         );
       } else {
@@ -239,14 +238,17 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
               : cart.invoiceNumber.trim(),
           discount: cart.discount,
           taxAmount: cart.taxAmount,
-          paidAmount: cart.paidAmount,          // ⬅️ إرسال المبلغ المدفوع
-          paymentMethod: cart.paymentMethod,    // ⬅️ إرسال طريقة الدفع
+          paidAmount: cart.paidAmount,
+          paymentMethod: cart.paymentMethod,
           notes: cart.notes.trim().isEmpty ? null : cart.notes.trim(),
         );
       }
 
       if (andConfirm) {
-        await notifier.confirmPurchase(saved.id);
+        // ⬇️ التحقق من الحالة قبل التأكيد
+        if (saved.status != 'confirmed') {
+          await notifier.confirmPurchase(saved.id);
+        }
       }
 
       if (!mounted) return;
