@@ -15,6 +15,11 @@ class PurchaseRemoteDataSource {
 
   static const int defaultLimit = 100;
 
+  /// Marker stored in `supplier_payments.notes` for the initial payment
+  /// that corresponds to `purchases.paid_amount`. Used to distinguish the
+  /// auto-generated payment from user-recorded payments.
+  static const String initialPaymentMarker = 'دفعة عند الإنشاء';
+
   // ---------------------------------------------------------------------------
   // Reads
   // ---------------------------------------------------------------------------
@@ -97,7 +102,9 @@ class PurchaseRemoteDataSource {
     final String effectiveInvoiceNumber =
         await _resolveInvoiceNumber(client, companyId, invoiceNumber);
 
-    // ⬇️ استخدام paid_amount = 0 مبدئياً لتجنب مشكلة القيد (paid_amount <= total)
+    // Insert the header with paid_amount = 0 (avoids the `paid_amount <= total`
+    // CHECK constraint firing before line items are inserted and the total
+    // is computed by the database trigger).
     final Map<String, dynamic> headerPayload = <String, dynamic>{
       'company_id': companyId,
       'branch_id': branchId,
@@ -106,7 +113,7 @@ class PurchaseRemoteDataSource {
       'invoice_number': effectiveInvoiceNumber,
       'discount': discount,
       'tax_amount': taxAmount,
-      'paid_amount': 0.0, // ⬅️ تم التعديل
+      'paid_amount': 0.0,
       'payment_method': paymentMethod,
       'status': 'draft',
       if (notes != null && notes.trim().isNotEmpty) 'notes': notes.trim(),
@@ -142,12 +149,25 @@ class PurchaseRemoteDataSource {
       }
     }
 
-    // ⬇️ تحديث المبلغ المدفوع بعد إدراج البنود (ليكون المجموع قد تم حسابه)
+    // Persist the initial payment: update `purchases.paid_amount` AND insert
+    // a matching row in `supplier_payments`, so the supplier statement
+    // reflects the payment instead of showing it as still owed.
     if (paidAmount > 0) {
       await client
           .from('purchases')
           .update(<String, dynamic>{'paid_amount': paidAmount})
           .eq('id', purchaseId);
+
+      await client.from('supplier_payments').insert(<String, dynamic>{
+        'company_id': companyId,
+        'supplier_id': supplierId,
+        'purchase_id': purchaseId,
+        'amount': paidAmount,
+        'payment_method': paymentMethod,
+        'payment_date': _formatDate(purchaseDate),
+        'notes': initialPaymentMarker,
+        if (createdBy != null) 'created_by': createdBy,
+      });
     }
 
     final Map<String, dynamic> finalRow = await client
@@ -174,15 +194,16 @@ class PurchaseRemoteDataSource {
     String? notes,
   }) async {
     final SupabaseClient client = _requireClient();
+    final String? createdBy = client.auth.currentUser?.id;
 
-    // ⬇️ استخدام paid_amount = 0 مبدئياً هنا أيضاً
+    // See `createPurchase` for why paid_amount starts at 0.
     final Map<String, dynamic> headerPayload = <String, dynamic>{
       'branch_id': branchId,
       'supplier_id': supplierId,
       'purchase_date': _formatDate(purchaseDate),
       'discount': discount,
       'tax_amount': taxAmount,
-      'paid_amount': 0.0, // ⬅️ تم التعديل
+      'paid_amount': 0.0,
       'payment_method': paymentMethod,
       'invoice_number':
           (invoiceNumber != null && invoiceNumber.trim().isNotEmpty)
@@ -212,12 +233,35 @@ class PurchaseRemoteDataSource {
       );
     }
 
-    // ⬇️ تحديث المبلغ المدفوع بعد إدراج البنود
+    // Reconcile the initial payment:
+    // 1. Remove any prior auto-generated initial payment for this purchase.
+    // 2. Re-insert it (if paidAmount > 0) and update `purchases.paid_amount`.
+    //
+    // Only rows tagged with [initialPaymentMarker] are touched, so
+    // user-recorded payments (added via `supplier_payment_dialog`) are
+    // preserved.
+    await client
+        .from('supplier_payments')
+        .delete()
+        .eq('purchase_id', purchaseId)
+        .eq('notes', initialPaymentMarker);
+
     if (paidAmount > 0) {
       await client
           .from('purchases')
           .update(<String, dynamic>{'paid_amount': paidAmount})
           .eq('id', purchaseId);
+
+      await client.from('supplier_payments').insert(<String, dynamic>{
+        'company_id': companyId,
+        'supplier_id': supplierId,
+        'purchase_id': purchaseId,
+        'amount': paidAmount,
+        'payment_method': paymentMethod,
+        'payment_date': _formatDate(purchaseDate),
+        'notes': initialPaymentMarker,
+        if (createdBy != null) 'created_by': createdBy,
+      });
     }
 
     final Map<String, dynamic> finalRow = await client
