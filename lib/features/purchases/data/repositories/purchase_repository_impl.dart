@@ -108,8 +108,8 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
     String? invoiceNumber,
     double discount = 0,
     double taxAmount = 0,
-    double paidAmount = 0,          // ⬅️ جديد
-    String paymentMethod = 'cash',  // ⬅️ جديد
+    double paidAmount = 0,
+    String paymentMethod = 'cash',
     String? notes,
   }) async {
     try {
@@ -151,8 +151,8 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
     String? invoiceNumber,
     double discount = 0,
     double taxAmount = 0,
-    double paidAmount = 0,          // ⬅️ جديد
-    String paymentMethod = 'cash',  // ⬅️ جديد
+    double paidAmount = 0,
+    String paymentMethod = 'cash',
     String? notes,
   }) async {
     try {
@@ -359,7 +359,8 @@ class PurchaseRepositoryImpl implements PurchaseRepository {
           message.contains('cannot modify items of a')) {
         return PurchaseFailureType.invalidStatusTransition;
       }
-      return PurchaseFailureType.invalidStatusTransition;
+      // ⬇️ إرجاع invalidResponse بدلاً من invalidStatusTransition كخطأ افتراضي
+      return PurchaseFailureType.invalidResponse;
     }
 
     if (code == 'PGRST116') {
