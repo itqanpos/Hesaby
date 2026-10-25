@@ -7,6 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:mobile_scanner/mobile_scanner.dart';
 
 import '../../../../core/utils/logger.dart';
+import '../../data/services/barcode_beep.dart';
 
 /// Full-screen barcode scanner dialog — stability-first.
 class PosBarcodeScannerDialog extends StatefulWidget {
@@ -51,7 +52,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       ],
     );
 
-    // أمان إضافي: تأكد من إيقاف أي كاميرا عالقة من محاولة سابقة
     try {
       _controller.stop();
     } on Object {
@@ -62,6 +62,9 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       vsync: this,
       duration: const Duration(milliseconds: 1600),
     )..repeat(reverse: true);
+
+    // ⬇️ تهيئة صوت الباركود مسبقاً (لا يحجب أول عملية مسح)
+    BarcodeBeep.instance.play().ignore();
 
     WidgetsBinding.instance.addPostFrameCallback((_) => _startCamera());
   }
@@ -93,7 +96,6 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
 
   Future<void> _startCamera() async {
     if (_starting || !mounted || _hasEmitted) return;
-    // ⬇️ فحص إضافي: لا تبدأ إذا كانت الكاميرا قيد التشغيل بالفعل
     if (_controller.value.isStarting || _controller.value.isRunning) {
       return;
     }
@@ -165,10 +167,18 @@ class _PosBarcodeScannerDialogState extends State<PosBarcodeScannerDialog>
       if (raw == null) continue;
       final String value = raw.trim();
       if (value.isEmpty) continue;
+
       _hasEmitted = true;
+
+      // ⬇️ صوت "بيب" + اهتزاز
+      BarcodeBeep.instance.play();
       HapticFeedback.heavyImpact().ignore();
-      SystemSound.play(SystemSoundType.alert).ignore();
-      if (mounted) Navigator.of(context).pop(value);
+
+      // ⬇️ تأجيل الإغلاق 100ms لضمان بدء الصوت
+      final String finalValue = value;
+      Future.delayed(const Duration(milliseconds: 100), () {
+        if (mounted) Navigator.of(context).pop(finalValue);
+      });
       return;
     }
   }
