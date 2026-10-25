@@ -40,12 +40,14 @@ class SettingsPage extends ConsumerWidget {
             subtitle: 'الاسم، الهاتف، كلمة المرور',
             onTap: () => context.pushNamed(AppRouter.profileName),
           ),
-          // ⬇️ رابط الدعم الفني الجديد
+          // ⬇️ البطاقة الموحدة الجديدة (تحل محل الدعم الفني والاشتراك)
           _SettingsTile(
-            icon: Icons.support_agent,
-            title: 'الدعم الفني',
-            subtitle: 'تواصل معنا لحل أي مشكلة',
-            onTap: () => context.pushNamed(AppRouter.supportName),
+            icon: Icons.account_circle_outlined,
+            title: 'حسابي',
+            subtitle: subscription != null 
+                ? _subscriptionSubtitle(subscription)
+                : 'الاشتراك، الدعم الفني، الفواتير',
+            onTap: () => context.pushNamed(AppRouter.accountName),
           ),
 
           const SizedBox(height: 8),
@@ -94,14 +96,7 @@ class SettingsPage extends ConsumerWidget {
             subtitle: 'الضريبة والخصم وقواعد البيع وتذييل الإيصال',
             onTap: () => context.pushNamed(AppRouter.companySettingsName),
           ),
-          if (isOwner)
-            _SettingsTile(
-              icon: Icons.workspace_premium_outlined,
-              title: 'الاشتراك',
-              subtitle: _subscriptionSubtitle(subscription),
-              onTap: () =>
-                  context.pushNamed(AppRouter.subscriptionName),
-            ),
+          // ملاحظة: تم حذف بطاقة "الاشتراك" القديمة لأنها أصبحت داخل "حسابي"
 
           const SizedBox(height: 8),
 
@@ -124,7 +119,6 @@ class SettingsPage extends ConsumerWidget {
           if (isPlatformAdmin) ...<Widget>[
             const SizedBox(height: 8),
             const _SectionHeader(title: 'لوحة المالك'),
-            // ⬇️ رابط لوحة تحكم المنصة
             _SettingsTile(
               icon: Icons.dashboard_outlined,
               title: 'لوحة تحكم المنصة',
@@ -207,7 +201,7 @@ class SettingsPage extends ConsumerWidget {
   }
 
   static String _subscriptionSubtitle(CompanySubscription? sub) {
-    if (sub == null) return 'حالة الاشتراك والباقة';
+    if (sub == null) return 'الاشتراك، الدعم الفني، الفواتير';
     if (sub.isCancelled) return 'ملغى — جدّد للعودة';
     if (sub.isExpired) return 'انتهى — جدّد الآن';
     final int? days = sub.daysRemaining;
@@ -350,13 +344,8 @@ class SettingsPage extends ConsumerWidget {
   }
 }
 
-// ============================================================================
-// Section header
-// ============================================================================
-
 class _SectionHeader extends StatelessWidget {
   const _SectionHeader({required this.title});
-
   final String title;
 
   @override
@@ -389,10 +378,6 @@ class _SectionHeader extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Settings tile
-// ============================================================================
 
 class _SettingsTile extends StatelessWidget {
   const _SettingsTile({
@@ -499,10 +484,6 @@ class _SettingsTile extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Picker sheet
-// ============================================================================
 
 enum _LocaleChoice { system, ar, en }
 
