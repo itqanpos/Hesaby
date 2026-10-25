@@ -15,6 +15,7 @@ import '../../../cash/domain/entities/cash_entities.dart';
 import '../../../cash/presentation/providers/cash_providers.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../companies/presentation/providers/company_status_provider.dart'; // ⬅️ استيراد جديد
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/domain/repositories/sales_repository.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
@@ -147,6 +148,18 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
+
+    // ⬇️ الفحص الجديد: هل الشركة موقوفة أو اشتراكها منتهي؟
+    if (!ref.read(companyCanWriteProvider)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('لا يمكن إتمام البيع. الحساب موقوف أو اشتراكه منتهي.'),
+          backgroundColor: Colors.red,
+        ),
+      );
+      return;
+    }
+
     if (_validationError() != null) return;
 
     final CompanyContextState contextState = ref.read(companyContextProvider);
