@@ -5,33 +5,16 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 
 import '../../../../app/router.dart';
-import '../../domain/entities/company_subscription.dart';
 import '../providers/company_status_provider.dart';
 import '../providers/subscription_providers.dart';
 
 /// Central choke point for **write-operation** gating.
-///
-/// The rule: an account whose company is **suspended** (by the platform
-/// admin), or whose subscription is **expired** / **cancelled**, can still
-/// navigate, search, and read every page — but must not be able to create,
-/// edit, delete, or record any new data until it is renewed.
-///
-/// ## Usage
-///
-/// Call [ensureCanWrite] **before** the actual write action. It returns
-/// `true` when the operation is allowed, and `false` (after showing an
-/// informative dialog) when the account is blocked.
 abstract final class SubscriptionGuard {
-  /// Returns `true` when the current company may perform write operations.
-  ///
-  /// Checks in order:
-  /// 1. **Suspension/Expiration** via `companyCanWriteProvider` (Admin block).
-  /// 2. **Subscription status** via `isSubscriptionBlockedProvider`.
   static Future<bool> ensureCanWrite({
     required BuildContext context,
     required WidgetRef ref,
   }) async {
-    // ⬇️ 1. فحص الإيقاف الإداري (من لوحة تحكم المنصة) أو انتهاء التاريخ
+    // 1. فحص الإيقاف الإداري (من لوحة تحكم المنصة) أو انتهاء التاريخ
     if (!ref.read(companyCanWriteProvider)) {
       final CompanyStatusInfo info = ref.read(companyStatusProvider);
       
@@ -87,7 +70,7 @@ abstract final class SubscriptionGuard {
       return false;
     }
 
-    // ⬇️ 2. الفحص الأصلي للاشتراك (فترة السماح، إلغاء، إلخ)
+    // 2. الفحص الأصلي للاشتراك
     final bool blocked = ref.read(isSubscriptionBlockedProvider);
     if (!blocked) return true;
 
@@ -96,28 +79,20 @@ abstract final class SubscriptionGuard {
     return false;
   }
 
-  /// Synchronous variant for cases where awaiting a dialog is not possible
-  /// (e.g. inside a `Listenable`). It does **not** show the dialog.
   static bool isWriteAllowed(WidgetRef ref) {
-    // يجب أن يمر كلا الفحصين ليكون مسموحاً
     if (!ref.read(companyCanWriteProvider)) return false;
     return !ref.read(isSubscriptionBlockedProvider);
   }
 }
 
-// ============================================================================
-// Blocked dialog (Subscription-based)
-// ============================================================================
-
 Future<void> _showBlockedDialog(BuildContext context) async {
   final bool? goToSubscription = await showDialog<bool>(
     context: context,
-    builder: (BuildContext dialogContext) =>
-        const _BlockedDialogContent(),
+    builder: (BuildContext dialogContext) => const _BlockedDialogContent(),
   );
 
   if (goToSubscription == true && context.mounted) {
-    await context.pushNamed(AppRouter.subscriptionName);
+    await context.pushNamed(AppRouter.accountName);
   }
 }
 
