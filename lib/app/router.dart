@@ -18,8 +18,7 @@ import '../features/companies/presentation/pages/branches_page.dart';
 import '../features/companies/presentation/pages/company_profile_page.dart';
 import '../features/companies/presentation/pages/member_permissions_page.dart';
 import '../features/companies/presentation/pages/members_page.dart';
-import '../features/companies/presentation/pages/my_account_page.dart'; // ⬅️ استيراد جديد
-import '../features/companies/presentation/pages/subscription_page.dart';
+import '../features/companies/presentation/pages/my_account_page.dart';
 import '../features/employees/presentation/pages/advances_page.dart';
 import '../features/employees/presentation/pages/employees_page.dart';
 import '../features/employees/presentation/pages/salaries_page.dart';
@@ -58,7 +57,6 @@ import '../features/settings/presentation/pages/company_settings_page.dart';
 import '../features/settings/presentation/pages/profile_page.dart';
 import '../features/settings/presentation/pages/settings_page.dart';
 import '../features/settings/presentation/providers/user_profile_providers.dart';
-import '../features/support/presentation/pages/company_support_page.dart';
 import '../features/suppliers/presentation/pages/suppliers_page.dart';
 import '../l10n/app_localizations.dart';
 import '../shared/widgets/app_error.dart';
@@ -166,11 +164,11 @@ abstract final class AppRouter {
   static const String printerSettingsPath = '/settings/printer';
   static const String printerSettingsName = 'printer-settings';
 
-  // ⬇️ المسار الجديد الموحد
+  // Unified account page (subscription + support)
   static const String accountPath = '/account';
   static const String accountName = 'account';
 
-  // ⬇️ مسارات قديمة (نبقيها للتوافق فقط)
+  // Legacy paths (redirected to /account)
   static const String subscriptionPath = '/subscription';
   static const String subscriptionName = 'subscription';
 
@@ -270,9 +268,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
       if (location == AppRouter.loginPath ||
           location == AppRouter.signupPath) {
         final profileAsync = ref.read(userProfileProvider);
-        
         if (!profileAsync.hasValue) return AppRouter.loadingPath;
-        
         if (profileAsync.value?.isPlatformAdmin == true) {
           return AppRouter.adminDashboardPath;
         }
@@ -281,8 +277,7 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
 
       if (location == AppRouter.loadingPath) {
         final profileAsync = ref.read(userProfileProvider);
-        if (!profileAsync.hasValue) return null; 
-        
+        if (!profileAsync.hasValue) return null;
         if (profileAsync.value?.isPlatformAdmin == true) {
           return AppRouter.adminDashboardPath;
         }
@@ -329,14 +324,12 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const CreateCompanyPage(),
       ),
-      // ⬇️ المسار الجديد الموحد
       GoRoute(
         path: AppRouter.accountPath,
         name: AppRouter.accountName,
         builder: (BuildContext context, GoRouterState state) =>
             const MyAccountPage(),
       ),
-      // ⬇️ المسارات القديمة نعيد توجيهها للمسار الجديد
       GoRoute(
         path: AppRouter.subscriptionPath,
         name: AppRouter.subscriptionName,
