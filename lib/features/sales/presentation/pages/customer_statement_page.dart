@@ -313,17 +313,15 @@ class _StatementBody extends StatelessWidget {
 }
 
 // ============================================================================
-// Computed statement
+// Computed statement (بدون الرصيد الافتتاحي — لأنه يُعرض كحركة)
 // ============================================================================
 
 class _ComputedStatement {
   const _ComputedStatement({
-    required this.openingBalance,
     required this.chronologicalEntries,
     required this.closingBalance,
   });
 
-  final double openingBalance;
   final List<_AugEntry> chronologicalEntries;
   final double closingBalance;
 
@@ -344,7 +342,7 @@ class _ComputedStatement {
     for (final item in indexed) {
       final CustomerStatementEntry e = item.entry;
       final double previous = balance;
-      
+
       balance = balance + e.debit - e.credit;
 
       augmented.add(_AugEntry(
@@ -355,7 +353,6 @@ class _ComputedStatement {
     }
 
     return _ComputedStatement(
-      openingBalance: statement.openingBalance,
       chronologicalEntries: augmented,
       closingBalance: balance,
     );
@@ -538,7 +535,7 @@ class _PeriodChips extends StatelessWidget {
 }
 
 // ============================================================================
-// Entries list
+// Entries list (بدون رصيد افتتاحي)
 // ============================================================================
 
 class _EntriesList extends StatelessWidget {
@@ -579,8 +576,7 @@ class _EntriesList extends StatelessWidget {
     final List<_AugEntry> display =
         computed.chronologicalEntries.reversed.toList(growable: false);
 
-    // تم إلغاء الرصيد الافتتاحي من العرض (showOpening = false)
-    const bool showOpening = false;
+    // الجدول: 0 = رأس الجدول، 1..n = الحركات، n+1 = الرصيد النهائي
     const int headerIndex = 0;
     const int firstRowIndex = 1;
     final int closingIndex = firstRowIndex + display.length;
@@ -627,13 +623,13 @@ class _TableHeaderRow extends StatelessWidget {
     const TextStyle style = TextStyle(
       fontSize: 11,
       fontWeight: FontWeight.w800,
-      color: Colors.grey, // لون رمادي هادئ للرأس
+      color: Colors.grey,
     );
 
     return Container(
       padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       decoration: BoxDecoration(
-        color: scheme.surface, // بدون لون خلفية بارز
+        color: scheme.surface,
         border: Border(
           bottom: BorderSide(color: scheme.outlineVariant, width: 1),
         ),
@@ -641,15 +637,17 @@ class _TableHeaderRow extends StatelessWidget {
       child: const Row(
         children: <Widget>[
           _HeaderCell(width: 54, text: 'التاريخ', style: style),
-          _HeaderCell(width: 0, text: 'البيان', style: style, isExpanded: true),
-          _HeaderCell(width: 70, text: 'الرصيد', style: style, alignRight: true),
-          _HeaderCell(width: 70, text: 'المدفوع', style: style, alignRight: true),
           _HeaderCell(
-            width: 84,
-            text: 'الرصيد الحالي',
-            style: style,
-            alignRight: true,
-          ),
+              width: 0, text: 'البيان', style: style, isExpanded: true),
+          _HeaderCell(
+              width: 70, text: 'الرصيد', style: style, alignRight: true),
+          _HeaderCell(
+              width: 70, text: 'المدفوع', style: style, alignRight: true),
+          _HeaderCell(
+              width: 84,
+              text: 'الرصيد الحالي',
+              style: style,
+              alignRight: true),
         ],
       ),
     );
@@ -690,7 +688,7 @@ class _HeaderCell extends StatelessWidget {
 }
 
 // ============================================================================
-// Entry row (بدون خطوط وتوسيع الخلايا)
+// Entry row (بدون خطوط، مع تاريخ + zebra striping)
 // ============================================================================
 
 class _EntryRow extends StatelessWidget {
@@ -704,27 +702,40 @@ class _EntryRow extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final CustomerStatementEntry entry = aug.entry;
-    
+
     final double paid = entry.credit;
     final double debit = entry.debit;
-    
+
     final double prevBal = aug.previousBalance;
     final double currBal = aug.currentBalance;
 
     final bool prevWeOwe = prevBal > 0.01;
     final bool prevTheyOweUs = prevBal < -0.01;
-    final Color prevColor = prevWeOwe ? scheme.error : (prevTheyOweUs ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant);
-    final String prevText = (prevWeOwe || prevTheyOweUs) ? '${prevWeOwe ? '+' : '−'}${AppFormatters.money(prevBal.abs())}' : '0.00';
+    final Color prevColor = prevWeOwe
+        ? scheme.error
+        : (prevTheyOweUs
+            ? const Color(0xFF1B5E20)
+            : scheme.onSurfaceVariant);
+    final String prevText = (prevWeOwe || prevTheyOweUs)
+        ? '${prevWeOwe ? '+' : '−'}${AppFormatters.money(prevBal.abs())}'
+        : '0.00';
 
     final bool currWeOwe = currBal > 0.01;
     final bool currTheyOweUs = currBal < -0.01;
-    final Color currColor = currWeOwe ? scheme.error : (currTheyOweUs ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant);
-    final String currText = (currWeOwe || currTheyOweUs) ? '${currWeOwe ? '+' : '−'}${AppFormatters.money(currBal.abs())}' : '0.00';
+    final Color currColor = currWeOwe
+        ? scheme.error
+        : (currTheyOweUs
+            ? const Color(0xFF1B5E20)
+            : scheme.onSurfaceVariant);
+    final String currText = (currWeOwe || currTheyOweUs)
+        ? '${currWeOwe ? '+' : '−'}${AppFormatters.money(currBal.abs())}'
+        : '0.00';
 
-    final String baseDesc = entry.hasDescription ? entry.description! : _typeLabel(entry.type);
-    final Color typeColor = debit > 0 ? scheme.error : const Color(0xFF1B5E20);
+    final String baseDesc =
+        entry.hasDescription ? entry.description! : _typeLabel(entry.type);
+    final Color typeColor =
+        debit > 0 ? scheme.error : const Color(0xFF1B5E20);
 
-    // خلفية متبادلة خفيفة جداً (Zebra Striping) بدلاً من الخطوط
     final Color rowColor = isEven
         ? scheme.surface
         : scheme.surfaceContainerHighest.withValues(alpha: 0.3);
@@ -736,7 +747,13 @@ class _EntryRow extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
           // Date
-          const SizedBox(width: 54),
+          SizedBox(
+            width: 54,
+            child: Text(
+              DateFormat('dd/MM').format(entry.date.toLocal()),
+              style: const TextStyle(fontSize: 11),
+            ),
+          ),
           // Description
           Expanded(
             child: Column(
@@ -753,21 +770,22 @@ class _EntryRow extends StatelessWidget {
                     color: typeColor,
                   ),
                 ),
-                if (entry.isSale && debit > 0) ...[
+                if (entry.isSale && debit > 0) ...<Widget>[
                   const SizedBox(height: 2),
                   Text(
                     'قيمة: ${AppFormatters.money(debit)}',
                     style: TextStyle(fontSize: 10, color: scheme.error),
                   ),
                 ],
-                if (entry.isSale && paid > 0) ...[
+                if (entry.isSale && paid > 0) ...<Widget>[
                   const SizedBox(height: 1),
                   Text(
                     'مدفوع: ${AppFormatters.money(paid)}',
-                    style: TextStyle(fontSize: 10, color: const Color(0xFF1B5E20)),
+                    style: TextStyle(
+                        fontSize: 10, color: const Color(0xFF1B5E20)),
                   ),
                 ],
-                if (entry.hasReference) ...[
+                if (entry.hasReference) ...<Widget>[
                   const SizedBox(height: 2),
                   Text(
                     entry.reference!,
@@ -788,7 +806,10 @@ class _EntryRow extends StatelessWidget {
             child: Text(
               prevText,
               textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: prevColor),
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w600,
+                  color: prevColor),
             ),
           ),
           // Paid
@@ -799,8 +820,11 @@ class _EntryRow extends StatelessWidget {
               textAlign: TextAlign.right,
               style: TextStyle(
                 fontSize: 11,
-                color: paid > 0 ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant,
-                fontWeight: paid > 0 ? FontWeight.w600 : FontWeight.normal,
+                color: paid > 0
+                    ? const Color(0xFF1B5E20)
+                    : scheme.onSurfaceVariant,
+                fontWeight:
+                    paid > 0 ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
           ),
@@ -810,7 +834,10 @@ class _EntryRow extends StatelessWidget {
             child: Text(
               currText,
               textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: currColor),
+              style: TextStyle(
+                  fontSize: 11,
+                  fontWeight: FontWeight.w800,
+                  color: currColor),
             ),
           ),
         ],
@@ -883,7 +910,8 @@ class _ClosingBalanceCard extends StatelessWidget {
           borderRadius: BorderRadius.circular(14),
         ),
         child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          padding:
+              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
