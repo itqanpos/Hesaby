@@ -313,7 +313,7 @@ class _StatementBody extends StatelessWidget {
 }
 
 // ============================================================================
-// Computed statement — حساب دقيق ومرتب
+// Computed statement
 // ============================================================================
 
 class _ComputedStatement {
@@ -336,9 +336,6 @@ class _ComputedStatement {
     indexed.sort((a, b) {
       final int c = a.entry.date.compareTo(b.entry.date);
       if (c != 0) return c;
-
-      // في نفس اليوم، نعكس الترتيب الأصلي
-      // (حتى تظهر الحركة المضافة حديثاً في الأعلى بعد عكس القائمة)
       return b.originalIndex.compareTo(a.originalIndex);
     });
 
@@ -348,7 +345,6 @@ class _ComputedStatement {
       final CustomerStatementEntry e = item.entry;
       final double previous = balance;
       
-      // العميل: مدين يزيد الرصيد، دائن يقلله
       balance = balance + e.debit - e.credit;
 
       augmented.add(_AugEntry(
@@ -630,28 +626,63 @@ class _TableHeaderRow extends StatelessWidget {
     final ColorScheme scheme = Theme.of(context).colorScheme;
     const TextStyle style =
         TextStyle(fontSize: 11, fontWeight: FontWeight.w800);
+    final Color borderColor = scheme.outlineVariant.withValues(alpha: 0.5);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      color: scheme.surfaceContainerHighest,
+      padding: const EdgeInsets.symmetric(vertical: 10),
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        border: Border(bottom: BorderSide(color: borderColor, width: 1)),
+      ),
       child: Row(
-        children: const <Widget>[
-          SizedBox(width: 54, child: Text('التاريخ', style: style)),
-          Expanded(child: Text('البيان', style: style)),
-          SizedBox(
-            width: 68,
-            child: Text('الرصيد', style: style, textAlign: TextAlign.right),
-          ),
-          SizedBox(
-            width: 68,
-            child: Text('المدفوع', style: style, textAlign: TextAlign.right),
-          ),
-          SizedBox(
-            width: 76,
-            child: Text('الرصيد الحالي', style: style, textAlign: TextAlign.right),
-          ),
+        children: <Widget>[
+          _HeaderCell(width: 52, text: 'التاريخ', style: style, borderColor: borderColor),
+          _HeaderCell(width: 0, text: 'البيان', style: style, borderColor: borderColor, isExpanded: true),
+          _HeaderCell(width: 66, text: 'الرصيد', style: style, borderColor: borderColor, alignRight: true),
+          _HeaderCell(width: 66, text: 'المدفوع', style: style, borderColor: borderColor, alignRight: true),
+          _HeaderCell(width: 82, text: 'الرصيد الحالي', style: style, borderColor: borderColor, alignRight: true, isLast: true),
         ],
       ),
+    );
+  }
+}
+
+class _HeaderCell extends StatelessWidget {
+  const _HeaderCell({
+    required this.width,
+    required this.text,
+    required this.style,
+    required this.borderColor,
+    this.isExpanded = false,
+    this.alignRight = false,
+    this.isLast = false,
+  });
+
+  final double width;
+  final String text;
+  final TextStyle style;
+  final Color borderColor;
+  final bool isExpanded;
+  final bool alignRight;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget child = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Text(
+        text,
+        style: style,
+        textAlign: alignRight ? TextAlign.right : TextAlign.right, // Keep RTL alignment
+      ),
+    );
+
+    return Container(
+      width: isExpanded ? null : width,
+      decoration: BoxDecoration(
+        border: isLast ? null : Border(left: BorderSide(color: borderColor, width: 0.5)),
+      ),
+      child: isExpanded ? Expanded(child: child) : child,
     );
   }
 }
@@ -670,8 +701,8 @@ class _EntryRow extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final CustomerStatementEntry entry = aug.entry;
+    final Color borderColor = scheme.outlineVariant.withValues(alpha: 0.5);
     
-    // المدفوع هو الدائن (credit)، والمسحوب هو المدين (debit)
     final double paid = entry.credit;
     final double debit = entry.debit;
     
@@ -689,46 +720,60 @@ class _EntryRow extends StatelessWidget {
     final String currText = (currWeOwe || currTheyOweUs) ? '${currWeOwe ? '+' : '−'}${AppFormatters.money(currBal.abs())}' : '0.00';
 
     final String baseDesc = entry.hasDescription ? entry.description! : _typeLabel(entry.type);
-    final String amountLabel = debit > 0 ? ' (+${AppFormatters.money(debit)})' : '';
-    final String description = '$baseDesc$amountLabel';
     final Color typeColor = debit > 0 ? scheme.error : const Color(0xFF1B5E20);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.5),
-            width: 0.5,
-          ),
-        ),
+        border: Border(bottom: BorderSide(color: borderColor, width: 0.5)),
       ),
       child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
-          SizedBox(
-            width: 54,
+          // Date Cell
+          _DataCell(
+            width: 52,
+            borderColor: borderColor,
             child: Text(
               DateFormat('dd/MM').format(entry.date.toLocal()),
               style: const TextStyle(fontSize: 11),
             ),
           ),
-          Expanded(
+          
+          // Description Cell
+          _DataCell(
+            width: 0,
+            isExpanded: true,
+            borderColor: borderColor,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
+              mainAxisAlignment: MainAxisAlignment.center,
               children: <Widget>[
                 Text(
-                  description,
+                  baseDesc,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                     color: typeColor,
                   ),
                 ),
-                if (entry.hasReference)
+                if (entry.isSale && debit > 0) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'قيمة: ${AppFormatters.money(debit)}',
+                    style: TextStyle(fontSize: 10, color: scheme.error),
+                  ),
+                ],
+                if (entry.isSale && paid > 0) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    'مدفوع: ${AppFormatters.money(paid)}',
+                    style: TextStyle(fontSize: 10, color: const Color(0xFF1B5E20)),
+                  ),
+                ],
+                if (entry.hasReference) ...[
+                  const SizedBox(height: 2),
                   Text(
                     entry.reference!,
                     maxLines: 1,
@@ -738,25 +783,26 @@ class _EntryRow extends StatelessWidget {
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
+                ],
               ],
             ),
           ),
-          // Previous Balance (الرصيد)
-          SizedBox(
-            width: 68,
+
+          // Previous Balance Cell
+          _DataCell(
+            width: 66,
+            borderColor: borderColor,
             child: Text(
               prevText,
               textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: prevColor,
-              ),
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: prevColor),
             ),
           ),
-          // Paid (المدفوع)
-          SizedBox(
-            width: 68,
+
+          // Paid Cell
+          _DataCell(
+            width: 66,
+            borderColor: borderColor,
             child: Text(
               paid > 0 ? AppFormatters.money(paid) : '—',
               textAlign: TextAlign.right,
@@ -767,17 +813,16 @@ class _EntryRow extends StatelessWidget {
               ),
             ),
           ),
-          // Current Balance (الرصيد الحالي)
-          SizedBox(
-            width: 76,
+
+          // Current Balance Cell
+          _DataCell(
+            width: 82,
+            isLast: true,
+            borderColor: borderColor,
             child: Text(
               currText,
               textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: currColor,
-              ),
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: currColor),
             ),
           ),
         ],
@@ -798,6 +843,38 @@ class _EntryRow extends StatelessWidget {
       default:
         return 'حركة';
     }
+  }
+}
+
+class _DataCell extends StatelessWidget {
+  const _DataCell({
+    required this.width,
+    required this.child,
+    required this.borderColor,
+    this.isExpanded = false,
+    this.isLast = false,
+  });
+
+  final double width;
+  final Widget child;
+  final Color borderColor;
+  final bool isExpanded;
+  final bool isLast;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      child: child,
+    );
+
+    return Container(
+      width: isExpanded ? null : width,
+      decoration: BoxDecoration(
+        border: isLast ? null : Border(left: BorderSide(color: borderColor, width: 0.5)),
+      ),
+      child: isExpanded ? Expanded(child: content) : content,
+    );
   }
 }
 
