@@ -3,43 +3,41 @@
 // Generic account statement page — customer, supplier, and any future
 // party (employee, cashbox, …). It owns:
 //
-// * page state (`_preset`, `_customRange`, `_entryFilter`, `_isPrinting`),
+// * page state (`_preset`, `_customRange`, `_entryFilter`, `_isPrinting`,
+//   `_isExporting`),
 // * period + entry-type chips,
 // * sticky table header,
 // * loading / error / empty states,
 // * pull-to-refresh,
-// * the AppBar (back / extra action / print).
+// * the AppBar (back / extra action / export / print).
 //
-// Everything party-specific is injected via [StatementPageConfig]:
-// data binding (watch / refresh), flattening (adapt), AppBar extra
-// action, print handler, error messages.
+// Everything party-specific is injected via [StatementPageConfig].
 //
-// Layout (top → bottom, fixed above the scrolling list):
-//
-//   InfoCard
-//   SummaryBar          ← 4 cells: opening / debit / credit / closing
-//   PeriodChips
-//   EntryFilterChips    ← hidden when only one filter is available
-//   TableHeader         ← sticky; hidden when statement is empty
-//   Expanded(EntriesList)
-//
-// This mirrors the v14 layout (info + chips were fixed above the list),
-// and adds the summary bar + entry-type filter + sticky header.
+// Phase 4 additions:
+// * CSV export button (governed by `enableCsvExport`, default true).
+// * Reconciliation banner when the cached balance diverges from the
+//   computed one.
+
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:printing/printing.dart' show Printing;
 
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import 'models/statement_filters.dart';
 import 'models/statement_models.dart';
+import 'statement_csv_export.dart';
 import 'widgets/statement_closing_balance_card.dart';
 import 'widgets/statement_empty_view.dart';
 import 'widgets/statement_entry_filter_chips.dart';
 import 'widgets/statement_entry_row.dart';
 import 'widgets/statement_info_card.dart';
 import 'widgets/statement_period_chips.dart';
+import 'widgets/statement_reconciliation_banner.dart';
 import 'widgets/statement_summary_bar.dart';
 import 'widgets/statement_table_header.dart';
 
@@ -49,10 +47,6 @@ import 'widgets/statement_table_header.dart';
 
 /// Extra AppBar action injected by the caller (e.g. "تعديل الرصيد" for a
 /// customer, "تسجيل دفعة" for a supplier).
-///
-/// The callback returns `true` when the page should refresh after it
-/// completes (e.g. a dialog saved something). The page then calls its own
-/// `refresh` with the current period.
 @immutable
 class StatementExtraAction {
   const StatementExtraAction({
@@ -64,9 +58,7 @@ class StatementExtraAction {
   final IconData icon;
   final String tooltip;
 
-  /// [view] is `null` while the statement is loading or in error. The
-  /// action is disabled in that case (the page prevents the callback from
-  /// firing), so implementations can assume `view != null`.
+  /// Returns `true` when the page should refresh after it completes.
   final Future<bool> Function(
     BuildContext context,
     WidgetRef ref,
@@ -88,50 +80,39 @@ class StatementPageConfig<T> {
     required this.errorMessage,
     this.print,
     this.extraAction,
+    this.enableCsvExport = true,
   });
 
-  /// AppBar title (e.g. "كشف حساب", "كشف حساب مورد").
   final String title;
-
-  /// Avatar icon in the info card.
   final IconData avatarIcon;
-
-  /// Drives wording, closing-balance label, and available filters.
   final StatementPartyKind partyKind;
 
-  /// Watch the raw statement for the given period. Called from `build`.
   final AsyncValue<T> Function(
     WidgetRef ref,
     DateTime? from,
     DateTime? to,
   ) watch;
 
-  /// Flatten the raw statement into the shared [StatementView].
   final StatementView Function(T raw) adapt;
 
-  /// Force-refresh the raw statement for the given period. Must
-  /// invalidate the underlying provider **and** await the new future, so
-  /// that `RefreshIndicator` stays visible until data arrives.
   final Future<void> Function(
     WidgetRef ref,
     DateTime? from,
     DateTime? to,
   ) refresh;
 
-  /// Map any error from [watch] to an Arabic message.
   final String Function(Object error) errorMessage;
 
-  /// If non-null, a print button is shown in the AppBar. The callback
-  /// receives the **raw** statement (needed by the party-specific PDF
-  /// builder).
   final Future<void> Function(
     BuildContext context,
     WidgetRef ref,
     T rawStatement,
   )? print;
 
-  /// If non-null, an extra icon button is shown before the print button.
   final StatementExtraAction? extraAction;
+
+  /// Show the "تصدير CSV" button in the AppBar. Defaults to `true`.
+  final bool enableCsvExport;
 }
 
 // ============================================================================
@@ -157,6 +138,7 @@ class _AccountStatementPageState<T>
   (DateTime, DateTime)? _customRange;
   StatementEntryFilter _entryFilter = StatementEntryFilter.all;
   bool _isPrinting = false;
+  bool _isExporting = false;
 
   // ---------------------------------------------------------------------------
   // Derived period bounds
@@ -213,12 +195,55 @@ class _AccountStatementPageState<T>
     }
   }
 
+  Future<void> _exportCsv(StatementView view) async {
+    final List<StatementEntryFilter> filters =
+        availableEntryFilters(view.partyKind);
+    final StatementEntryFilter activeFilter = filters.contains(_entryFilter)
+        ? _entryFilter
+        : StatementEntryFilter.all;
+    final ComputedStatement computed = ComputedStatement.from(view);
+
+    setState(() => _isExporting = true);
+    try {
+      final String csv = StatementCsvExporter.build(
+        view: view,
+        computed: computed,
+        filter: activeFilter,
+      );
+      final Uint8List bytes = Uint8List.fromList(utf8.encode(csv));
+
+      final String safeName = view.partyName
+          .replaceAll(RegExp(r'[^\w\u0600-\u06FF-]'), '_');
+      final String filename =
+          'statement-$safeName-${DateTime.now().millisecondsSinceEpoch}.csv';
+
+      await Printing.sharePdf(bytes: bytes, filename: filename);
+
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(content: Text('تم تجهيز ملف CSV.')),
+        );
+    } on Object {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context)
+        ..hideCurrentSnackBar()
+        ..showSnackBar(
+          const SnackBar(
+            content: Text('تعذّر تصدير ملف CSV. حاول مرة أخرى.'),
+          ),
+        );
+    } finally {
+      if (mounted) setState(() => _isExporting = false);
+    }
+  }
+
   Future<void> _runExtraAction(StatementView? view) async {
     final StatementExtraAction? action = widget.config.extraAction;
     if (action == null) return;
 
-    final bool shouldRefresh =
-        await action.onPressed(context, ref, view);
+    final bool shouldRefresh = await action.onPressed(context, ref, view);
     if (shouldRefresh && mounted) {
       await _refresh();
     }
@@ -235,8 +260,6 @@ class _AccountStatementPageState<T>
     final DateTime? to = _toDate;
     final AsyncValue<T> async = config.watch(ref, from, to);
     final T? raw = async.valueOrNull;
-
-    // Computed once per build; cheap (pure object construction).
     final StatementView? view = raw == null ? null : config.adapt(raw);
 
     return AppShell(
@@ -252,9 +275,9 @@ class _AccountStatementPageState<T>
             IconButton(
               tooltip: config.extraAction!.tooltip,
               icon: Icon(config.extraAction!.icon),
-              onPressed:
-                  view == null ? null : () => _runExtraAction(view),
+              onPressed: view == null ? null : () => _runExtraAction(view),
             ),
+          if (config.enableCsvExport) _buildCsvButton(view),
           if (config.print != null)
             IconButton(
               tooltip: 'طباعة',
@@ -274,11 +297,25 @@ class _AccountStatementPageState<T>
           onRetry: _refresh,
         ),
         data: (T rawData) {
-          // `adapt` is cheap; recompute here to keep the body independent
-          // of the `view` computed above (avoids a `!` on a nullable).
           return _buildBody(config.adapt(rawData));
         },
       ),
+    );
+  }
+
+  Widget _buildCsvButton(StatementView? view) {
+    if (view == null) {
+      return const IconButton(
+        tooltip: 'تصدير CSV',
+        icon: Icon(Icons.file_download_outlined),
+        onPressed: null,
+      );
+    }
+    return IconButton(
+      tooltip: 'تصدير CSV',
+      icon: const Icon(Icons.file_download_outlined),
+      onPressed:
+          (_isExporting || _isPrinting) ? null : () => _exportCsv(view),
     );
   }
 
@@ -292,6 +329,10 @@ class _AccountStatementPageState<T>
         availableEntryFilters(view.partyKind);
     final StatementEntryFilter activeFilter =
         filters.contains(_entryFilter) ? _entryFilter : StatementEntryFilter.all;
+
+    final double? storedBalance = view.storedBalance;
+    final bool showReconciliationBanner =
+        storedBalance != null && view.hasReconciliationMismatch;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -310,6 +351,12 @@ class _AccountStatementPageState<T>
           totalCredit: view.totalCredit,
           closingBalance: computed.closingBalance,
         ),
+        if (showReconciliationBanner)
+          StatementReconciliationBanner(
+            storedBalance: storedBalance,
+            computedBalance: computed.closingBalance,
+            onRefresh: _refresh,
+          ),
         StatementPeriodChips(
           preset: _preset,
           customRange: _customRange,
@@ -344,11 +391,8 @@ class _AccountStatementPageState<T>
     required StatementEntryFilter filter,
     required StatementView view,
   }) {
-    final List<AugmentedEntry> display =
-        computed.displayFiltered(filter);
+    final List<AugmentedEntry> display = computed.displayFiltered(filter);
 
-    // Filter hides everything: show a hint above the closing card so the
-    // user knows the period is not empty — only the filter is.
     if (display.isEmpty) {
       return RefreshIndicator(
         onRefresh: _refresh,
