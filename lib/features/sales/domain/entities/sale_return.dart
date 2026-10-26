@@ -7,10 +7,6 @@ import 'package:flutter/foundation.dart';
 // Return status constants
 // ============================================================================
 
-/// Canonical return status identifiers used by `sale_returns.status`.
-///
-/// The three values match the `sale_returns_status_valid` CHECK constraint
-/// declared in migration `202610110001_sale_returns.sql`.
 abstract final class ReturnStatus {
   static const String draft = 'draft';
   static const String confirmed = 'confirmed';
@@ -23,14 +19,6 @@ abstract final class ReturnStatus {
 // Refund method constants
 // ============================================================================
 
-/// Canonical refund-method identifiers used by
-/// `sale_returns.refund_method`.
-///
-/// * [cash]        — money returned to the customer in cash.
-/// * [card]        — money returned to the customer's card.
-/// * [creditNote]  — amount credited against the customer's balance (the
-///                   only method that touches `customers.balance`).
-/// * [none]        — no refund (e.g. an exchange handled elsewhere).
 abstract final class RefundMethod {
   static const String cash = 'cash';
   static const String card = 'card';
@@ -44,24 +32,13 @@ abstract final class RefundMethod {
 // Sale return
 // ============================================================================
 
-/// Represents a return of one or more items from a confirmed sale.
-///
-/// Lifecycle:
-/// * Created in `draft` — items may be freely added, edited, or removed.
-/// * [confirm] — inserts `return_in` stock movements, reduces the customer
-///   balance when the refund method is `credit_note`, and locks the row
-///   against further structural changes.
-/// * [cancel] — reverses both effects and locks the row completely.
-///
-/// Money values are exposed as `double`, matching `numeric(15,4)` in the
-/// database; the same rationale documented on `Product` and `Sale` applies.
 @immutable
 class SaleReturn extends Equatable {
   const SaleReturn({
     required this.id,
     required this.companyId,
     required this.branchId,
-    required this.saleId,
+    this.saleId, // ✅ nullable — يدعم المرتجع المستقل
     required this.returnDate,
     required this.status,
     required this.subtotal,
@@ -82,7 +59,7 @@ class SaleReturn extends Equatable {
   final String id;
   final String companyId;
   final String branchId;
-  final String saleId;
+  final String? saleId; // ✅ nullable
   final String? customerId;
   final String? returnNumber;
   final DateTime returnDate;
@@ -100,7 +77,7 @@ class SaleReturn extends Equatable {
   final DateTime updatedAt;
 
   // ---------------------------------------------------------------------------
-  // Convenience getters (UI only — no business rules)
+  // Convenience getters
   // ---------------------------------------------------------------------------
 
   bool get isDraft => status == ReturnStatus.draft;
@@ -109,6 +86,7 @@ class SaleReturn extends Equatable {
   bool get canEdit => isDraft;
   bool get canTransition => isDraft || isConfirmed;
 
+  bool get hasSale => saleId != null; // ✅ جديد
   bool get hasCustomer => customerId != null;
   bool get hasReturnNumber =>
       returnNumber != null && returnNumber!.trim().isNotEmpty;
@@ -121,9 +99,7 @@ class SaleReturn extends Equatable {
   bool get isCreditNote => refundMethod == RefundMethod.creditNote;
   bool get isNoRefund => refundMethod == RefundMethod.none;
 
-  /// Whether confirming this return will affect the customer balance.
-  bool get affectsCustomerBalance =>
-      isCreditNote && customerId != null;
+  bool get affectsCustomerBalance => isCreditNote && customerId != null;
 
   @override
   List<Object?> get props => <Object?>[
@@ -158,18 +134,13 @@ class SaleReturn extends Equatable {
 // Sale return item
 // ============================================================================
 
-/// A single line in a sale return.
-///
-/// Every row references the original [SaleItem] it reverses, so the
-/// over-return guard in the database can enforce
-/// `sum(returned) <= original_quantity`.
 @immutable
 class SaleReturnItem extends Equatable {
   const SaleReturnItem({
     required this.id,
     required this.companyId,
     required this.returnId,
-    required this.saleItemId,
+    this.saleItemId, // ✅ nullable
     required this.productId,
     required this.unitId,
     required this.quantity,
@@ -183,7 +154,7 @@ class SaleReturnItem extends Equatable {
   final String id;
   final String companyId;
   final String returnId;
-  final String saleItemId;
+  final String? saleItemId; // ✅ nullable
   final String productId;
   final String unitId;
   final double quantity;
@@ -219,17 +190,13 @@ class SaleReturnItem extends Equatable {
 }
 
 // ============================================================================
-// Sale return item draft (input value object)
+// Sale return item draft — ✅ التعديل الجوهري هنا
 // ============================================================================
 
-/// Input value object used when creating or updating return items.
-///
-/// The `company_id` and `return_id` are resolved by the caller — this class
-/// is a plain data carrier used at the boundary of the repository.
 @immutable
 class SaleReturnItemDraft extends Equatable {
   const SaleReturnItemDraft({
-    required this.saleItemId,
+    this.saleItemId, // ✅ بدون required — nullable
     required this.productId,
     required this.unitId,
     required this.quantity,
@@ -237,15 +204,14 @@ class SaleReturnItemDraft extends Equatable {
     this.notes,
   });
 
-  final String saleItemId;
+  /// `null` للمرتجعات المستقلة (بدون فاتورة أصلية).
+  final String? saleItemId; // ✅ String? — يقبل null
   final String productId;
   final String unitId;
   final double quantity;
   final double unitPrice;
   final String? notes;
 
-  /// Convenience: line total computed locally so the caller does not have
-  /// to pass it as a redundant parameter.
   double get lineTotal => quantity * unitPrice;
 
   @override
