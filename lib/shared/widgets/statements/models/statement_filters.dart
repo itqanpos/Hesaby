@@ -1,18 +1,14 @@
 // lib/shared/widgets/statements/models/statement_filters.dart
 //
-// Display-only filters for account statements:
-// * [StatementPeriodPreset] — quick period shortcuts (this month, last 30
-//   days, …). The actual date range is computed by the caller, not here.
-// * [StatementEntryFilter] — chip filter for the movement type.
+// Display-only period shortcuts for account statements.
 //
-// The filtering logic lives entirely in the model layer so the UI stays
-// dumb: `_EntriesList` just calls `ComputedStatement.displayFiltered(filter)`
-// and renders the result.
-
-import 'package:flutter/foundation.dart';
+// NOTE: This file intentionally contains **only** `StatementPeriodPreset`
+// and its extension. The entry-type filter (`StatementEntryFilter`) lives
+// in `statement_models.dart` because it is consumed directly by
+// `ComputedStatement.displayFiltered` — keeping it here would create a
+// circular import between the two model files.
 
 import '../../../../core/utils/formatters.dart';
-import 'statement_models.dart';
 
 // ============================================================================
 // Period preset
@@ -26,6 +22,8 @@ extension StatementPeriodPresetX on StatementPeriodPreset {
   /// "since the beginning".
   ///
   /// [now] is passed explicitly so the method is pure and testable.
+  /// [customRange] is a `(start, end)` record used only for
+  /// [StatementPeriodPreset.custom].
   DateTime? computeFrom({
     required DateTime now,
     (DateTime, DateTime)? customRange,
@@ -81,84 +79,5 @@ extension StatementPeriodPresetX on StatementPeriodPreset {
         return '${AppFormatters.date(customRange.$1)} → '
             '${AppFormatters.date(customRange.$2)}';
     }
-  }
-}
-
-// ============================================================================
-// Entry type filter
-// ============================================================================
-
-/// Chip filter for the movement type.
-///
-/// The set of filters offered to the user depends on the party:
-/// * customer → [all, sale, saleReversal, payment, adjustment]
-/// * supplier → [all, purchase, payment]
-///
-/// Use [availableEntryFilters] to obtain the right list.
-enum StatementEntryFilter {
-  all,
-  sale,
-  saleReversal,
-  purchase,
-  payment,
-  adjustment;
-
-  /// Arabic label for the chip.
-  String get arabicLabel {
-    switch (this) {
-      case StatementEntryFilter.all:
-        return 'الكل';
-      case StatementEntryFilter.sale:
-        return 'فواتير بيع';
-      case StatementEntryFilter.saleReversal:
-        return 'إلغاءات';
-      case StatementEntryFilter.purchase:
-        return 'مشتريات';
-      case StatementEntryFilter.payment:
-        return 'دفعات';
-      case StatementEntryFilter.adjustment:
-        return 'تعديلات';
-    }
-  }
-
-  /// Whether the given entry should be shown when this filter is active.
-  bool matches(StatementEntryView entry) {
-    switch (this) {
-      case StatementEntryFilter.all:
-        return true;
-      case StatementEntryFilter.sale:
-        return entry.kind == StatementEntryKind.sale;
-      case StatementEntryFilter.saleReversal:
-        return entry.kind == StatementEntryKind.saleReversal;
-      case StatementEntryFilter.purchase:
-        return entry.kind == StatementEntryKind.purchase;
-      case StatementEntryFilter.payment:
-        return entry.kind == StatementEntryKind.payment;
-      case StatementEntryFilter.adjustment:
-        return entry.kind == StatementEntryKind.adjustment;
-    }
-  }
-}
-
-/// Returns the filters that make sense for the given party kind.
-///
-/// Always non-empty and always starts with [StatementEntryFilter.all].
-@immutable
-List<StatementEntryFilter> availableEntryFilters(StatementPartyKind kind) {
-  switch (kind) {
-    case StatementPartyKind.customer:
-      return const <StatementEntryFilter>[
-        StatementEntryFilter.all,
-        StatementEntryFilter.sale,
-        StatementEntryFilter.saleReversal,
-        StatementEntryFilter.payment,
-        StatementEntryFilter.adjustment,
-      ];
-    case StatementPartyKind.supplier:
-      return const <StatementEntryFilter>[
-        StatementEntryFilter.all,
-        StatementEntryFilter.purchase,
-        StatementEntryFilter.payment,
-      ];
   }
 }
