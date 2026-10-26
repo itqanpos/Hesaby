@@ -10,7 +10,7 @@ class SaleReturnModel extends Equatable {
     required this.id,
     required this.companyId,
     required this.branchId,
-    required this.saleId,
+    this.saleId, // ✅ nullable — يدعم المرتجعات المستقلة
     required this.returnDate,
     required this.status,
     required this.subtotal,
@@ -33,7 +33,8 @@ class SaleReturnModel extends Equatable {
       id: _requireString(map, 'id'),
       companyId: _requireString(map, 'company_id'),
       branchId: _requireString(map, 'branch_id'),
-      saleId: _requireString(map, 'sale_id'),
+      // ✅ sale_id قد يكون NULL في المرتجعات المستقلة
+      saleId: _optionalString(map, 'sale_id'),
       customerId: _optionalString(map, 'customer_id'),
       returnNumber: _optionalString(map, 'return_number'),
       returnDate: _requireDate(map, 'return_date'),
@@ -55,7 +56,7 @@ class SaleReturnModel extends Equatable {
   final String id;
   final String companyId;
   final String branchId;
-  final String saleId;
+  final String? saleId; // ✅ nullable
   final String? customerId;
   final String? returnNumber;
   final DateTime returnDate;
@@ -148,7 +149,6 @@ class SaleReturnModel extends Equatable {
   static DateTime _requireDate(Map<String, dynamic> map, String key) {
     final Object? value = map[key];
     if (value is String && value.isNotEmpty) {
-      // `date` columns come back as "YYYY-MM-DD"; parse as UTC midnight.
       final DateTime? parsed = DateTime.tryParse(value);
       if (parsed != null) {
         return DateTime.utc(parsed.year, parsed.month, parsed.day);
@@ -237,7 +237,7 @@ class SaleReturnItemModel extends Equatable {
     required this.id,
     required this.companyId,
     required this.returnId,
-    required this.saleItemId,
+    this.saleItemId, // ✅ nullable — يدعم المرتجعات المستقلة
     required this.productId,
     required this.unitId,
     required this.quantity,
@@ -253,7 +253,8 @@ class SaleReturnItemModel extends Equatable {
       id: _requireString(map, 'id'),
       companyId: _requireString(map, 'company_id'),
       returnId: _requireString(map, 'return_id'),
-      saleItemId: _requireString(map, 'sale_item_id'),
+      // ✅ sale_item_id قد يكون NULL في المرتجعات المستقلة
+      saleItemId: _optionalString(map, 'sale_item_id'),
       productId: _requireString(map, 'product_id'),
       unitId: _requireString(map, 'unit_id'),
       quantity: _requireDouble(map, 'quantity'),
@@ -268,7 +269,7 @@ class SaleReturnItemModel extends Equatable {
   final String id;
   final String companyId;
   final String returnId;
-  final String saleItemId;
+  final String? saleItemId; // ✅ nullable
   final String productId;
   final String unitId;
   final double quantity;
