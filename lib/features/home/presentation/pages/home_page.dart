@@ -1371,7 +1371,7 @@ class _InfrastructureFooter extends StatelessWidget {
           ),
           const Spacer(),
           Text(
-            'v1.0.5',
+            'v1.0.6',
             style: theme.textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
