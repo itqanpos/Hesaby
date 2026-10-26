@@ -1,19 +1,29 @@
 // lib/features/sales/presentation/pages/customer_statement_page.dart
+//
+// Thin adapter: feeds the generic AccountStatementPage with the
+// customer-specific pieces (data binding, flattening, print, adjust).
+//
+// All page state (period preset, custom range, entry filter, printing
+// flag), the AppBar, the summary bar, the sticky header, the entries list,
+// and pull-to-refresh are handled by AccountStatementPage. This file
+// therefore contains only:
+//
+// * the watch/adapt/refresh mapping to the customer provider,
+// * the "تعديل الرصيد" extra action (delegates to the adjustment dialog),
+// * the print callback (delegates to PdfStatementBuilder + printer),
+// * customer-specific error messages.
 
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart' hide TextDirection;
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
-import '../../../../core/utils/formatters.dart';
 import '../../../../core/utils/logger.dart';
-import '../../../../shared/layouts/app_shell.dart';
-import '../../../../shared/widgets/app_empty.dart';
-import '../../../../shared/widgets/app_error.dart';
-import '../../../../shared/widgets/app_loader.dart';
+import '../../../../shared/widgets/statements/account_statement_page.dart';
+import '../../../../shared/widgets/statements/adapters/statement_adapter.dart';
+import '../../../../shared/widgets/statements/models/statement_models.dart';
 import '../../../pos/data/services/direct_print_service.dart';
 import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
@@ -26,10 +36,7 @@ import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/customer_adjustment_dialog.dart';
 import '../providers/sales_providers.dart';
 
-enum _PeriodPreset { all, thisMonth, last30Days, thisYear, custom }
-
-/// Full account statement page for a single customer.
-class CustomerStatementPage extends ConsumerStatefulWidget {
+class CustomerStatementPage extends ConsumerWidget {
   const CustomerStatementPage({
     super.key,
     required this.customer,
@@ -38,916 +45,162 @@ class CustomerStatementPage extends ConsumerStatefulWidget {
   final Customer customer;
 
   @override
-  ConsumerState<CustomerStatementPage> createState() =>
-      _CustomerStatementPageState();
+  Widget build(BuildContext context, WidgetRef ref) {
+    return AccountStatementPage<CustomerStatement>(
+      config: StatementPageConfig<CustomerStatement>(
+        title: 'كشف حساب',
+        avatarIcon: Icons.person_outline,
+        partyKind: StatementPartyKind.customer,
+        watch: (WidgetRef ref, DateTime? from, DateTime? to) {
+          return ref.watch(
+            customerStatementProvider(
+              CustomerStatementArgs(
+                customerId: customer.id,
+                fromDate: from,
+                toDate: to,
+              ),
+            ),
+          );
+        },
+        adapt: (CustomerStatement raw) =>
+            const CustomerStatementAdapter().adapt(raw),
+        refresh: (WidgetRef ref, DateTime? from, DateTime? to) async {
+          final CustomerStatementArgs args = CustomerStatementArgs(
+            customerId: customer.id,
+            fromDate: from,
+            toDate: to,
+          );
+          ref.invalidate(customerStatementProvider(args));
+          await ref.read(customerStatementProvider(args).future);
+        },
+        errorMessage: _errorMessage,
+        print: _print,
+        extraAction: StatementExtraAction(
+          icon: Icons.tune,
+          tooltip: 'تعديل الرصيد',
+          onPressed: (BuildContext ctx, WidgetRef r, StatementView? view) {
+            return _openAdjustment(
+              context: ctx,
+              ref: r,
+              customer: customer,
+              view: view,
+            );
+          },
+        ),
+      ),
+    );
+  }
 }
 
-class _CustomerStatementPageState
-    extends ConsumerState<CustomerStatementPage> {
-  _PeriodPreset _preset = _PeriodPreset.all;
-  DateTimeRange? _customRange;
-  bool _isPrinting = false;
+// ============================================================================
+// Extra action — adjust balance
+// ============================================================================
 
-  DateTime? get _fromDate {
-    final DateTime now = DateTime.now();
-    switch (_preset) {
-      case _PeriodPreset.all:
-        return null;
-      case _PeriodPreset.thisMonth:
-        return DateTime(now.year, now.month, 1);
-      case _PeriodPreset.last30Days:
-        return DateTime(now.year, now.month, now.day)
-            .subtract(const Duration(days: 30));
-      case _PeriodPreset.thisYear:
-        return DateTime(now.year, 1, 1);
-      case _PeriodPreset.custom:
-        return _customRange?.start;
-    }
+Future<bool> _openAdjustment({
+  required BuildContext context,
+  required WidgetRef ref,
+  required Customer customer,
+  required StatementView? view,
+}) async {
+  // Prefer the statement-carried balance when available (fresh from DB);
+  // fall back to the widget-level customer entity while the statement is
+  // still loading.
+  final double currentBalance = view?.storedBalance ?? customer.balance;
+
+  final Customer? updated = await showCustomerAdjustmentDialog(
+    context: context,
+    customerId: customer.id,
+    customerName: customer.name,
+    currentBalance: currentBalance,
+  );
+
+  if (updated == null || !context.mounted) return false;
+
+  ScaffoldMessenger.of(context)
+    ..hideCurrentSnackBar()
+    ..showSnackBar(
+      const SnackBar(content: Text('تم تسجيل التعديل بنجاح.')),
+    );
+  return true;
+}
+
+// ============================================================================
+// Print
+// ============================================================================
+
+PrintStyleSettings _readA4Style(WidgetRef ref) {
+  final CompanySettings? s =
+      ref.read(companySettingsProvider).valueOrNull;
+  if (s == null) return const PrintStyleSettings.defaults();
+  return PrintStyleSettings(
+    fontScale: s.printFontScaleA4,
+    fontWeight: s.printFontWeight,
+  );
+}
+
+Future<Uint8List?> _loadLogoBytes(WidgetRef ref) async {
+  final CompanySettings? s =
+      ref.read(companySettingsProvider).valueOrNull;
+  if (s == null || s.companyId.isEmpty) return null;
+  try {
+    return await const CompanyLogoLoader().load(
+      companyId: s.companyId,
+      logoUrl: s.logoUrl,
+    );
+  } on Object catch (e) {
+    AppLogger.warning('Logo load failed (non-fatal): $e');
+    return null;
   }
+}
 
-  DateTime? get _toDate {
-    final DateTime now = DateTime.now();
-    switch (_preset) {
-      case _PeriodPreset.all:
-        return null;
-      case _PeriodPreset.thisMonth:
-      case _PeriodPreset.last30Days:
-      case _PeriodPreset.thisYear:
-        return now;
-      case _PeriodPreset.custom:
-        final DateTime? end = _customRange?.end;
-        if (end == null) return null;
-        return DateTime(end.year, end.month, end.day, 23, 59, 59);
-    }
-  }
+Future<void> _print(
+  BuildContext context,
+  WidgetRef ref,
+  CustomerStatement statement,
+) async {
+  if (statement.isEmpty) return;
 
-  CustomerStatementArgs get _args => CustomerStatementArgs(
-        customerId: widget.customer.id,
-        fromDate: _fromDate,
-        toDate: _toDate,
-      );
-
-  Future<void> _refresh() async {
-    ref.invalidate(customerStatementProvider(_args));
-    await ref.read(customerStatementProvider(_args).future);
-  }
-
-  Future<void> _selectPreset(_PeriodPreset preset) async {
-    if (preset == _PeriodPreset.custom) {
-      final DateTime now = DateTime.now();
-      final DateTimeRange? picked = await showDateRangePicker(
-        context: context,
-        firstDate: DateTime(now.year - 5),
-        lastDate: now,
-        initialDateRange: _customRange,
-        helpText: 'اختر الفترة',
-        saveText: 'تطبيق',
-      );
-      if (picked == null || !mounted) return;
-      setState(() {
-        _preset = _PeriodPreset.custom;
-        _customRange = picked;
-      });
-      return;
-    }
-    setState(() => _preset = preset);
-  }
-
-  Future<void> _openAdjustment() async {
-    final CustomerStatement? statement =
-        ref.read(customerStatementProvider(_args)).valueOrNull;
-    final double balance =
-        statement?.customer.balance ?? widget.customer.balance;
-
-    final Customer? updated = await showCustomerAdjustmentDialog(
-      context: context,
-      customerId: widget.customer.id,
-      customerName: widget.customer.name,
-      currentBalance: balance,
+  try {
+    final Uint8List? logo = await _loadLogoBytes(ref);
+    final Uint8List bytes = await PdfStatementBuilder.build(
+      statement: statement,
+      style: _readA4Style(ref),
+      logoBytes: logo,
     );
 
-    if (updated == null || !mounted) return;
+    final String fileName = 'statement-${statement.customer.name}.pdf';
 
-    await _refresh();
+    final bool direct =
+        ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
+            false;
 
-    if (!mounted) return;
+    if (direct) {
+      final bool ok = await DirectPrintService.tryPdfBytes(
+        bytes: bytes,
+        name: fileName,
+      );
+      if (ok) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context)
+          ..hideCurrentSnackBar()
+          ..showSnackBar(
+            const SnackBar(content: Text('تم إرسال الكشف للطابعة.')),
+          );
+        return;
+      }
+    }
+
+    await Printing.layoutPdf(
+      name: fileName,
+      onLayout: (PdfPageFormat _) async => bytes,
+    );
+  } on Object {
+    if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
-        const SnackBar(content: Text('تم تسجيل التعديل بنجاح.')),
+        const SnackBar(content: Text('تعذّرت الطباعة. حاول مرة أخرى.')),
       );
-  }
-
-  PrintStyleSettings _readA4Style() {
-    final CompanySettings? s =
-        ref.read(companySettingsProvider).valueOrNull;
-    if (s == null) return const PrintStyleSettings.defaults();
-    return PrintStyleSettings(
-      fontScale: s.printFontScaleA4,
-      fontWeight: s.printFontWeight,
-    );
-  }
-
-  Future<Uint8List?> _loadLogoBytes() async {
-    final CompanySettings? s =
-        ref.read(companySettingsProvider).valueOrNull;
-    if (s == null || s.companyId.isEmpty) return null;
-    try {
-      return await const CompanyLogoLoader().load(
-        companyId: s.companyId,
-        logoUrl: s.logoUrl,
-      );
-    } on Object catch (e) {
-      AppLogger.warning('Logo load failed (non-fatal): $e');
-      return null;
-    }
-  }
-
-  Future<void> _print() async {
-    final CustomerStatement? statement =
-        ref.read(customerStatementProvider(_args)).valueOrNull;
-    if (statement == null || statement.isEmpty) return;
-
-    setState(() => _isPrinting = true);
-
-    try {
-      final Uint8List? logo = await _loadLogoBytes();
-      final Uint8List bytes = await PdfStatementBuilder.build(
-        statement: statement,
-        style: _readA4Style(),
-        logoBytes: logo,
-      );
-
-      final String fileName = 'statement-${statement.customer.name}.pdf';
-
-      final bool direct =
-          ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
-              false;
-
-      if (direct) {
-        final bool ok = await DirectPrintService.tryPdfBytes(
-          bytes: bytes,
-          name: fileName,
-        );
-        if (ok) {
-          if (!mounted) return;
-          ScaffoldMessenger.of(context)
-            ..hideCurrentSnackBar()
-            ..showSnackBar(
-              const SnackBar(content: Text('تم إرسال الكشف للطابعة.')),
-            );
-          return;
-        }
-      }
-
-      await Printing.layoutPdf(
-        name: fileName,
-        onLayout: (PdfPageFormat _) async => bytes,
-      );
-    } on Object {
-      if (!mounted) return;
-      ScaffoldMessenger.of(context)
-        ..hideCurrentSnackBar()
-        ..showSnackBar(
-          const SnackBar(
-            content: Text('تعذّرت الطباعة. حاول مرة أخرى.'),
-          ),
-        );
-    } finally {
-      if (mounted) {
-        setState(() => _isPrinting = false);
-      }
-    }
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return AppShell(
-      appBar: AppBar(
-        leading: IconButton(
-          tooltip: 'رجوع',
-          icon: const Icon(Icons.arrow_back),
-          onPressed: () => Navigator.of(context).maybePop(),
-        ),
-        title: const Text('كشف حساب'),
-        actions: <Widget>[
-          IconButton(
-            tooltip: 'تعديل الرصيد',
-            icon: const Icon(Icons.tune),
-            onPressed: _openAdjustment,
-          ),
-          IconButton(
-            tooltip: 'طباعة',
-            icon: const Icon(Icons.print_outlined),
-            onPressed: _isPrinting ? null : _print,
-          ),
-        ],
-      ),
-      body: ref.watch(customerStatementProvider(_args)).when(
-            loading: () => const AppLoader(),
-            error: (Object error, StackTrace _) => AppErrorView(
-              title: 'تعذّر تحميل كشف الحساب',
-              message: _errorMessage(error),
-              retryLabel: 'إعادة المحاولة',
-              onRetry: _refresh,
-            ),
-            data: (CustomerStatement statement) => _StatementBody(
-              statement: statement,
-              preset: _preset,
-              customRange: _customRange,
-              onSelectPreset: _selectPreset,
-              onRefresh: _refresh,
-            ),
-          ),
-    );
-  }
-}
-
-// ============================================================================
-// Body
-// ============================================================================
-
-class _StatementBody extends StatelessWidget {
-  const _StatementBody({
-    required this.statement,
-    required this.preset,
-    required this.customRange,
-    required this.onSelectPreset,
-    required this.onRefresh,
-  });
-
-  final CustomerStatement statement;
-  final _PeriodPreset preset;
-  final DateTimeRange? customRange;
-  final Future<void> Function(_PeriodPreset) onSelectPreset;
-  final Future<void> Function() onRefresh;
-
-  @override
-  Widget build(BuildContext context) {
-    final _ComputedStatement computed = _ComputedStatement.from(statement);
-
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      children: <Widget>[
-        _CustomerInfoCard(
-          statement: statement,
-          closingBalance: computed.closingBalance,
-        ),
-        const SizedBox(height: 8),
-        _PeriodChips(
-          preset: preset,
-          customRange: customRange,
-          onSelect: onSelectPreset,
-        ),
-        const SizedBox(height: 4),
-        Expanded(
-          child: _EntriesList(
-            statement: statement,
-            computed: computed,
-            onRefresh: onRefresh,
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-// ============================================================================
-// Computed statement (بدون الرصيد الافتتاحي — لأنه يُعرض كحركة)
-// ============================================================================
-
-class _ComputedStatement {
-  const _ComputedStatement({
-    required this.chronologicalEntries,
-    required this.closingBalance,
-  });
-
-  final List<_AugEntry> chronologicalEntries;
-  final double closingBalance;
-
-  factory _ComputedStatement.from(CustomerStatement statement) {
-    final List<_IndexedEntry> indexed = [];
-    for (int i = 0; i < statement.entries.length; i++) {
-      indexed.add(_IndexedEntry(statement.entries[i], i));
-    }
-
-    indexed.sort((a, b) {
-      final int c = a.entry.date.compareTo(b.entry.date);
-      if (c != 0) return c;
-      return b.originalIndex.compareTo(a.originalIndex);
-    });
-
-    double balance = statement.openingBalance;
-    final List<_AugEntry> augmented = [];
-    for (final item in indexed) {
-      final CustomerStatementEntry e = item.entry;
-      final double previous = balance;
-
-      balance = balance + e.debit - e.credit;
-
-      augmented.add(_AugEntry(
-        entry: e,
-        previousBalance: previous,
-        currentBalance: balance,
-      ));
-    }
-
-    return _ComputedStatement(
-      chronologicalEntries: augmented,
-      closingBalance: balance,
-    );
-  }
-}
-
-class _IndexedEntry {
-  _IndexedEntry(this.entry, this.originalIndex);
-  final CustomerStatementEntry entry;
-  final int originalIndex;
-}
-
-class _AugEntry {
-  const _AugEntry({
-    required this.entry,
-    required this.previousBalance,
-    required this.currentBalance,
-  });
-  final CustomerStatementEntry entry;
-  final double previousBalance;
-  final double currentBalance;
-}
-
-// ============================================================================
-// Info card
-// ============================================================================
-
-class _CustomerInfoCard extends StatelessWidget {
-  const _CustomerInfoCard({
-    required this.statement,
-    required this.closingBalance,
-  });
-
-  final CustomerStatement statement;
-  final double closingBalance;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final Customer customer = statement.customer;
-
-    final List<String> meta = <String>[];
-    if (customer.hasCode) meta.add('كود: ${customer.code}');
-    if (customer.hasPhone) meta.add(customer.phone!);
-
-    final bool weOwe = closingBalance > 0.01;
-    final bool theyOweUs = closingBalance < -0.01;
-    final String balanceLabel = weOwe
-        ? 'مستحق على العميل'
-        : theyOweUs
-            ? 'لك عند العميل'
-            : 'الرصيد مسدد';
-    final Color balanceColor = weOwe
-        ? scheme.error
-        : theyOweUs
-            ? const Color(0xFF1B5E20)
-            : scheme.onSurfaceVariant;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(14),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                CircleAvatar(
-                  backgroundColor: scheme.primaryContainer,
-                  foregroundColor: scheme.onPrimaryContainer,
-                  child: const Icon(Icons.person_outline),
-                ),
-                const SizedBox(width: 12),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Text(
-                        customer.name,
-                        style: theme.textTheme.titleMedium,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      if (meta.isNotEmpty) ...<Widget>[
-                        const SizedBox(height: 2),
-                        Text(
-                          meta.join(' · '),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: <Widget>[
-                Text(
-                  balanceLabel,
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: balanceColor,
-                  ),
-                ),
-                const Spacer(),
-                Text(
-                  AppFormatters.money(closingBalance.abs()),
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    color: balanceColor,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Period chips
-// ============================================================================
-
-class _PeriodChips extends StatelessWidget {
-  const _PeriodChips({
-    required this.preset,
-    required this.customRange,
-    required this.onSelect,
-  });
-
-  final _PeriodPreset preset;
-  final DateTimeRange? customRange;
-  final Future<void> Function(_PeriodPreset) onSelect;
-
-  @override
-  Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      scrollDirection: Axis.horizontal,
-      child: Row(
-        children: <Widget>[
-          _chip(context, _PeriodPreset.all, 'الكل'),
-          _chip(context, _PeriodPreset.thisMonth, 'هذا الشهر'),
-          _chip(context, _PeriodPreset.last30Days, 'آخر 30 يومًا'),
-          _chip(context, _PeriodPreset.thisYear, 'هذا العام'),
-          _chip(context, _PeriodPreset.custom, _customLabel()),
-        ],
-      ),
-    );
-  }
-
-  Widget _chip(BuildContext context, _PeriodPreset value, String label) {
-    return Padding(
-      padding: const EdgeInsetsDirectional.only(end: 6),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: preset == value,
-        onSelected: (_) => onSelect(value),
-        showCheckmark: false,
-      ),
-    );
-  }
-
-  String _customLabel() {
-    if (preset == _PeriodPreset.custom && customRange != null) {
-      return '${AppFormatters.date(customRange!.start)} → '
-          '${AppFormatters.date(customRange!.end)}';
-    }
-    return 'نطاق مخصص';
-  }
-}
-
-// ============================================================================
-// Entries list (بدون رصيد افتتاحي)
-// ============================================================================
-
-class _EntriesList extends StatelessWidget {
-  const _EntriesList({
-    required this.statement,
-    required this.computed,
-    required this.onRefresh,
-  });
-
-  final CustomerStatement statement;
-  final _ComputedStatement computed;
-  final Future<void> Function() onRefresh;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    if (statement.isEmpty) {
-      return RefreshIndicator(
-        onRefresh: onRefresh,
-        child: ListView(
-          physics: const AlwaysScrollableScrollPhysics(),
-          children: <Widget>[
-            SizedBox(
-              height: 320,
-              child: AppEmptyView(
-                icon: Icons.receipt_long_outlined,
-                title: 'لا توجد حركات',
-                message: 'لم تُسجَّل أي حركة على هذا العميل في الفترة المحددة.',
-              ),
-            ),
-          ],
-        ),
-      );
-    }
-
-    final List<_AugEntry> display =
-        computed.chronologicalEntries.reversed.toList(growable: false);
-
-    // الجدول: 0 = رأس الجدول، 1..n = الحركات، n+1 = الرصيد النهائي
-    const int headerIndex = 0;
-    const int firstRowIndex = 1;
-    final int closingIndex = firstRowIndex + display.length;
-
-    return RefreshIndicator(
-      onRefresh: onRefresh,
-      color: scheme.primary,
-      child: ListView.builder(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.only(bottom: 16),
-        itemCount: closingIndex + 1,
-        itemBuilder: (BuildContext context, int index) {
-          if (index == headerIndex) {
-            return const _TableHeaderRow();
-          }
-          if (index == closingIndex) {
-            return _ClosingBalanceCard(
-              closingBalance: computed.closingBalance,
-              entryCount: display.length,
-            );
-          }
-          final int entryIdx = index - firstRowIndex;
-          final bool isEven = entryIdx % 2 == 0;
-          return _EntryRow(
-            aug: display[entryIdx],
-            isEven: isEven,
-          );
-        },
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Table header row
-// ============================================================================
-
-class _TableHeaderRow extends StatelessWidget {
-  const _TableHeaderRow();
-
-  @override
-  Widget build(BuildContext context) {
-    final ColorScheme scheme = Theme.of(context).colorScheme;
-    const TextStyle style = TextStyle(
-      fontSize: 11,
-      fontWeight: FontWeight.w800,
-      color: Colors.grey,
-    );
-
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        border: Border(
-          bottom: BorderSide(color: scheme.outlineVariant, width: 1),
-        ),
-      ),
-      child: const Row(
-        children: <Widget>[
-          _HeaderCell(width: 54, text: 'التاريخ', style: style),
-          _HeaderCell(
-              width: 0, text: 'البيان', style: style, isExpanded: true),
-          _HeaderCell(
-              width: 70, text: 'الرصيد', style: style, alignRight: true),
-          _HeaderCell(
-              width: 70, text: 'المدفوع', style: style, alignRight: true),
-          _HeaderCell(
-              width: 84,
-              text: 'الرصيد الحالي',
-              style: style,
-              alignRight: true),
-        ],
-      ),
-    );
-  }
-}
-
-class _HeaderCell extends StatelessWidget {
-  const _HeaderCell({
-    required this.width,
-    required this.text,
-    required this.style,
-    this.isExpanded = false,
-    this.alignRight = false,
-  });
-
-  final double width;
-  final String text;
-  final TextStyle style;
-  final bool isExpanded;
-  final bool alignRight;
-
-  @override
-  Widget build(BuildContext context) {
-    final Widget content = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
-      child: Text(
-        text,
-        style: style,
-        textAlign: alignRight ? TextAlign.right : TextAlign.left,
-      ),
-    );
-
-    if (isExpanded) {
-      return Expanded(child: content);
-    }
-    return SizedBox(width: width, child: content);
-  }
-}
-
-// ============================================================================
-// Entry row (بدون خطوط، مع تاريخ + zebra striping)
-// ============================================================================
-
-class _EntryRow extends StatelessWidget {
-  const _EntryRow({required this.aug, required this.isEven});
-
-  final _AugEntry aug;
-  final bool isEven;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final CustomerStatementEntry entry = aug.entry;
-
-    final double paid = entry.credit;
-    final double debit = entry.debit;
-
-    final double prevBal = aug.previousBalance;
-    final double currBal = aug.currentBalance;
-
-    final bool prevWeOwe = prevBal > 0.01;
-    final bool prevTheyOweUs = prevBal < -0.01;
-    final Color prevColor = prevWeOwe
-        ? scheme.error
-        : (prevTheyOweUs
-            ? const Color(0xFF1B5E20)
-            : scheme.onSurfaceVariant);
-    final String prevText = (prevWeOwe || prevTheyOweUs)
-        ? '${prevWeOwe ? '+' : '−'}${AppFormatters.money(prevBal.abs())}'
-        : '0.00';
-
-    final bool currWeOwe = currBal > 0.01;
-    final bool currTheyOweUs = currBal < -0.01;
-    final Color currColor = currWeOwe
-        ? scheme.error
-        : (currTheyOweUs
-            ? const Color(0xFF1B5E20)
-            : scheme.onSurfaceVariant);
-    final String currText = (currWeOwe || currTheyOweUs)
-        ? '${currWeOwe ? '+' : '−'}${AppFormatters.money(currBal.abs())}'
-        : '0.00';
-
-    final String baseDesc =
-        entry.hasDescription ? entry.description! : _typeLabel(entry.type);
-    final Color typeColor =
-        debit > 0 ? scheme.error : const Color(0xFF1B5E20);
-
-    final Color rowColor = isEven
-        ? scheme.surface
-        : scheme.surfaceContainerHighest.withValues(alpha: 0.3);
-
-    return Container(
-      color: rowColor,
-      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.center,
-        children: <Widget>[
-          // Date
-          SizedBox(
-            width: 54,
-            child: Text(
-              DateFormat('dd/MM').format(entry.date.toLocal()),
-              style: const TextStyle(fontSize: 11),
-            ),
-          ),
-          // Description
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: <Widget>[
-                Text(
-                  baseDesc,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: typeColor,
-                  ),
-                ),
-                if (entry.isSale && debit > 0) ...<Widget>[
-                  const SizedBox(height: 2),
-                  Text(
-                    'قيمة: ${AppFormatters.money(debit)}',
-                    style: TextStyle(fontSize: 10, color: scheme.error),
-                  ),
-                ],
-                if (entry.isSale && paid > 0) ...<Widget>[
-                  const SizedBox(height: 1),
-                  Text(
-                    'مدفوع: ${AppFormatters.money(paid)}',
-                    style: TextStyle(
-                        fontSize: 10, color: const Color(0xFF1B5E20)),
-                  ),
-                ],
-                if (entry.hasReference) ...<Widget>[
-                  const SizedBox(height: 2),
-                  Text(
-                    entry.reference!,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: TextStyle(
-                      fontSize: 10,
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ],
-            ),
-          ),
-          // Prev Balance
-          SizedBox(
-            width: 70,
-            child: Text(
-              prevText,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w600,
-                  color: prevColor),
-            ),
-          ),
-          // Paid
-          SizedBox(
-            width: 70,
-            child: Text(
-              paid > 0 ? AppFormatters.money(paid) : '—',
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                color: paid > 0
-                    ? const Color(0xFF1B5E20)
-                    : scheme.onSurfaceVariant,
-                fontWeight:
-                    paid > 0 ? FontWeight.w600 : FontWeight.normal,
-              ),
-            ),
-          ),
-          // Current Balance
-          SizedBox(
-            width: 84,
-            child: Text(
-              currText,
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                  fontSize: 11,
-                  fontWeight: FontWeight.w800,
-                  color: currColor),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _typeLabel(String type) {
-    switch (type) {
-      case StatementEntryType.sale:
-        return 'فاتورة بيع';
-      case StatementEntryType.saleReversal:
-        return 'إلغاء فاتورة';
-      case StatementEntryType.payment:
-        return 'دفعة';
-      case StatementEntryType.adjustment:
-        return 'تعديل رصيد';
-      default:
-        return 'حركة';
-    }
-  }
-}
-
-// ============================================================================
-// Closing balance card
-// ============================================================================
-
-class _ClosingBalanceCard extends StatelessWidget {
-  const _ClosingBalanceCard({
-    required this.closingBalance,
-    required this.entryCount,
-  });
-
-  final double closingBalance;
-  final int entryCount;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final bool weOwe = closingBalance > 0.01;
-    final bool theyOweUs = closingBalance < -0.01;
-
-    final Color bg = weOwe
-        ? scheme.errorContainer
-        : theyOweUs
-            ? scheme.primaryContainer
-            : scheme.surfaceContainerHighest;
-    final Color fg = weOwe
-        ? scheme.onErrorContainer
-        : theyOweUs
-            ? scheme.onPrimaryContainer
-            : scheme.onSurfaceVariant;
-    final IconData icon = weOwe
-        ? Icons.warning_amber_outlined
-        : theyOweUs
-            ? Icons.account_balance_wallet_outlined
-            : Icons.check_circle_outline;
-    final String label = weOwe
-        ? 'الرصيد النهائي — مستحق على العميل'
-        : theyOweUs
-            ? 'الرصيد النهائي — لك عند العميل'
-            : 'الرصيد النهائي — مسدد';
-
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
-      child: DecoratedBox(
-        decoration: BoxDecoration(
-          color: bg,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Padding(
-          padding:
-              const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: <Widget>[
-              Row(
-                children: <Widget>[
-                  Icon(icon, color: fg, size: 20),
-                  const SizedBox(width: 8),
-                  Expanded(
-                    child: Text(
-                      label,
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w700,
-                        color: fg,
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 8),
-              Text(
-                AppFormatters.money(closingBalance.abs()),
-                style: theme.textTheme.headlineSmall?.copyWith(
-                  fontWeight: FontWeight.w900,
-                  color: fg,
-                ),
-              ),
-              const SizedBox(height: 6),
-              Text(
-                'عدد الحركات: ${AppFormatters.integer(entryCount)}',
-                style: theme.textTheme.bodySmall?.copyWith(color: fg),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
 
