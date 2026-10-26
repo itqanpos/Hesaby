@@ -21,14 +21,6 @@ import '../dialogs/sale_return_dialog.dart';
 import '../providers/sales_providers.dart';
 import '../services/sale_print_actions.dart';
 
-/// Full-page view of a single sale invoice.
-///
-/// Actions:
-/// * 🖨️ **طباعة** — direct thermal print (no preview, no PDF).
-/// * 📤 **مشاركة** — build a PDF and open the platform share sheet.
-/// * ↩️ **إنشاء مرتجع** — only for confirmed sales.
-/// * 🔒 **إلغاء الفاتورة** — compact icon-only danger action (in the
-///   actions card).
 class SaleDetailPage extends ConsumerStatefulWidget {
   const SaleDetailPage({super.key, required this.saleId});
 
@@ -213,10 +205,6 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
-
   void _editSale(Sale sale) {
     context.pushNamed(
       AppRouter.saleEditName,
@@ -340,10 +328,6 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Return dialog
-  // ---------------------------------------------------------------------------
-
   Future<void> _openReturnDialog(
     Sale sale,
     List<SaleItem> items,
@@ -370,10 +354,6 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
         const SnackBar(content: Text('تم تسجيل المرتجع بنجاح.')),
       );
   }
-
-  // ---------------------------------------------------------------------------
-  // Print & share
-  // ---------------------------------------------------------------------------
 
   Future<void> _handlePrint(
     Sale sale,
@@ -439,10 +419,6 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
       ..showSnackBar(SnackBar(content: Text(message)));
   }
 
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
-
   static Sale? _findSale(List<Sale> sales, String id) {
     for (final Sale sale in sales) {
       if (sale.id == id) {
@@ -469,7 +445,7 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
 }
 
 // ============================================================================
-// Header card
+// Widgets (نفس ما كان، ماعدا _ReturnsCard._cancelReturn)
 // ============================================================================
 
 class _HeaderCard extends StatelessWidget {
@@ -560,10 +536,6 @@ class _HeaderCard extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Actions card
-// ============================================================================
 
 class _ActionsCard extends StatelessWidget {
   const _ActionsCard({
@@ -658,10 +630,6 @@ class _ActionsCard extends StatelessWidget {
     return Row(children: spaced);
   }
 }
-
-// ============================================================================
-// Items card
-// ============================================================================
 
 class _ItemsCard extends StatelessWidget {
   const _ItemsCard({
@@ -781,10 +749,6 @@ class _ItemRow extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Totals card
-// ============================================================================
-
 class _TotalsCard extends StatelessWidget {
   const _TotalsCard({required this.sale});
 
@@ -868,12 +832,9 @@ class _TotalsCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Returns card
+// Returns card — ✅ مع الإصلاح
 // ============================================================================
 
-/// Lists every sale return recorded against the current sale.
-///
-/// The card is a no-op when no returns exist yet.
 class _ReturnsCard extends ConsumerWidget {
   const _ReturnsCard({required this.sale});
 
@@ -979,7 +940,8 @@ class _ReturnsCard extends ConsumerWidget {
     try {
       await ref.read(returnsProvider.notifier).cancelReturn(
             returnId: saleReturn.id,
-            saleId: saleReturn.saleId,
+            // ✅ الإصلاح: fallback إلى sale.id عندما يكون saleReturn.saleId == null
+            saleId: saleReturn.saleId ?? sale.id,
           );
       if (!context.mounted) {
         return;
@@ -1012,10 +974,6 @@ class _ReturnsCard extends ConsumerWidget {
     }
   }
 }
-
-// ============================================================================
-// Return row
-// ============================================================================
 
 class _ReturnRow extends StatelessWidget {
   const _ReturnRow({
