@@ -393,9 +393,6 @@ class CustomerRepositoryImpl implements CustomerRepository {
     DateTime? toDate,
   }) async {
     try {
-      // Fetch everything in parallel. Returns are fetched alongside the
-      // other sources so a single round-trip brings every operation that
-      // can affect the customer's balance.
       final List<Object> results = await Future.wait<Object>(<Future<Object>>[
         _remoteDataSource.getCustomer(customerId),
         _remoteDataSource.listCustomerSales(customerId),
@@ -420,8 +417,6 @@ class CustomerRepositoryImpl implements CustomerRepository {
         ..._buildPaymentEntries(payments),
         ..._buildAdjustmentEntries(adjustments),
       ]..sort(
-          // Unified ordering: newest first, so the top of the statement
-          // always shows the most recent activity.
           (CustomerStatementEntry a, CustomerStatementEntry b) =>
               b.date.compareTo(a.date),
         );
@@ -429,8 +424,6 @@ class CustomerRepositoryImpl implements CustomerRepository {
       final List<CustomerStatementEntry> visible =
           _filterEntriesByWindow(allEntries, fromDate, toDate);
 
-      // Opening balance = current balance − net delta of the visible window.
-      // This keeps closingBalance == customer.balance, no matter the filter.
       final double visibleDelta = visible.fold<double>(
         0,
         (double sum, CustomerStatementEntry e) => sum + e.debit - e.credit,
@@ -804,11 +797,12 @@ class ReturnsRepositoryImpl implements ReturnsRepository {
     }
   }
 
+  // ⬇️ تم تعديل الدالة لاستقبال saleId كاختياري (String?)
   @override
   Future<SaleReturn> createReturn({
     required String companyId,
     required String branchId,
-    required String saleId,
+    String? saleId, // ⬅️ الآن اختياري
     String? customerId,
     required DateTime returnDate,
     required List<SaleReturnItemDraft> items,
@@ -819,7 +813,7 @@ class ReturnsRepositoryImpl implements ReturnsRepository {
       final SaleReturnModel model = await _remoteDataSource.createReturn(
         companyId: companyId,
         branchId: branchId,
-        saleId: saleId,
+        saleId: saleId, // سيتم تمرير null للبيانات المستقلة
         customerId: customerId,
         returnDate: returnDate,
         items: items,
@@ -844,12 +838,13 @@ class ReturnsRepositoryImpl implements ReturnsRepository {
     }
   }
 
+  // ⬇️ تم تعديل الدالة لاستقبال saleId كاختياري (String?)
   @override
   Future<SaleReturn> updateDraft({
     required String returnId,
     required String companyId,
     required String branchId,
-    required String saleId,
+    String? saleId, // ⬅️ الآن اختياري
     String? customerId,
     required DateTime returnDate,
     required List<SaleReturnItemDraft> items,
@@ -947,15 +942,6 @@ class ReturnsRepositoryImpl implements ReturnsRepository {
 // ============================================================================
 
 /// Converts confirmed / cancelled sales into statement entries.
-///
-/// A confirmed sale contributes a **debit** equal to `total - paid_amount`
-/// (the portion left on credit at confirmation time). A sale that was
-/// confirmed and then cancelled contributes a **credit** of the same amount
-/// at its cancellation timestamp, so both events appear on the statement
-/// and their net effect is zero.
-///
-/// Sales that were cancelled without ever being confirmed (`confirmed_at`
-/// is null) are skipped: they never touched the balance.
 List<CustomerStatementEntry> _buildSaleEntries(List<SaleModel> sales) {
   final List<CustomerStatementEntry> entries = <CustomerStatementEntry>[];
 
@@ -1009,16 +995,6 @@ List<CustomerStatementEntry> _buildSaleEntries(List<SaleModel> sales) {
 }
 
 /// Converts sale returns into statement entries.
-///
-/// Only `credit_note` refunds affect the customer's balance — cash and
-/// card refunds are paid out at the counter and never touch the running
-/// balance. Drafts are skipped because the statement builder does not
-/// fetch them.
-///
-/// A confirmed `credit_note` return contributes a **credit** equal to
-/// `total`. A return that was confirmed and then cancelled contributes
-/// a **debit** of the same amount at its cancellation timestamp, so both
-/// events appear on the statement and their net effect is zero.
 List<CustomerStatementEntry> _buildReturnEntries(
   List<SaleReturnModel> returns,
 ) {
@@ -1045,11 +1021,6 @@ List<CustomerStatementEntry> _buildReturnEntries(
         ),
       );
     } else if (r.status == ReturnStatus.cancelled) {
-      // A cancelled return only affected the balance if it was ever
-      // confirmed. Since the statement builder does not fetch the
-      // confirmation / cancellation timestamps, we conservatively
-      // emit both legs when the record is cancelled — the net effect
-      // is still zero.
       entries.add(
         CustomerStatementEntry(
           id: '${r.id}::confirm',
@@ -1078,7 +1049,7 @@ List<CustomerStatementEntry> _buildReturnEntries(
   return entries;
 }
 
-/// Converts payments into statement entries (all of them are **credits**).
+/// Converts payments into statement entries.
 List<CustomerStatementEntry> _buildPaymentEntries(
   List<CustomerPaymentModel> payments,
 ) {
@@ -1098,10 +1069,6 @@ List<CustomerStatementEntry> _buildPaymentEntries(
 }
 
 /// Converts manual adjustments into statement entries.
-///
-/// A positive amount becomes a **debit**; a negative amount becomes a
-/// **credit** of its absolute value, so [CustomerStatementEntry.debit] and
-/// [CustomerStatementEntry.credit] stay non-negative.
 List<CustomerStatementEntry> _buildAdjustmentEntries(
   List<CustomerAdjustmentModel> adjustments,
 ) {
@@ -1124,8 +1091,6 @@ List<CustomerStatementEntry> _buildAdjustmentEntries(
 }
 
 /// Keeps only entries inside the `[fromDate, toDate]` window (inclusive).
-///
-/// `null` on either side means "open-ended" on that side.
 List<CustomerStatementEntry> _filterEntriesByWindow(
   List<CustomerStatementEntry> entries,
   DateTime? fromDate,
@@ -1258,7 +1223,6 @@ CustomerException _mapCustomerUnknown(
   );
 }
 
-/// Classifies a PostgREST error into a safe [CustomerFailureType].
 CustomerFailureType _classifyCustomerPostgrest(
   supabase.PostgrestException error,
 ) {
@@ -1420,7 +1384,6 @@ SaleException _mapSaleUnknown(
   );
 }
 
-/// Classifies a PostgREST error into a safe [SalesFailureType].
 SalesFailureType _classifySalePostgrest(
   supabase.PostgrestException error,
 ) {
@@ -1622,7 +1585,6 @@ ReturnException _mapReturnUnknown(
   );
 }
 
-/// Classifies a PostgREST error into a safe [ReturnFailureType].
 ReturnFailureType _classifyReturnPostgrest(supabase.PostgrestException error) {
   final String code = (error.code ?? '').toUpperCase();
   final String message = error.message.toLowerCase();
