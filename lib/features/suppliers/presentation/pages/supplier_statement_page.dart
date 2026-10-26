@@ -29,7 +29,10 @@ import '../providers/supplier_statement_providers.dart';
 enum _PeriodPreset { all, thisMonth, last30Days, thisYear, custom }
 
 class SupplierStatementPage extends ConsumerStatefulWidget {
-  const SupplierStatementPage({super.key, required this.supplier});
+  const SupplierStatementPage({
+    super.key,
+    required this.supplier,
+  });
 
   final Supplier supplier;
 
@@ -291,54 +294,38 @@ class _StatementBody extends StatelessWidget {
 }
 
 // ============================================================================
-// Computed statement — حساب دقيق ومرتب
+// Computed statement
 // ============================================================================
 
 class _ComputedStatement {
   const _ComputedStatement({
-    required this.openingBalance,
     required this.chronologicalEntries,
     required this.closingBalance,
   });
 
-  final double openingBalance;
-  final List<_AugEntry> chronologicalEntries; // الأقدم أولاً
+  final List<_AugEntry> chronologicalEntries;
   final double closingBalance;
 
   factory _ComputedStatement.from(SupplierStatement statement) {
-    // 1. نضع فهرساً للحركات الأصلية لضمان استقرار الترتيب
     final List<_IndexedEntry> indexed = [];
     for (int i = 0; i < statement.entries.length; i++) {
       indexed.add(_IndexedEntry(statement.entries[i], i));
     }
 
-    // 2. الترتيب من الأقدم للأحدث
     indexed.sort((a, b) {
       final int c = a.entry.date.compareTo(b.entry.date);
       if (c != 0) return c;
-
-      // الفواتير قبل الدفعات في نفس اللحظة
-      if (a.entry.isPurchase && !b.entry.isPurchase) return -1;
-      if (!a.entry.isPurchase && b.entry.isPurchase) return 1;
-
-      // في نفس اليوم، نعكس الترتيب الأصلي
-      // (حتى تظهر الدفعة المضافة حديثاً في الأعلى بعد عكس القائمة)
       return b.originalIndex.compareTo(a.originalIndex);
     });
 
-    // 3. حساب الرصيد التراكمي
     double balance = statement.openingBalance;
     final List<_AugEntry> augmented = [];
     for (final item in indexed) {
       final SupplierStatementEntry e = item.entry;
-      final double amount = _extractAmount(e);
       final double previous = balance;
-
-      if (e.isPurchase) {
-        balance += amount; // فاتورة تزيد الرصيد
-      } else {
-        balance -= amount; // دفعة تقلل الرصيد
-      }
+      
+      // المورد: الفاتورة (مدين) تزيد الرصيد، والدفعة (دائن) تقلله
+      balance = balance + e.debit - e.credit;
 
       augmented.add(_AugEntry(
         entry: e,
@@ -348,18 +335,9 @@ class _ComputedStatement {
     }
 
     return _ComputedStatement(
-      openingBalance: statement.openingBalance,
       chronologicalEntries: augmented,
       closingBalance: balance,
     );
-  }
-
-  static double _extractAmount(SupplierStatementEntry e) {
-    final double d = e.debit.abs();
-    final double c = e.credit.abs();
-    if (d > 0) return d;
-    if (c > 0) return c;
-    return 0;
   }
 }
 
@@ -569,8 +547,7 @@ class _EntriesList extends StatelessWidget {
               child: AppEmptyView(
                 icon: Icons.receipt_long_outlined,
                 title: 'لا توجد حركات',
-                message:
-                    'لم تُسجَّل أي حركة على هذا المورد في الفترة المحددة.',
+                message: 'لم تُسجَّل أي حركة على هذا المورد في الفترة المحددة.',
               ),
             ),
           ],
@@ -581,9 +558,8 @@ class _EntriesList extends StatelessWidget {
     final List<_AugEntry> display =
         computed.chronologicalEntries.reversed.toList(growable: false);
 
-    final bool showOpening = computed.openingBalance.abs() > 0.01;
-    final int headerIndex = showOpening ? 1 : 0;
-    final int firstRowIndex = headerIndex + 1;
+    const int headerIndex = 0;
+    const int firstRowIndex = 1;
     final int closingIndex = firstRowIndex + display.length;
 
     return RefreshIndicator(
@@ -594,11 +570,6 @@ class _EntriesList extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 16),
         itemCount: closingIndex + 1,
         itemBuilder: (BuildContext context, int index) {
-          if (showOpening && index == 0) {
-            return _OpeningBalanceTile(
-              openingBalance: computed.openingBalance,
-            );
-          }
           if (index == headerIndex) {
             return const _TableHeaderRow();
           }
@@ -609,7 +580,11 @@ class _EntriesList extends StatelessWidget {
             );
           }
           final int entryIdx = index - firstRowIndex;
-          return _EntryRow(aug: display[entryIdx]);
+          final bool isEven = entryIdx % 2 == 0;
+          return _EntryRow(
+            aug: display[entryIdx],
+            isEven: isEven,
+          );
         },
       ),
     );
@@ -626,27 +601,31 @@ class _TableHeaderRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    const TextStyle style =
-        TextStyle(fontSize: 11, fontWeight: FontWeight.w800);
+    const TextStyle style = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w800,
+      color: Colors.grey,
+    );
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      color: scheme.surfaceContainerHighest,
-      child: Row(
-        children: const <Widget>[
-          SizedBox(width: 54, child: Text('التاريخ', style: style)),
-          Expanded(child: Text('البيان', style: style)),
-          SizedBox(
-            width: 68,
-            child: Text('الرصيد', style: style, textAlign: TextAlign.right),
-          ),
-          SizedBox(
-            width: 68,
-            child: Text('المدفوع', style: style, textAlign: TextAlign.right),
-          ),
-          SizedBox(
-            width: 76,
-            child: Text('الرصيد الحالي', style: style, textAlign: TextAlign.right),
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        border: Border(
+          bottom: BorderSide(color: scheme.outlineVariant, width: 1),
+        ),
+      ),
+      child: const Row(
+        children: <Widget>[
+          _HeaderCell(width: 54, text: 'التاريخ', style: style),
+          _HeaderCell(width: 0, text: 'البيان', style: style, isExpanded: true),
+          _HeaderCell(width: 70, text: 'الرصيد', style: style, alignRight: true),
+          _HeaderCell(width: 70, text: 'المدفوع', style: style, alignRight: true),
+          _HeaderCell(
+            width: 84,
+            text: 'الرصيد الحالي',
+            style: style,
+            alignRight: true,
           ),
         ],
       ),
@@ -654,23 +633,57 @@ class _TableHeaderRow extends StatelessWidget {
   }
 }
 
+class _HeaderCell extends StatelessWidget {
+  const _HeaderCell({
+    required this.width,
+    required this.text,
+    required this.style,
+    this.isExpanded = false,
+    this.alignRight = false,
+  });
+
+  final double width;
+  final String text;
+  final TextStyle style;
+  final bool isExpanded;
+  final bool alignRight;
+
+  @override
+  Widget build(BuildContext context) {
+    final Widget content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
+      child: Text(
+        text,
+        style: style,
+        textAlign: alignRight ? TextAlign.right : TextAlign.left,
+      ),
+    );
+
+    if (isExpanded) {
+      return Expanded(child: content);
+    }
+    return SizedBox(width: width, child: content);
+  }
+}
+
 // ============================================================================
-// Entry row
+// Entry row (بدون خطوط، مع تاريخ + zebra striping)
 // ============================================================================
 
 class _EntryRow extends StatelessWidget {
-  const _EntryRow({required this.aug});
+  const _EntryRow({required this.aug, required this.isEven});
 
   final _AugEntry aug;
+  final bool isEven;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final SupplierStatementEntry entry = aug.entry;
-    final bool isPurchase = entry.isPurchase;
-    final double amount = _ComputedStatement._extractAmount(entry);
-    final double paid = isPurchase ? 0.0 : amount;
+    
+    final double paid = entry.credit;
+    final double debit = entry.debit;
     
     final double prevBal = aug.previousBalance;
     final double currBal = aug.currentBalance;
@@ -685,24 +698,20 @@ class _EntryRow extends StatelessWidget {
     final Color currColor = currWeOwe ? scheme.error : (currTheyOweUs ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant);
     final String currText = (currWeOwe || currTheyOweUs) ? '${currWeOwe ? '+' : '−'}${AppFormatters.money(currBal.abs())}' : '0.00';
 
-    final String baseDesc = entry.hasDescription ? entry.description! : (isPurchase ? 'فاتورة مشتريات' : 'دفعة');
-    final String amountLabel = isPurchase ? ' (+${AppFormatters.money(amount)})' : '';
-    final String description = '$baseDesc$amountLabel';
-    final Color typeColor = isPurchase ? scheme.error : const Color(0xFF1B5E20);
+    final String baseDesc = entry.hasDescription ? entry.description! : _typeLabel(entry.isPurchase);
+    final Color typeColor = debit > 0 ? scheme.error : const Color(0xFF1B5E20);
+
+    final Color rowColor = isEven
+        ? scheme.surface
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.3);
 
     return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-      decoration: BoxDecoration(
-        border: Border(
-          bottom: BorderSide(
-            color: scheme.outlineVariant.withValues(alpha: 0.5),
-            width: 0.5,
-          ),
-        ),
-      ),
+      color: rowColor,
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.center,
         children: <Widget>[
+          // Date
           SizedBox(
             width: 54,
             child: Text(
@@ -710,22 +719,38 @@ class _EntryRow extends StatelessWidget {
               style: const TextStyle(fontSize: 11),
             ),
           ),
+          // Description
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
                 Text(
-                  description,
+                  baseDesc,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                   style: TextStyle(
                     fontSize: 12,
-                    fontWeight: FontWeight.w600,
+                    fontWeight: FontWeight.w700,
                     color: typeColor,
                   ),
                 ),
-                if (entry.hasReference)
+                if (entry.isPurchase && debit > 0) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    'قيمة: ${AppFormatters.money(debit)}',
+                    style: TextStyle(fontSize: 10, color: scheme.error),
+                  ),
+                ],
+                if (entry.isPurchase && paid > 0) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    'مدفوع: ${AppFormatters.money(paid)}',
+                    style: TextStyle(fontSize: 10, color: const Color(0xFF1B5E20)),
+                  ),
+                ],
+                if (entry.hasReference) ...[
+                  const SizedBox(height: 2),
                   Text(
                     entry.reference!,
                     maxLines: 1,
@@ -735,25 +760,22 @@ class _EntryRow extends StatelessWidget {
                       color: scheme.onSurfaceVariant,
                     ),
                   ),
+                ],
               ],
             ),
           ),
-          // Previous Balance (الرصيد)
+          // Prev Balance
           SizedBox(
-            width: 68,
+            width: 70,
             child: Text(
               prevText,
               textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w600,
-                color: prevColor,
-              ),
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: prevColor),
             ),
           ),
-          // Paid (المدفوع)
+          // Paid
           SizedBox(
-            width: 68,
+            width: 70,
             child: Text(
               paid > 0 ? AppFormatters.money(paid) : '—',
               textAlign: TextAlign.right,
@@ -764,75 +786,22 @@ class _EntryRow extends StatelessWidget {
               ),
             ),
           ),
-          // Current Balance (الرصيد الحالي)
+          // Current Balance
           SizedBox(
-            width: 76,
+            width: 84,
             child: Text(
               currText,
               textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                fontWeight: FontWeight.w800,
-                color: currColor,
-              ),
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: currColor),
             ),
           ),
         ],
       ),
     );
   }
-}
 
-// ============================================================================
-// Opening balance tile
-// ============================================================================
-
-class _OpeningBalanceTile extends StatelessWidget {
-  const _OpeningBalanceTile({required this.openingBalance});
-
-  final double openingBalance;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final bool weOwe = openingBalance > 0.01;
-    final bool theyOweUs = openingBalance < -0.01;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      color: scheme.surfaceContainerHigh,
-      child: Row(
-        children: <Widget>[
-          Icon(
-            Icons.play_circle_outline,
-            size: 16,
-            color: scheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'رصيد افتتاحي',
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            theyOweUs
-                ? '−${AppFormatters.money(openingBalance.abs())}'
-                : AppFormatters.money(openingBalance),
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: weOwe
-                  ? scheme.error
-                  : theyOweUs
-                      ? const Color(0xFF1B5E20)
-                      : scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
+  static String _typeLabel(bool isPurchase) {
+    return isPurchase ? 'فاتورة مشتريات' : 'دفعة';
   }
 }
 
@@ -878,7 +847,7 @@ class _ClosingBalanceCard extends StatelessWidget {
             : 'الرصيد النهائي — مسدد';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+      padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: bg,
