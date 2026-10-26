@@ -4,15 +4,10 @@
 //
 // **Phase 4 update:** the `custom` preset was removed in favour of a
 // simpler 4-chip model (all / this month / last 30 days / this year).
-// Reason: combining `showModalBottomSheet` with `showDateRangePicker`
-// inside a single "filter button" flow added complexity that was not worth
-// the UX gain — a user needing an arbitrary range can pick one of the
-// presets, and the statement is regenerated from the provider anyway.
 //
 // This file intentionally contains **only** `StatementPeriodPreset` and
 // its extension. The entry-type filter (`StatementEntryFilter`) lives in
-// `statement_models.dart` because it is consumed directly by
-// `ComputedStatement.displayFiltered`.
+// `statement_models.dart`.
 
 // ============================================================================
 // Period preset
@@ -24,8 +19,6 @@ enum StatementPeriodPreset { all, thisMonth, last30Days, thisYear }
 extension StatementPeriodPresetX on StatementPeriodPreset {
   /// Computes the inclusive `from` date for this preset, or `null` for
   /// "since the beginning".
-  ///
-  /// [now] is passed explicitly so the method is pure and testable.
   DateTime? computeFrom({required DateTime now}) {
     switch (this) {
       case StatementPeriodPreset.all:
