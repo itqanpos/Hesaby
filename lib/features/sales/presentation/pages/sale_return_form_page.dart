@@ -20,18 +20,21 @@ import '../../domain/entities/sale_return.dart';
 import '../../domain/repositories/sales_repository.dart';
 import '../providers/sales_providers.dart';
 
+/// صفحة إنشاء مرتجع مستقل (Standalone Return).
 class SaleReturnFormPage extends ConsumerStatefulWidget {
   const SaleReturnFormPage({super.key});
 
   @override
-  ConsumerState<SaleReturnFormPage> createState() => _SaleReturnFormPageState();
+  ConsumerState<SaleReturnFormPage> createState() =>
+      _SaleReturnFormPageState();
 }
 
+// ✅ تم إزالة القيمة الافتراضية لـ quantity (كانت تسبب تحذيرًا)
 class _ReturnCartLine {
   _ReturnCartLine({
     required this.product,
     required this.unit,
-    this.quantity = 1,
+    required this.quantity,
     required this.unitPrice,
   });
 
@@ -90,6 +93,7 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
         _cart.add(_ReturnCartLine(
           product: product,
           unit: defaultUnit!,
+          quantity: 1, // ✅ تمرير صريح (كان مصدر التحذير)
           unitPrice: product.sellingPrice,
         ));
       });
@@ -118,7 +122,8 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
       _snack('أضف صنفاً واحداً على الأقل.');
       return;
     }
-    if (_refundMethod == RefundMethod.creditNote && _selectedCustomerId == null) {
+    if (_refundMethod == RefundMethod.creditNote &&
+        _selectedCustomerId == null) {
       _snack('استرداد الرصيد يتطلب اختيار عميل.');
       return;
     }
@@ -138,7 +143,7 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
       final List<SaleReturnItemDraft> drafts = <SaleReturnItemDraft>[
         for (final _ReturnCartLine line in _cart)
           SaleReturnItemDraft(
-            saleItemId: null, // ⬅️ مرتجع مستقل
+            saleItemId: null, // ← مرتجع مستقل (يحتاج sale_return.dart محدَّث)
             productId: line.product.id,
             unitId: line.unit.id,
             quantity: line.quantity,
@@ -151,7 +156,7 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
       final SaleReturn created = await repo.createReturn(
         companyId: companyId,
         branchId: branchId,
-        saleId: null, // ⬅️ مرتجع مستقل
+        saleId: null, // ← مرتجع مستقل (يحتاج repository محدَّث)
         customerId: _selectedCustomerId,
         returnDate: DateTime.now(),
         items: drafts,
@@ -275,7 +280,9 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
                     dense: true,
                     leading: const Icon(Icons.inventory_2_outlined),
                     title: Text(p.name, maxLines: 1, overflow: TextOverflow.ellipsis),
-                    subtitle: Text('${AppFormatters.money(p.sellingPrice)} · ${unitNames[p.defaultUnitId] ?? 'وحدة'}'),
+                    subtitle: Text(
+                      '${AppFormatters.money(p.sellingPrice)} · ${unitNames[p.defaultUnitId] ?? 'وحدة'}',
+                    ),
                     onTap: () => _addProduct(p),
                   );
                 },
@@ -340,7 +347,10 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
                           child: Text(c.name),
                         ),
                     ],
-                    onChanged: _isSubmitting ? null : (String? v) => setState(() => _selectedCustomerId = v),
+                    onChanged: _isSubmitting
+                        ? null
+                        : (String? v) =>
+                            setState(() => _selectedCustomerId = v),
                   ),
                   const SizedBox(height: 8),
 
@@ -354,14 +364,30 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
                       border: OutlineInputBorder(),
                     ),
                     items: const <DropdownMenuItem<String>>[
-                      DropdownMenuItem<String>(value: RefundMethod.cash, child: Text('نقدي')),
-                      DropdownMenuItem<String>(value: RefundMethod.card, child: Text('بطاقة')),
-                      DropdownMenuItem<String>(value: RefundMethod.creditNote, child: Text('رصيد (خصم من حساب العميل)')),
-                      DropdownMenuItem<String>(value: RefundMethod.none, child: Text('بدون استرداد')),
+                      DropdownMenuItem<String>(
+                        value: RefundMethod.cash,
+                        child: Text('نقدي'),
+                      ),
+                      DropdownMenuItem<String>(
+                        value: RefundMethod.card,
+                        child: Text('بطاقة'),
+                      ),
+                      DropdownMenuItem<String>(
+                        value: RefundMethod.creditNote,
+                        child: Text('رصيد (خصم من حساب العميل)'),
+                      ),
+                      DropdownMenuItem<String>(
+                        value: RefundMethod.none,
+                        child: Text('بدون استرداد'),
+                      ),
                     ],
-                    onChanged: _isSubmitting ? null : (String? v) {
-                      if (v != null) setState(() => _refundMethod = v);
-                    },
+                    onChanged: _isSubmitting
+                        ? null
+                        : (String? v) {
+                            if (v != null) {
+                              setState(() => _refundMethod = v);
+                            }
+                          },
                   ),
                   const SizedBox(height: 8),
 
@@ -379,9 +405,19 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
 
                   Row(
                     children: <Widget>[
-                      Text('إجمالي المرتجع', style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700)),
+                      Text(
+                        'إجمالي المرتجع',
+                        style: theme.textTheme.titleSmall
+                            ?.copyWith(fontWeight: FontWeight.w700),
+                      ),
                       const Spacer(),
-                      Text(AppFormatters.money(_totalAmount), style: theme.textTheme.titleLarge?.copyWith(color: scheme.primary, fontWeight: FontWeight.w900)),
+                      Text(
+                        AppFormatters.money(_totalAmount),
+                        style: theme.textTheme.titleLarge?.copyWith(
+                          color: scheme.primary,
+                          fontWeight: FontWeight.w900,
+                        ),
+                      ),
                     ],
                   ),
                   const SizedBox(height: 12),
@@ -393,7 +429,9 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
                           label: 'حفظ كمسودة',
                           icon: Icons.save_outlined,
                           variant: AppButtonVariant.secondary,
-                          onPressed: _isSubmitting || _cart.isEmpty ? null : () => _submit(andConfirm: false),
+                          onPressed: _isSubmitting || _cart.isEmpty
+                              ? null
+                              : () => _submit(andConfirm: false),
                         ),
                       ),
                       const SizedBox(width: 12),
@@ -402,7 +440,9 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
                           label: 'حفظ وتأكيد',
                           icon: Icons.check_circle_outline,
                           isLoading: _isSubmitting,
-                          onPressed: _isSubmitting || _cart.isEmpty ? null : () => _submit(andConfirm: true),
+                          onPressed: _isSubmitting || _cart.isEmpty
+                              ? null
+                              : () => _submit(andConfirm: true),
                         ),
                       ),
                     ],
@@ -423,9 +463,12 @@ class _SaleReturnFormPageState extends ConsumerState<SaleReturnFormPage> {
         ReturnFailureType.saleNotConfirmed => 'الفاتورة الأصلية غير مؤكدة.',
         ReturnFailureType.emptyReturn => 'المرتجع بدون بنود.',
         ReturnFailureType.excessiveQuantity => 'الكمية تتجاوز المتاح.',
-        ReturnFailureType.creditNoteRequiresCustomer => 'استرداد الرصيد يتطلب عميلاً.',
-        ReturnFailureType.invalidStatusTransition => 'لا يمكن التعديل في الحالة الحالية.',
-        ReturnFailureType.immutableConfirmedReturn => 'المرتجع المؤكد غير قابل للتعديل.',
+        ReturnFailureType.creditNoteRequiresCustomer =>
+          'استرداد الرصيد يتطلب عميلاً.',
+        ReturnFailureType.invalidStatusTransition =>
+          'لا يمكن التعديل في الحالة الحالية.',
+        ReturnFailureType.immutableConfirmedReturn =>
+          'المرتجع المؤكد غير قابل للتعديل.',
         ReturnFailureType.referenceNotFound => 'أحد المراجع غير موجود.',
         ReturnFailureType.invalidResponse => 'تعذّر قراءة البيانات.',
         ReturnFailureType.unknown => 'تعذّر إتمام العملية.',
@@ -465,10 +508,12 @@ class _ReturnLineTileState extends State<_ReturnLineTile> {
   @override
   void didUpdateWidget(covariant _ReturnLineTile oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.line.quantity != widget.line.quantity && _qtyCtrl.text != _fmt(widget.line.quantity)) {
+    if (oldWidget.line.quantity != widget.line.quantity &&
+        _qtyCtrl.text != _fmt(widget.line.quantity)) {
       _qtyCtrl.text = _fmt(widget.line.quantity);
     }
-    if (oldWidget.line.unitPrice != widget.line.unitPrice && _priceCtrl.text != _fmt(widget.line.unitPrice)) {
+    if (oldWidget.line.unitPrice != widget.line.unitPrice &&
+        _priceCtrl.text != _fmt(widget.line.unitPrice)) {
       _priceCtrl.text = _fmt(widget.line.unitPrice);
     }
   }
@@ -499,7 +544,13 @@ class _ReturnLineTileState extends State<_ReturnLineTile> {
           Row(
             children: <Widget>[
               Expanded(
-                child: Text(line.product.name, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700), maxLines: 1, overflow: TextOverflow.ellipsis),
+                child: Text(
+                  line.product.name,
+                  style: theme.textTheme.titleSmall
+                      ?.copyWith(fontWeight: FontWeight.w700),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
               ),
               IconButton(
                 tooltip: 'حذف',
@@ -515,11 +566,21 @@ class _ReturnLineTileState extends State<_ReturnLineTile> {
                 width: 72,
                 child: TextField(
                   controller: _qtyCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: <TextInputFormatter>[
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 13),
-                  decoration: const InputDecoration(isDense: true, labelText: 'الكمية', contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 10), border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: 'الكمية',
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+                    border: OutlineInputBorder(),
+                  ),
                   onChanged: (String v) {
                     final double d = double.tryParse(v) ?? 0;
                     if (d > 0) widget.onQuantityChanged(d);
@@ -527,17 +588,30 @@ class _ReturnLineTileState extends State<_ReturnLineTile> {
                 ),
               ),
               const SizedBox(width: 6),
-              Text(widget.unitName, style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant)),
+              Text(
+                widget.unitName,
+                style: TextStyle(fontSize: 12, color: scheme.onSurfaceVariant),
+              ),
               const SizedBox(width: 8),
               SizedBox(
                 width: 92,
                 child: TextField(
                   controller: _priceCtrl,
-                  keyboardType: const TextInputType.numberWithOptions(decimal: true),
-                  inputFormatters: <TextInputFormatter>[FilteringTextInputFormatter.allow(RegExp(r'[0-9.]'))],
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  inputFormatters: <TextInputFormatter>[
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
                   textAlign: TextAlign.center,
                   style: const TextStyle(fontSize: 13),
-                  decoration: const InputDecoration(isDense: true, labelText: 'السعر', contentPadding: EdgeInsets.symmetric(horizontal: 6, vertical: 10), border: OutlineInputBorder()),
+                  decoration: const InputDecoration(
+                    isDense: true,
+                    labelText: 'السعر',
+                    contentPadding:
+                        EdgeInsets.symmetric(horizontal: 6, vertical: 10),
+                    border: OutlineInputBorder(),
+                  ),
                   onChanged: (String v) {
                     final double d = double.tryParse(v) ?? 0;
                     if (d >= 0) widget.onPriceChanged(d);
@@ -545,7 +619,14 @@ class _ReturnLineTileState extends State<_ReturnLineTile> {
                 ),
               ),
               const Spacer(),
-              Text(AppFormatters.money(line.lineTotal), style: TextStyle(color: scheme.primary, fontWeight: FontWeight.w800, fontSize: 13)),
+              Text(
+                AppFormatters.money(line.lineTotal),
+                style: TextStyle(
+                  color: scheme.primary,
+                  fontWeight: FontWeight.w800,
+                  fontSize: 13,
+                ),
+              ),
             ],
           ),
         ],
