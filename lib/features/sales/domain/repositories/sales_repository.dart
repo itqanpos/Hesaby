@@ -254,10 +254,11 @@ abstract interface class ReturnsRepository {
 
   Future<List<SaleReturn>> listReturnsForSale(String saleId);
 
+  // ✅ saleId اختياري (String?) لدعم المرتجع المستقل
   Future<SaleReturn> createReturn({
     required String companyId,
     required String branchId,
-    String? saleId, // ⬅️ تم التعديل لدعم المرتجع المستقل
+    String? saleId, // ← هنا التغيير الأساسي
     String? customerId,
     required DateTime returnDate,
     required List<SaleReturnItemDraft> items,
@@ -265,11 +266,12 @@ abstract interface class ReturnsRepository {
     String? notes,
   });
 
+  // ✅ saleId اختياري (String?) لدعم المرتجع المستقل
   Future<SaleReturn> updateDraft({
     required String returnId,
     required String companyId,
     required String branchId,
-    String? saleId, // ⬅️ تم التعديل لدعم المرتجع المستقل
+    String? saleId, // ← هنا التغيير الأساسي
     String? customerId,
     required DateTime returnDate,
     required List<SaleReturnItemDraft> items,
