@@ -615,7 +615,7 @@ class _EntriesList extends StatelessWidget {
 }
 
 // ============================================================================
-// Table header row
+// Table header row (FIXED)
 // ============================================================================
 
 class _TableHeaderRow extends StatelessWidget {
@@ -628,20 +628,22 @@ class _TableHeaderRow extends StatelessWidget {
         TextStyle(fontSize: 11, fontWeight: FontWeight.w800);
     final Color borderColor = scheme.outlineVariant.withValues(alpha: 0.5);
 
-    return Container(
-      padding: const EdgeInsets.symmetric(vertical: 10),
-      decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        border: Border(bottom: BorderSide(color: borderColor, width: 1)),
-      ),
-      child: Row(
-        children: <Widget>[
-          _HeaderCell(width: 52, text: 'التاريخ', style: style, borderColor: borderColor),
-          _HeaderCell(width: 0, text: 'البيان', style: style, borderColor: borderColor, isExpanded: true),
-          _HeaderCell(width: 66, text: 'الرصيد', style: style, borderColor: borderColor, alignRight: true),
-          _HeaderCell(width: 66, text: 'المدفوع', style: style, borderColor: borderColor, alignRight: true),
-          _HeaderCell(width: 82, text: 'الرصيد الحالي', style: style, borderColor: borderColor, alignRight: true, isLast: true),
-        ],
+    return IntrinsicHeight(
+      child: Container(
+        decoration: BoxDecoration(
+          color: scheme.surfaceContainerHighest,
+          border: Border(bottom: BorderSide(color: borderColor, width: 1)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _HeaderCell(width: 52, text: 'التاريخ', style: style, borderColor: borderColor),
+            _HeaderCell(width: 0, text: 'البيان', style: style, borderColor: borderColor, isExpanded: true),
+            _HeaderCell(width: 66, text: 'الرصيد', style: style, borderColor: borderColor, alignRight: true),
+            _HeaderCell(width: 66, text: 'المدفوع', style: style, borderColor: borderColor, alignRight: true),
+            _HeaderCell(width: 82, text: 'الرصيد الحالي', style: style, borderColor: borderColor, alignRight: true, isLast: true),
+          ],
+        ),
       ),
     );
   }
@@ -668,27 +670,32 @@ class _HeaderCell extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final Widget child = Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 4),
+    final Widget content = Container(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
       child: Text(
         text,
         style: style,
-        textAlign: alignRight ? TextAlign.right : TextAlign.right, // Keep RTL alignment
+        textAlign: alignRight ? TextAlign.right : TextAlign.left,
       ),
     );
 
-    return Container(
-      width: isExpanded ? null : width,
+    final Widget cell = Container(
       decoration: BoxDecoration(
         border: isLast ? null : Border(left: BorderSide(color: borderColor, width: 0.5)),
       ),
-      child: isExpanded ? Expanded(child: child) : child,
+      child: content,
     );
+
+    if (isExpanded) {
+      return Expanded(child: cell);
+    }
+    return SizedBox(width: width, child: cell);
   }
 }
 
 // ============================================================================
-// Entry row
+// Entry row (FIXED)
 // ============================================================================
 
 class _EntryRow extends StatelessWidget {
@@ -722,110 +729,106 @@ class _EntryRow extends StatelessWidget {
     final String baseDesc = entry.hasDescription ? entry.description! : _typeLabel(entry.type);
     final Color typeColor = debit > 0 ? scheme.error : const Color(0xFF1B5E20);
 
-    return Container(
-      decoration: BoxDecoration(
-        border: Border(bottom: BorderSide(color: borderColor, width: 0.5)),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          // Date Cell
-          _DataCell(
-            width: 52,
-            borderColor: borderColor,
-            child: Text(
-              DateFormat('dd/MM').format(entry.date.toLocal()),
-              style: const TextStyle(fontSize: 11),
+    return IntrinsicHeight(
+      child: Container(
+        decoration: BoxDecoration(
+          border: Border(bottom: BorderSide(color: borderColor, width: 0.5)),
+        ),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _DataCell(
+              width: 52,
+              borderColor: borderColor,
+              child: Text(
+                DateFormat('dd/MM').format(entry.date.toLocal()),
+                style: const TextStyle(fontSize: 11),
+              ),
             ),
-          ),
-          
-          // Description Cell
-          _DataCell(
-            width: 0,
-            isExpanded: true,
-            borderColor: borderColor,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                Text(
-                  baseDesc,
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                  style: TextStyle(
-                    fontSize: 12,
-                    fontWeight: FontWeight.w700,
-                    color: typeColor,
-                  ),
-                ),
-                if (entry.isSale && debit > 0) ...[
-                  const SizedBox(height: 2),
+            _DataCell(
+              width: 0,
+              isExpanded: true,
+              borderColor: borderColor,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: <Widget>[
                   Text(
-                    'قيمة: ${AppFormatters.money(debit)}',
-                    style: TextStyle(fontSize: 10, color: scheme.error),
-                  ),
-                ],
-                if (entry.isSale && paid > 0) ...[
-                  const SizedBox(height: 1),
-                  Text(
-                    'مدفوع: ${AppFormatters.money(paid)}',
-                    style: TextStyle(fontSize: 10, color: const Color(0xFF1B5E20)),
-                  ),
-                ],
-                if (entry.hasReference) ...[
-                  const SizedBox(height: 2),
-                  Text(
-                    entry.reference!,
+                    baseDesc,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 10,
-                      color: scheme.onSurfaceVariant,
+                      fontSize: 12,
+                      fontWeight: FontWeight.w700,
+                      color: typeColor,
                     ),
                   ),
+                  if (entry.isSale && debit > 0) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      'قيمة: ${AppFormatters.money(debit)}',
+                      style: TextStyle(fontSize: 10, color: scheme.error),
+                    ),
+                  ],
+                  if (entry.isSale && paid > 0) ...[
+                    const SizedBox(height: 1),
+                    Text(
+                      'مدفوع: ${AppFormatters.money(paid)}',
+                      style: TextStyle(fontSize: 10, color: const Color(0xFF1B5E20)),
+                    ),
+                  ],
+                  if (entry.hasReference) ...[
+                    const SizedBox(height: 2),
+                    Text(
+                      entry.reference!,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: scheme.onSurfaceVariant,
+                      ),
+                    ),
+                  ],
                 ],
-              ],
-            ),
-          ),
-
-          // Previous Balance Cell
-          _DataCell(
-            width: 66,
-            borderColor: borderColor,
-            child: Text(
-              prevText,
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: prevColor),
-            ),
-          ),
-
-          // Paid Cell
-          _DataCell(
-            width: 66,
-            borderColor: borderColor,
-            child: Text(
-              paid > 0 ? AppFormatters.money(paid) : '—',
-              textAlign: TextAlign.right,
-              style: TextStyle(
-                fontSize: 11,
-                color: paid > 0 ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant,
-                fontWeight: paid > 0 ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
-          ),
-
-          // Current Balance Cell
-          _DataCell(
-            width: 82,
-            isLast: true,
-            borderColor: borderColor,
-            child: Text(
-              currText,
-              textAlign: TextAlign.right,
-              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: currColor),
+            _DataCell(
+              width: 66,
+              borderColor: borderColor,
+              alignRight: true,
+              child: Text(
+                prevText,
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: prevColor),
+              ),
             ),
-          ),
-        ],
+            _DataCell(
+              width: 66,
+              borderColor: borderColor,
+              alignRight: true,
+              child: Text(
+                paid > 0 ? AppFormatters.money(paid) : '—',
+                textAlign: TextAlign.right,
+                style: TextStyle(
+                  fontSize: 11,
+                  color: paid > 0 ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant,
+                  fontWeight: paid > 0 ? FontWeight.w600 : FontWeight.normal,
+                ),
+              ),
+            ),
+            _DataCell(
+              width: 82,
+              isLast: true,
+              borderColor: borderColor,
+              alignRight: true,
+              child: Text(
+                currText,
+                textAlign: TextAlign.right,
+                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: currColor),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }
@@ -853,6 +856,7 @@ class _DataCell extends StatelessWidget {
     required this.borderColor,
     this.isExpanded = false,
     this.isLast = false,
+    this.alignRight = false,
   });
 
   final double width;
@@ -860,21 +864,27 @@ class _DataCell extends StatelessWidget {
   final Color borderColor;
   final bool isExpanded;
   final bool isLast;
+  final bool alignRight;
 
   @override
   Widget build(BuildContext context) {
-    final Widget content = Padding(
+    final Widget content = Container(
       padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
       child: child,
     );
 
-    return Container(
-      width: isExpanded ? null : width,
+    final Widget cell = Container(
       decoration: BoxDecoration(
         border: isLast ? null : Border(left: BorderSide(color: borderColor, width: 0.5)),
       ),
-      child: isExpanded ? Expanded(child: content) : content,
+      child: content,
     );
+
+    if (isExpanded) {
+      return Expanded(child: cell);
+    }
+    return SizedBox(width: width, child: cell);
   }
 }
 
