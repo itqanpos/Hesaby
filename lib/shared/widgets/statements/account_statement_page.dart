@@ -3,24 +3,12 @@
 // Generic account statement page — customer, supplier, and any future
 // party (employee, cashbox, …).
 //
-// **Phase 4 update (filter redesign):**
-// * The two chip rows (period + entry-type) that used to sit above the
-//   table have been merged into a single AppBar filter button that opens
-//   `statement_filter_sheet.dart`.
-// * The button shows a `Badge.count` with the number of active filters
-//   (0–2). When zero, the badge is hidden.
-// * A compact `StatementActiveFilterBar` appears under the summary bar
-//   **only** when at least one filter is active, with a "مسح" shortcut
-//   that resets both filters in one tap.
-// * `custom` period preset was removed — see `statement_filters.dart`.
-//
-// Layout (top → bottom):
-//   InfoCard
-//   SummaryBar              ← 4 cells: opening / debit / credit / closing
-//   ReconciliationBanner    ← only when cached ≠ computed balance
-//   ActiveFilterBar         ← only when a filter is active
-//   TableHeader             ← sticky; hidden when statement is empty
-//   Expanded(EntriesList)
+// **Phase 4 update (filter redesign):** the two chip rows were merged
+// into a single AppBar filter button that opens
+// `statement_filter_sheet.dart`. A `Badge.count` shows the number of
+// active filters (0–2). A compact `StatementActiveFilterBar` appears
+// under the summary bar only when at least one filter is active.
+// The `custom` period preset was removed.
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -49,8 +37,6 @@ import 'widgets/statement_table_header.dart';
 // Configuration
 // ============================================================================
 
-/// Extra AppBar action injected by the caller (e.g. "تعديل الرصيد" for a
-/// customer, "تسجيل دفعة" for a supplier).
 @immutable
 class StatementExtraAction {
   const StatementExtraAction({
@@ -62,7 +48,6 @@ class StatementExtraAction {
   final IconData icon;
   final String tooltip;
 
-  /// Returns `true` when the page should refresh after it completes.
   final Future<bool> Function(
     BuildContext context,
     WidgetRef ref,
@@ -70,8 +55,6 @@ class StatementExtraAction {
   ) onPressed;
 }
 
-/// Everything the generic [AccountStatementPage] needs to render a
-/// specific party's statement.
 @immutable
 class StatementPageConfig<T> {
   const StatementPageConfig({
@@ -114,8 +97,6 @@ class StatementPageConfig<T> {
   )? print;
 
   final StatementExtraAction? extraAction;
-
-  /// Show the "تصدير CSV" button in the AppBar. Defaults to `true`.
   final bool enableCsvExport;
 }
 
@@ -147,14 +128,10 @@ class _AccountStatementPageState<T>
   // Derived period bounds
   // ---------------------------------------------------------------------------
 
-  DateTime? get _fromDate =>
-      _preset.computeFrom(now: DateTime.now());
+  DateTime? get _fromDate => _preset.computeFrom(now: DateTime.now());
 
-  DateTime? get _toDate =>
-      _preset.computeTo(now: DateTime.now());
+  DateTime? get _toDate => _preset.computeTo(now: DateTime.now());
 
-  /// Number of **active** filters (preset + entry type), used by the
-  /// AppBar badge. Range: 0..2.
   int get _activeFilterCount {
     int count = 0;
     if (_preset != StatementPeriodPreset.all) count++;
@@ -280,8 +257,6 @@ class _AccountStatementPageState<T>
         ),
         title: Text(config.title),
         actions: <Widget>[
-          // Filter button — always enabled (users may want to pre-set a
-          // filter while data is still loading).
           _buildFilterButton(),
           if (config.extraAction != null)
             IconButton(
