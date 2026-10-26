@@ -21,6 +21,10 @@
 // * `storedBalance` is the balance cached on the party row
 //   (`customers.balance` / `suppliers.balance`) and is used later to warn
 //   about reconciliation drift. It may be `null` if not provided.
+// * `StatementEntryFilter` lives here (not in `statement_filters.dart`)
+//   because `ComputedStatement.displayFiltered` consumes it directly; the
+//   `statement_filters.dart` file is reserved for period presets, which are
+//   independent of the entry shape.
 
 import 'package:flutter/foundation.dart';
 
@@ -76,13 +80,91 @@ enum StatementEntryKind {
 enum StatementPartyKind { customer, supplier }
 
 // ============================================================================
+// Entry filter
+// ============================================================================
+
+/// Chip filter for the movement type.
+///
+/// The set of filters offered to the user depends on the party:
+/// * customer → [all, sale, saleReversal, payment, adjustment]
+/// * supplier → [all, purchase, payment]
+///
+/// Use [availableEntryFilters] to obtain the right list for a party.
+enum StatementEntryFilter {
+  all,
+  sale,
+  saleReversal,
+  purchase,
+  payment,
+  adjustment;
+
+  /// Arabic label for the chip.
+  String get arabicLabel {
+    switch (this) {
+      case StatementEntryFilter.all:
+        return 'الكل';
+      case StatementEntryFilter.sale:
+        return 'فواتير بيع';
+      case StatementEntryFilter.saleReversal:
+        return 'إلغاءات';
+      case StatementEntryFilter.purchase:
+        return 'مشتريات';
+      case StatementEntryFilter.payment:
+        return 'دفعات';
+      case StatementEntryFilter.adjustment:
+        return 'تعديلات';
+    }
+  }
+
+  /// Whether the given entry should be shown when this filter is active.
+  bool matches(StatementEntryView entry) {
+    switch (this) {
+      case StatementEntryFilter.all:
+        return true;
+      case StatementEntryFilter.sale:
+        return entry.kind == StatementEntryKind.sale;
+      case StatementEntryFilter.saleReversal:
+        return entry.kind == StatementEntryKind.saleReversal;
+      case StatementEntryFilter.purchase:
+        return entry.kind == StatementEntryKind.purchase;
+      case StatementEntryFilter.payment:
+        return entry.kind == StatementEntryKind.payment;
+      case StatementEntryFilter.adjustment:
+        return entry.kind == StatementEntryKind.adjustment;
+    }
+  }
+}
+
+/// Returns the filters that make sense for the given party kind.
+///
+/// Always non-empty and always starts with [StatementEntryFilter.all].
+List<StatementEntryFilter> availableEntryFilters(StatementPartyKind kind) {
+  switch (kind) {
+    case StatementPartyKind.customer:
+      return const <StatementEntryFilter>[
+        StatementEntryFilter.all,
+        StatementEntryFilter.sale,
+        StatementEntryFilter.saleReversal,
+        StatementEntryFilter.payment,
+        StatementEntryFilter.adjustment,
+      ];
+    case StatementPartyKind.supplier:
+      return const <StatementEntryFilter>[
+        StatementEntryFilter.all,
+        StatementEntryFilter.purchase,
+        StatementEntryFilter.payment,
+      ];
+  }
+}
+
+// ============================================================================
 // Entry view
 // ============================================================================
 
 /// A flattened, UI-facing representation of a single statement line.
 ///
 /// Built from `CustomerStatementEntry` or `SupplierStatementEntry` by the
-/// corresponding [StatementAdapter] (see `adapters/`).
+/// corresponding adapter in `adapters/`.
 @immutable
 class StatementEntryView {
   const StatementEntryView({
@@ -151,7 +233,7 @@ class StatementEntryView {
 /// A flattened, UI-facing representation of a complete statement.
 ///
 /// Built from `CustomerStatement` or `SupplierStatement` by the
-/// corresponding [StatementAdapter].
+/// corresponding adapter.
 @immutable
 class StatementView {
   const StatementView({
