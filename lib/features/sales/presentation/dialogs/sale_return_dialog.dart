@@ -87,8 +87,6 @@ class _SaleReturnDialogState extends ConsumerState<_SaleReturnDialog> {
   void initState() {
     super.initState();
 
-    // Default refund method: credit_note when a customer is attached,
-    // otherwise cash (credit_note requires a customer on the DB side).
     _refundMethod = widget.sale.hasCustomer
         ? RefundMethod.creditNote
         : RefundMethod.cash;
@@ -131,8 +129,11 @@ class _SaleReturnDialogState extends ConsumerState<_SaleReturnDialog> {
         final List<SaleReturnItem> items =
             await repo.listReturnItems(r.id);
         for (final SaleReturnItem it in items) {
-          map[it.saleItemId] =
-              (map[it.saleItemId] ?? 0) + it.quantity;
+          // ✅ الإصلاح: تخطي المرتجعات المستقلة (بدون saleItemId)
+          final String? saleItemId = it.saleItemId;
+          if (saleItemId == null) continue;
+          map[saleItemId] =
+              (map[saleItemId] ?? 0) + it.quantity;
         }
       }
 
@@ -160,14 +161,12 @@ class _SaleReturnDialogState extends ConsumerState<_SaleReturnDialog> {
   // Computed
   // ---------------------------------------------------------------------------
 
-  /// The maximum quantity that can still be returned for [saleItem].
   double _remainingFor(SaleItem saleItem) {
     final double already = _alreadyReturned[saleItem.id] ?? 0;
     final double remaining = saleItem.quantity - already;
     return remaining < 0 ? 0 : remaining;
   }
 
-  /// Selected quantity for a sale item (0 when blank/invalid).
   double _qtyFor(SaleItem saleItem) {
     final TextEditingController? c = _qtyControllers[saleItem.id];
     if (c == null) {
@@ -177,7 +176,6 @@ class _SaleReturnDialogState extends ConsumerState<_SaleReturnDialog> {
     return parsed < 0 ? 0 : parsed;
   }
 
-  /// Total amount of the return (subtotal; discount/tax are always 0).
   double get _returnTotal {
     double sum = 0;
     for (final SaleItem item in widget.saleItems) {
@@ -386,14 +384,11 @@ class _SaleReturnDialogState extends ConsumerState<_SaleReturnDialog> {
             crossAxisAlignment: CrossAxisAlignment.stretch,
             mainAxisSize: MainAxisSize.min,
             children: <Widget>[
-              // ---- Sale summary ----
               _SaleSummaryCard(
                 sale: widget.sale,
                 dateFormat: _dateFormat,
               ),
               const SizedBox(height: 12),
-
-              // ---- Items ----
               Text(
                 'اختر الكميات المُرجَعة',
                 style: theme.textTheme.titleMedium,
@@ -414,10 +409,7 @@ class _SaleReturnDialogState extends ConsumerState<_SaleReturnDialog> {
                     onChanged: () => setState(() {}),
                   ),
                 ),
-
               const SizedBox(height: 16),
-
-              // ---- Refund method ----
               Text('طريقة الاسترداد', style: theme.textTheme.labelLarge),
               const SizedBox(height: 8),
               _RefundMethodSelector(
@@ -428,25 +420,18 @@ class _SaleReturnDialogState extends ConsumerState<_SaleReturnDialog> {
                   setState(() => _refundMethod = v);
                 },
               ),
-
               const SizedBox(height: 12),
-
-              // ---- Notes ----
               AppTextField(
                 controller: _notesController,
                 label: 'ملاحظات — اختياري',
                 enabled: !_isSubmitting,
                 maxLines: 2,
               ),
-
               if (displayError != null) ...<Widget>[
                 const SizedBox(height: 12),
                 _ErrorBanner(message: displayError),
               ],
-
               const SizedBox(height: 12),
-
-              // ---- Total preview ----
               _TotalPreview(
                 total: _returnTotal,
                 money: _money,
@@ -686,8 +671,6 @@ class _RefundMethodSelector extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // `credit_note` requires a customer; disable it when the sale is a
-    // cash sale.
     final bool creditNoteEnabled = hasCustomer;
 
     return SingleChildScrollView(
