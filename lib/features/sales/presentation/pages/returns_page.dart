@@ -24,14 +24,9 @@ import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/return_print_dialog.dart';
 import '../dialogs/sales_filter_sheet.dart';
 import '../providers/sales_providers.dart';
+import 'sale_return_form_page.dart'; // ⬅️ المدخل الجديد
 
-/// Returns list page — mirrors the layout of the sales page.
-///
-/// * KPI overview (this month / drafts / confirmed / cancelled).
-/// * Search by return number, sale invoice, or customer name.
-/// * Compact filter button with an active-count badge.
-/// * Tapping a return opens a bottom sheet with its items.
-/// * Each card exposes a print action (80 mm / A4).
+/// Returns list page.
 class ReturnsPage extends ConsumerStatefulWidget {
   const ReturnsPage({super.key});
 
@@ -58,9 +53,7 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
       context: context,
       current: _filter,
     );
-    if (result == null || !mounted) {
-      return;
-    }
+    if (result == null || !mounted) return;
     setState(() => _filter = result);
   }
 
@@ -70,6 +63,20 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
       _searchQuery = '';
       _filter = const SalesFilter();
     });
+  }
+
+  // ⬇️ المدخل الجديد: فتح شاشة المرتجع المستقل
+  Future<void> _openNewReturn() async {
+    final bool? created = await Navigator.of(context).push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const SaleReturnFormPage(),
+      ),
+    );
+    if (created == true && mounted) {
+      // تحديث القائمة + أرصدة العملاء (قد تتأثر بالاسترداد كرصيد)
+      ref.invalidate(returnsProvider);
+      ref.invalidate(customersProvider);
+    }
   }
 
   bool _matches(
@@ -101,7 +108,11 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
       return true;
     }
 
-    final String saleInv = (invoiceBySaleId[r.saleId] ?? '').toLowerCase();
+    // ✅ safe lookup — saleId قد يكون null
+    final String? saleId = r.saleId;
+    final String saleInv = saleId != null
+        ? (invoiceBySaleId[saleId] ?? '').toLowerCase()
+        : '';
     if (saleInv.contains(trimmed)) {
       return true;
     }
@@ -132,7 +143,28 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
         returnsAsync.error ?? customersAsync.error ?? salesAsync.error;
 
     return AppShell(
-      appBar: AppBar(title: const Text('المرتجعات')),
+      appBar: AppBar(
+        title: const Text('المرتجعات'),
+        actions: <Widget>[
+          IconButton(
+            tooltip: 'تحديث',
+            icon: const Icon(Icons.refresh),
+            onPressed: anyLoading
+                ? null
+                : () {
+                    ref.invalidate(returnsProvider);
+                    ref.invalidate(customersProvider);
+                    ref.invalidate(salesProvider);
+                  },
+          ),
+          // ✅ المدخل الجديد: زر إنشاء مرتجع
+          IconButton(
+            tooltip: 'مرتجع جديد',
+            icon: const Icon(Icons.add),
+            onPressed: _openNewReturn,
+          ),
+        ],
+      ),
       body: Builder(
         builder: (BuildContext context) {
           if (anyLoading) {
@@ -174,13 +206,11 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
           return Column(
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- KPI ----
               Padding(
                 padding: const EdgeInsets.only(top: 8, bottom: 8),
                 child: _ReturnsKpiRow(returns: allReturns),
               ),
 
-              // ---- Search + filter ----
               Padding(
                 padding: const EdgeInsets.only(bottom: 8),
                 child: Row(
@@ -213,7 +243,6 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
                 ),
               ),
 
-              // ---- Active filter chips ----
               if (_filter.isNotEmpty)
                 Padding(
                   padding: const EdgeInsets.only(bottom: 8),
@@ -223,14 +252,9 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
                   ),
                 ),
 
-              // ---- List ----
               Expanded(
                 child: allReturns.isEmpty
-                    ? const AppEmptyView(
-                        icon: Icons.assignment_return_outlined,
-                        title: 'لا توجد مرتجعات',
-                        message: 'لم يتم تسجيل أي مرتجع حتى الآن.',
-                      )
+                    ? _EmptyReturns(onCreateNew: _openNewReturn)
                     : filtered.isEmpty
                         ? AppEmptyView(
                             icon: Icons.search_off_outlined,
@@ -254,14 +278,17 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
                             itemBuilder:
                                 (BuildContext context, int index) {
                               final SaleReturn r = filtered[index];
+                              final String? saleId = r.saleId;
+                              final String saleInvoiceLabel = saleId != null
+                                  ? 'فاتورة: ${invoiceBySaleId[saleId] ?? '—'}'
+                                  : 'مرتجع مستقل';
                               return _ReturnCard(
                                 saleReturn: r,
                                 customerName: _resolveCustomerName(
                                   customerNames,
                                   r.customerId,
                                 ),
-                                saleInvoice:
-                                    invoiceBySaleId[r.saleId] ?? '—',
+                                saleInvoiceLabel: saleInvoiceLabel,
                                 onTap: () => _openDetail(context, r),
                                 onPrint: () =>
                                     _printReturn(context, r),
@@ -287,16 +314,11 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Print
-  // ---------------------------------------------------------------------------
-
   Future<void> _printReturn(
     BuildContext context,
     SaleReturn saleReturn,
   ) async {
     try {
-      // 1) Load the return items + product/unit names.
       final List<SaleReturnItem> items =
           await ref.read(returnsRepositoryProvider).listReturnItems(
                 saleReturn.id,
@@ -329,10 +351,13 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
       }
 
       String? saleInvoice;
-      for (final Sale s in sales) {
-        if (s.id == saleReturn.saleId) {
-          saleInvoice = s.invoiceNumber;
-          break;
+      final String? saleId = saleReturn.saleId;
+      if (saleId != null) {
+        for (final Sale s in sales) {
+          if (s.id == saleId) {
+            saleInvoice = s.invoiceNumber;
+            break;
+          }
         }
       }
 
@@ -364,14 +389,10 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
         footer: ref.read(receiptFooterProvider),
       );
 
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       await showReturnPrintDialog(context: context, receipt: receipt);
     } on Object {
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
@@ -394,7 +415,31 @@ class _ReturnsPageState extends ConsumerState<ReturnsPage> {
 }
 
 // ============================================================================
-// KPI row
+// Empty state with prominent create button
+// ============================================================================
+
+class _EmptyReturns extends StatelessWidget {
+  const _EmptyReturns({required this.onCreateNew});
+
+  final VoidCallback onCreateNew;
+
+  @override
+  Widget build(BuildContext context) {
+    return AppEmptyView(
+      icon: Icons.assignment_return_outlined,
+      title: 'لا توجد مرتجعات',
+      message: 'لم يتم تسجيل أي مرتجع حتى الآن.',
+      action: AppButton(
+        label: 'إنشاء مرتجع جديد',
+        icon: Icons.add,
+        onPressed: onCreateNew,
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// KPI row (unchanged)
 // ============================================================================
 
 class _ReturnsKpiRow extends StatelessWidget {
@@ -575,7 +620,7 @@ class _KpiCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Filter button
+// Filter button (unchanged)
 // ============================================================================
 
 class _FilterButton extends StatelessWidget {
@@ -641,7 +686,7 @@ class _FilterButton extends StatelessWidget {
 }
 
 // ============================================================================
-// Active chips summary
+// Active chips (unchanged)
 // ============================================================================
 
 class _ActiveChips extends StatelessWidget {
@@ -730,21 +775,21 @@ class _ActiveChips extends StatelessWidget {
 }
 
 // ============================================================================
-// Return card
+// Return card (with label instead of raw invoice)
 // ============================================================================
 
 class _ReturnCard extends StatelessWidget {
   const _ReturnCard({
     required this.saleReturn,
     required this.customerName,
-    required this.saleInvoice,
+    required this.saleInvoiceLabel,
     required this.onTap,
     required this.onPrint,
   });
 
   final SaleReturn saleReturn;
   final String customerName;
-  final String saleInvoice;
+  final String saleInvoiceLabel;
   final VoidCallback onTap;
   final VoidCallback onPrint;
 
@@ -823,7 +868,7 @@ class _ReturnCard extends StatelessWidget {
                     ),
                     const SizedBox(height: 2),
                     Text(
-                      'فاتورة: $saleInvoice',
+                      saleInvoiceLabel,
                       style: theme.textTheme.bodySmall?.copyWith(
                         color: scheme.onSurfaceVariant,
                       ),
@@ -871,7 +916,7 @@ class _ReturnCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Return detail sheet
+// Return detail sheet (unchanged)
 // ============================================================================
 
 class _ReturnDetailSheet extends ConsumerWidget {
