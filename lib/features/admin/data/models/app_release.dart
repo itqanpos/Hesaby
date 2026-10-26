@@ -12,14 +12,17 @@ class AppRelease {
     required this.isMandatory,
     required this.createdAt,
     this.releaseNotes,
+    this.downloadUrl,
   });
 
+  /// المعرّف الفريد (UUID).
   final String id;
 
   /// الاسم الظاهر للإصدار، مثال: "1.0.5".
   final String versionName;
 
   /// رقم البناء الفريد، يجب أن يزداد مع كل إصدار، مثال: 6, 7, 8.
+  ///
   /// المقارنة بين إصدار المستخدم والـ build_number هي الأساس.
   final int buildNumber;
 
@@ -29,7 +32,18 @@ class AppRelease {
   /// ملاحظات التحديث (Release Notes).
   final String? releaseNotes;
 
+  /// رابط التحميل المخصص (APK / EXE / ...).
+  ///
+  /// عند `null` أو نص فارغ: لا يوجد رابط، ويجب توجيه المستخدم للتواصل
+  /// مع الدعم بدلاً من فتح GitHub. هذا هو الفرق الأساسي عن v14 حيث
+  /// كان الرابط ثابتًا على `github.com/itqanpos/Hesaby/releases/latest`.
+  final String? downloadUrl;
+
   final DateTime createdAt;
+
+  /// هل يوجد رابط تحميل صالح؟ (غير null وغير فارغ)
+  bool get hasDownloadUrl =>
+      downloadUrl != null && downloadUrl!.trim().isNotEmpty;
 
   factory AppRelease.fromMap(Map<String, dynamic> map) {
     return AppRelease(
@@ -38,6 +52,8 @@ class AppRelease {
       buildNumber: (map['build_number'] as num?)?.toInt() ?? 0,
       isMandatory: map['is_mandatory'] as bool? ?? false,
       releaseNotes: map['release_notes'] as String?,
+      // trim() يحوّل "   " إلى "" — و getter `hasDownloadUrl` يعالجها.
+      downloadUrl: (map['download_url'] as String?)?.trim(),
       createdAt: DateTime.tryParse(map['created_at']?.toString() ?? '')
               ?.toLocal() ??
           DateTime.now(),
@@ -46,5 +62,6 @@ class AppRelease {
 
   @override
   String toString() =>
-      'AppRelease(version: $versionName, build: $buildNumber, mandatory: $isMandatory)';
+      'AppRelease(version: $versionName, build: $buildNumber, '
+      'mandatory: $isMandatory, hasUrl: $hasDownloadUrl)';
 }
