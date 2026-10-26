@@ -1,21 +1,7 @@
 // lib/shared/widgets/statements/widgets/statement_filter_sheet.dart
 //
 // Bottom sheet that groups the period presets and the entry-type filters
-// in a single place. Replaces the previous two horizontal chip rows that
-// lived above the statement table.
-//
-// Behaviour:
-// * The sheet owns a **local** copy of the current filter state via its
-//   own `State`. Chips update this state immediately (visible feedback)
-//   but the page is only notified when the user taps "تطبيق".
-// * "إعادة تعيين" resets both the period and the entry filter to `all`
-//   in-place (without closing) so the user can still adjust further
-//   before applying.
-// * Dismissing the sheet (barrier tap, drag down) returns `null` —
-//   the page keeps its current filter state untouched.
-//
-// The sheet re-uses [StatementPeriodChips] and [StatementEntryFilterChips]
-// so the visual language stays consistent with the rest of the app.
+// in a single place. Replaces the previous two horizontal chip rows.
 
 import 'package:flutter/material.dart';
 
@@ -35,7 +21,6 @@ class StatementFilterResult {
   final StatementPeriodPreset preset;
   final StatementEntryFilter entryFilter;
 
-  /// Whether both filters are back to their default "all" values.
   bool get isDefault =>
       preset == StatementPeriodPreset.all &&
       entryFilter == StatementEntryFilter.all;
@@ -103,7 +88,6 @@ class _FilterSheetBodyState extends State<_FilterSheetBody> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- Header ---------------------------------------------
               Padding(
                 padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
                 child: Row(
@@ -129,8 +113,6 @@ class _FilterSheetBodyState extends State<_FilterSheetBody> {
               ),
               const Divider(height: 1),
               const SizedBox(height: 8),
-
-              // ---- Period section -------------------------------------
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Text(
@@ -146,8 +128,6 @@ class _FilterSheetBodyState extends State<_FilterSheetBody> {
                 onSelect: (StatementPeriodPreset p) =>
                     setState(() => _preset = p),
               ),
-
-              // ---- Entry type section (only when >1 filter) ------------
               if (widget.filters.length > 1) ...<Widget>[
                 const SizedBox(height: 8),
                 Padding(
@@ -167,8 +147,6 @@ class _FilterSheetBodyState extends State<_FilterSheetBody> {
                       setState(() => _entryFilter = f),
                 ),
               ],
-
-              // ---- Apply button ----------------------------------------
               const SizedBox(height: 16),
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
