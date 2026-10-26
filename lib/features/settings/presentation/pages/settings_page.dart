@@ -184,7 +184,7 @@ class SettingsPage extends ConsumerWidget {
           const _SettingsTile(
             icon: Icons.info_outline,
             title: 'الإصدار',
-            subtitle: 'v1.0.5',
+            subtitle: 'v1.0.6',
             enabled: false,
           ),
           const _SettingsTile(
