@@ -2,13 +2,12 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart';
 import 'package:intl/intl.dart';
 
-import '../../../../app/router.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/presentation/dialogs/customer_payment_dialog.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
+import '../../../sales/presentation/pages/sale_return_form_page.dart'; // ⬅️ استيراد شاشة المرتجع الجديدة
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
 import '../../domain/entities/pos_cart.dart';
@@ -154,7 +153,7 @@ class _PosActionsSheet extends ConsumerWidget {
             _ActionTile(
               icon: Icons.assignment_return_outlined,
               title: 'إنشاء فاتورة مرتجع',
-              subtitle: 'إرجاع منتجات من فاتورة سابقة',
+              subtitle: 'إرجاع أي صنف إلى المخزون', // ⬅️ تم تعديل النص الفرعي
               enabled: true,
               onTap: () => _openReturns(context),
             ),
@@ -312,10 +311,19 @@ class _PosActionsSheet extends ConsumerWidget {
     );
   }
 
-  // ⬇️ تمت إضافة await هنا لحل unawaited_futures
+  // ⬇️ تم تعديل الدالة لتفتح شاشة المرتجع الجديدة
   Future<void> _openReturns(BuildContext context) async {
-    Navigator.of(context).pop();
-    await context.pushNamed(AppRouter.returnsName);
+    final navigator = Navigator.of(context);
+    navigator.pop(); // إغلاق القائمة السفلية
+    
+    if (!context.mounted) return;
+
+    // فتح الشاشة المستقلة للمرتجع
+    await navigator.push<bool>(
+      MaterialPageRoute<bool>(
+        builder: (_) => const SaleReturnFormPage(),
+      ),
+    );
   }
 
   static String _formatDate(DateTime date) {
