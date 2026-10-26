@@ -1,20 +1,21 @@
 // lib/shared/widgets/statements/widgets/statement_filter_sheet.dart
 //
 // Bottom sheet that groups the period presets and the entry-type filters
-// in a single place. Replaces the previous two horizontal chip rows.
+// in a single place. Replaces the previous two horizontal chip rows that
+// lived above the statement table.
 //
 // Behaviour:
-// * The sheet owns a **local** copy of the current filter state. Chips
-//   update this local state immediately (visible feedback) but the page
-//   is only notified when the user taps "تطبيق".
-// * "إعادة تعيين" resets both the period and the entry filter to `all`.
-// * Selecting "نطاق مخصص" temporarily closes the sheet (Material's
-//   `showDateRangePicker` is a full-screen route) and re-opens it once the
-//   user has picked a range. This is the standard pattern for combining
-//   `showModalBottomSheet` with date pickers on mobile.
+// * The sheet owns a **local** copy of the current filter state via its
+//   own `State`. Chips update this state immediately (visible feedback)
+//   but the page is only notified when the user taps "تطبيق".
+// * "إعادة تعيين" resets both the period and the entry filter to `all`
+//   in-place (without closing) so the user can still adjust further
+//   before applying.
+// * Dismissing the sheet (barrier tap, drag down) returns `null` —
+//   the page keeps its current filter state untouched.
 //
 // The sheet re-uses [StatementPeriodChips] and [StatementEntryFilterChips]
-// so the visual language stays consistent.
+// so the visual language stays consistent with the rest of the app.
 
 import 'package:flutter/material.dart';
 
@@ -23,19 +24,18 @@ import '../models/statement_models.dart';
 import 'statement_entry_filter_chips.dart';
 import 'statement_period_chips.dart';
 
-/// Result of the filter sheet.
+/// Result of the filter sheet — returned when the user taps "تطبيق".
 @immutable
 class StatementFilterResult {
   const StatementFilterResult({
     required this.preset,
-    required this.customRange,
     required this.entryFilter,
   });
 
   final StatementPeriodPreset preset;
-  final (DateTime, DateTime)? customRange;
   final StatementEntryFilter entryFilter;
 
+  /// Whether both filters are back to their default "all" values.
   bool get isDefault =>
       preset == StatementPeriodPreset.all &&
       entryFilter == StatementEntryFilter.all;
@@ -46,114 +46,24 @@ class StatementFilterResult {
 Future<StatementFilterResult?> showStatementFilterSheet({
   required BuildContext context,
   required StatementPeriodPreset initialPreset,
-  required (DateTime, DateTime)? initialCustomRange,
   required StatementEntryFilter initialEntryFilter,
   required StatementPartyKind partyKind,
-}) async {
-  StatementPeriodPreset localPreset = initialPreset;
-  (DateTime, DateTime)? localRange = initialCustomRange;
-  StatementEntryFilter localFilter = initialEntryFilter;
-
+}) {
   final List<StatementEntryFilter> filters =
       availableEntryFilters(partyKind);
 
-  bool customRangePicked = false;
-
-  while (true) {
-    final StatementFilterResult? result =
-        await showModalBottomSheet<StatementFilterResult>(
-      context: context,
-      isScrollControlled: true,
-      showDragHandle: true,
-      builder: (BuildContext sheetCtx) {
-        return _FilterSheetBody(
-          preset: localPreset,
-          customRange: localRange,
-          entryFilter: localFilter,
-          filters: filters,
-          onPresetChanged: (StatementPeriodPreset p) {
-            if (p == StatementPeriodPreset.custom) {
-              // Signal the outer loop to open the date picker and
-              // re-open the sheet afterwards.
-              customRangePicked = true;
-              Navigator.of(sheetCtx).pop(_FilterSheetAction.openCustomRange);
-            } else {
-              localPreset = p;
-              localRange = null;
-              _rebuildSheet(sheetCtx);
-            }
-          },
-          onEntryFilterChanged: (StatementEntryFilter f) {
-            localFilter = f;
-            _rebuildSheet(sheetCtx);
-          },
-          onApply: () {
-            Navigator.of(sheetCtx).pop(
-              StatementFilterResult(
-                preset: localPreset,
-                customRange: localRange,
-                entryFilter: localFilter,
-              ),
-            );
-          },
-          onReset: () {
-            localPreset = StatementPeriodPreset.all;
-            localRange = null;
-            localFilter = StatementEntryFilter.all;
-            _rebuildSheet(sheetCtx);
-          },
-        );
-      },
-    );
-
-    // The sheet returned a sentinel asking us to open the date picker.
-    if (identical(result, _FilterSheetAction.openCustomRange)) {
-      if (!context.mounted) return null;
-      final DateTime now = DateTime.now();
-      final DateTimeRange? picked = await showDateRangePicker(
-        context: context,
-        firstDate: DateTime(now.year - 5),
-        lastDate: now,
-        initialDateRange: localRange == null
-            ? null
-            : DateTimeRange(start: localRange!.$1, end: localRange!.$2),
-        helpText: 'اختر الفترة',
-        saveText: 'تطبيق',
+  return showModalBottomSheet<StatementFilterResult>(
+    context: context,
+    isScrollControlled: true,
+    showDragHandle: true,
+    builder: (BuildContext ctx) {
+      return _FilterSheetBody(
+        initialPreset: initialPreset,
+        initialEntryFilter: initialEntryFilter,
+        filters: filters,
       );
-      if (picked == null) {
-        // User cancelled the date picker; re-open the sheet unchanged.
-        if (!context.mounted) return null;
-        continue;
-      }
-      localPreset = StatementPeriodPreset.custom;
-      localRange = (picked.start, picked.end);
-      if (!context.mounted) return null;
-      continue;
-    }
-
-    // Normal dismissal (barrier tap) returns null; keep the previous
-    // selection untouched.
-    return result;
-  }
-}
-
-/// Sentinel value used to signal "open the date picker, then re-open the
-/// sheet". Identical() is used to distinguish it from a real result.
-class _FilterSheetAction {
-  static const StatementFilterResult openCustomRange =
-      StatementFilterResult(
-    preset: StatementPeriodPreset.all,
-    customRange: null,
-    entryFilter: StatementEntryFilter.all,
+    },
   );
-}
-
-void _rebuildSheet(BuildContext sheetCtx) {
-  // Trigger a rebuild of the sheet body using its own State.
-  // `showModalBottomSheet` does not expose a setState, so we rely on the
-  // `StatefulBuilder` used inside `_FilterSheetBody` instead.
-  // This function is therefore a no-op kept for readability — the actual
-  // rebuild is handled inside `_FilterSheetBody`'s StatefulBuilder.
 }
 
 // ============================================================================
@@ -162,33 +72,22 @@ void _rebuildSheet(BuildContext sheetCtx) {
 
 class _FilterSheetBody extends StatefulWidget {
   const _FilterSheetBody({
-    required this.preset,
-    required this.customRange,
-    required this.entryFilter,
+    required this.initialPreset,
+    required this.initialEntryFilter,
     required this.filters,
-    required this.onPresetChanged,
-    required this.onEntryFilterChanged,
-    required this.onApply,
-    required this.onReset,
   });
 
-  final StatementPeriodPreset preset;
-  final (DateTime, DateTime)? customRange;
-  final StatementEntryFilter entryFilter;
+  final StatementPeriodPreset initialPreset;
+  final StatementEntryFilter initialEntryFilter;
   final List<StatementEntryFilter> filters;
-  final void Function(StatementPeriodPreset) onPresetChanged;
-  final void Function(StatementEntryFilter) onEntryFilterChanged;
-  final VoidCallback onApply;
-  final VoidCallback onReset;
 
   @override
   State<_FilterSheetBody> createState() => _FilterSheetBodyState();
 }
 
 class _FilterSheetBodyState extends State<_FilterSheetBody> {
-  late StatementPeriodPreset _preset = widget.preset;
-  late (DateTime, DateTime)? _customRange = widget.customRange;
-  late StatementEntryFilter _entryFilter = widget.entryFilter;
+  late StatementPeriodPreset _preset = widget.initialPreset;
+  late StatementEntryFilter _entryFilter = widget.initialEntryFilter;
 
   @override
   Widget build(BuildContext context) {
@@ -197,98 +96,96 @@ class _FilterSheetBodyState extends State<_FilterSheetBody> {
 
     return SafeArea(
       top: false,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
-              child: Row(
-                children: <Widget>[
-                  Text(
-                    'تصفية الكشف',
-                    style: theme.textTheme.titleMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(8, 0, 8, 16),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              // ---- Header ---------------------------------------------
+              Padding(
+                padding: const EdgeInsets.fromLTRB(8, 4, 8, 8),
+                child: Row(
+                  children: <Widget>[
+                    Text(
+                      'تصفية الكشف',
+                      style: theme.textTheme.titleMedium?.copyWith(
+                        fontWeight: FontWeight.w700,
+                      ),
                     ),
-                  ),
-                  const Spacer(),
-                  TextButton(
-                    onPressed: () {
-                      setState(() {
-                        _preset = StatementPeriodPreset.all;
-                        _customRange = null;
-                        _entryFilter = StatementEntryFilter.all;
-                      });
-                      widget.onReset();
-                    },
-                    child: const Text('إعادة تعيين'),
-                  ),
-                ],
-              ),
-            ),
-            const Divider(height: 1),
-            const SizedBox(height: 8),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Text(
-                'الفترة',
-                style: theme.textTheme.labelMedium?.copyWith(
-                  fontWeight: FontWeight.w600,
-                  color: scheme.onSurfaceVariant,
+                    const Spacer(),
+                    TextButton(
+                      onPressed: () {
+                        setState(() {
+                          _preset = StatementPeriodPreset.all;
+                          _entryFilter = StatementEntryFilter.all;
+                        });
+                      },
+                      child: const Text('إعادة تعيين'),
+                    ),
+                  ],
                 ),
               ),
-            ),
-            StatementPeriodChips(
-              preset: _preset,
-              customRange: _customRange,
-              onSelect: (StatementPeriodPreset p) {
-                if (p == StatementPeriodPreset.custom) {
-                  widget.onPresetChanged(p);
-                  return;
-                }
-                setState(() {
-                  _preset = p;
-                  _customRange = null;
-                });
-              },
-            ),
-            if (widget.filters.length > 1) ...<Widget>[
+              const Divider(height: 1),
               const SizedBox(height: 8),
+
+              // ---- Period section -------------------------------------
               Padding(
                 padding: const EdgeInsets.symmetric(horizontal: 8),
                 child: Text(
-                  'نوع الحركة',
+                  'الفترة',
                   style: theme.textTheme.labelMedium?.copyWith(
                     fontWeight: FontWeight.w600,
                     color: scheme.onSurfaceVariant,
                   ),
                 ),
               ),
-              StatementEntryFilterChips(
-                filters: widget.filters,
-                selected: _entryFilter,
-                onSelect: (StatementEntryFilter f) {
-                  setState(() => _entryFilter = f);
-                },
+              StatementPeriodChips(
+                preset: _preset,
+                onSelect: (StatementPeriodPreset p) =>
+                    setState(() => _preset = p),
+              ),
+
+              // ---- Entry type section (only when >1 filter) ------------
+              if (widget.filters.length > 1) ...<Widget>[
+                const SizedBox(height: 8),
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8),
+                  child: Text(
+                    'نوع الحركة',
+                    style: theme.textTheme.labelMedium?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: scheme.onSurfaceVariant,
+                    ),
+                  ),
+                ),
+                StatementEntryFilterChips(
+                  filters: widget.filters,
+                  selected: _entryFilter,
+                  onSelect: (StatementEntryFilter f) =>
+                      setState(() => _entryFilter = f),
+                ),
+              ],
+
+              // ---- Apply button ----------------------------------------
+              const SizedBox(height: 16),
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: FilledButton(
+                  onPressed: () {
+                    Navigator.of(context).pop(
+                      StatementFilterResult(
+                        preset: _preset,
+                        entryFilter: _entryFilter,
+                      ),
+                    );
+                  },
+                  child: const Text('تطبيق'),
+                ),
               ),
             ],
-            const SizedBox(height: 16),
-            Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: FilledButton(
-                onPressed: () {
-                  // Sync the local state into the outer closure before
-                  // applying, so the caller sees the final values.
-                  widget.onPresetChanged(_preset);
-                  widget.onEntryFilterChanged(_entryFilter);
-                  widget.onApply();
-                },
-                child: const Text('تطبيق'),
-              ),
-            ),
-          ],
+          ),
         ),
       ),
     );
