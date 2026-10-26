@@ -4,6 +4,7 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
@@ -25,13 +26,7 @@ import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/customer_adjustment_dialog.dart';
 import '../providers/sales_providers.dart';
 
-enum _PeriodPreset {
-  all,
-  thisMonth,
-  last30Days,
-  thisYear,
-  custom,
-}
+enum _PeriodPreset { all, thisMonth, last30Days, thisYear, custom }
 
 /// Full account statement page for a single customer.
 class CustomerStatementPage extends ConsumerStatefulWidget {
@@ -52,10 +47,6 @@ class _CustomerStatementPageState
   _PeriodPreset _preset = _PeriodPreset.all;
   DateTimeRange? _customRange;
   bool _isPrinting = false;
-
-  // ---------------------------------------------------------------------------
-  // Period computation
-  // ---------------------------------------------------------------------------
 
   DateTime? get _fromDate {
     final DateTime now = DateTime.now();
@@ -96,9 +87,10 @@ class _CustomerStatementPageState
         toDate: _toDate,
       );
 
-  // ---------------------------------------------------------------------------
-  // Actions
-  // ---------------------------------------------------------------------------
+  Future<void> _refresh() async {
+    ref.invalidate(customerStatementProvider(_args));
+    await ref.read(customerStatementProvider(_args).future);
+  }
 
   Future<void> _selectPreset(_PeriodPreset preset) async {
     if (preset == _PeriodPreset.custom) {
@@ -136,6 +128,9 @@ class _CustomerStatementPageState
 
     if (updated == null || !mounted) return;
 
+    await _refresh();
+
+    if (!mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(
@@ -143,7 +138,6 @@ class _CustomerStatementPageState
       );
   }
 
-  /// Reads the A4 print style from company settings.
   PrintStyleSettings _readA4Style() {
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
@@ -154,10 +148,6 @@ class _CustomerStatementPageState
     );
   }
 
-  /// Loads the company logo bytes for PDF printing.
-  ///
-  /// Returns `null` on any failure — the statement is still printable
-  /// without a logo.
   Future<Uint8List?> _loadLogoBytes() async {
     final CompanySettings? s =
         ref.read(companySettingsProvider).valueOrNull;
@@ -190,7 +180,6 @@ class _CustomerStatementPageState
 
       final String fileName = 'statement-${statement.customer.name}.pdf';
 
-      // ---- Direct print path when enabled ----
       final bool direct =
           ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
               false;
@@ -211,7 +200,6 @@ class _CustomerStatementPageState
         }
       }
 
-      // ---- Fallback: system dialog ----
       await Printing.layoutPdf(
         name: fileName,
         onLayout: (PdfPageFormat _) async => bytes,
@@ -232,17 +220,10 @@ class _CustomerStatementPageState
     }
   }
 
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
-
   @override
   Widget build(BuildContext context) {
     return AppShell(
       appBar: AppBar(
-        // Explicit back button that returns to the customers list. The
-        // page is opened via `Navigator.push` from `CustomersPage`, so a
-        // simple `pop()` is the correct navigation target.
         leading: IconButton(
           tooltip: 'رجوع',
           icon: const Icon(Icons.arrow_back),
@@ -268,14 +249,14 @@ class _CustomerStatementPageState
               title: 'تعذّر تحميل كشف الحساب',
               message: _errorMessage(error),
               retryLabel: 'إعادة المحاولة',
-              onRetry: () =>
-                  ref.invalidate(customerStatementProvider(_args)),
+              onRetry: _refresh,
             ),
             data: (CustomerStatement statement) => _StatementBody(
               statement: statement,
               preset: _preset,
               customRange: _customRange,
               onSelectPreset: _selectPreset,
+              onRefresh: _refresh,
             ),
           ),
     );
@@ -292,28 +273,39 @@ class _StatementBody extends StatelessWidget {
     required this.preset,
     required this.customRange,
     required this.onSelectPreset,
+    required this.onRefresh,
   });
 
   final CustomerStatement statement;
   final _PeriodPreset preset;
   final DateTimeRange? customRange;
   final Future<void> Function(_PeriodPreset) onSelectPreset;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
+    final _ComputedStatement computed = _ComputedStatement.from(statement);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: <Widget>[
-        _CustomerInfoCard(statement: statement),
+        _CustomerInfoCard(
+          statement: statement,
+          closingBalance: computed.closingBalance,
+        ),
         const SizedBox(height: 8),
         _PeriodChips(
           preset: preset,
           customRange: customRange,
           onSelect: onSelectPreset,
         ),
-        const SizedBox(height: 8),
+        const SizedBox(height: 4),
         Expanded(
-          child: _EntriesList(statement: statement),
+          child: _EntriesList(
+            statement: statement,
+            computed: computed,
+            onRefresh: onRefresh,
+          ),
         ),
       ],
     );
@@ -321,13 +313,88 @@ class _StatementBody extends StatelessWidget {
 }
 
 // ============================================================================
+// Computed statement — حساب دقيق ومرتب
+// ============================================================================
+
+class _ComputedStatement {
+  const _ComputedStatement({
+    required this.openingBalance,
+    required this.chronologicalEntries,
+    required this.closingBalance,
+  });
+
+  final double openingBalance;
+  final List<_AugEntry> chronologicalEntries;
+  final double closingBalance;
+
+  factory _ComputedStatement.from(CustomerStatement statement) {
+    final List<_IndexedEntry> indexed = [];
+    for (int i = 0; i < statement.entries.length; i++) {
+      indexed.add(_IndexedEntry(statement.entries[i], i));
+    }
+
+    indexed.sort((a, b) {
+      final int c = a.entry.date.compareTo(b.entry.date);
+      if (c != 0) return c;
+
+      // في نفس اليوم، نعكس الترتيب الأصلي
+      // (حتى تظهر الحركة المضافة حديثاً في الأعلى بعد عكس القائمة)
+      return b.originalIndex.compareTo(a.originalIndex);
+    });
+
+    double balance = statement.openingBalance;
+    final List<_AugEntry> augmented = [];
+    for (final item in indexed) {
+      final CustomerStatementEntry e = item.entry;
+      final double previous = balance;
+      
+      // العميل: مدين يزيد الرصيد، دائن يقلله
+      balance = balance + e.debit - e.credit;
+
+      augmented.add(_AugEntry(
+        entry: e,
+        previousBalance: previous,
+        currentBalance: balance,
+      ));
+    }
+
+    return _ComputedStatement(
+      openingBalance: statement.openingBalance,
+      chronologicalEntries: augmented,
+      closingBalance: balance,
+    );
+  }
+}
+
+class _IndexedEntry {
+  _IndexedEntry(this.entry, this.originalIndex);
+  final CustomerStatementEntry entry;
+  final int originalIndex;
+}
+
+class _AugEntry {
+  const _AugEntry({
+    required this.entry,
+    required this.previousBalance,
+    required this.currentBalance,
+  });
+  final CustomerStatementEntry entry;
+  final double previousBalance;
+  final double currentBalance;
+}
+
+// ============================================================================
 // Info card
 // ============================================================================
 
 class _CustomerInfoCard extends StatelessWidget {
-  const _CustomerInfoCard({required this.statement});
+  const _CustomerInfoCard({
+    required this.statement,
+    required this.closingBalance,
+  });
 
   final CustomerStatement statement;
+  final double closingBalance;
 
   @override
   Widget build(BuildContext context) {
@@ -338,6 +405,19 @@ class _CustomerInfoCard extends StatelessWidget {
     final List<String> meta = <String>[];
     if (customer.hasCode) meta.add('كود: ${customer.code}');
     if (customer.hasPhone) meta.add(customer.phone!);
+
+    final bool weOwe = closingBalance > 0.01;
+    final bool theyOweUs = closingBalance < -0.01;
+    final String balanceLabel = weOwe
+        ? 'مستحق على العميل'
+        : theyOweUs
+            ? 'لك عند العميل'
+            : 'الرصيد مسدد';
+    final Color balanceColor = weOwe
+        ? scheme.error
+        : theyOweUs
+            ? const Color(0xFF1B5E20)
+            : scheme.onSurfaceVariant;
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -386,16 +466,17 @@ class _CustomerInfoCard extends StatelessWidget {
             Row(
               children: <Widget>[
                 Text(
-                  'الرصيد الحالي',
-                  style: theme.textTheme.bodyMedium,
+                  balanceLabel,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    fontWeight: FontWeight.w600,
+                    color: balanceColor,
+                  ),
                 ),
                 const Spacer(),
                 Text(
-                  AppFormatters.money(customer.balance),
+                  AppFormatters.money(closingBalance.abs()),
                   style: theme.textTheme.titleLarge?.copyWith(
-                    color: customer.balance > 0
-                        ? scheme.error
-                        : scheme.primary,
+                    color: balanceColor,
                     fontWeight: FontWeight.w800,
                   ),
                 ),
@@ -440,12 +521,11 @@ class _PeriodChips extends StatelessWidget {
   }
 
   Widget _chip(BuildContext context, _PeriodPreset value, String label) {
-    final bool selected = preset == value;
     return Padding(
       padding: const EdgeInsetsDirectional.only(end: 6),
       child: ChoiceChip(
         label: Text(label),
-        selected: selected,
+        selected: preset == value,
         onSelected: (_) => onSelect(value),
         showCheckmark: false,
       ),
@@ -466,239 +546,243 @@ class _PeriodChips extends StatelessWidget {
 // ============================================================================
 
 class _EntriesList extends StatelessWidget {
-  const _EntriesList({required this.statement});
+  const _EntriesList({
+    required this.statement,
+    required this.computed,
+    required this.onRefresh,
+  });
 
   final CustomerStatement statement;
+  final _ComputedStatement computed;
+  final Future<void> Function() onRefresh;
 
   @override
   Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
     if (statement.isEmpty) {
-      return AppEmptyView(
-        icon: Icons.receipt_long_outlined,
-        title: 'لا توجد حركات',
-        message: 'لم تُسجَّل أي حركة على هذا العميل في الفترة المحددة.',
-        action: _OpeningBalanceTile(
-          openingBalance: statement.openingBalance,
+      return RefreshIndicator(
+        onRefresh: onRefresh,
+        child: ListView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          children: <Widget>[
+            SizedBox(
+              height: 320,
+              child: AppEmptyView(
+                icon: Icons.receipt_long_outlined,
+                title: 'لا توجد حركات',
+                message: 'لم تُسجَّل أي حركة على هذا العميل في الفترة المحددة.',
+              ),
+            ),
+          ],
         ),
       );
     }
 
-    // Force the display order to be newest-first, regardless of the
-    // ordering that [CustomerStatement.build] returned upstream.
-    // Sorting here is a guaranteed invariant on the UI layer, so the
-    // statement always shows the most recent activity at the top.
-    final List<CustomerStatementEntry> sorted =
-        List<CustomerStatementEntry>.of(statement.entries)
-          ..sort(
-            (CustomerStatementEntry a, CustomerStatementEntry b) =>
-                b.date.compareTo(a.date),
-          );
+    final List<_AugEntry> display =
+        computed.chronologicalEntries.reversed.toList(growable: false);
 
-    return ListView.separated(
-      padding: const EdgeInsets.only(bottom: 24),
-      itemCount: sorted.length + 2,
-      separatorBuilder: (_, __) => const SizedBox(height: 6),
-      itemBuilder: (BuildContext context, int index) {
-        if (index == 0) {
-          return _OpeningBalanceTile(
-            openingBalance: statement.openingBalance,
-          );
-        }
-        if (index == sorted.length + 1) {
-          return _ClosingBalanceCard(statement: statement);
-        }
-        return _EntryCard(entry: sorted[index - 1]);
-      },
+    final bool showOpening = computed.openingBalance.abs() > 0.01;
+    final int headerIndex = showOpening ? 1 : 0;
+    final int firstRowIndex = headerIndex + 1;
+    final int closingIndex = firstRowIndex + display.length;
+
+    return RefreshIndicator(
+      onRefresh: onRefresh,
+      color: scheme.primary,
+      child: ListView.builder(
+        physics: const AlwaysScrollableScrollPhysics(),
+        padding: const EdgeInsets.only(bottom: 16),
+        itemCount: closingIndex + 1,
+        itemBuilder: (BuildContext context, int index) {
+          if (showOpening && index == 0) {
+            return _OpeningBalanceTile(
+              openingBalance: computed.openingBalance,
+            );
+          }
+          if (index == headerIndex) {
+            return const _TableHeaderRow();
+          }
+          if (index == closingIndex) {
+            return _ClosingBalanceCard(
+              closingBalance: computed.closingBalance,
+              entryCount: display.length,
+            );
+          }
+          final int entryIdx = index - firstRowIndex;
+          return _EntryRow(aug: display[entryIdx]);
+        },
+      ),
     );
   }
 }
 
 // ============================================================================
-// Opening balance tile
+// Table header row
 // ============================================================================
 
-class _OpeningBalanceTile extends StatelessWidget {
-  const _OpeningBalanceTile({required this.openingBalance});
+class _TableHeaderRow extends StatelessWidget {
+  const _TableHeaderRow();
 
-  final double openingBalance;
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+    const TextStyle style =
+        TextStyle(fontSize: 11, fontWeight: FontWeight.w800);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+      color: scheme.surfaceContainerHighest,
+      child: Row(
+        children: const <Widget>[
+          SizedBox(width: 54, child: Text('التاريخ', style: style)),
+          Expanded(child: Text('البيان', style: style)),
+          SizedBox(
+            width: 68,
+            child: Text('الرصيد', style: style, textAlign: TextAlign.right),
+          ),
+          SizedBox(
+            width: 68,
+            child: Text('المدفوع', style: style, textAlign: TextAlign.right),
+          ),
+          SizedBox(
+            width: 76,
+            child: Text('الرصيد الحالي', style: style, textAlign: TextAlign.right),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Entry row
+// ============================================================================
+
+class _EntryRow extends StatelessWidget {
+  const _EntryRow({required this.aug});
+
+  final _AugEntry aug;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final CustomerStatementEntry entry = aug.entry;
+    
+    // المدفوع هو الدائن (credit)، والمسحوب هو المدين (debit)
+    final double paid = entry.credit;
+    final double debit = entry.debit;
+    
+    final double prevBal = aug.previousBalance;
+    final double currBal = aug.currentBalance;
 
-    return DecoratedBox(
+    final bool prevWeOwe = prevBal > 0.01;
+    final bool prevTheyOweUs = prevBal < -0.01;
+    final Color prevColor = prevWeOwe ? scheme.error : (prevTheyOweUs ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant);
+    final String prevText = (prevWeOwe || prevTheyOweUs) ? '${prevWeOwe ? '+' : '−'}${AppFormatters.money(prevBal.abs())}' : '0.00';
+
+    final bool currWeOwe = currBal > 0.01;
+    final bool currTheyOweUs = currBal < -0.01;
+    final Color currColor = currWeOwe ? scheme.error : (currTheyOweUs ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant);
+    final String currText = (currWeOwe || currTheyOweUs) ? '${currWeOwe ? '+' : '−'}${AppFormatters.money(currBal.abs())}' : '0.00';
+
+    final String baseDesc = entry.hasDescription ? entry.description! : _typeLabel(entry.type);
+    final String amountLabel = debit > 0 ? ' (+${AppFormatters.money(debit)})' : '';
+    final String description = '$baseDesc$amountLabel';
+    final Color typeColor = debit > 0 ? scheme.error : const Color(0xFF1B5E20);
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHigh,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 10),
-        child: Row(
-          children: <Widget>[
-            Icon(
-              Icons.play_circle_outline,
-              size: 18,
-              color: scheme.onSurfaceVariant,
-            ),
-            const SizedBox(width: 8),
-            Text(
-              'رصيد افتتاحي',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
-            ),
-            const Spacer(),
-            Text(
-              AppFormatters.money(openingBalance),
-              style: theme.textTheme.titleMedium?.copyWith(
-                fontWeight: FontWeight.w800,
-                color: openingBalance > 0
-                    ? scheme.error
-                    : scheme.onSurface,
-              ),
-            ),
-          ],
+        border: Border(
+          bottom: BorderSide(
+            color: scheme.outlineVariant.withValues(alpha: 0.5),
+            width: 0.5,
+          ),
         ),
       ),
-    );
-  }
-}
-
-// ============================================================================
-// Entry card
-// ============================================================================
-
-class _EntryCard extends StatelessWidget {
-  const _EntryCard({required this.entry});
-
-  final CustomerStatementEntry entry;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    final Color accent = entry.isDebit ? scheme.error : scheme.primary;
-    final IconData icon = _iconFor(entry.type);
-    final String description = entry.hasDescription
-        ? entry.description!
-        : _typeLabel(entry.type);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(12),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          mainAxisSize: MainAxisSize.min,
-          children: <Widget>[
-            Row(
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          SizedBox(
+            width: 54,
+            child: Text(
+              DateFormat('dd/MM').format(entry.date.toLocal()),
+              style: const TextStyle(fontSize: 11),
+            ),
+          ),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: accent.withValues(alpha: 0.12),
-                    borderRadius: BorderRadius.circular(8),
-                  ),
-                  child: Icon(icon, size: 18, color: accent),
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: <Widget>[
-                      Text(
-                        description,
-                        style: theme.textTheme.titleSmall?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        _metaLine(),
-                        style: theme.textTheme.bodySmall?.copyWith(
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
+                Text(
+                  description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: typeColor,
                   ),
                 ),
-                const SizedBox(width: 8),
-                Column(
-                  crossAxisAlignment: CrossAxisAlignment.end,
-                  mainAxisSize: MainAxisSize.min,
-                  children: <Widget>[
-                    Text(
-                      '${entry.isDebit ? '+' : '−'}'
-                      '${AppFormatters.money(entry.isDebit ? entry.debit : entry.credit)}',
-                      style: theme.textTheme.titleSmall?.copyWith(
-                        color: accent,
-                        fontWeight: FontWeight.w800,
-                      ),
+                if (entry.hasReference)
+                  Text(
+                    entry.reference!,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      fontSize: 10,
+                      color: scheme.onSurfaceVariant,
                     ),
-                    const SizedBox(height: 2),
-                    Text(
-                      'الرصيد: '
-                      '${AppFormatters.money(entry.balanceAfter ?? 0)}',
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
-                ),
+                  ),
               ],
             ),
-            if (entry.hasNotes) ...<Widget>[
-              const SizedBox(height: 6),
-              Text(
-                entry.notes!,
-                style: theme.textTheme.bodySmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                  fontStyle: FontStyle.italic,
-                ),
-                maxLines: 2,
-                overflow: TextOverflow.ellipsis,
+          ),
+          // Previous Balance (الرصيد)
+          SizedBox(
+            width: 68,
+            child: Text(
+              prevText,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: prevColor,
               ),
-            ],
-          ],
-        ),
+            ),
+          ),
+          // Paid (المدفوع)
+          SizedBox(
+            width: 68,
+            child: Text(
+              paid > 0 ? AppFormatters.money(paid) : '—',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                color: paid > 0 ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant,
+                fontWeight: paid > 0 ? FontWeight.w600 : FontWeight.normal,
+              ),
+            ),
+          ),
+          // Current Balance (الرصيد الحالي)
+          SizedBox(
+            width: 76,
+            child: Text(
+              currText,
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w800,
+                color: currColor,
+              ),
+            ),
+          ),
+        ],
       ),
     );
-  }
-
-  String _metaLine() {
-    final String date = AppFormatters.dateTime(entry.date);
-    if (entry.hasReference) {
-      return '$date · ${entry.reference}';
-    }
-    return date;
-  }
-
-  static IconData _iconFor(String type) {
-    switch (type) {
-      case StatementEntryType.sale:
-        return Icons.receipt_long_outlined;
-      case StatementEntryType.saleReversal:
-        return Icons.assignment_return_outlined;
-      case StatementEntryType.payment:
-        return Icons.payments_outlined;
-      case StatementEntryType.adjustment:
-        return Icons.tune;
-      default:
-        return Icons.circle_outlined;
-    }
   }
 
   static String _typeLabel(String type) {
@@ -718,73 +802,141 @@ class _EntryCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Closing balance card
+// Opening balance tile
 // ============================================================================
 
-class _ClosingBalanceCard extends StatelessWidget {
-  const _ClosingBalanceCard({required this.statement});
+class _OpeningBalanceTile extends StatelessWidget {
+  const _OpeningBalanceTile({required this.openingBalance});
 
-  final CustomerStatement statement;
+  final double openingBalance;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final bool inDebt = statement.isInDebt;
+    final bool weOwe = openingBalance > 0.01;
+    final bool theyOweUs = openingBalance < -0.01;
 
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: inDebt ? scheme.errorContainer : scheme.primaryContainer,
-        borderRadius: BorderRadius.circular(14),
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
+      color: scheme.surfaceContainerHigh,
+      child: Row(
+        children: <Widget>[
+          Icon(
+            Icons.play_circle_outline,
+            size: 16,
+            color: scheme.onSurfaceVariant,
+          ),
+          const SizedBox(width: 6),
+          Text(
+            'رصيد افتتاحي',
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontWeight: FontWeight.w700,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            theyOweUs
+                ? '−${AppFormatters.money(openingBalance.abs())}'
+                : AppFormatters.money(openingBalance),
+            style: theme.textTheme.titleSmall?.copyWith(
+              fontWeight: FontWeight.w800,
+              color: weOwe
+                  ? scheme.error
+                  : theyOweUs
+                      ? const Color(0xFF1B5E20)
+                      : scheme.onSurfaceVariant,
+            ),
+          ),
+        ],
       ),
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Row(
-              children: <Widget>[
-                Icon(
-                  inDebt
-                      ? Icons.warning_amber_outlined
-                      : Icons.check_circle_outline,
-                  color: inDebt
-                      ? scheme.onErrorContainer
-                      : scheme.onPrimaryContainer,
-                ),
-                const SizedBox(width: 8),
-                Text(
-                  inDebt ? 'الرصيد النهائي (مدين)' : 'الرصيد النهائي',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.w700,
-                    color: inDebt
-                        ? scheme.onErrorContainer
-                        : scheme.onPrimaryContainer,
+    );
+  }
+}
+
+// ============================================================================
+// Closing balance card
+// ============================================================================
+
+class _ClosingBalanceCard extends StatelessWidget {
+  const _ClosingBalanceCard({
+    required this.closingBalance,
+    required this.entryCount,
+  });
+
+  final double closingBalance;
+  final int entryCount;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final bool weOwe = closingBalance > 0.01;
+    final bool theyOweUs = closingBalance < -0.01;
+
+    final Color bg = weOwe
+        ? scheme.errorContainer
+        : theyOweUs
+            ? scheme.primaryContainer
+            : scheme.surfaceContainerHighest;
+    final Color fg = weOwe
+        ? scheme.onErrorContainer
+        : theyOweUs
+            ? scheme.onPrimaryContainer
+            : scheme.onSurfaceVariant;
+    final IconData icon = weOwe
+        ? Icons.warning_amber_outlined
+        : theyOweUs
+            ? Icons.account_balance_wallet_outlined
+            : Icons.check_circle_outline;
+    final String label = weOwe
+        ? 'الرصيد النهائي — مستحق على العميل'
+        : theyOweUs
+            ? 'الرصيد النهائي — لك عند العميل'
+            : 'الرصيد النهائي — مسدد';
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: bg,
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: <Widget>[
+              Row(
+                children: <Widget>[
+                  Icon(icon, color: fg, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      label,
+                      style: theme.textTheme.titleSmall?.copyWith(
+                        fontWeight: FontWeight.w700,
+                        color: fg,
+                      ),
+                    ),
                   ),
+                ],
+              ),
+              const SizedBox(height: 8),
+              Text(
+                AppFormatters.money(closingBalance.abs()),
+                style: theme.textTheme.headlineSmall?.copyWith(
+                  fontWeight: FontWeight.w900,
+                  color: fg,
                 ),
-              ],
-            ),
-            const SizedBox(height: 6),
-            Text(
-              AppFormatters.money(statement.closingBalance),
-              style: theme.textTheme.headlineSmall?.copyWith(
-                fontWeight: FontWeight.w900,
-                color: inDebt
-                    ? scheme.onErrorContainer
-                    : scheme.onPrimaryContainer,
               ),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'عدد الحركات: '
-              '${AppFormatters.integer(statement.entryCount)}',
-              style: theme.textTheme.bodySmall?.copyWith(
-                color: inDebt
-                    ? scheme.onErrorContainer
-                    : scheme.onPrimaryContainer,
+              const SizedBox(height: 6),
+              Text(
+                'عدد الحركات: ${AppFormatters.integer(entryCount)}',
+                style: theme.textTheme.bodySmall?.copyWith(color: fg),
               ),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
