@@ -138,9 +138,6 @@ class SalesRemoteDataSource {
   // CUSTOMER PAYMENTS
   // ===========================================================================
 
-  /// Lists the most recent payments for [customerId], newest first.
-  ///
-  /// Falls back to [defaultLimit] when [limit] is null or non-positive.
   Future<List<CustomerPaymentModel>> listCustomerPayments(
     String customerId, {
     int? limit,
@@ -160,11 +157,6 @@ class SalesRemoteDataSource {
     return rows.map(CustomerPaymentModel.fromMap).toList(growable: false);
   }
 
-  /// Inserts a standalone payment for [customerId].
-  ///
-  /// The database trigger `apply_customer_payment` runs immediately after
-  /// the insert and reduces `customers.balance` by [amount]. The row is
-  /// returned so the caller can update its in-memory copy of the customer.
   Future<CustomerPaymentModel> recordCustomerPayment({
     required String companyId,
     required String customerId,
@@ -201,10 +193,6 @@ class SalesRemoteDataSource {
   // CUSTOMER ADJUSTMENTS
   // ===========================================================================
 
-  /// Lists the manual adjustments recorded for [customerId], newest first.
-  ///
-  /// When [fromDate] / [toDate] are provided they act as an inclusive
-  /// window on `created_at`.
   Future<List<CustomerAdjustmentModel>> listCustomerAdjustments(
     String customerId, {
     DateTime? fromDate,
@@ -232,12 +220,6 @@ class SalesRemoteDataSource {
         .toList(growable: false);
   }
 
-  /// Inserts a manual adjustment for [customerId].
-  ///
-  /// The database trigger `apply_customer_balance_adjustment` runs
-  /// immediately after the insert and applies the signed delta to
-  /// `customers.balance`. A negative delta that would drive the balance
-  /// below zero is rejected by the trigger with SQLSTATE `23514`.
   Future<CustomerAdjustmentModel> addCustomerAdjustment({
     required String companyId,
     required String customerId,
@@ -271,12 +253,6 @@ class SalesRemoteDataSource {
   // CUSTOMER RETURNS (for statement)
   // ===========================================================================
 
-  /// Lists sale returns that involve [customerId].
-  ///
-  /// Used by the statement builder to include credit-note refunds (which
-  /// reduce the customer's balance) and their reversals when a confirmed
-  /// return is later cancelled. Drafts are excluded — they have not
-  /// affected the balance yet.
   Future<List<SaleReturnModel>> listCustomerReturns(
     String customerId,
   ) async {
@@ -324,11 +300,6 @@ class SalesRemoteDataSource {
     return rows.map(SaleModel.fromMap).toList(growable: false);
   }
 
-  /// Lists sales that involve [customerId], across the whole company.
-  ///
-  /// Used by the statement builder to reconstruct a customer's balance
-  /// history. Only `confirmed` and `cancelled` sales are relevant — a
-  /// `draft` sale has not affected the balance yet.
   Future<List<SaleModel>> listCustomerSales(String customerId) async {
     final SupabaseClient client = _requireClient();
 
@@ -366,13 +337,6 @@ class SalesRemoteDataSource {
     return rows.map(SaleItemModel.fromMap).toList(growable: false);
   }
 
-  /// Creates a draft sale with its items.
-  ///
-  /// The header is inserted with `paid_amount = 0` because `total` is still
-  /// `0` at that moment (the items have not been inserted yet) and the
-  /// database enforces `paid_amount <= total`. Once the items are in place
-  /// the parent subtotal is recomputed by a trigger, and the effective
-  /// `paid_amount` is written in a follow-up update.
   Future<SaleModel> createSale({
     required String companyId,
     required String branchId,
@@ -428,8 +392,6 @@ class SalesRemoteDataSource {
         );
       }
 
-      // The parent subtotal has now been recomputed by the AFTER-INSERT
-      // trigger on sale_items. We can safely set paid_amount (<= total).
       if (paidAmount > 0) {
         await client
             .from('sales')
@@ -450,10 +412,6 @@ class SalesRemoteDataSource {
     return SaleModel.fromMap(finalRow);
   }
 
-  /// Replaces the header and items of an existing draft sale.
-  ///
-  /// Same reasoning as [createSale]: `paid_amount` is reset to `0` before
-  /// items are replaced, then written in a final update.
   Future<SaleModel> updateDraft({
     required String saleId,
     required String companyId,
@@ -544,7 +502,6 @@ class SalesRemoteDataSource {
   // RETURNS
   // ===========================================================================
 
-  /// Lists sale returns for a company, newest first.
   Future<List<SaleReturnModel>> listReturns(
     String companyId, {
     String? branchId,
@@ -602,7 +559,6 @@ class SalesRemoteDataSource {
     return rows.map(SaleReturnItemModel.fromMap).toList(growable: false);
   }
 
-  /// Lists every return recorded against [saleId] (any status).
   Future<List<SaleReturnModel>> listReturnsForSale(String saleId) async {
     final SupabaseClient client = _requireClient();
 
@@ -615,10 +571,11 @@ class SalesRemoteDataSource {
     return rows.map(SaleReturnModel.fromMap).toList(growable: false);
   }
 
+  // ✅ التعديل: saleId أصبح اختياريًا (String?)
   Future<SaleReturnModel> createReturn({
     required String companyId,
     required String branchId,
-    required String saleId,
+    String? saleId, // ⬅️ كان: required String saleId
     String? customerId,
     required DateTime returnDate,
     required List<SaleReturnItemDraft> items,
@@ -632,7 +589,7 @@ class SalesRemoteDataSource {
     final Map<String, dynamic> headerPayload = <String, dynamic>{
       'company_id': companyId,
       'branch_id': branchId,
-      'sale_id': saleId,
+      'sale_id': saleId, // يمكن أن يكون null
       if (customerId != null) 'customer_id': customerId,
       'return_date': _formatDateOnly(returnDate),
       'refund_method': refundMethod,
@@ -678,11 +635,12 @@ class SalesRemoteDataSource {
     return SaleReturnModel.fromMap(finalRow);
   }
 
+  // ✅ التعديل: saleId أصبح اختياريًا (String?)
   Future<SaleReturnModel> updateReturnDraft({
     required String returnId,
     required String companyId,
     required String branchId,
-    required String saleId,
+    String? saleId, // ⬅️ كان: required String saleId
     String? customerId,
     required DateTime returnDate,
     required List<SaleReturnItemDraft> items,
@@ -693,7 +651,7 @@ class SalesRemoteDataSource {
 
     final Map<String, dynamic> headerPayload = <String, dynamic>{
       'branch_id': branchId,
-      'sale_id': saleId,
+      'sale_id': saleId, // يمكن أن يكون null
       'customer_id': customerId,
       'return_date': _formatDateOnly(returnDate),
       'refund_method': refundMethod,
@@ -797,6 +755,7 @@ class SalesRemoteDataSource {
         <String, dynamic>{
           'company_id': companyId,
           'return_id': returnId,
+          // ✅ saleItemId أصبح String? — يقبل null للمرتجع المستقل
           'sale_item_id': item.saleItemId,
           'product_id': item.productId,
           'unit_id': item.unitId,
