@@ -1,22 +1,26 @@
 // lib/shared/widgets/statements/account_statement_page.dart
 //
 // Generic account statement page — customer, supplier, and any future
-// party (employee, cashbox, …). It owns:
+// party (employee, cashbox, …).
 //
-// * page state (`_preset`, `_customRange`, `_entryFilter`, `_isPrinting`,
-//   `_isExporting`),
-// * period + entry-type chips,
-// * sticky table header,
-// * loading / error / empty states,
-// * pull-to-refresh,
-// * the AppBar (back / extra action / export / print).
+// **Phase 4 update (filter redesign):**
+// * The two chip rows (period + entry-type) that used to sit above the
+//   table have been merged into a single AppBar filter button that opens
+//   `statement_filter_sheet.dart`.
+// * The button shows a `Badge.count` with the number of active filters
+//   (0–2). When zero, the badge is hidden.
+// * A compact `StatementActiveFilterBar` appears under the summary bar
+//   **only** when at least one filter is active, with a "مسح" shortcut
+//   that resets both filters in one tap.
+// * `custom` period preset was removed — see `statement_filters.dart`.
 //
-// Everything party-specific is injected via [StatementPageConfig].
-//
-// Phase 4 additions:
-// * CSV export button (governed by `enableCsvExport`, default true).
-// * Reconciliation banner when the cached balance diverges from the
-//   computed one.
+// Layout (top → bottom):
+//   InfoCard
+//   SummaryBar              ← 4 cells: opening / debit / credit / closing
+//   ReconciliationBanner    ← only when cached ≠ computed balance
+//   ActiveFilterBar         ← only when a filter is active
+//   TableHeader             ← sticky; hidden when statement is empty
+//   Expanded(EntriesList)
 
 import 'dart:convert';
 import 'dart:typed_data';
@@ -31,12 +35,12 @@ import '../../../../shared/widgets/app_loader.dart';
 import 'models/statement_filters.dart';
 import 'models/statement_models.dart';
 import 'statement_csv_export.dart';
+import 'widgets/statement_active_filter_bar.dart';
 import 'widgets/statement_closing_balance_card.dart';
 import 'widgets/statement_empty_view.dart';
-import 'widgets/statement_entry_filter_chips.dart';
 import 'widgets/statement_entry_row.dart';
+import 'widgets/statement_filter_sheet.dart';
 import 'widgets/statement_info_card.dart';
-import 'widgets/statement_period_chips.dart';
 import 'widgets/statement_reconciliation_banner.dart';
 import 'widgets/statement_summary_bar.dart';
 import 'widgets/statement_table_header.dart';
@@ -135,7 +139,6 @@ class AccountStatementPage<T> extends ConsumerStatefulWidget {
 class _AccountStatementPageState<T>
     extends ConsumerState<AccountStatementPage<T>> {
   StatementPeriodPreset _preset = StatementPeriodPreset.all;
-  (DateTime, DateTime)? _customRange;
   StatementEntryFilter _entryFilter = StatementEntryFilter.all;
   bool _isPrinting = false;
   bool _isExporting = false;
@@ -145,10 +148,19 @@ class _AccountStatementPageState<T>
   // ---------------------------------------------------------------------------
 
   DateTime? get _fromDate =>
-      _preset.computeFrom(now: DateTime.now(), customRange: _customRange);
+      _preset.computeFrom(now: DateTime.now());
 
   DateTime? get _toDate =>
-      _preset.computeTo(now: DateTime.now(), customRange: _customRange);
+      _preset.computeTo(now: DateTime.now());
+
+  /// Number of **active** filters (preset + entry type), used by the
+  /// AppBar badge. Range: 0..2.
+  int get _activeFilterCount {
+    int count = 0;
+    if (_preset != StatementPeriodPreset.all) count++;
+    if (_entryFilter != StatementEntryFilter.all) count++;
+    return count;
+  }
 
   // ---------------------------------------------------------------------------
   // Actions
@@ -158,28 +170,25 @@ class _AccountStatementPageState<T>
     await widget.config.refresh(ref, _fromDate, _toDate);
   }
 
-  Future<void> _selectPreset(StatementPeriodPreset preset) async {
-    if (preset == StatementPeriodPreset.custom) {
-      final DateTime now = DateTime.now();
-      final (DateTime, DateTime)? current = _customRange;
-      final DateTimeRange? picked = await showDateRangePicker(
-        context: context,
-        firstDate: DateTime(now.year - 5),
-        lastDate: now,
-        initialDateRange: current == null
-            ? null
-            : DateTimeRange(start: current.$1, end: current.$2),
-        helpText: 'اختر الفترة',
-        saveText: 'تطبيق',
-      );
-      if (picked == null || !mounted) return;
-      setState(() {
-        _preset = StatementPeriodPreset.custom;
-        _customRange = (picked.start, picked.end);
-      });
-      return;
-    }
-    setState(() => _preset = preset);
+  Future<void> _openFilterSheet() async {
+    final StatementFilterResult? result = await showStatementFilterSheet(
+      context: context,
+      initialPreset: _preset,
+      initialEntryFilter: _entryFilter,
+      partyKind: widget.config.partyKind,
+    );
+    if (result == null || !mounted) return;
+    setState(() {
+      _preset = result.preset;
+      _entryFilter = result.entryFilter;
+    });
+  }
+
+  void _clearFilters() {
+    setState(() {
+      _preset = StatementPeriodPreset.all;
+      _entryFilter = StatementEntryFilter.all;
+    });
   }
 
   Future<void> _print(T rawStatement) async {
@@ -271,6 +280,9 @@ class _AccountStatementPageState<T>
         ),
         title: Text(config.title),
         actions: <Widget>[
+          // Filter button — always enabled (users may want to pre-set a
+          // filter while data is still loading).
+          _buildFilterButton(),
           if (config.extraAction != null)
             IconButton(
               tooltip: config.extraAction!.tooltip,
@@ -296,10 +308,21 @@ class _AccountStatementPageState<T>
           retryLabel: 'إعادة المحاولة',
           onRetry: _refresh,
         ),
-        data: (T rawData) {
-          return _buildBody(config.adapt(rawData));
-        },
+        data: (T rawData) => _buildBody(config.adapt(rawData)),
       ),
+    );
+  }
+
+  Widget _buildFilterButton() {
+    final Widget icon = const Icon(Icons.filter_alt_outlined);
+    final int count = _activeFilterCount;
+
+    return IconButton(
+      tooltip: 'تصفية',
+      icon: count > 0
+          ? Badge.count(count: count, child: icon)
+          : icon,
+      onPressed: _openFilterSheet,
     );
   }
 
@@ -327,8 +350,9 @@ class _AccountStatementPageState<T>
     final ComputedStatement computed = ComputedStatement.from(view);
     final List<StatementEntryFilter> filters =
         availableEntryFilters(view.partyKind);
-    final StatementEntryFilter activeFilter =
-        filters.contains(_entryFilter) ? _entryFilter : StatementEntryFilter.all;
+    final StatementEntryFilter activeFilter = filters.contains(_entryFilter)
+        ? _entryFilter
+        : StatementEntryFilter.all;
 
     final double? storedBalance = view.storedBalance;
     final bool showReconciliationBanner =
@@ -357,18 +381,11 @@ class _AccountStatementPageState<T>
             computedBalance: computed.closingBalance,
             onRefresh: _refresh,
           ),
-        StatementPeriodChips(
+        StatementActiveFilterBar(
           preset: _preset,
-          customRange: _customRange,
-          onSelect: _selectPreset,
+          entryFilter: activeFilter,
+          onClear: _clearFilters,
         ),
-        if (filters.length > 1)
-          StatementEntryFilterChips(
-            filters: filters,
-            selected: activeFilter,
-            onSelect: (StatementEntryFilter f) =>
-                setState(() => _entryFilter = f),
-          ),
         if (view.hasEntries) const StatementTableHeader(),
         Expanded(
           child: !view.hasEntries
