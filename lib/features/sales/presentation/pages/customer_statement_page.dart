@@ -579,9 +579,10 @@ class _EntriesList extends StatelessWidget {
     final List<_AugEntry> display =
         computed.chronologicalEntries.reversed.toList(growable: false);
 
-    final bool showOpening = computed.openingBalance.abs() > 0.01;
-    final int headerIndex = showOpening ? 1 : 0;
-    final int firstRowIndex = headerIndex + 1;
+    // تم إلغاء الرصيد الافتتاحي من العرض (showOpening = false)
+    const bool showOpening = false;
+    const int headerIndex = 0;
+    const int firstRowIndex = 1;
     final int closingIndex = firstRowIndex + display.length;
 
     return RefreshIndicator(
@@ -592,11 +593,6 @@ class _EntriesList extends StatelessWidget {
         padding: const EdgeInsets.only(bottom: 16),
         itemCount: closingIndex + 1,
         itemBuilder: (BuildContext context, int index) {
-          if (showOpening && index == 0) {
-            return _OpeningBalanceTile(
-              openingBalance: computed.openingBalance,
-            );
-          }
           if (index == headerIndex) {
             return const _TableHeaderRow();
           }
@@ -607,7 +603,11 @@ class _EntriesList extends StatelessWidget {
             );
           }
           final int entryIdx = index - firstRowIndex;
-          return _EntryRow(aug: display[entryIdx]);
+          final bool isEven = entryIdx % 2 == 0;
+          return _EntryRow(
+            aug: display[entryIdx],
+            isEven: isEven,
+          );
         },
       ),
     );
@@ -615,7 +615,7 @@ class _EntriesList extends StatelessWidget {
 }
 
 // ============================================================================
-// Table header row (FIXED)
+// Table header row
 // ============================================================================
 
 class _TableHeaderRow extends StatelessWidget {
@@ -624,26 +624,33 @@ class _TableHeaderRow extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final ColorScheme scheme = Theme.of(context).colorScheme;
-    const TextStyle style =
-        TextStyle(fontSize: 11, fontWeight: FontWeight.w800);
-    final Color borderColor = scheme.outlineVariant.withValues(alpha: 0.5);
+    const TextStyle style = TextStyle(
+      fontSize: 11,
+      fontWeight: FontWeight.w800,
+      color: Colors.grey, // لون رمادي هادئ للرأس
+    );
 
-    return IntrinsicHeight(
-      child: Container(
-        decoration: BoxDecoration(
-          color: scheme.surfaceContainerHighest,
-          border: Border(bottom: BorderSide(color: borderColor, width: 1)),
+    return Container(
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+      decoration: BoxDecoration(
+        color: scheme.surface, // بدون لون خلفية بارز
+        border: Border(
+          bottom: BorderSide(color: scheme.outlineVariant, width: 1),
         ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _HeaderCell(width: 52, text: 'التاريخ', style: style, borderColor: borderColor),
-            _HeaderCell(width: 0, text: 'البيان', style: style, borderColor: borderColor, isExpanded: true),
-            _HeaderCell(width: 66, text: 'الرصيد', style: style, borderColor: borderColor, alignRight: true),
-            _HeaderCell(width: 66, text: 'المدفوع', style: style, borderColor: borderColor, alignRight: true),
-            _HeaderCell(width: 82, text: 'الرصيد الحالي', style: style, borderColor: borderColor, alignRight: true, isLast: true),
-          ],
-        ),
+      ),
+      child: const Row(
+        children: <Widget>[
+          _HeaderCell(width: 54, text: 'التاريخ', style: style),
+          _HeaderCell(width: 0, text: 'البيان', style: style, isExpanded: true),
+          _HeaderCell(width: 70, text: 'الرصيد', style: style, alignRight: true),
+          _HeaderCell(width: 70, text: 'المدفوع', style: style, alignRight: true),
+          _HeaderCell(
+            width: 84,
+            text: 'الرصيد الحالي',
+            style: style,
+            alignRight: true,
+          ),
+        ],
       ),
     );
   }
@@ -654,25 +661,20 @@ class _HeaderCell extends StatelessWidget {
     required this.width,
     required this.text,
     required this.style,
-    required this.borderColor,
     this.isExpanded = false,
     this.alignRight = false,
-    this.isLast = false,
   });
 
   final double width;
   final String text;
   final TextStyle style;
-  final Color borderColor;
   final bool isExpanded;
   final bool alignRight;
-  final bool isLast;
 
   @override
   Widget build(BuildContext context) {
-    final Widget content = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
+    final Widget content = Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4),
       child: Text(
         text,
         style: style,
@@ -680,35 +682,28 @@ class _HeaderCell extends StatelessWidget {
       ),
     );
 
-    final Widget cell = Container(
-      decoration: BoxDecoration(
-        border: isLast ? null : Border(left: BorderSide(color: borderColor, width: 0.5)),
-      ),
-      child: content,
-    );
-
     if (isExpanded) {
-      return Expanded(child: cell);
+      return Expanded(child: content);
     }
-    return SizedBox(width: width, child: cell);
+    return SizedBox(width: width, child: content);
   }
 }
 
 // ============================================================================
-// Entry row (FIXED)
+// Entry row (بدون خطوط وتوسيع الخلايا)
 // ============================================================================
 
 class _EntryRow extends StatelessWidget {
-  const _EntryRow({required this.aug});
+  const _EntryRow({required this.aug, required this.isEven});
 
   final _AugEntry aug;
+  final bool isEven;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final CustomerStatementEntry entry = aug.entry;
-    final Color borderColor = scheme.outlineVariant.withValues(alpha: 0.5);
     
     final double paid = entry.credit;
     final double debit = entry.debit;
@@ -729,106 +724,96 @@ class _EntryRow extends StatelessWidget {
     final String baseDesc = entry.hasDescription ? entry.description! : _typeLabel(entry.type);
     final Color typeColor = debit > 0 ? scheme.error : const Color(0xFF1B5E20);
 
-    return IntrinsicHeight(
-      child: Container(
-        decoration: BoxDecoration(
-          border: Border(bottom: BorderSide(color: borderColor, width: 0.5)),
-        ),
-        child: Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            _DataCell(
-              width: 52,
-              borderColor: borderColor,
-              child: Text(
-                DateFormat('dd/MM').format(entry.date.toLocal()),
-                style: const TextStyle(fontSize: 11),
-              ),
-            ),
-            _DataCell(
-              width: 0,
-              isExpanded: true,
-              borderColor: borderColor,
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: <Widget>[
+    // خلفية متبادلة خفيفة جداً (Zebra Striping) بدلاً من الخطوط
+    final Color rowColor = isEven
+        ? scheme.surface
+        : scheme.surfaceContainerHighest.withValues(alpha: 0.3);
+
+    return Container(
+      color: rowColor,
+      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 8),
+      child: Row(
+        crossAxisAlignment: CrossAxisAlignment.center,
+        children: <Widget>[
+          // Date
+          const SizedBox(width: 54),
+          // Description
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: <Widget>[
+                Text(
+                  baseDesc,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w700,
+                    color: typeColor,
+                  ),
+                ),
+                if (entry.isSale && debit > 0) ...[
+                  const SizedBox(height: 2),
                   Text(
-                    baseDesc,
+                    'قيمة: ${AppFormatters.money(debit)}',
+                    style: TextStyle(fontSize: 10, color: scheme.error),
+                  ),
+                ],
+                if (entry.isSale && paid > 0) ...[
+                  const SizedBox(height: 1),
+                  Text(
+                    'مدفوع: ${AppFormatters.money(paid)}',
+                    style: TextStyle(fontSize: 10, color: const Color(0xFF1B5E20)),
+                  ),
+                ],
+                if (entry.hasReference) ...[
+                  const SizedBox(height: 2),
+                  Text(
+                    entry.reference!,
                     maxLines: 1,
                     overflow: TextOverflow.ellipsis,
                     style: TextStyle(
-                      fontSize: 12,
-                      fontWeight: FontWeight.w700,
-                      color: typeColor,
+                      fontSize: 10,
+                      color: scheme.onSurfaceVariant,
                     ),
                   ),
-                  if (entry.isSale && debit > 0) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      'قيمة: ${AppFormatters.money(debit)}',
-                      style: TextStyle(fontSize: 10, color: scheme.error),
-                    ),
-                  ],
-                  if (entry.isSale && paid > 0) ...[
-                    const SizedBox(height: 1),
-                    Text(
-                      'مدفوع: ${AppFormatters.money(paid)}',
-                      style: TextStyle(fontSize: 10, color: const Color(0xFF1B5E20)),
-                    ),
-                  ],
-                  if (entry.hasReference) ...[
-                    const SizedBox(height: 2),
-                    Text(
-                      entry.reference!,
-                      maxLines: 1,
-                      overflow: TextOverflow.ellipsis,
-                      style: TextStyle(
-                        fontSize: 10,
-                        color: scheme.onSurfaceVariant,
-                      ),
-                    ),
-                  ],
                 ],
+              ],
+            ),
+          ),
+          // Prev Balance
+          SizedBox(
+            width: 70,
+            child: Text(
+              prevText,
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: prevColor),
+            ),
+          ),
+          // Paid
+          SizedBox(
+            width: 70,
+            child: Text(
+              paid > 0 ? AppFormatters.money(paid) : '—',
+              textAlign: TextAlign.right,
+              style: TextStyle(
+                fontSize: 11,
+                color: paid > 0 ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant,
+                fontWeight: paid > 0 ? FontWeight.w600 : FontWeight.normal,
               ),
             ),
-            _DataCell(
-              width: 66,
-              borderColor: borderColor,
-              alignRight: true,
-              child: Text(
-                prevText,
-                textAlign: TextAlign.right,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w600, color: prevColor),
-              ),
+          ),
+          // Current Balance
+          SizedBox(
+            width: 84,
+            child: Text(
+              currText,
+              textAlign: TextAlign.right,
+              style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: currColor),
             ),
-            _DataCell(
-              width: 66,
-              borderColor: borderColor,
-              alignRight: true,
-              child: Text(
-                paid > 0 ? AppFormatters.money(paid) : '—',
-                textAlign: TextAlign.right,
-                style: TextStyle(
-                  fontSize: 11,
-                  color: paid > 0 ? const Color(0xFF1B5E20) : scheme.onSurfaceVariant,
-                  fontWeight: paid > 0 ? FontWeight.w600 : FontWeight.normal,
-                ),
-              ),
-            ),
-            _DataCell(
-              width: 82,
-              isLast: true,
-              borderColor: borderColor,
-              alignRight: true,
-              child: Text(
-                currText,
-                textAlign: TextAlign.right,
-                style: TextStyle(fontSize: 11, fontWeight: FontWeight.w800, color: currColor),
-              ),
-            ),
-          ],
-        ),
+          ),
+        ],
       ),
     );
   }
@@ -846,98 +831,6 @@ class _EntryRow extends StatelessWidget {
       default:
         return 'حركة';
     }
-  }
-}
-
-class _DataCell extends StatelessWidget {
-  const _DataCell({
-    required this.width,
-    required this.child,
-    required this.borderColor,
-    this.isExpanded = false,
-    this.isLast = false,
-    this.alignRight = false,
-  });
-
-  final double width;
-  final Widget child;
-  final Color borderColor;
-  final bool isExpanded;
-  final bool isLast;
-  final bool alignRight;
-
-  @override
-  Widget build(BuildContext context) {
-    final Widget content = Container(
-      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
-      alignment: alignRight ? Alignment.centerRight : Alignment.centerLeft,
-      child: child,
-    );
-
-    final Widget cell = Container(
-      decoration: BoxDecoration(
-        border: isLast ? null : Border(left: BorderSide(color: borderColor, width: 0.5)),
-      ),
-      child: content,
-    );
-
-    if (isExpanded) {
-      return Expanded(child: cell);
-    }
-    return SizedBox(width: width, child: cell);
-  }
-}
-
-// ============================================================================
-// Opening balance tile
-// ============================================================================
-
-class _OpeningBalanceTile extends StatelessWidget {
-  const _OpeningBalanceTile({required this.openingBalance});
-
-  final double openingBalance;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final bool weOwe = openingBalance > 0.01;
-    final bool theyOweUs = openingBalance < -0.01;
-
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-      color: scheme.surfaceContainerHigh,
-      child: Row(
-        children: <Widget>[
-          Icon(
-            Icons.play_circle_outline,
-            size: 16,
-            color: scheme.onSurfaceVariant,
-          ),
-          const SizedBox(width: 6),
-          Text(
-            'رصيد افتتاحي',
-            style: theme.textTheme.bodySmall?.copyWith(
-              fontWeight: FontWeight.w700,
-            ),
-          ),
-          const Spacer(),
-          Text(
-            theyOweUs
-                ? '−${AppFormatters.money(openingBalance.abs())}'
-                : AppFormatters.money(openingBalance),
-            style: theme.textTheme.titleSmall?.copyWith(
-              fontWeight: FontWeight.w800,
-              color: weOwe
-                  ? scheme.error
-                  : theyOweUs
-                      ? const Color(0xFF1B5E20)
-                      : scheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
-    );
   }
 }
 
@@ -983,7 +876,7 @@ class _ClosingBalanceCard extends StatelessWidget {
             : 'الرصيد النهائي — مسدد';
 
     return Padding(
-      padding: const EdgeInsets.fromLTRB(8, 12, 8, 8),
+      padding: const EdgeInsets.fromLTRB(8, 16, 8, 8),
       child: DecoratedBox(
         decoration: BoxDecoration(
           color: bg,
