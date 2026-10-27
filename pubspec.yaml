@@ -1,7 +1,7 @@
 name: hesabi
 description: "Hesabi - Multi-tenant SaaS for POS, Inventory, Sales and Accounting"
 publish_to: "none"
-version: 1.0.7+9
+version: 1.0.8+10
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
@@ -48,6 +48,10 @@ dependencies:
   image: ^4.2.0
   flutter_pos_printer_platform_image_3: ^1.2.0
   esc_pos_utils_plus: ^2.0.4
+
+  # ✅ حزم المشاركة والملفات (جديدة)
+  share_plus: ^10.1.2
+  path_provider: ^2.1.5
 
   # Offline support
   connectivity_plus: ^6.1.0
