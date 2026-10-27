@@ -2,7 +2,6 @@
 
 import 'dart:typed_data';
 
-import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
 import '../../../pos/data/services/pdf_receipt_builder.dart'
@@ -31,6 +30,11 @@ abstract interface class PurchaseReceiptPrinter {
 }
 
 /// Default [PurchaseReceiptPrinter] backed by the `printing` package.
+///
+/// **Updates:**
+/// * Replaced `Printing.layoutPdf` with `Printing.sharePdf` to avoid the
+///   Android system print dialog.
+/// * Removed unused `package:pdf/pdf.dart` import.
 class PurchaseReceiptPrinterImpl implements PurchaseReceiptPrinter {
   const PurchaseReceiptPrinterImpl();
 
@@ -52,9 +56,10 @@ class PurchaseReceiptPrinterImpl implements PurchaseReceiptPrinter {
         logoBytes: logoBytes,
       );
 
-      await Printing.layoutPdf(
-        name: _fileNameFor(receipt),
-        onLayout: (PdfPageFormat _) => bytes,
+      // ✅ تم استبدال layoutPdf بـ sharePdf لإخفاء حوار الطباعة
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: _fileNameFor(receipt),
       );
 
       return true;
