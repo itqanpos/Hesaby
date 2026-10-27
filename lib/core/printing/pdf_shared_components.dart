@@ -50,11 +50,17 @@ abstract final class PdfSharedFonts {
 // ============================================================================
 
 abstract final class PdfSharedStyle {
+  /// Resolves the effective weight for a text run.
+  ///
+  /// Uses the [PrintStyleSettings.isBoldBase] convenience getter (which
+  /// reads `fontWeight == PrintFontWeight.bold`) instead of comparing the
+  /// enum directly — `PrintFontWeight` lives in `company_settings.dart`
+  /// and is not re-exported by `print_style_settings.dart`.
   static pw.FontWeight weight(
     PrintStyleSettings style, {
     bool emphasized = false,
   }) {
-    if (emphasized || style.fontWeight == PrintFontWeight.bold) {
+    if (emphasized || style.isBoldBase) {
       return pw.FontWeight.bold;
     }
     return pw.FontWeight.normal;
@@ -390,7 +396,9 @@ abstract final class PdfSharedFooter {
 // ============================================================================
 
 abstract final class PdfSharedTable {
-  static const pw.TableBorder border = pw.TableBorder.all(
+  /// `TableBorder.all()` is **not** a const constructor — using
+  /// `static final` instead of `static const` fixes that.
+  static final pw.TableBorder border = pw.TableBorder.all(
     color: PdfColors.grey700,
     width: 0.5,
   );
