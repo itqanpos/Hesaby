@@ -107,7 +107,6 @@ abstract final class PdfReturnBuilder {
     final double scale = style.fontScale.clamp(0.8, 1.6);
 
     final double baseFont = (isThermal ? 8 : 10) * scale;
-    final double titleFont = (isThermal ? 11 : 16) * scale;
     final double smallFont = (isThermal ? 7 : 9) * scale;
 
     return <pw.Widget>[
@@ -119,7 +118,8 @@ abstract final class PdfReturnBuilder {
         style: style,
         logoBytes: logoBytes,
         logoWidth: _logoWidthFor(paperSize),
-        titleFontSize: titleFont,
+        // ✅ إرسال الحجم الأساسي (غير المُضاعف)
+        titleFontSize: isThermal ? 11 : 16,
       ),
       
       pw.SizedBox(height: 6),
@@ -155,7 +155,7 @@ abstract final class PdfReturnBuilder {
       pw.Text(
         'البنود المُرجَعة',
         style: pw.TextStyle(
-          fontSize: titleFont,
+          fontSize: isThermal ? 11 * scale : 16 * scale, // Scaled here once
           fontWeight:
               PdfSharedStyle.weight(style, emphasized: true),
         ),
