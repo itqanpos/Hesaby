@@ -1,10 +1,13 @@
 // lib/features/sales/presentation/services/sale_print_actions.dart
 
+import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:path_provider/path_provider.dart';
 import 'package:printing/printing.dart' show Printing;
+import 'package:share_plus/share_plus.dart';
 
 import '../../../../core/utils/logger.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
@@ -23,18 +26,8 @@ import '../../../settings/presentation/providers/company_settings_providers.dart
 import '../../domain/entities/sale_entities.dart';
 import '../providers/sales_providers.dart';
 
-/// نتيجة عملية الطباعة المباشرة
-enum DirectSalePrintResult {
-  success,
-  noPrinter,
-  connectFailed,
-  sendFailed,
-}
+enum DirectSalePrintResult { success, noPrinter, connectFailed, sendFailed }
 
-/// محرك الطباعة الموحد (الإجراء الرئيسي)
-/// 
-/// [forceShare] = false: يحاول الطباعة المباشرة أولاً (إذا كانت مفعلة)، ثم ينتقل للمشاركة.
-/// [forceShare] = true: يفتح شيت المشاركة مباشرة (لتجاهل الطباعة المباشرة).
 Future<void> handleSalePrintFlow({
   required BuildContext context,
   required WidgetRef ref,
@@ -54,61 +47,42 @@ Future<void> handleSalePrintFlow({
     unitNames: unitNames,
   );
 
-  // 1. محاولة الطباعة المباشرة (إذا لم يُجبر على المشاركة)
   if (!forceShare) {
-    final bool directEnabled =
-        ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ?? false;
-    
+    final bool directEnabled = ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ?? false;
     if (directEnabled) {
       final DirectSalePrintResult result = await _tryDirectThermalPrint(ref, receipt);
-      
       if (result == DirectSalePrintResult.success) {
         if (!context.mounted) return;
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(content: Text('تم إرسال الفاتورة للطابعة.')),
-        );
-        return; // انتهى بنجاح
+        ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تم إرسال الفاتورة للطابعة.')));
+        return;
       }
-      
-      // إذا فشلت الطباعة المباشرة، ننتقل للمشاركة كخطة بديلة
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('تعذّرت الطباعة المباشرة. جاري فتح المشاركة...')),
-      );
+      ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّرت الطباعة المباشرة. جاري فتح المشاركة...')));
     }
   }
 
-  // 2. المشاركة كـ PDF (إذا فشلت المباشرة أو تم الإجبار)
-  final bool ok = await _shareReceiptPdf(ref, receipt, sale.invoiceNumber ?? sale.id);
+  // ✅ المشاركة كصورة (لأن الواتساب لا يعرض PDF)
+  final bool ok = await _shareReceiptAsImage(ref, receipt, sale.invoiceNumber ?? sale.id);
   if (!context.mounted) return;
   
   if (!ok) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('تعذّرت مشاركة الفاتورة.')),
-    );
+    ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّرت مشاركة الفاتورة.')));
   }
 }
 
-/// دالة الطباعة المباشرة (مفصولة لسهولة الاختبار)
-Future<DirectSalePrintResult> _tryDirectThermalPrint(
-  WidgetRef ref,
-  Receipt receipt,
-) async {
+Future<DirectSalePrintResult> _tryDirectThermalPrint(WidgetRef ref, Receipt receipt) async {
   final SavedPrinter? saved = ref.read(savedPrinterProvider).valueOrNull;
   if (saved == null) return DirectSalePrintResult.noPrinter;
 
   final PrinterService service = ref.read(printerServiceProvider);
-
   try {
     if (!service.isConnected) {
       final bool connected = await service.connect(saved.toDevice());
       if (!connected) return DirectSalePrintResult.connectFailed;
     }
-
     final Uint8List? logoBytes = await _loadLogoBytes(ref);
     final PrintStyleSettings style = _readStyle(ref);
     final int widthDots = _resolveWidthDots(ref);
-
     final List<int> bytes = await EscPosReceiptBuilder.build(
       receipt: receipt,
       paperWidthDots: widthDots,
@@ -116,7 +90,6 @@ Future<DirectSalePrintResult> _tryDirectThermalPrint(
       fontScale: style.fontScale,
       fontWeight: style.fontWeight,
     );
-
     await service.sendBytes(bytes);
     return DirectSalePrintResult.success;
   } on Object catch (error, stackTrace) {
@@ -125,37 +98,43 @@ Future<DirectSalePrintResult> _tryDirectThermalPrint(
   }
 }
 
-/// دالة المشاركة كـ PDF
-Future<bool> _shareReceiptPdf(
-  WidgetRef ref,
-  Receipt receipt,
-  String filenameSuffix,
-) async {
+/// ✅ تحويل الـ PDF إلى صورة PNG ومشاركتها (لكي تظهر في واتساب)
+Future<bool> _shareReceiptAsImage(WidgetRef ref, Receipt receipt, String filenameSuffix) async {
   try {
     final Uint8List? logoBytes = await _loadLogoBytes(ref);
     final PrintStyleSettings style = _readStyle(ref);
-    final ReceiptPaperSize size =
-        ref.read(posPaperSizeProvider).valueOrNull ?? PosPreferences.defaultPaperSize;
+    final ReceiptPaperSize size = ref.read(posPaperSizeProvider).valueOrNull ?? PosPreferences.defaultPaperSize;
 
-    final Uint8List bytes = await PdfReceiptBuilder.build(
+    final Uint8List pdfBytes = await PdfReceiptBuilder.build(
       receipt: receipt,
       size: size,
       style: style,
       logoBytes: logoBytes,
     );
 
-    await Printing.sharePdf(
-      bytes: bytes,
-      filename: 'invoice-$filenameSuffix.pdf',
+    // 1. تحويل الـ PDF إلى صورة (Rasterize)
+    final stream = Printing.raster(pdfBytes, dpi: 200);
+    final images = await stream.toList();
+    final Uint8List pngBytes = await images.first.toPng();
+
+    // 2. حفظ الصورة في مجلد مؤقت
+    final tempDir = await getTemporaryDirectory();
+    final file = File('${tempDir.path}/invoice-$filenameSuffix.png');
+    await file.writeAsBytes(pngBytes);
+
+    // 3. مشاركة الصورة عبر شيت المشاركة (تظهر في واتساب كصورة)
+    await Share.shareXFiles(
+      [XFile(file.path, mimeType: 'image/png')],
+      text: 'فاتورة رقم $filenameSuffix',
     );
+
     return true;
   } on Object catch (error, stackTrace) {
-    AppLogger.error('Sale PDF share failed', error, stackTrace);
+    AppLogger.error('Sale image share failed', error, stackTrace);
     return false;
   }
 }
 
-/// بناء كائن Receipt من Sale (بدون تغيير)
 Receipt buildReceiptFromSale({
   required WidgetRef ref,
   required Sale sale,
@@ -177,10 +156,7 @@ Receipt buildReceiptFromSale({
     final AsyncValue<List<Customer>> customersAsync = ref.read(customersProvider);
     final List<Customer>? customers = customersAsync.valueOrNull;
     if (customers != null) {
-      final Customer? customer = customers.cast<Customer?>().firstWhere(
-            (Customer? c) => c?.id == sale.customerId,
-            orElse: () => null,
-          );
+      final Customer? customer = customers.cast<Customer?>().firstWhere((Customer? c) => c?.id == sale.customerId, orElse: () => null);
       if (customer != null) {
         final double currentBalance = customer.balance;
         newBalance = currentBalance;
@@ -227,10 +203,6 @@ Receipt buildReceiptFromSale({
   );
 }
 
-// ============================================================================
-// Helpers
-// ============================================================================
-
 Future<Uint8List?> _loadLogoBytes(WidgetRef ref) async {
   final CompanySettings? s = ref.read(companySettingsProvider).valueOrNull;
   if (s == null || s.companyId.isEmpty) return null;
@@ -249,13 +221,10 @@ PrintStyleSettings _readStyle(WidgetRef ref) {
 }
 
 int _resolveWidthDots(WidgetRef ref) {
-  final ReceiptPaperSize size =
-      ref.read(posPaperSizeProvider).valueOrNull ?? PosPreferences.defaultPaperSize;
+  final ReceiptPaperSize size = ref.read(posPaperSizeProvider).valueOrNull ?? PosPreferences.defaultPaperSize;
   switch (size) {
-    case ReceiptPaperSize.mm58:
-      return EscPosReceiptBuilder.widthMm58;
+    case ReceiptPaperSize.mm58: return EscPosReceiptBuilder.widthMm58;
     case ReceiptPaperSize.mm80:
-    case ReceiptPaperSize.a4:
-      return EscPosReceiptBuilder.widthMm80;
+    case ReceiptPaperSize.a4: return EscPosReceiptBuilder.widthMm80;
   }
 }
