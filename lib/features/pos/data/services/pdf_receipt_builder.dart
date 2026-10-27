@@ -2,7 +2,6 @@
 
 import 'dart:typed_data';
 
-import 'package:flutter/services.dart' show ByteData, rootBundle;
 import 'package:pdf/pdf.dart';
 import 'package:pdf/widgets.dart' as pw;
 
@@ -11,16 +10,23 @@ import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/receipt.dart';
 import '../../domain/services/receipt_number_format.dart';
 
-enum ReceiptPaperSize { mm58, mm80, a4 }
+enum ReceiptPaperSize {
+  mm58,
+  mm80,
+  a4,
+}
 
 abstract final class PdfReceiptBuilder {
   static const String _currency = 'ج.م';
+
   static const double _thermalFixedMm = 120;
   static const double _thermalPerLineMm = 14;
 
   static double _thermalHeightFor(int lineCount) {
     final double estimatedMm = _thermalFixedMm + lineCount * _thermalPerLineMm;
-    return estimatedMm.clamp(170.0, 600.0) * PdfPageFormat.mm;
+    // زيادة الارتفاع لضمان عدم الانقسام إلى صفحتين
+    final double clampedMm = estimatedMm.clamp(170.0, 600.0);
+    return clampedMm * PdfPageFormat.mm;
   }
 
   static Future<Uint8List> build({
@@ -35,10 +41,18 @@ abstract final class PdfReceiptBuilder {
     final double padding;
     switch (size) {
       case ReceiptPaperSize.mm58:
-        pageFormat = PdfPageFormat(58 * PdfPageFormat.mm, _thermalHeightFor(receipt.lines.length), marginAll: 0);
+        pageFormat = PdfPageFormat(
+          58 * PdfPageFormat.mm,
+          _thermalHeightFor(receipt.lines.length),
+          marginAll: 0,
+        );
         padding = 4;
       case ReceiptPaperSize.mm80:
-        pageFormat = PdfPageFormat(80 * PdfPageFormat.mm, _thermalHeightFor(receipt.lines.length), marginAll: 0);
+        pageFormat = PdfPageFormat(
+          80 * PdfPageFormat.mm,
+          _thermalHeightFor(receipt.lines.length),
+          marginAll: 0,
+        );
         padding = 6;
       case ReceiptPaperSize.a4:
         pageFormat = PdfPageFormat.a4;
@@ -53,6 +67,7 @@ abstract final class PdfReceiptBuilder {
     );
 
     document.addPage(
+      // ⬇️ استخدام pw.Page بدلاً من pw.MultiPage لمنع الانقسام إلى ورقتين
       pw.Page(
         pageFormat: pageFormat,
         margin: pw.EdgeInsets.all(padding),
@@ -109,6 +124,477 @@ abstract final class PdfReceiptBuilder {
     ];
   }
 
-  // ... (rest of the file remains identical to the original, using _Sizes, _metaBlock, _itemsTable, _totalsSection, _footer, etc.)
-  // ⚠️ لضمان عدم كسر شيء، احتفظت بكل الدوال المساعدة من النسخة الأصلية (metaBlock, itemsTable, totalsSection, footer, Sizes) ووضعتها هنا كما هي.
+  static pw.Widget _totalsSection(
+      Receipt receipt, _Sizes s, PrintStyleSettings style) {
+    final double totalOwed = receipt.total + (receipt.previousBalance ?? 0);
+    final double newBalance = receipt.newBalance ?? 0;
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: <pw.Widget>[
+        _kvRow('الإجمالي الحالي', _money(receipt.total, receipt), s, style),
+        if (receipt.hasCustomer &&
+            (receipt.previousBalance ?? 0) != 0) ...<pw.Widget>[
+          pw.SizedBox(height: 6),
+          _kvRow('الرصيد السابق',
+              _money(receipt.previousBalance!.abs(), receipt), s, style),
+        ],
+        pw.SizedBox(height: 8),
+        pw.Container(
+          padding: pw.EdgeInsets.symmetric(
+              horizontal: s.cellPadH * 2, vertical: s.cellPadV * 1.5),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.black, width: 1.2),
+            borderRadius:
+                const pw.BorderRadius.all(pw.Radius.circular(3)),
+          ),
+          child: pw.Row(
+            children: <pw.Widget>[
+              pw.Expanded(
+                child: pw.Text(
+                  ((receipt.previousBalance ?? 0) != 0)
+                      ? 'الإجمالي الكلي'
+                      : 'إجمالي الفاتورة',
+                  style: pw.TextStyle(
+                      fontSize: s.grandTotal,
+                      fontWeight: PdfSharedStyle.weight(style,
+                          emphasized: true)),
+                ),
+              ),
+              pw.Text(
+                _money(totalOwed, receipt),
+                style: pw.TextStyle(
+                    fontSize: s.grandTotal,
+                    fontWeight: PdfSharedStyle.weight(style,
+                        emphasized: true)),
+              ),
+            ],
+          ),
+        ),
+        pw.SizedBox(height: 8),
+        _kvRow('طريقة الدفع', _paymentMethodLabel(receipt), s, style),
+        pw.SizedBox(height: 6),
+        _kvRow('المدفوع', _money(receipt.paidAmount, receipt), s, style),
+        if (receipt.hasBalanceChange) ...<pw.Widget>[
+          pw.SizedBox(height: 8),
+          _divider(),
+          pw.SizedBox(height: 8),
+          if (newBalance > 0)
+            _kvRow('الرصيد الجديد على العميل', _money(newBalance, receipt), s,
+                style,
+                emphasized: true)
+          else if (newBalance < 0)
+            _kvRow('الرصيد الجديد (له عندنا)',
+                _money(newBalance.abs(), receipt), s, style,
+                emphasized: true)
+          else
+            _kvRow('الرصيد الجديد', _money(0, receipt), s, style,
+                emphasized: true),
+        ],
+      ],
+    );
+  }
+
+  static pw.Widget _metaBlock(
+      Receipt receipt, _Sizes s, PrintStyleSettings style) {
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: <pw.Widget>[
+        _metaRow('رقم الفاتورة', receipt.invoiceNumber ?? '—', s, style,
+            emphasized: true),
+        _metaRow('التاريخ', PdfSharedFormat.dayDate(receipt.dateTime), s, style),
+        if (receipt.cashierName != null &&
+            receipt.cashierName!.trim().isNotEmpty)
+          _metaRow('الكاشير', receipt.cashierName!, s, style),
+        if (receipt.hasCustomer) ...<pw.Widget>[
+          _metaRow('العميل', receipt.customerName!, s, style),
+          if (receipt.hasCustomerAddress)
+            _metaRow('عنوان العميل', receipt.customerAddress!, s, style),
+          if (receipt.hasCustomerPhone)
+            _metaRow('هاتف العميل', receipt.customerPhone!, s, style),
+        ],
+      ],
+    );
+  }
+
+  static pw.Widget _metaRow(
+      String label, String value, _Sizes s, PrintStyleSettings style,
+      {bool emphasized = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 1.5),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: <pw.Widget>[
+          pw.SizedBox(
+            width: s.metaLabelWidth,
+            child: pw.Text(
+              PdfSharedFormat.norm('$label:'),
+              style: pw.TextStyle(
+                  fontSize: s.meta,
+                  fontWeight:
+                      PdfSharedStyle.weight(style, emphasized: true)),
+              textAlign: pw.TextAlign.right,
+            ),
+          ),
+          pw.SizedBox(width: 8),
+          pw.Expanded(
+            child: pw.Text(
+              PdfSharedFormat.norm(value),
+              style: pw.TextStyle(
+                  fontSize: s.meta,
+                  fontWeight: PdfSharedStyle.weight(style,
+                      emphasized: emphasized)),
+              textAlign: pw.TextAlign.left,
+              softWrap: true,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _itemsTable(
+      Receipt receipt, _Sizes s, PrintStyleSettings style) {
+    final Map<int, pw.TableColumnWidth> columnWidths =
+        <int, pw.TableColumnWidth>{
+      0: pw.FlexColumnWidth(1.4),
+      1: pw.FlexColumnWidth(1.2),
+      2: pw.FlexColumnWidth(1.3),
+      3: pw.FlexColumnWidth(3.0),
+      4: pw.FixedColumnWidth(s.rowNumWidth),
+    };
+
+    double totalQuantity = 0;
+    for (final line in receipt.lines) {
+      totalQuantity += line.quantity;
+    }
+
+    final List<pw.TableRow> rows = <pw.TableRow>[
+      pw.TableRow(
+        decoration: PdfSharedTable.headerDecoration,
+        children: <pw.Widget>[
+          _cell('الإجمالي',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell('السعر',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell('الكمية',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell('الصنف',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              s: s,
+              style: style),
+          _cell('م',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+        ],
+      ),
+    ];
+
+    for (int i = 0; i < receipt.lines.length; i++) {
+      final ReceiptLine line = receipt.lines[i];
+      rows.add(
+        pw.TableRow(
+          decoration: PdfSharedTable.zebraDecoration(i.isOdd),
+          children: <pw.Widget>[
+            _cell(_money(line.lineTotal, receipt),
+                fontSize: s.tableRow,
+                emphasized: true,
+                center: true,
+                s: s,
+                style: style),
+            _cell(_money(line.unitPrice, receipt),
+                fontSize: s.tableRow, center: true, s: s, style: style),
+            _cell('${PdfSharedFormat.quantity(line.quantity)} ${line.unitName}',
+                fontSize: s.tableRow, center: true, s: s, style: style),
+            _cell(line.productName,
+                fontSize: s.tableRow, s: s, style: style),
+            _cell('${i + 1}',
+                fontSize: s.tableRow, center: true, s: s, style: style),
+          ],
+        ),
+      );
+    }
+
+    rows.add(
+      pw.TableRow(
+        decoration: PdfSharedTable.totalsDecoration,
+        children: <pw.Widget>[
+          _cell(_money(receipt.subtotal, receipt),
+              fontSize: s.tableRow,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell('', fontSize: s.tableRow, s: s, style: style),
+          _cell(PdfSharedFormat.quantity(totalQuantity),
+              fontSize: s.tableRow, center: true, s: s, style: style),
+          _cell('المجموع الفرعي',
+              fontSize: s.tableRow,
+              emphasized: true,
+              s: s,
+              style: style),
+          _cell('', fontSize: s.tableRow, s: s, style: style),
+        ],
+      ),
+    );
+
+    if (receipt.hasDiscountToPrint) {
+      rows.add(_summaryRow(
+          'الخصم', '- ${_money(receipt.discount, receipt)}', s, style));
+    }
+    if (receipt.hasTaxToPrint) {
+      rows.add(_summaryRow(
+          'الضريبة', _money(receipt.taxAmount, receipt), s, style));
+    }
+
+    return pw.Table(
+      border: PdfSharedTable.border,
+      defaultVerticalAlignment: pw.TableCellVerticalAlignment.middle,
+      columnWidths: columnWidths,
+      children: rows,
+    );
+  }
+
+  static pw.TableRow _summaryRow(
+      String label, String value, _Sizes s, PrintStyleSettings style) {
+    return pw.TableRow(
+      children: <pw.Widget>[
+        _cell(value,
+            fontSize: s.tableRow,
+            emphasized: true,
+            center: true,
+            s: s,
+            style: style),
+        _cell('', fontSize: s.tableRow, s: s, style: style),
+        _cell('', fontSize: s.tableRow, s: s, style: style),
+        _cell(label,
+            fontSize: s.tableRow, emphasized: true, s: s, style: style),
+        _cell('', fontSize: s.tableRow, s: s, style: style),
+      ],
+    );
+  }
+
+  static pw.Widget _cell(
+    String text, {
+    required double fontSize,
+    required _Sizes s,
+    required PrintStyleSettings style,
+    bool emphasized = false,
+    bool center = false,
+  }) {
+    return pw.Padding(
+      padding: pw.EdgeInsets.symmetric(
+          horizontal: s.cellPadH, vertical: s.cellPadV),
+      child: pw.Text(
+        PdfSharedFormat.norm(text),
+        style: pw.TextStyle(
+            fontSize: fontSize,
+            fontWeight:
+                PdfSharedStyle.weight(style, emphasized: emphasized)),
+        textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
+        softWrap: true,
+      ),
+    );
+  }
+
+  static pw.Widget _kvRow(
+      String label, String value, _Sizes s, PrintStyleSettings style,
+      {bool emphasized = false}) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 2),
+      child: pw.Row(
+        children: <pw.Widget>[
+          pw.Expanded(
+            child: pw.Text(
+              PdfSharedFormat.norm(label),
+              style: pw.TextStyle(
+                  fontSize: s.kvLabel,
+                  fontWeight:
+                      PdfSharedStyle.weight(style, emphasized: true)),
+            ),
+          ),
+          pw.Text(
+            PdfSharedFormat.norm(value),
+            style: pw.TextStyle(
+                fontSize: emphasized ? s.kvValueLarge : s.kvValue,
+                fontWeight: PdfSharedStyle.weight(style,
+                    emphasized: emphasized)),
+            textAlign: pw.TextAlign.left,
+          ),
+        ],
+      ),
+    );
+  }
+
+  static pw.Widget _footer(
+      Receipt receipt, _Sizes s, PrintStyleSettings style) {
+    return pw.Center(
+      child: pw.Text(
+        PdfSharedFormat.norm(_footerText(receipt)),
+        style: pw.TextStyle(
+            fontSize: s.footer,
+            color: PdfColors.grey700,
+            fontStyle: pw.FontStyle.italic,
+            fontWeight:
+                PdfSharedStyle.weight(style, emphasized: false)),
+        textAlign: pw.TextAlign.center,
+      ),
+    );
+  }
+
+  static String _footerText(Receipt receipt) {
+    final String? custom = receipt.footer;
+    if (custom != null && custom.trim().isNotEmpty) return custom.trim();
+    return PdfSharedFooter.defaultThankYou;
+  }
+
+  static pw.Widget _divider({bool double = false}) {
+    if (double) {
+      return pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: <pw.Widget>[
+          _singleRule(),
+          pw.SizedBox(height: 2),
+          _singleRule(),
+        ],
+      );
+    }
+    return _singleRule();
+  }
+
+  static pw.Widget _singleRule() =>
+      pw.Container(height: 0.6, color: PdfColors.grey600);
+
+  static String _money(double value, Receipt receipt) {
+    final String symbol = receipt.showCurrencySymbol ? _currency : '';
+    return ReceiptNumberFormat.money(value, currency: symbol);
+  }
+
+  static String _paymentMethodLabel(Receipt receipt) {
+    if (receipt.paidAmount <= 0) return 'آجل';
+    if (receipt.paidAmount >= receipt.total) return 'نقدي';
+    return 'نقدي (جزئي)';
+  }
+}
+
+class _Sizes {
+  const _Sizes({
+    required this.companyName,
+    required this.branchName,
+    required this.title,
+    required this.meta,
+    required this.metaLabelWidth,
+    required this.tableHeader,
+    required this.tableRow,
+    required this.rowNumWidth,
+    required this.cellPadH,
+    required this.cellPadV,
+    required this.grandTotal,
+    required this.kvLabel,
+    required this.kvValue,
+    required this.kvValueLarge,
+    required this.footer,
+    required this.sectionGap,
+    required this.logoWidth,
+  });
+
+  factory _Sizes.forSize(ReceiptPaperSize size, {double scale = 1.0}) {
+    final double s = scale.clamp(0.8, 1.6);
+    switch (size) {
+      case ReceiptPaperSize.mm58:
+        return _Sizes(
+          companyName: 14 * s,
+          branchName: 9 * s,
+          title: 11 * s,
+          meta: 9 * s,
+          metaLabelWidth: 70 * s,
+          tableHeader: 8.5 * s,
+          tableRow: 8.5 * s,
+          rowNumWidth: 16 * s,
+          cellPadH: 3 * s,
+          cellPadV: 3.5 * s,
+          grandTotal: 13 * s,
+          kvLabel: 9.5 * s,
+          kvValue: 10 * s,
+          kvValueLarge: 12 * s,
+          footer: 8.5 * s,
+          sectionGap: 6 * s,
+          logoWidth: 90,
+        );
+      case ReceiptPaperSize.mm80:
+        return _Sizes(
+          companyName: 16 * s,
+          branchName: 10 * s,
+          title: 12 * s,
+          meta: 9.5 * s,
+          metaLabelWidth: 85 * s,
+          tableHeader: 9 * s,
+          tableRow: 9 * s,
+          rowNumWidth: 18 * s,
+          cellPadH: 3.5 * s,
+          cellPadV: 4 * s,
+          grandTotal: 14 * s,
+          kvLabel: 10 * s,
+          kvValue: 11 * s,
+          kvValueLarge: 13 * s,
+          footer: 9 * s,
+          sectionGap: 7 * s,
+          logoWidth: 140,
+        );
+      case ReceiptPaperSize.a4:
+        return _Sizes(
+          companyName: 22 * s,
+          branchName: 12 * s,
+          title: 16 * s,
+          meta: 11 * s,
+          metaLabelWidth: 120 * s,
+          tableHeader: 11 * s,
+          tableRow: 11 * s,
+          rowNumWidth: 26 * s,
+          cellPadH: 7 * s,
+          cellPadV: 7 * s,
+          grandTotal: 18 * s,
+          kvLabel: 12 * s,
+          kvValue: 13 * s,
+          kvValueLarge: 15 * s,
+          footer: 11 * s,
+          sectionGap: 11 * s,
+          logoWidth: 180,
+        );
+    }
+  }
+
+  final double companyName;
+  final double branchName;
+  final double title;
+  final double meta;
+  final double metaLabelWidth;
+  final double tableHeader;
+  final double tableRow;
+  final double rowNumWidth;
+  final double cellPadH;
+  final double cellPadV;
+  final double grandTotal;
+  final double kvLabel;
+  final double kvValue;
+  final double kvValueLarge;
+  final double footer;
+  final double sectionGap;
+  final double logoWidth;
 }
