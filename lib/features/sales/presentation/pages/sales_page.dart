@@ -127,7 +127,7 @@ class _SalesPageState extends ConsumerState<SalesPage> {
   }
 
   // ---------------------------------------------------------------------------
-  // Quick actions
+  // Quick actions (Using the Central Print Engine)
   // ---------------------------------------------------------------------------
 
   Future<void> _handlePrint(
@@ -151,7 +151,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       final List<Unit> units = await ref.read(unitsProvider.future);
       if (!mounted) return;
 
-      final DirectSalePrintResult result = await printSaleDirect(
+      // ✅ استدعاء المحرك الاحترافي (forceShare: false)
+      await handleSalePrintFlow(
+        context: context,
         ref: ref,
         sale: sale,
         items: items,
@@ -162,10 +164,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         unitNames: <String, String>{
           for (final Unit u in units) u.id: u.name,
         },
+        forceShare: false,
       );
-
-      if (!mounted) return;
-      _snack(directSalePrintMessage(result));
     } on Object {
       if (!mounted) return;
       _snack('تعذّر تحضير الفاتورة للطباعة.');
@@ -197,7 +197,9 @@ class _SalesPageState extends ConsumerState<SalesPage> {
       final List<Unit> units = await ref.read(unitsProvider.future);
       if (!mounted) return;
 
-      final bool ok = await shareSalePdf(
+      // ✅ استدعاء المحرك الاحترافي (forceShare: true)
+      await handleSalePrintFlow(
+        context: context,
         ref: ref,
         sale: sale,
         items: items,
@@ -208,12 +210,8 @@ class _SalesPageState extends ConsumerState<SalesPage> {
         unitNames: <String, String>{
           for (final Unit u in units) u.id: u.name,
         },
+        forceShare: true,
       );
-
-      if (!mounted) return;
-      if (!ok) {
-        _snack('تعذّرت مشاركة الفاتورة.');
-      }
     } on Object {
       if (!mounted) return;
       _snack('تعذّرت مشاركة الفاتورة.');
