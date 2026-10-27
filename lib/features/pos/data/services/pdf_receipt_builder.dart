@@ -13,12 +13,11 @@ import '../../domain/services/receipt_number_format.dart';
 enum ReceiptPaperSize { mm58, mm80, a4 }
 
 abstract final class PdfReceiptBuilder {
-  // ✅ حساب الارتفاع ديناميكياً لضمان عدم ظهور صفحة بيضاء وعدم قص البيانات
+  // ✅ زيادة الارتفاع لضمان عدم قص الأصناف (200 مم أساسي + 20 مم لكل صنف)
   static double _calculateHeight(int lineCount, ReceiptPaperSize size) {
     if (size == ReceiptPaperSize.a4) return PdfPageFormat.a4.height;
     
-    // ارتفاع أساسي (رأس + إجماليات + تذييل) = 150mm + (15mm لكل صنف)
-    final double baseMm = 150.0 + (lineCount * 15.0);
+    final double baseMm = 200.0 + (lineCount * 20.0);
     return baseMm * PdfPageFormat.mm;
   }
 
@@ -34,16 +33,10 @@ abstract final class PdfReceiptBuilder {
     final double padding;
     switch (size) {
       case ReceiptPaperSize.mm58:
-        pageFormat = PdfPageFormat(
-          58 * PdfPageFormat.mm,
-          _calculateHeight(receipt.lines.length, size),
-        );
+        pageFormat = PdfPageFormat(58 * PdfPageFormat.mm, _calculateHeight(receipt.lines.length, size));
         padding = 4;
       case ReceiptPaperSize.mm80:
-        pageFormat = PdfPageFormat(
-          80 * PdfPageFormat.mm,
-          _calculateHeight(receipt.lines.length, size),
-        );
+        pageFormat = PdfPageFormat(80 * PdfPageFormat.mm, _calculateHeight(receipt.lines.length, size));
         padding = 6;
       case ReceiptPaperSize.a4:
         pageFormat = PdfPageFormat.a4;
@@ -57,19 +50,22 @@ abstract final class PdfReceiptBuilder {
       creator: 'Hesabi',
     );
 
-    // ✅ استخدام pw.Page (صفحة واحدة ثابتة) بدلاً من MultiPage لمنع الصفحة البيضاء
     document.addPage(
       pw.Page(
         pageFormat: pageFormat,
         margin: pw.EdgeInsets.all(padding),
         textDirection: pw.TextDirection.rtl,
-        build: (pw.Context context) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: _buildContent(
-            receipt: receipt,
-            paperSize: size,
-            style: style,
-            logoBytes: logoBytes,
+        // ✅ إجبار الخلفية البيضاء ومنع الشفافية
+        build: (pw.Context context) => pw.Container(
+          color: PdfColors.white,
+          child: pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: _buildContent(
+              receipt: receipt,
+              paperSize: size,
+              style: style,
+              logoBytes: logoBytes,
+            ),
           ),
         ),
       ),
@@ -146,7 +142,7 @@ abstract final class PdfReceiptBuilder {
             width: 65,
             child: pw.Text(
               PdfSharedFormat.norm('$label:'),
-              style: pw.TextStyle(fontSize: s.meta, fontWeight: PdfSharedStyle.weight(style, emphasized: true)),
+              style: pw.TextStyle(fontSize: s.meta, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: true)),
               textAlign: pw.TextAlign.right,
             ),
           ),
@@ -154,7 +150,7 @@ abstract final class PdfReceiptBuilder {
           pw.Expanded(
             child: pw.Text(
               PdfSharedFormat.norm(value),
-              style: pw.TextStyle(fontSize: s.meta, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)),
+              style: pw.TextStyle(fontSize: s.meta, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)),
               textAlign: pw.TextAlign.left,
             ),
           ),
@@ -238,7 +234,7 @@ abstract final class PdfReceiptBuilder {
       padding: pw.EdgeInsets.symmetric(horizontal: 2, vertical: 3),
       child: pw.Text(
         PdfSharedFormat.norm(text),
-        style: pw.TextStyle(fontSize: fontSize, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)),
+        style: pw.TextStyle(fontSize: fontSize, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)),
         textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
       ),
     );
@@ -263,9 +259,9 @@ abstract final class PdfReceiptBuilder {
           child: pw.Row(children: <pw.Widget>[
             pw.Expanded(child: pw.Text(
               ((receipt.previousBalance ?? 0) != 0) ? 'الإجمالي الكلي' : 'إجمالي الفاتورة',
-              style: pw.TextStyle(fontSize: s.grandTotal, fontWeight: PdfSharedStyle.weight(style, emphasized: true)),
+              style: pw.TextStyle(fontSize: s.grandTotal, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: true)),
             )),
-            pw.Text(_money(totalOwed, receipt), style: pw.TextStyle(fontSize: s.grandTotal, fontWeight: PdfSharedStyle.weight(style, emphasized: true))),
+            pw.Text(_money(totalOwed, receipt), style: pw.TextStyle(fontSize: s.grandTotal, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: true))),
           ]),
         ),
         pw.SizedBox(height: 6),
@@ -288,8 +284,8 @@ abstract final class PdfReceiptBuilder {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 1),
       child: pw.Row(children: <pw.Widget>[
-        pw.Expanded(child: pw.Text(PdfSharedFormat.norm(label), style: pw.TextStyle(fontSize: s.kvLabel, fontWeight: PdfSharedStyle.weight(style, emphasized: true)))),
-        pw.Text(PdfSharedFormat.norm(value), style: pw.TextStyle(fontSize: emphasized ? s.kvValueLarge : s.kvValue, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)), textAlign: pw.TextAlign.left),
+        pw.Expanded(child: pw.Text(PdfSharedFormat.norm(label), style: pw.TextStyle(fontSize: s.kvLabel, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: true)))),
+        pw.Text(PdfSharedFormat.norm(value), style: pw.TextStyle(fontSize: emphasized ? s.kvValueLarge : s.kvValue, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)), textAlign: pw.TextAlign.left),
       ]),
     );
   }
@@ -298,7 +294,7 @@ abstract final class PdfReceiptBuilder {
     return pw.Center(
       child: pw.Text(
         PdfSharedFormat.norm(_footerText(receipt)),
-        style: pw.TextStyle(fontSize: s.footer, color: PdfColors.grey700, fontStyle: pw.FontStyle.italic),
+        style: pw.TextStyle(fontSize: s.footer, color: PdfColors.black, fontStyle: pw.FontStyle.italic),
         textAlign: pw.TextAlign.center,
       ),
     );
