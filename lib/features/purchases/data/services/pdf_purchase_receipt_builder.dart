@@ -107,7 +107,10 @@ abstract final class PdfPurchaseReceiptBuilder {
         style: style,
         logoBytes: logoBytes,
         logoWidth: s.logoWidth,
-        titleFontSize: s.title,
+        // ✅ إرسال الحجم الأساسي (غير المُضاعف)
+        titleFontSize: paperSize == ReceiptPaperSize.a4
+            ? 14
+            : (paperSize == ReceiptPaperSize.mm80 ? 10 : 9),
       ),
       pw.SizedBox(height: s.sectionGap),
       _metaBlock(receipt, s, style),
