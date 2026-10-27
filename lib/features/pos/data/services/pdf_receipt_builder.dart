@@ -21,12 +21,15 @@ abstract final class PdfReceiptBuilder {
   }) async {
     final pw.ThemeData theme = await PdfSharedFonts.loadTheme();
 
-    // ✅ استخدام ورقة roll80 أو roll58 الحرارية القياسية
     final PdfPageFormat pageFormat;
     final double padding;
     switch (size) {
       case ReceiptPaperSize.mm58:
-        pageFormat = PdfPageFormat.roll58;
+        // ✅ إصلاح: لا يوجد roll58 في المكتبة، نعرفه يدوياً (58مم عرض، 297مم طول)
+        pageFormat = PdfPageFormat(
+          58 * PdfPageFormat.mm,
+          297 * PdfPageFormat.mm,
+        );
         padding = 4;
       case ReceiptPaperSize.mm80:
         pageFormat = PdfPageFormat.roll80;
@@ -66,7 +69,6 @@ abstract final class PdfReceiptBuilder {
     required PrintStyleSettings style,
     Uint8List? logoBytes,
   }) {
-    // ✅ تثبيت حجم الخط للطباعة الحرارية ليطابق الطباعة المباشرة (تجاهل الـ fontScale الكبير)
     final bool isThermal = paperSize != ReceiptPaperSize.a4;
     final _Sizes s = _Sizes.forSize(paperSize);
 
@@ -136,7 +138,7 @@ abstract final class PdfReceiptBuilder {
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: <pw.Widget>[
           pw.SizedBox(
-            width: 65, // عرض ثابت للعناوين
+            width: 65,
             child: pw.Text(
               PdfSharedFormat.norm('$label:'),
               style: pw.TextStyle(
@@ -167,11 +169,11 @@ abstract final class PdfReceiptBuilder {
       Receipt receipt, _Sizes s, PrintStyleSettings style) {
     final Map<int, pw.TableColumnWidth> columnWidths =
         <int, pw.TableColumnWidth>{
-      0: pw.FlexColumnWidth(1.4), // الإجمالي
-      1: pw.FlexColumnWidth(1.2), // السعر
-      2: pw.FlexColumnWidth(1.3), // الكمية
-      3: pw.FlexColumnWidth(2.5), // الصنف
-      4: pw.FixedColumnWidth(16), // م
+      0: pw.FlexColumnWidth(1.4),
+      1: pw.FlexColumnWidth(1.2),
+      2: pw.FlexColumnWidth(1.3),
+      3: pw.FlexColumnWidth(2.5),
+      4: pw.FixedColumnWidth(16),
     };
 
     double totalQuantity = 0;
@@ -383,7 +385,6 @@ abstract final class PdfReceiptBuilder {
   }
 }
 
-// ✅ إعادة تعريف أحجام ثابتة تماماً للطباعة الحرارية
 class _Sizes {
   const _Sizes({
     required this.meta,
@@ -411,7 +412,6 @@ class _Sizes {
         sectionGap: 10,
       );
     }
-    // قياسات حرارية صارمة (مثل الطباعة المباشرة)
     return const _Sizes(
       meta: 8,
       tableHeader: 8,
