@@ -13,12 +13,10 @@ import '../../domain/services/receipt_number_format.dart';
 enum ReceiptPaperSize { mm58, mm80, a4 }
 
 abstract final class PdfReceiptBuilder {
-  static const String _currency = 'ج.م';
+  // ✅ تم حذف الثابت _currency
 
-  // ✅ حساب الارتفاع بناءً على عدد الأسطر وحجم الخط لضمان عدم القص
   static double _thermalHeightFor(int lineCount, double fontScale) {
-    final double s = fontScale.clamp(0.8, 1.2); // سقف أمان للحراري
-    // 200mm مساحة أساسية + 15mm لكل سطر (مع مراعاة التكبير)
+    final double s = fontScale.clamp(0.8, 1.2);
     final double estimatedMm = 200 + (lineCount * 15 * s);
     return estimatedMm.clamp(200.0, 3000.0) * PdfPageFormat.mm;
   }
@@ -61,7 +59,6 @@ abstract final class PdfReceiptBuilder {
     );
 
     if (size == ReceiptPaperSize.a4) {
-      // A4: متعدد الصفحات
       document.addPage(
         pw.MultiPage(
           pageFormat: pageFormat,
@@ -76,7 +73,6 @@ abstract final class PdfReceiptBuilder {
         ),
       );
     } else {
-      // حراري: صفحة واحدة فقط (يمنع الانقسام)
       document.addPage(
         pw.Page(
           pageFormat: pageFormat,
@@ -183,7 +179,7 @@ abstract final class PdfReceiptBuilder {
                 fontWeight: PdfSharedStyle.weight(style, emphasized: true),
               ),
               textAlign: pw.TextAlign.right,
-              maxLines: 1, // منع كسر عنوان الحقل
+              maxLines: 1,
             ),
           ),
           pw.SizedBox(width: 4),
@@ -206,14 +202,13 @@ abstract final class PdfReceiptBuilder {
 
   static pw.Widget _itemsTable(
       Receipt receipt, _Sizes s, PrintStyleSettings style) {
-    // ✅ توزيع الأعمدة: مساحة أكبر للصنف، وتصغير عمود "م" لمنع الكسر
     final Map<int, pw.TableColumnWidth> columnWidths =
         <int, pw.TableColumnWidth>{
-      0: pw.FlexColumnWidth(1.4), // الإجمالي
-      1: pw.FlexColumnWidth(1.2), // السعر
-      2: pw.FlexColumnWidth(1.2), // الكمية
-      3: pw.FlexColumnWidth(2.8), // الصنف
-      4: pw.FixedColumnWidth(18), // م (ثابت)
+      0: pw.FlexColumnWidth(1.4),
+      1: pw.FlexColumnWidth(1.2),
+      2: pw.FlexColumnWidth(1.2),
+      3: pw.FlexColumnWidth(2.8),
+      4: pw.FixedColumnWidth(18),
     };
 
     double totalQuantity = 0;
@@ -287,7 +282,7 @@ abstract final class PdfReceiptBuilder {
                 center: true,
                 s: s,
                 style: style,
-                wrap: true), // يسمح للكمية بالالتفاف إذا كانت طويلة جداً
+                wrap: true),
             _cell(line.productName,
                 fontSize: s.tableRow, s: s, style: style, wrap: true),
             _cell('${i + 1}',
@@ -378,7 +373,7 @@ abstract final class PdfReceiptBuilder {
     required PrintStyleSettings style,
     bool emphasized = false,
     bool center = false,
-    bool wrap = true, // ✅ التحكم في التفاف النص
+    bool wrap = true,
   }) {
     return pw.Padding(
       padding: pw.EdgeInsets.symmetric(
@@ -390,8 +385,8 @@ abstract final class PdfReceiptBuilder {
             fontWeight:
                 PdfSharedStyle.weight(style, emphasized: emphasized)),
         textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
-        softWrap: wrap, // إذا كان false، لن يكسر السطر
-        maxLines: wrap ? null : 1, // إذا كان false، سطر واحد فقط
+        softWrap: wrap,
+        maxLines: wrap ? null : 1,
         overflow: wrap ? pw.TextOverflow.visible : pw.TextOverflow.clip,
       ),
     );
@@ -535,9 +530,9 @@ abstract final class PdfReceiptBuilder {
   static pw.Widget _singleRule() =>
       pw.Container(height: 0.6, color: PdfColors.grey600);
 
+  // ✅ تم تعديل هذه الدالة لإلغاء العملة نهائياً
   static String _money(double value, Receipt receipt) {
-    final String symbol = receipt.showCurrencySymbol ? _currency : '';
-    return ReceiptNumberFormat.money(value, currency: symbol);
+    return ReceiptNumberFormat.money(value, currency: '');
   }
 
   static String _paymentMethodLabel(Receipt receipt) {
@@ -569,7 +564,6 @@ class _Sizes {
   });
 
   factory _Sizes.forSize(ReceiptPaperSize size, {double scale = 1.0}) {
-    // ✅ سقف التكبير: 1.2 للحراري (يمنع الانفجار)، 1.6 لـ A4
     final double effectiveScale = size == ReceiptPaperSize.a4 
         ? scale.clamp(0.8, 1.6) 
         : scale.clamp(0.8, 1.2);
