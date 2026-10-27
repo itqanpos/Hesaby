@@ -15,16 +15,9 @@ enum ReceiptPaperSize { mm58, mm80, a4 }
 abstract final class PdfReceiptBuilder {
   static const String _currency = 'ج.م';
 
-  // ✅ حساب الارتفاع بناءً على عدد الأسطر وحجم الخط
-  static double _thermalHeightFor(int lineCount, double fontScale) {
-    // نحدد حداً أقصى للحجم لتجنب الحسابات المجنونة
-    final double s = fontScale.clamp(0.8, 2.0);
-    
-    // 250mm مساحة أساسية (شعار + عناوين + إجماليات + تذييل)
-    // 35mm لكل سطر لاستيعاب التفاف النص (Text Wrapping)
-    final double estimatedMm = 250 + (lineCount * 35 * s);
-    
-    // نضع حداً أقصى 3000mm لمنع أي مشاكل في الذاكرة
+  static double _thermalHeightFor(int lineCount) {
+    // مساحة ثابتة 250mm + 15mm لكل سطر
+    final double estimatedMm = 250 + (lineCount * 15);
     return estimatedMm.clamp(250.0, 3000.0) * PdfPageFormat.mm;
   }
 
@@ -40,18 +33,14 @@ abstract final class PdfReceiptBuilder {
     final double padding;
     switch (size) {
       case ReceiptPaperSize.mm58:
-        pageFormat = PdfPageFormat(
-          58 * PdfPageFormat.mm,
-          _thermalHeightFor(receipt.lines.length, style.fontScale),
-          marginAll: 0,
-        );
+        pageFormat = PdfPageFormat(58 * PdfPageFormat.mm,
+            _thermalHeightFor(receipt.lines.length),
+            marginAll: 0);
         padding = 4;
       case ReceiptPaperSize.mm80:
-        pageFormat = PdfPageFormat(
-          80 * PdfPageFormat.mm,
-          _thermalHeightFor(receipt.lines.length, style.fontScale),
-          marginAll: 0,
-        );
+        pageFormat = PdfPageFormat(80 * PdfPageFormat.mm,
+            _thermalHeightFor(receipt.lines.length),
+            marginAll: 0);
         padding = 6;
       case ReceiptPaperSize.a4:
         pageFormat = PdfPageFormat.a4;
@@ -66,7 +55,6 @@ abstract final class PdfReceiptBuilder {
     );
 
     if (size == ReceiptPaperSize.a4) {
-      // 🟢 A4: متعدد الصفحات مسموح (للأمان إذا كانت الفاتورة طويلة)
       document.addPage(
         pw.MultiPage(
           pageFormat: pageFormat,
@@ -81,7 +69,7 @@ abstract final class PdfReceiptBuilder {
         ),
       );
     } else {
-      // 🔴 حراري (80mm/58mm): صفحة واحدة فقط (يمنع الانقسام لصفحتين)
+      // حراري: صفحة واحدة فقط
       document.addPage(
         pw.Page(
           pageFormat: pageFormat,
@@ -111,14 +99,10 @@ abstract final class PdfReceiptBuilder {
   }) {
     final _Sizes s = _Sizes.forSize(paperSize, scale: style.fontScale);
 
-    // ✅ تصغير عرض الشعار للإيصالات الحرارية لترك مساحة للجدول
     final double logoWidth = paperSize == ReceiptPaperSize.a4
         ? 160
         : (paperSize == ReceiptPaperSize.mm80 ? 80 : 60);
-
-    // ✅ الحجم الأساسي للعنوان
-    final double titleBase =
-        paperSize == ReceiptPaperSize.a4 ? 16.0 : 12.0;
+    final double titleBase = paperSize == ReceiptPaperSize.a4 ? 16.0 : 12.0;
 
     return <pw.Widget>[
       PdfSharedHeader.build(
@@ -127,7 +111,6 @@ abstract final class PdfReceiptBuilder {
         branchName: receipt.branchName,
         address: receipt.companyAddress,
         phone: receipt.companyPhone,
-        // 🔒 احترام مفاتيح التفعيل
         taxNumber: receipt.hasTaxNumberToPrint
             ? receipt.companyTaxNumber
             : null,
@@ -152,76 +135,6 @@ abstract final class PdfReceiptBuilder {
       pw.SizedBox(height: s.sectionGap),
       _footer(receipt, s, style),
     ];
-  }
-
-  static pw.Widget _totalsSection(
-      Receipt receipt, _Sizes s, PrintStyleSettings style) {
-    final double totalOwed = receipt.total + (receipt.previousBalance ?? 0);
-    final double newBalance = receipt.newBalance ?? 0;
-
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: <pw.Widget>[
-        _kvRow('الإجمالي الحالي', _money(receipt.total, receipt), s, style),
-        if (receipt.hasCustomer &&
-            (receipt.previousBalance ?? 0) != 0) ...<pw.Widget>[
-          pw.SizedBox(height: 6),
-          _kvRow('الرصيد السابق',
-              _money(receipt.previousBalance!.abs(), receipt), s, style),
-        ],
-        pw.SizedBox(height: 8),
-        pw.Container(
-          padding: pw.EdgeInsets.symmetric(
-              horizontal: s.cellPadH * 2, vertical: s.cellPadV * 1.5),
-          decoration: pw.BoxDecoration(
-            border: pw.Border.all(color: PdfColors.black, width: 1.2),
-            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
-          ),
-          child: pw.Row(
-            children: <pw.Widget>[
-              pw.Expanded(
-                child: pw.Text(
-                  ((receipt.previousBalance ?? 0) != 0)
-                      ? 'الإجمالي الكلي'
-                      : 'إجمالي الفاتورة',
-                  style: pw.TextStyle(
-                      fontSize: s.grandTotal,
-                      fontWeight:
-                          PdfSharedStyle.weight(style, emphasized: true)),
-                ),
-              ),
-              pw.Text(
-                _money(totalOwed, receipt),
-                style: pw.TextStyle(
-                    fontSize: s.grandTotal,
-                    fontWeight:
-                        PdfSharedStyle.weight(style, emphasized: true)),
-              ),
-            ],
-          ),
-        ),
-        pw.SizedBox(height: 8),
-        _kvRow('طريقة الدفع', _paymentMethodLabel(receipt), s, style),
-        pw.SizedBox(height: 6),
-        _kvRow('المدفوع', _money(receipt.paidAmount, receipt), s, style),
-        if (receipt.hasBalanceChange) ...<pw.Widget>[
-          pw.SizedBox(height: 8),
-          _divider(),
-          pw.SizedBox(height: 8),
-          if (newBalance > 0)
-            _kvRow('الرصيد الجديد على العميل', _money(newBalance, receipt), s,
-                style,
-                emphasized: true)
-          else if (newBalance < 0)
-            _kvRow('الرصيد الجديد (له عندنا)',
-                _money(newBalance.abs(), receipt), s, style,
-                emphasized: true)
-          else
-            _kvRow('الرصيد الجديد', _money(0, receipt), s, style,
-                emphasized: true),
-        ],
-      ],
-    );
   }
 
   static pw.Widget _metaBlock(
@@ -254,25 +167,28 @@ abstract final class PdfReceiptBuilder {
       child: pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: <pw.Widget>[
+          // عرض ثابت للعنوان (مثل: رقم الفاتورة) يمنع تداخله مع القيمة
           pw.SizedBox(
             width: s.metaLabelWidth,
             child: pw.Text(
               PdfSharedFormat.norm('$label:'),
               style: pw.TextStyle(
-                  fontSize: s.meta,
-                  fontWeight:
-                      PdfSharedStyle.weight(style, emphasized: true)),
+                fontSize: s.meta,
+                fontWeight: PdfSharedStyle.weight(style, emphasized: true),
+              ),
               textAlign: pw.TextAlign.right,
+              maxLines: 1, // يمنع نزول العنوان لسطرين
             ),
           ),
-          pw.SizedBox(width: 8),
+          pw.SizedBox(width: 4),
           pw.Expanded(
             child: pw.Text(
               PdfSharedFormat.norm(value),
               style: pw.TextStyle(
-                  fontSize: s.meta,
-                  fontWeight: PdfSharedStyle.weight(style,
-                      emphasized: emphasized)),
+                fontSize: s.meta,
+                fontWeight:
+                    PdfSharedStyle.weight(style, emphasized: emphasized),
+              ),
               textAlign: pw.TextAlign.left,
               softWrap: true,
             ),
@@ -284,13 +200,14 @@ abstract final class PdfReceiptBuilder {
 
   static pw.Widget _itemsTable(
       Receipt receipt, _Sizes s, PrintStyleSettings style) {
+    // ✅ توزيع أعمدة ذكي: إعطاء مساحة أكبر للصنف، وتصغير "م"
     final Map<int, pw.TableColumnWidth> columnWidths =
         <int, pw.TableColumnWidth>{
-      0: pw.FlexColumnWidth(1.4),
-      1: pw.FlexColumnWidth(1.2),
-      2: pw.FlexColumnWidth(1.3),
-      3: pw.FlexColumnWidth(3.0),
-      4: pw.FixedColumnWidth(s.rowNumWidth),
+      0: pw.FlexColumnWidth(1.3), // الإجمالي
+      1: pw.FlexColumnWidth(1.1), // السعر
+      2: pw.FlexColumnWidth(1.1), // الكمية
+      3: pw.FlexColumnWidth(2.5), // الصنف (أكبر مساحة)
+      4: pw.FixedColumnWidth(12), // م (مساحة صغيرة)
     };
 
     double totalQuantity = 0;
@@ -427,18 +344,93 @@ abstract final class PdfReceiptBuilder {
     bool emphasized = false,
     bool center = false,
   }) {
+    // ✅ استخدام FittedBox لمنع كسر الكلمات في الأعمدة الضيقة
     return pw.Padding(
       padding: pw.EdgeInsets.symmetric(
           horizontal: s.cellPadH, vertical: s.cellPadV),
-      child: pw.Text(
-        PdfSharedFormat.norm(text),
-        style: pw.TextStyle(
-            fontSize: fontSize,
-            fontWeight:
-                PdfSharedStyle.weight(style, emphasized: emphasized)),
-        textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
-        softWrap: true,
+      child: pw.FittedBox(
+        fit: pw.BoxFit.scaleDown,
+        alignment: center ? pw.Alignment.center : pw.Alignment.centerRight,
+        child: pw.Text(
+          PdfSharedFormat.norm(text),
+          style: pw.TextStyle(
+              fontSize: fontSize,
+              fontWeight:
+                  PdfSharedStyle.weight(style, emphasized: emphasized)),
+          textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
+          maxLines: 1,
+        ),
       ),
+    );
+  }
+
+  static pw.Widget _totalsSection(
+      Receipt receipt, _Sizes s, PrintStyleSettings style) {
+    final double totalOwed = receipt.total + (receipt.previousBalance ?? 0);
+    final double newBalance = receipt.newBalance ?? 0;
+
+    return pw.Column(
+      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+      children: <pw.Widget>[
+        _kvRow('الإجمالي الحالي', _money(receipt.total, receipt), s, style),
+        if (receipt.hasCustomer &&
+            (receipt.previousBalance ?? 0) != 0) ...<pw.Widget>[
+          pw.SizedBox(height: 6),
+          _kvRow('الرصيد السابق',
+              _money(receipt.previousBalance!.abs(), receipt), s, style),
+        ],
+        pw.SizedBox(height: 8),
+        pw.Container(
+          padding: pw.EdgeInsets.symmetric(
+              horizontal: s.cellPadH * 2, vertical: s.cellPadV * 1.5),
+          decoration: pw.BoxDecoration(
+            border: pw.Border.all(color: PdfColors.black, width: 1.2),
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+          ),
+          child: pw.Row(
+            children: <pw.Widget>[
+              pw.Expanded(
+                child: pw.Text(
+                  ((receipt.previousBalance ?? 0) != 0)
+                      ? 'الإجمالي الكلي'
+                      : 'إجمالي الفاتورة',
+                  style: pw.TextStyle(
+                      fontSize: s.grandTotal,
+                      fontWeight:
+                          PdfSharedStyle.weight(style, emphasized: true)),
+                ),
+              ),
+              pw.Text(
+                _money(totalOwed, receipt),
+                style: pw.TextStyle(
+                    fontSize: s.grandTotal,
+                    fontWeight:
+                        PdfSharedStyle.weight(style, emphasized: true)),
+              ),
+            ],
+          ),
+        ),
+        pw.SizedBox(height: 8),
+        _kvRow('طريقة الدفع', _paymentMethodLabel(receipt), s, style),
+        pw.SizedBox(height: 6),
+        _kvRow('المدفوع', _money(receipt.paidAmount, receipt), s, style),
+        if (receipt.hasBalanceChange) ...<pw.Widget>[
+          pw.SizedBox(height: 8),
+          _divider(),
+          pw.SizedBox(height: 8),
+          if (newBalance > 0)
+            _kvRow('الرصيد الجديد على العميل', _money(newBalance, receipt), s,
+                style,
+                emphasized: true)
+          else if (newBalance < 0)
+            _kvRow('الرصيد الجديد (له عندنا)',
+                _money(newBalance.abs(), receipt), s, style,
+                emphasized: true)
+          else
+            _kvRow('الرصيد الجديد', _money(0, receipt), s, style,
+                emphasized: true),
+        ],
+      ],
     );
   }
 
@@ -544,66 +536,71 @@ class _Sizes {
   });
 
   factory _Sizes.forSize(ReceiptPaperSize size, {double scale = 1.0}) {
-    final double s = scale.clamp(0.8, 1.6);
+    // 🚀 السر هنا: نقص أقصى تكبير للورق الحراري إلى 1.1 (بدلاً من 1.6)
+    // حتى لا تنفجر النصوص وتنكسر الكلمات. الـ A4 يظل مسموحاً له بالتكبير.
+    final double effectiveScale = size == ReceiptPaperSize.a4 
+        ? scale.clamp(0.8, 1.6) 
+        : scale.clamp(0.8, 1.1);
+
     switch (size) {
       case ReceiptPaperSize.mm58:
         return _Sizes(
-          companyName: 14 * s,
-          branchName: 9 * s,
-          title: 11 * s,
-          meta: 9 * s,
-          metaLabelWidth: 70 * s,
-          tableHeader: 8.5 * s,
-          tableRow: 8.5 * s,
-          rowNumWidth: 16 * s,
-          cellPadH: 3 * s,
-          cellPadV: 3.5 * s,
-          grandTotal: 13 * s,
-          kvLabel: 9.5 * s,
-          kvValue: 10 * s,
-          kvValueLarge: 12 * s,
-          footer: 8.5 * s,
-          sectionGap: 6 * s,
-          logoWidth: 90,
+          companyName: 14 * effectiveScale,
+          branchName: 9 * effectiveScale,
+          title: 11 * effectiveScale,
+          meta: 8 * effectiveScale, // تقليل حجم الميتا
+          metaLabelWidth: 55 * effectiveScale, // تقليل عرض العنوان
+          tableHeader: 8 * effectiveScale, // تقليل حجم رأس الجدول
+          tableRow: 8 * effectiveScale,
+          rowNumWidth: 16 * effectiveScale,
+          cellPadH: 2 * effectiveScale,
+          cellPadV: 3 * effectiveScale,
+          grandTotal: 13 * effectiveScale,
+          kvLabel: 9 * effectiveScale,
+          kvValue: 9 * effectiveScale,
+          kvValueLarge: 11 * effectiveScale,
+          footer: 8 * effectiveScale,
+          sectionGap: 6 * effectiveScale,
+          logoWidth: 60,
         );
       case ReceiptPaperSize.mm80:
         return _Sizes(
-          companyName: 16 * s,
-          branchName: 10 * s,
-          title: 12 * s,
-          meta: 9.5 * s,
-          metaLabelWidth: 85 * s,
-          tableHeader: 9 * s,
-          tableRow: 9 * s,
-          rowNumWidth: 18 * s,
-          cellPadH: 3.5 * s,
-          cellPadV: 4 * s,
-          grandTotal: 14 * s,
-          kvLabel: 10 * s,
-          kvValue: 11 * s,
-          kvValueLarge: 13 * s,
-          footer: 9 * s,
-          sectionGap: 7 * s,
-          logoWidth: 140,
+          companyName: 16 * effectiveScale,
+          branchName: 10 * effectiveScale,
+          title: 12 * effectiveScale,
+          meta: 9 * effectiveScale, // 9 بدلاً من 9.5
+          metaLabelWidth: 65 * effectiveScale, // 65 بدلاً من 85 لمنع الكسر
+          tableHeader: 8.5 * effectiveScale, // 8.5 بدلاً من 9
+          tableRow: 9 * effectiveScale,
+          rowNumWidth: 18 * effectiveScale,
+          cellPadH: 2.5 * effectiveScale, // تقليل الحواف
+          cellPadV: 3.5 * effectiveScale,
+          grandTotal: 14 * effectiveScale,
+          kvLabel: 9.5 * effectiveScale,
+          kvValue: 10 * effectiveScale,
+          kvValueLarge: 12 * effectiveScale,
+          footer: 9 * effectiveScale,
+          sectionGap: 6 * effectiveScale,
+          logoWidth: 80,
         );
       case ReceiptPaperSize.a4:
         return _Sizes(
-          companyName: 22 * s,
-          branchName: 12 * s,
-          title: 16 * s,
-          meta: 11 * s,
-          metaLabelWidth: 120 * s,
-          tableHeader: 11 * s,
-          tableRow: 11 * s,
-          rowNumWidth: 26 * s,
-          cellPadH: 7 * s,
-          cellPadV: 7 * s,
-          grandTotal: 18 * s,
-          kvLabel: 12 * s,
-          kvValue: 13 * s,
-          kvValueLarge: 15 * s,
-          footer: 11 * s,
-          sectionGap: 11 * s,
+          companyName: 22 * effectiveScale,
+          branchName: 12 * effectiveScale,
+          title: 16 * effectiveScale,
+          meta: 11 * effectiveScale,
+          metaLabelWidth: 120 * effectiveScale,
+          tableHeader: 11 * effectiveScale,
+          tableRow: 11 * effectiveScale,
+          rowNumWidth: 26 * effectiveScale,
+          cellPadH: 7 * effectiveScale,
+          cellPadV: 7 * effectiveScale,
+          grandTotal: 18 * effectiveScale,
+          kvLabel: 12 * effectiveScale,
+          kvValue: 13 * effectiveScale,
+          kvValueLarge: 15 * effectiveScale,
+          footer: 11 * effectiveScale,
+          sectionGap: 11 * effectiveScale,
           logoWidth: 180,
         );
     }
