@@ -102,12 +102,13 @@ abstract final class PdfReceiptBuilder {
         branchName: receipt.branchName,
         address: receipt.companyAddress,
         phone: receipt.companyPhone,
-        taxNumber: receipt.companyTaxNumber,
-        commercialRegister: receipt.companyCommercialRegister,
+        // 🔒 احترام مفاتيح التفعيل: لا نمرر البيانات إلا إذا كان المفتاح مفعل
+        taxNumber: receipt.hasTaxNumberToPrint ? receipt.companyTaxNumber : null,
+        commercialRegister: receipt.hasCommercialRegisterToPrint ? receipt.companyCommercialRegister : null,
         style: style,
         logoBytes: logoBytes,
         logoWidth: s.logoWidth,
-        // ✅ إرسال الحجم الأساسي (غير المُضاعف)، والدالة ستقوم بتكبيره مرة واحدة
+        // ✅ إرسال الحجم الأساسي (غير المُضاعف)
         titleFontSize: paperSize == ReceiptPaperSize.a4
             ? 16
             : (paperSize == ReceiptPaperSize.mm80 ? 12 : 11),
