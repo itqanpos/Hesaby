@@ -2,7 +2,6 @@
 
 import 'dart:typed_data';
 
-import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
 import '../../../settings/domain/entities/print_style_settings.dart';
@@ -36,6 +35,11 @@ abstract interface class ReceiptPrinter {
 }
 
 /// Default [ReceiptPrinter] backed by the `printing` package.
+///
+/// **Updates:**
+/// * Replaced `Printing.layoutPdf` with `Printing.sharePdf` to avoid the
+///   Android system print dialog.
+/// * Removed unused `package:pdf/pdf.dart` import.
 class ReceiptPrinterImpl implements ReceiptPrinter {
   const ReceiptPrinterImpl();
 
@@ -57,9 +61,10 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
         logoBytes: logoBytes,
       );
 
-      await Printing.layoutPdf(
-        name: _fileNameFor(receipt),
-        onLayout: (PdfPageFormat _) => bytes,
+      // ✅ تم استبدال layoutPdf بـ sharePdf لإخفاء حوار الطباعة
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: _fileNameFor(receipt),
       );
 
       return true;
@@ -75,6 +80,9 @@ class ReceiptPrinterImpl implements ReceiptPrinter {
     PrintStyleSettings style = const PrintStyleSettings.defaults(),
     Uint8List? logoBytes,
   }) async {
+    // In this version, preview delegates to print, which opens the OS
+    // share sheet. The WYSIWYG preview is handled elsewhere
+    // (e.g., thermal_return_preview for returns).
     return printReceipt(
       receipt: receipt,
       size: size,
