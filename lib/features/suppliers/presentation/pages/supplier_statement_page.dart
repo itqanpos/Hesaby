@@ -4,16 +4,15 @@
 // supplier-specific pieces (data binding, flattening, print, record
 // payment).
 //
-// Note: `Supplier` does not carry a cached `balance` column (unlike
-// `Customer`), so `SupplierStatementAdapter.adapt` leaves
-// `StatementView.storedBalance` null. As a result the reconciliation
-// warning in the summary bar is inert for supplier statements.
+// **Updates:**
+// * Removed `Printing.layoutPdf` in favour of `Printing.sharePdf`.
+// * Added paper size selection (A4 / Thermal 80mm).
+// * Passed company info to `PdfSupplierStatementBuilder` for the unified header.
 
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
 import '../../../../core/utils/logger.dart';
@@ -21,6 +20,8 @@ import '../../../../shared/widgets/statements/account_statement_page.dart';
 import '../../../../shared/widgets/statements/adapters/statement_adapter.dart';
 import '../../../../shared/widgets/statements/models/statement_models.dart';
 import '../../../pos/data/services/direct_print_service.dart';
+import '../../../pos/data/services/pdf_receipt_builder.dart'
+    show ReceiptPaperSize;
 import '../../../purchases/presentation/dialogs/supplier_payment_dialog.dart';
 import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
@@ -124,22 +125,73 @@ Future<void> _print(
 ) async {
   if (statement.isEmpty) return;
 
+  // 1. اختيار مقاس الطباعة
+  final ReceiptPaperSize? selectedSize = await showDialog<ReceiptPaperSize>(
+    context: context,
+    builder: (BuildContext ctx) {
+      return SimpleDialog(
+        title: const Text('اختر مقاس الطباعة'),
+        children: <Widget>[
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, ReceiptPaperSize.a4),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.description_outlined),
+                  SizedBox(width: 8),
+                  Text('A4 (تفصيلي)'),
+                ],
+              ),
+            ),
+          ),
+          SimpleDialogOption(
+            onPressed: () => Navigator.pop(ctx, ReceiptPaperSize.mm80),
+            child: const Padding(
+              padding: EdgeInsets.symmetric(vertical: 8),
+              child: Row(
+                children: [
+                  Icon(Icons.receipt_long_outlined),
+                  SizedBox(width: 8),
+                  Text('إيصال حراري 80 مم (ملخص)'),
+                ],
+              ),
+            ),
+          ),
+        ],
+      );
+    },
+  );
+
+  if (selectedSize == null || !context.mounted) return;
+
   try {
+    final CompanySettings? settings =
+        ref.read(companySettingsProvider).valueOrNull;
     final Uint8List? logo = await _loadLogoBytes(ref);
+
+    // 2. بناء الـ PDF
     final Uint8List bytes = await PdfSupplierStatementBuilder.build(
       statement: statement,
       style: _readA4Style(ref),
       logoBytes: logo,
+      size: selectedSize,
+      companyName: settings?.companyName,
+      branchName: settings?.branchName,
+      companyAddress: settings?.address,
+      companyPhone: settings?.phone,
+      taxNumber: settings?.taxNumber,
+      commercialRegister: settings?.commercialRegister,
     );
 
     final String fileName =
-        'supplier-statement-${statement.supplier.name}.pdf';
+        'supplier-statement-${statement.supplier.name}-${DateTime.now().millisecondsSinceEpoch}.pdf';
 
+    // 3. محاولة الطباعة المباشرة (إذا كانت مفعلة ومقاس حراري)
     final bool direct =
-        ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
-            false;
+        settings?.printDirectEnabled ?? false;
 
-    if (direct) {
+    if (direct && selectedSize != ReceiptPaperSize.a4) {
       final bool ok = await DirectPrintService.tryPdfBytes(
         bytes: bytes,
         name: fileName,
@@ -155,11 +207,13 @@ Future<void> _print(
       }
     }
 
-    await Printing.layoutPdf(
-      name: fileName,
-      onLayout: (PdfPageFormat _) async => bytes,
+    // 4. شيت المشاركة (بدلاً من layoutPdf)
+    await Printing.sharePdf(
+      bytes: bytes,
+      filename: fileName,
     );
-  } on Object {
+  } on Object catch (e) {
+    AppLogger.warning('Supplier statement print failed: $e');
     if (!context.mounted) return;
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
