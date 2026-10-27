@@ -2,6 +2,7 @@
 
 import 'dart:typed_data';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:printing/printing.dart' show Printing;
 
@@ -22,7 +23,7 @@ import '../../../settings/presentation/providers/company_settings_providers.dart
 import '../../domain/entities/sale_entities.dart';
 import '../providers/sales_providers.dart';
 
-/// Outcome of a direct thermal print attempt.
+/// نتيجة عملية الطباعة المباشرة
 enum DirectSalePrintResult {
   success,
   noPrinter,
@@ -30,48 +31,79 @@ enum DirectSalePrintResult {
   sendFailed,
 }
 
-/// Prints [sale] directly to the saved thermal printer.
-Future<DirectSalePrintResult> printSaleDirect({
+/// محرك الطباعة الموحد (الإجراء الرئيسي)
+/// 
+/// [forceShare] = false: يحاول الطباعة المباشرة أولاً (إذا كانت مفعلة)، ثم ينتقل للمشاركة.
+/// [forceShare] = true: يفتح شيت المشاركة مباشرة (لتجاهل الطباعة المباشرة).
+Future<void> handleSalePrintFlow({
+  required BuildContext context,
   required WidgetRef ref,
   required Sale sale,
   required List<SaleItem> items,
   required String customerName,
-  String? customerAddress,
-  String? customerPhone,
-  String? cashierName,
   required Map<String, String> productNames,
   required Map<String, String> unitNames,
+  required bool forceShare,
 }) async {
-  if (items.isEmpty) {
-    return DirectSalePrintResult.sendFailed;
+  final Receipt receipt = buildReceiptFromSale(
+    ref: ref,
+    sale: sale,
+    items: items,
+    customerName: customerName,
+    productNames: productNames,
+    unitNames: unitNames,
+  );
+
+  // 1. محاولة الطباعة المباشرة (إذا لم يُجبر على المشاركة)
+  if (!forceShare) {
+    final bool directEnabled =
+        ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ?? false;
+    
+    if (directEnabled) {
+      final DirectSalePrintResult result = await _tryDirectThermalPrint(ref, receipt);
+      
+      if (result == DirectSalePrintResult.success) {
+        if (!context.mounted) return;
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تم إرسال الفاتورة للطابعة.')),
+        );
+        return; // انتهى بنجاح
+      }
+      
+      // إذا فشلت الطباعة المباشرة، ننتقل للمشاركة كخطة بديلة
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذّرت الطباعة المباشرة. جاري فتح المشاركة...')),
+      );
+    }
   }
 
-  final SavedPrinter? saved = ref.read(savedPrinterProvider).valueOrNull;
-  if (saved == null) {
-    return DirectSalePrintResult.noPrinter;
+  // 2. المشاركة كـ PDF (إذا فشلت المباشرة أو تم الإجبار)
+  final bool ok = await _shareReceiptPdf(ref, receipt, sale.invoiceNumber ?? sale.id);
+  if (!context.mounted) return;
+  
+  if (!ok) {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('تعذّرت مشاركة الفاتورة.')),
+    );
   }
+}
+
+/// دالة الطباعة المباشرة (مفصولة لسهولة الاختبار)
+Future<DirectSalePrintResult> _tryDirectThermalPrint(
+  WidgetRef ref,
+  Receipt receipt,
+) async {
+  final SavedPrinter? saved = ref.read(savedPrinterProvider).valueOrNull;
+  if (saved == null) return DirectSalePrintResult.noPrinter;
 
   final PrinterService service = ref.read(printerServiceProvider);
 
   try {
     if (!service.isConnected) {
       final bool connected = await service.connect(saved.toDevice());
-      if (!connected) {
-        return DirectSalePrintResult.connectFailed;
-      }
+      if (!connected) return DirectSalePrintResult.connectFailed;
     }
-
-    final Receipt receipt = buildReceiptFromSale(
-      ref: ref,
-      sale: sale,
-      items: items,
-      customerName: customerName,
-      customerAddress: customerAddress,
-      customerPhone: customerPhone,
-      cashierName: cashierName,
-      productNames: productNames,
-      unitNames: unitNames,
-    );
 
     final Uint8List? logoBytes = await _loadLogoBytes(ref);
     final PrintStyleSettings style = _readStyle(ref);
@@ -87,49 +119,23 @@ Future<DirectSalePrintResult> printSaleDirect({
 
     await service.sendBytes(bytes);
     return DirectSalePrintResult.success;
-  } on PrinterException catch (error) {
-    AppLogger.error('Direct sale print failed', error);
-    return DirectSalePrintResult.sendFailed;
   } on Object catch (error, stackTrace) {
     AppLogger.error('Direct sale print failed', error, stackTrace);
     return DirectSalePrintResult.sendFailed;
   }
 }
 
-/// Builds a PDF for [sale] and opens the platform share sheet.
-Future<bool> shareSalePdf({
-  required WidgetRef ref,
-  required Sale sale,
-  required List<SaleItem> items,
-  required String customerName,
-  String? customerAddress,
-  String? customerPhone,
-  String? cashierName,
-  required Map<String, String> productNames,
-  required Map<String, String> unitNames,
-}) async {
-  if (items.isEmpty) {
-    return false;
-  }
-
+/// دالة المشاركة كـ PDF
+Future<bool> _shareReceiptPdf(
+  WidgetRef ref,
+  Receipt receipt,
+  String filenameSuffix,
+) async {
   try {
-    final Receipt receipt = buildReceiptFromSale(
-      ref: ref,
-      sale: sale,
-      items: items,
-      customerName: customerName,
-      customerAddress: customerAddress,
-      customerPhone: customerPhone,
-      cashierName: cashierName,
-      productNames: productNames,
-      unitNames: unitNames,
-    );
-
     final Uint8List? logoBytes = await _loadLogoBytes(ref);
     final PrintStyleSettings style = _readStyle(ref);
     final ReceiptPaperSize size =
-        ref.read(posPaperSizeProvider).valueOrNull ??
-            PosPreferences.defaultPaperSize;
+        ref.read(posPaperSizeProvider).valueOrNull ?? PosPreferences.defaultPaperSize;
 
     final Uint8List bytes = await PdfReceiptBuilder.build(
       receipt: receipt,
@@ -138,14 +144,9 @@ Future<bool> shareSalePdf({
       logoBytes: logoBytes,
     );
 
-    final String suffix =
-        (sale.invoiceNumber?.trim().isNotEmpty ?? false)
-            ? sale.invoiceNumber!.trim()
-            : sale.id;
-
     await Printing.sharePdf(
       bytes: bytes,
-      filename: 'sale-$suffix.pdf',
+      filename: 'invoice-$filenameSuffix.pdf',
     );
     return true;
   } on Object catch (error, stackTrace) {
@@ -154,7 +155,7 @@ Future<bool> shareSalePdf({
   }
 }
 
-/// Builds a [Receipt] snapshot from a stored [Sale] and its related data.
+/// بناء كائن Receipt من Sale (بدون تغيير)
 Receipt buildReceiptFromSale({
   required WidgetRef ref,
   required Sale sale,
@@ -166,23 +167,17 @@ Receipt buildReceiptFromSale({
   required Map<String, String> productNames,
   required Map<String, String> unitNames,
 }) {
-  final CompanyContextState contextState =
-      ref.read(companyContextProvider);
-  final CompanySettings? settings =
-      ref.read(companySettingsProvider).valueOrNull;
+  final CompanyContextState contextState = ref.read(companyContextProvider);
+  final CompanySettings? settings = ref.read(companySettingsProvider).valueOrNull;
 
-  // قراءة رصيد العميل الحالي (تقريبي)
   double? previousBalance;
   double? newBalance;
 
   if (sale.customerId != null) {
-    final AsyncValue<List<Customer>> customersAsync =
-        ref.read(customersProvider);
+    final AsyncValue<List<Customer>> customersAsync = ref.read(customersProvider);
     final List<Customer>? customers = customersAsync.valueOrNull;
     if (customers != null) {
-      final Customer? customer = customers
-          .cast<Customer?>()
-          .firstWhere(
+      final Customer? customer = customers.cast<Customer?>().firstWhere(
             (Customer? c) => c?.id == sale.customerId,
             orElse: () => null,
           );
@@ -203,11 +198,9 @@ Receipt buildReceiptFromSale({
     companyAddress: contextState.currentCompany?.address,
     companyPhone: contextState.currentCompany?.phone,
     companyTaxNumber: contextState.currentCompany?.taxNumber,
-    companyCommercialRegister:
-        contextState.currentCompany?.commercialRegister,
+    companyCommercialRegister: contextState.currentCompany?.commercialRegister,
     showTaxNumberOnPrint: settings?.showTaxNumberOnPrint ?? false,
-    showCommercialRegisterOnPrint:
-        settings?.showCommercialRegisterOnPrint ?? false,
+    showCommercialRegisterOnPrint: settings?.showCommercialRegisterOnPrint ?? false,
     showCurrencySymbol: settings?.showCurrencySymbol ?? true,
     lines: <ReceiptLine>[
       for (final SaleItem item in items)
@@ -234,35 +227,15 @@ Receipt buildReceiptFromSale({
   );
 }
 
-/// Localised message for a [DirectSalePrintResult].
-String directSalePrintMessage(DirectSalePrintResult result) {
-  switch (result) {
-    case DirectSalePrintResult.success:
-      return 'تم إرسال الفاتورة للطابعة.';
-    case DirectSalePrintResult.noPrinter:
-      return 'لا توجد طابعة محفوظة. اضبط طابعة من الإعدادات.';
-    case DirectSalePrintResult.connectFailed:
-      return 'تعذّر الاتصال بالطابعة. تأكد من تشغيلها.';
-    case DirectSalePrintResult.sendFailed:
-      return 'تعذّر إرسال الفاتورة للطابعة.';
-  }
-}
-
 // ============================================================================
-// Internal helpers
+// Helpers
 // ============================================================================
 
 Future<Uint8List?> _loadLogoBytes(WidgetRef ref) async {
-  final CompanySettings? s =
-      ref.read(companySettingsProvider).valueOrNull;
+  final CompanySettings? s = ref.read(companySettingsProvider).valueOrNull;
   if (s == null || s.companyId.isEmpty) return null;
-
-  // CompanyLogoLoader handles empty URL internally.
   try {
-    return await const CompanyLogoLoader().load(
-      companyId: s.companyId,
-      logoUrl: s.logoUrl,
-    );
+    return await const CompanyLogoLoader().load(companyId: s.companyId, logoUrl: s.logoUrl);
   } on Object catch (e) {
     AppLogger.warning('Logo load failed (non-fatal): $e');
     return null;
@@ -270,16 +243,14 @@ Future<Uint8List?> _loadLogoBytes(WidgetRef ref) async {
 }
 
 PrintStyleSettings _readStyle(WidgetRef ref) {
-  final CompanySettings? s =
-      ref.read(companySettingsProvider).valueOrNull;
+  final CompanySettings? s = ref.read(companySettingsProvider).valueOrNull;
   if (s == null) return const PrintStyleSettings.defaults();
   return PrintStyleSettings.fromCompanySettings(s);
 }
 
 int _resolveWidthDots(WidgetRef ref) {
   final ReceiptPaperSize size =
-      ref.read(posPaperSizeProvider).valueOrNull ??
-          PosPreferences.defaultPaperSize;
+      ref.read(posPaperSizeProvider).valueOrNull ?? PosPreferences.defaultPaperSize;
   switch (size) {
     case ReceiptPaperSize.mm58:
       return EscPosReceiptBuilder.widthMm58;
