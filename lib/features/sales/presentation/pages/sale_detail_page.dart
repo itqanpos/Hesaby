@@ -365,16 +365,17 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     if (_isPrinting) return;
     setState(() => _isPrinting = true);
     try {
-      final DirectSalePrintResult result = await printSaleDirect(
+      // ✅ استخدام المحرك الموحد الجديد
+      await handleSalePrintFlow(
+        context: context,
         ref: ref,
         sale: sale,
         items: items,
         customerName: customerName,
         productNames: productNames,
         unitNames: unitNames,
+        forceShare: false,
       );
-      if (!mounted) return;
-      _snack(directSalePrintMessage(result));
     } on Object {
       if (!mounted) return;
       _snack('تعذّر تحضير الفاتورة للطباعة.');
@@ -393,18 +394,17 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     if (_isSharing) return;
     setState(() => _isSharing = true);
     try {
-      final bool ok = await shareSalePdf(
+      // ✅ استخدام المحرك الموحد الجديد
+      await handleSalePrintFlow(
+        context: context,
         ref: ref,
         sale: sale,
         items: items,
         customerName: customerName,
         productNames: productNames,
         unitNames: unitNames,
+        forceShare: true,
       );
-      if (!mounted) return;
-      if (!ok) {
-        _snack('تعذّرت مشاركة الفاتورة.');
-      }
     } on Object {
       if (!mounted) return;
       _snack('تعذّرت مشاركة الفاتورة.');
@@ -445,7 +445,7 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
 }
 
 // ============================================================================
-// Widgets (نفس ما كان، ماعدا _ReturnsCard._cancelReturn)
+// Widgets
 // ============================================================================
 
 class _HeaderCard extends StatelessWidget {
@@ -831,10 +831,6 @@ class _TotalsCard extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Returns card — ✅ مع الإصلاح
-// ============================================================================
-
 class _ReturnsCard extends ConsumerWidget {
   const _ReturnsCard({required this.sale});
 
@@ -940,7 +936,6 @@ class _ReturnsCard extends ConsumerWidget {
     try {
       await ref.read(returnsProvider.notifier).cancelReturn(
             returnId: saleReturn.id,
-            // ✅ الإصلاح: fallback إلى sale.id عندما يكون saleReturn.saleId == null
             saleId: saleReturn.saleId ?? sale.id,
           );
       if (!context.mounted) {
