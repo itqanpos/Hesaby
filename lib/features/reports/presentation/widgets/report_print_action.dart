@@ -4,13 +4,14 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
 import '../../../../core/utils/logger.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../pos/data/services/direct_print_service.dart';
+import '../../../pos/data/services/pdf_receipt_builder.dart'
+    show ReceiptPaperSize;
 import '../../../settings/data/services/company_logo_loader.dart';
 import '../../../settings/domain/entities/company_settings.dart';
 import '../../../settings/domain/entities/print_style_settings.dart';
@@ -20,13 +21,10 @@ import '../../domain/entities/report_document.dart';
 
 /// A button that opens a print / share dialog for a [ReportDocument].
 ///
-/// **Phase P-2:** if "direct print" is enabled, the report is sent straight
-/// to the OS default printer without opening the preview dialog. On any
-/// failure, the standard dialog opens as a fallback.
-///
-/// **Phase U-5+:** the company logo is loaded once per invocation and
-/// embedded into every page header (both in the direct-print path and in
-/// the print / share dialog paths).
+/// **Updates:**
+/// * Removed `Printing.layoutPdf` in favour of `Printing.sharePdf`.
+/// * Added paper size selection (A4 / Thermal 80mm) inside the dialog.
+/// * Passed the selected size to `PdfReportBuilder`.
 class ReportPrintAction extends ConsumerWidget {
   const ReportPrintAction({super.key, required this.documentBuilder});
 
@@ -60,7 +58,7 @@ class ReportPrintAction extends ConsumerWidget {
       branchName: ctx.currentBranch?.name ?? raw.branchName,
     );
 
-    // Reports are always A4, so we use the A4 font scale.
+    // Reports are always A4 by default, but we pass the style anyway.
     final CompanySettings? settings =
         ref.read(companySettingsProvider).valueOrNull;
     final PrintStyleSettings style = settings == null
@@ -73,35 +71,10 @@ class ReportPrintAction extends ConsumerWidget {
     // ---- Load logo once (non-fatal) ----
     final Uint8List? logoBytes = await _loadLogoBytes(ref);
 
-    // ---- Direct print path ----
-    final bool direct = settings?.printDirectEnabled ?? false;
-    if (direct) {
-      try {
-        final Uint8List bytes = await PdfReportBuilder.build(
-          document: doc,
-          style: style,
-          logoBytes: logoBytes,
-        );
-        final String name = _fileNameFor();
-        final bool ok = await DirectPrintService.tryPdfBytes(
-          bytes: bytes,
-          name: name,
-        );
-        if (ok) {
-          if (context.mounted) {
-            ScaffoldMessenger.of(context)
-              ..hideCurrentSnackBar()
-              ..showSnackBar(
-                const SnackBar(content: Text('تم إرسال التقرير للطابعة.')),
-              );
-          }
-          return;
-        }
-      } on Object {
-        // Fall through to the preview dialog.
-      }
-    }
-
+    // ---- Direct print path (only for thermal) ----
+    // Note: In this version, direct print is handled inside the dialog
+    // because the user needs to choose the paper size first.
+    
     if (!context.mounted) return;
     await showDialog<void>(
       context: context,
@@ -132,21 +105,13 @@ class ReportPrintAction extends ConsumerWidget {
       return null;
     }
   }
-
-  static String _fileNameFor() {
-    final String stamp = DateTime.now()
-        .toIso8601String()
-        .replaceAll(':', '-')
-        .substring(0, 16);
-    return 'report-$stamp.pdf';
-  }
 }
 
 // ============================================================================
 // Dialog
 // ============================================================================
 
-class _PrintDialog extends StatefulWidget {
+class _PrintDialog extends ConsumerStatefulWidget {
   const _PrintDialog({
     required this.document,
     required this.style,
@@ -160,14 +125,14 @@ class _PrintDialog extends StatefulWidget {
   final Uint8List? logoBytes;
 
   @override
-  State<_PrintDialog> createState() => _PrintDialogState();
+  ConsumerState<_PrintDialog> createState() => _PrintDialogState();
 }
 
-class _PrintDialogState extends State<_PrintDialog> {
-  bool _isPrinting = false;
-  bool _isSharing = false;
+class _PrintDialogState extends ConsumerState<_PrintDialog> {
+  ReceiptPaperSize _selectedSize = ReceiptPaperSize.a4;
+  bool _isProcessing = false;
 
-  bool get _isBusy => _isPrinting || _isSharing;
+  bool get _isBusy => _isProcessing;
 
   String get _fileName {
     final String stamp = DateTime.now()
@@ -177,44 +142,45 @@ class _PrintDialogState extends State<_PrintDialog> {
     return 'report-$stamp.pdf';
   }
 
-  Future<void> _print() async {
-    setState(() => _isPrinting = true);
+  Future<void> _export() async {
+    setState(() => _isProcessing = true);
     try {
       final Uint8List bytes = await PdfReportBuilder.build(
         document: widget.document,
         style: widget.style,
         logoBytes: widget.logoBytes,
+        size: _selectedSize,
       );
-      await Printing.layoutPdf(
-        name: _fileName,
-        onLayout: (PdfPageFormat _) => bytes,
-      );
-      if (!mounted) return;
-      Navigator.of(context).pop();
-    } on Object {
-      if (!mounted) return;
-      _showFailure('تعذّرت الطباعة. حاول مرة أخرى.');
-    } finally {
-      if (mounted) setState(() => _isPrinting = false);
-    }
-  }
 
-  Future<void> _share() async {
-    setState(() => _isSharing = true);
-    try {
-      final Uint8List bytes = await PdfReportBuilder.build(
-        document: widget.document,
-        style: widget.style,
-        logoBytes: widget.logoBytes,
-      );
+      // Direct print path (only if thermal and enabled)
+      final bool direct = ref
+              .read(companySettingsProvider)
+              .valueOrNull
+              ?.printDirectEnabled ??
+          false;
+
+      if (direct && _selectedSize != ReceiptPaperSize.a4) {
+        final bool ok = await DirectPrintService.tryPdfBytes(
+          bytes: bytes,
+          name: _fileName,
+        );
+        if (ok) {
+          if (!mounted) return;
+          Navigator.of(context).pop();
+          return;
+        }
+      }
+
+      // ✅ شيت المشاركة (بدلاً من layoutPdf)
       await Printing.sharePdf(bytes: bytes, filename: _fileName);
       if (!mounted) return;
       Navigator.of(context).pop();
-    } on Object {
+    } on Object catch (e) {
+      AppLogger.warning('Report export failed: $e');
       if (!mounted) return;
-      _showFailure('تعذّرت مشاركة الملف.');
+      _showFailure('تعذّرت الطباعة. حاول مرة أخرى.');
     } finally {
-      if (mounted) setState(() => _isSharing = false);
+      if (mounted) setState(() => _isProcessing = false);
     }
   }
 
@@ -222,6 +188,11 @@ class _PrintDialogState extends State<_PrintDialog> {
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
       ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
+  void _onSizeSelected(Set<ReceiptPaperSize> selection) {
+    if (selection.isEmpty || _isBusy) return;
+    setState(() => _selectedSize = selection.first);
   }
 
   @override
@@ -244,16 +215,52 @@ class _PrintDialogState extends State<_PrintDialog> {
           ),
         ],
       ),
-      content: Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          _infoRow(theme, 'الشركة', doc.companyName),
-          if (doc.branchName != null)
-            _infoRow(theme, 'الفرع', doc.branchName!),
-          _infoRow(theme, 'الفترة', doc.periodLabel ?? 'الكل'),
-          _infoRow(theme, 'عدد الأقسام', doc.sections.length.toString()),
-        ],
+      content: SingleChildScrollView(
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            _infoRow(theme, 'الشركة', doc.companyName),
+            if (doc.branchName != null)
+              _infoRow(theme, 'الفرع', doc.branchName!),
+            _infoRow(theme, 'الفترة', doc.periodLabel ?? 'الكل'),
+            _infoRow(theme, 'عدد الأقسام', doc.sections.length.toString()),
+            const SizedBox(height: 16),
+            
+            // اختيار مقاس الطباعة
+            Center(
+              child: SegmentedButton<ReceiptPaperSize>(
+                segments: const <ButtonSegment<ReceiptPaperSize>>[
+                  ButtonSegment<ReceiptPaperSize>(
+                    value: ReceiptPaperSize.a4,
+                    label: Text('A4 (تفصيلي)'),
+                  ),
+                  ButtonSegment<ReceiptPaperSize>(
+                    value: ReceiptPaperSize.mm80,
+                    label: Text('حراري 80مم'),
+                  ),
+                ],
+                selected: <ReceiptPaperSize>{_selectedSize},
+                onSelectionChanged: _isBusy ? null : _onSizeSelected,
+                showSelectedIcon: false,
+                style: SegmentedButton.styleFrom(
+                  visualDensity: VisualDensity.compact,
+                ),
+              ),
+            ),
+            if (_selectedSize != ReceiptPaperSize.a4) ...<Widget>[
+              const SizedBox(height: 8),
+              Text(
+                'ملاحظة: الإيصال الحراري يعرض ملخصاً فقط (KPIs). '
+                'الجدول التفصيلي متاح في نسخة A4.',
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: scheme.onSurfaceVariant,
+                ),
+                textAlign: TextAlign.center,
+              ),
+            ],
+          ],
+        ),
       ),
       actionsPadding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
       actions: <Widget>[
@@ -261,27 +268,15 @@ class _PrintDialogState extends State<_PrintDialog> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
             FilledButton.icon(
-              onPressed: _isBusy ? null : _print,
-              icon: _isPrinting
-                  ? const SizedBox(
-                      width: 18,
-                      height: 18,
-                      child: CircularProgressIndicator(strokeWidth: 2),
-                    )
-                  : const Icon(Icons.print_outlined),
-              label: const Text('طباعة'),
-            ),
-            const SizedBox(height: 8),
-            OutlinedButton.icon(
-              onPressed: _isBusy ? null : _share,
-              icon: _isSharing
+              onPressed: _isBusy ? null : _export,
+              icon: _isProcessing
                   ? const SizedBox(
                       width: 18,
                       height: 18,
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.ios_share),
-              label: const Text('مشاركة PDF'),
+              label: const Text('تصدير / مشاركة'),
             ),
           ],
         ),
