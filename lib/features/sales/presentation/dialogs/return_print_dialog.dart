@@ -4,7 +4,6 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:pdf/pdf.dart' show PdfPageFormat;
 import 'package:printing/printing.dart' show Printing;
 
 import '../../../../core/utils/logger.dart';
@@ -22,13 +21,12 @@ import '../widgets/thermal_return_preview.dart';
 
 /// Opens the print dialog for a return receipt.
 ///
-/// The dialog shows:
-/// * A compact paper-size selector (80 مم / A4).
-/// * A live **thermal preview** — the exact bitmap that will be sent to a
-///   thermal printer (WYSIWYG). For A4 the preview still uses the 80 mm
-///   shape; the printed PDF respects the selected size.
-/// * Two actions: **طباعة** (system dialog or direct print) and
-///   **مشاركة** (share the PDF).
+/// **Updates:**
+/// * Removed `Printing.layoutPdf` in favour of `Printing.sharePdf`.
+/// * The system print dialog no longer appears. The user gets the OS
+///   share sheet (Save as PDF, WhatsApp, printer apps, etc.).
+/// * Direct print is still attempted first for thermal sizes when the
+///   setting is enabled.
 Future<void> showReturnPrintDialog({
   required BuildContext context,
   required ReturnReceipt receipt,
@@ -123,14 +121,16 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
         }
       }
 
-      await Printing.layoutPdf(
-        name: _fileName(),
-        onLayout: (PdfPageFormat _) => bytes,
+      // ✅ شيت المشاركة (بدلاً من layoutPdf)
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: _fileName(),
       );
 
       if (!mounted) return;
       Navigator.of(context).pop();
-    } on Object {
+    } on Object catch (e) {
+      AppLogger.warning('Return print failed: $e');
       if (!mounted) return;
       _showFailure('تعذّرت الطباعة. يرجى المحاولة مرة أخرى.');
     } finally {
@@ -154,7 +154,8 @@ class _ReturnPrintDialogState extends ConsumerState<_ReturnPrintDialog> {
 
       if (!mounted) return;
       Navigator.of(context).pop();
-    } on Object {
+    } on Object catch (e) {
+      AppLogger.warning('Return share failed: $e');
       if (!mounted) return;
       _showFailure('تعذّرت مشاركة الإيصال.');
     } finally {
