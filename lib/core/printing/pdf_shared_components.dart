@@ -1,7 +1,8 @@
 // lib/core/printing/pdf_shared_components.dart
 //
-// المكونات المشتركة لكل PDF في التطبيق (كشوف، إيصالات، تقارير، مرتجعات).
-// المصدر الوحيد لـ: الخطوط، الأوزان، الرأس الغني، الفوتر، الجدول، التنسيق.
+// المكونات المشتركة لكل PDF في التطبيق.
+// 🔒 الحماية: كل أحجام الخطوط مقيدة بحدود قصوى (hard caps) حتى لا تنفجر
+// الصفحة بسبب fontScale مرتفع أو مرور قيمة مكبّرة مسبقاً (double-scaling).
 
 import 'dart:typed_data';
 
@@ -46,16 +47,19 @@ abstract final class PdfSharedFonts {
 }
 
 // ============================================================================
-// Style
+// Style (with hard caps)
 // ============================================================================
 
 abstract final class PdfSharedStyle {
-  /// Resolves the effective weight for a text run.
-  ///
-  /// Uses the [PrintStyleSettings.isBoldBase] convenience getter (which
-  /// reads `fontWeight == PrintFontWeight.bold`) instead of comparing the
-  /// enum directly — `PrintFontWeight` lives in `company_settings.dart`
-  /// and is not re-exported by `print_style_settings.dart`.
+  /// Absolute maximum size in PDF points. Nothing in the header can exceed
+  /// this — protects against `fontScale` set too high in settings, or
+  /// against callers accidentally passing a pre-scaled value (double
+  /// scaling).
+  static const double maxHeaderPointSize = 22.0;
+
+  /// Absolute minimum so text never becomes unreadably tiny.
+  static const double minHeaderPointSize = 8.0;
+
   static pw.FontWeight weight(
     PrintStyleSettings style, {
     bool emphasized = false,
@@ -66,8 +70,10 @@ abstract final class PdfSharedStyle {
     return pw.FontWeight.normal;
   }
 
-  static double size(PrintStyleSettings style, double base) =>
-      style.scale(base);
+  /// Scaled size with hard clamp (8–22 pt).
+  static double size(PrintStyleSettings style, double base) {
+    return (base * style.fontScale).clamp(minHeaderPointSize, maxHeaderPointSize);
+  }
 }
 
 // ============================================================================
@@ -180,7 +186,41 @@ abstract final class PdfSharedFormat {
 }
 
 // ============================================================================
-// Header
+// Title Box (with hard cap)
+// ============================================================================
+
+abstract final class PdfSharedTitle {
+  static pw.Widget build(
+    String title,
+    PrintStyleSettings style, {
+    double fontSize = 14,
+  }) {
+    // 🔒 Hard cap — prevents any blow-up (double-scaled or oversized).
+    final double safeSize =
+        PdfSharedStyle.size(style, fontSize).clamp(10.0, 18.0);
+
+    return pw.Center(
+      child: pw.Container(
+        padding: const pw.EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        decoration: pw.BoxDecoration(
+          border: pw.Border.all(color: PdfColors.black, width: 1),
+          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
+        ),
+        child: pw.Text(
+          PdfSharedFormat.norm(title),
+          style: pw.TextStyle(
+            fontSize: safeSize,
+            fontWeight: PdfSharedStyle.weight(style, emphasized: true),
+            letterSpacing: 0.3,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================================
+// Header (all sizes hard-capped)
 // ============================================================================
 
 abstract final class PdfSharedHeader {
@@ -198,6 +238,16 @@ abstract final class PdfSharedHeader {
     double logoWidth = 130,
     double titleFontSize = 14,
   }) {
+    // Every font here is clamped explicitly — no caller can make the
+    // header explode, even if it passes `s.title` (pre-scaled) instead
+    // of an unscaled base value.
+    final double companySize =
+        PdfSharedStyle.size(style, 16).clamp(12.0, 22.0);
+    final double smallSize =
+        PdfSharedStyle.size(style, 9).clamp(8.0, 12.0);
+    final double subtitleSize =
+        PdfSharedStyle.size(style, 12).clamp(10.0, 15.0);
+
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
@@ -216,7 +266,7 @@ abstract final class PdfSharedHeader {
             child: pw.Text(
               PdfSharedFormat.norm(companyName),
               style: pw.TextStyle(
-                fontSize: PdfSharedStyle.size(style, 16),
+                fontSize: companySize,
                 fontWeight: PdfSharedStyle.weight(style, emphasized: true),
                 letterSpacing: 0.3,
               ),
@@ -230,7 +280,7 @@ abstract final class PdfSharedHeader {
             child: pw.Text(
               PdfSharedFormat.norm(address),
               style: pw.TextStyle(
-                fontSize: PdfSharedStyle.size(style, 9),
+                fontSize: smallSize,
                 color: PdfColors.grey700,
               ),
               textAlign: pw.TextAlign.center,
@@ -242,7 +292,7 @@ abstract final class PdfSharedHeader {
             child: pw.Text(
               PdfSharedFormat.norm('هاتف: $phone'),
               style: pw.TextStyle(
-                fontSize: PdfSharedStyle.size(style, 9),
+                fontSize: smallSize,
                 color: PdfColors.grey700,
               ),
               textAlign: pw.TextAlign.center,
@@ -254,7 +304,7 @@ abstract final class PdfSharedHeader {
             child: pw.Text(
               PdfSharedFormat.norm(branchName),
               style: pw.TextStyle(
-                fontSize: PdfSharedStyle.size(style, 9),
+                fontSize: smallSize,
                 color: PdfColors.grey700,
               ),
               textAlign: pw.TextAlign.center,
@@ -266,7 +316,7 @@ abstract final class PdfSharedHeader {
             child: pw.Text(
               PdfSharedFormat.norm('الرقم الضريبي: $taxNumber'),
               style: pw.TextStyle(
-                fontSize: PdfSharedStyle.size(style, 9),
+                fontSize: smallSize,
                 color: PdfColors.grey700,
               ),
               textAlign: pw.TextAlign.center,
@@ -278,7 +328,7 @@ abstract final class PdfSharedHeader {
             child: pw.Text(
               PdfSharedFormat.norm('السجل التجاري: $commercialRegister'),
               style: pw.TextStyle(
-                fontSize: PdfSharedStyle.size(style, 9),
+                fontSize: smallSize,
                 color: PdfColors.grey700,
               ),
               textAlign: pw.TextAlign.center,
@@ -293,7 +343,7 @@ abstract final class PdfSharedHeader {
             child: pw.Text(
               PdfSharedFormat.norm(subtitle),
               style: pw.TextStyle(
-                fontSize: PdfSharedStyle.size(style, 12),
+                fontSize: subtitleSize,
                 fontWeight: PdfSharedStyle.weight(style, emphasized: true),
               ),
               textAlign: pw.TextAlign.center,
@@ -302,36 +352,6 @@ abstract final class PdfSharedHeader {
         ],
         pw.SizedBox(height: 8),
       ],
-    );
-  }
-}
-
-// ============================================================================
-// Title Box
-// ============================================================================
-
-abstract final class PdfSharedTitle {
-  static pw.Widget build(
-    String title,
-    PrintStyleSettings style, {
-    double fontSize = 14,
-  }) {
-    return pw.Center(
-      child: pw.Container(
-        padding: const pw.EdgeInsets.symmetric(horizontal: 20, vertical: 5),
-        decoration: pw.BoxDecoration(
-          border: pw.Border.all(color: PdfColors.black, width: 1),
-          borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
-        ),
-        child: pw.Text(
-          PdfSharedFormat.norm(title),
-          style: pw.TextStyle(
-            fontSize: PdfSharedStyle.size(style, fontSize),
-            fontWeight: PdfSharedStyle.weight(style, emphasized: true),
-            letterSpacing: 0.5,
-          ),
-        ),
-      ),
     );
   }
 }
@@ -370,7 +390,7 @@ abstract final class PdfSharedFooter {
               pw.Text(
                 text,
                 style: pw.TextStyle(
-                  fontSize: PdfSharedStyle.size(style, 8),
+                  fontSize: PdfSharedStyle.size(style, 8).clamp(6.0, 10.0),
                   color: PdfColors.grey700,
                   fontStyle: pw.FontStyle.italic,
                 ),
@@ -379,7 +399,7 @@ abstract final class PdfSharedFooter {
                 pw.Text(
                   pageStr,
                   style: pw.TextStyle(
-                    fontSize: PdfSharedStyle.size(style, 8),
+                    fontSize: PdfSharedStyle.size(style, 8).clamp(6.0, 10.0),
                     color: PdfColors.grey600,
                   ),
                 ),
@@ -396,8 +416,6 @@ abstract final class PdfSharedFooter {
 // ============================================================================
 
 abstract final class PdfSharedTable {
-  /// `TableBorder.all()` is **not** a const constructor — using
-  /// `static final` instead of `static const` fixes that.
   static final pw.TableBorder border = pw.TableBorder.all(
     color: PdfColors.grey700,
     width: 0.5,
