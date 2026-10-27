@@ -3,7 +3,6 @@
 import 'dart:typed_data';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:printing/printing.dart';
-import 'package:pdf/pdf.dart';
 
 import '../../features/pos/data/services/pdf_receipt_builder.dart';
 import '../../features/pos/data/services/esc_pos_receipt_builder.dart';
@@ -50,6 +49,10 @@ class AppPrintEngine {
   }
 
   /// 2️⃣ طباعة A4 (فاتورة رسمية)
+  ///
+  /// ✅ تم استبدال `Printing.layoutPdf` بـ `Printing.sharePdf` لإخفاء حوار
+  /// الطباعة الخاص بنظام أندرويد نهائياً. النتيجة: شيت المشاركة (حفظ /
+  /// واتساب / بريد / أي تطبيق طباعة يختاره المستخدم).
   Future<bool> printInvoiceA4({
     required Receipt receipt,
     Uint8List? logoBytes,
@@ -63,9 +66,9 @@ class AppPrintEngine {
         logoBytes: logoBytes,
       );
 
-      await Printing.layoutPdf(
-        name: 'invoice-${receipt.invoiceNumber ?? receipt.saleId}.pdf',
-        onLayout: (PdfPageFormat _) => bytes,
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: 'invoice-${receipt.invoiceNumber ?? receipt.saleId}.pdf',
       );
       return true;
     } catch (e, s) {
@@ -100,11 +103,17 @@ class AppPrintEngine {
   }
 
   /// 4️⃣ طباعة تقارير وكشوف (A4 جاهزة)
-  Future<bool> printRawPdf({required Uint8List bytes, required String filename}) async {
+  ///
+  /// ✅ تم استبدال `Printing.layoutPdf` بـ `Printing.sharePdf` لإخفاء حوار
+  /// الطباعة الخاص بنظام أندرويد نهائياً.
+  Future<bool> printRawPdf({
+    required Uint8List bytes,
+    required String filename,
+  }) async {
     try {
-      await Printing.layoutPdf(
-        name: filename,
-        onLayout: (PdfPageFormat _) => bytes,
+      await Printing.sharePdf(
+        bytes: bytes,
+        filename: filename,
       );
       return true;
     } catch (e, s) {
@@ -114,7 +123,10 @@ class AppPrintEngine {
   }
 
   /// 5️⃣ مشاركة تقارير وكشوف
-  Future<bool> shareRawPdf({required Uint8List bytes, required String filename}) async {
+  Future<bool> shareRawPdf({
+    required Uint8List bytes,
+    required String filename,
+  }) async {
     try {
       await Printing.sharePdf(bytes: bytes, filename: filename);
       return true;
