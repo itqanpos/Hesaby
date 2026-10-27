@@ -7,7 +7,8 @@
 // **Updates:**
 // * Removed `Printing.layoutPdf` in favour of `Printing.sharePdf`.
 // * Added paper size selection (A4 / Thermal 80mm).
-// * Passed company info to `PdfSupplierStatementBuilder` for the unified header.
+// * Company info now comes from `companyContextProvider` (not
+//   `CompanySettings`, which does not carry name/address).
 
 import 'dart:typed_data';
 
@@ -19,6 +20,8 @@ import '../../../../core/utils/logger.dart';
 import '../../../../shared/widgets/statements/account_statement_page.dart';
 import '../../../../shared/widgets/statements/adapters/statement_adapter.dart';
 import '../../../../shared/widgets/statements/models/statement_models.dart';
+import '../../../companies/presentation/providers/company_context_provider.dart';
+import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../pos/data/services/direct_print_service.dart';
 import '../../../pos/data/services/pdf_receipt_builder.dart'
     show ReceiptPaperSize;
@@ -137,7 +140,7 @@ Future<void> _print(
             child: const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
               child: Row(
-                children: [
+                children: <Widget>[
                   Icon(Icons.description_outlined),
                   SizedBox(width: 8),
                   Text('A4 (تفصيلي)'),
@@ -150,7 +153,7 @@ Future<void> _print(
             child: const Padding(
               padding: EdgeInsets.symmetric(vertical: 8),
               child: Row(
-                children: [
+                children: <Widget>[
                   Icon(Icons.receipt_long_outlined),
                   SizedBox(width: 8),
                   Text('إيصال حراري 80 مم (ملخص)'),
@@ -168,6 +171,8 @@ Future<void> _print(
   try {
     final CompanySettings? settings =
         ref.read(companySettingsProvider).valueOrNull;
+    final CompanyContextState companyCtx =
+        ref.read(companyContextProvider);
     final Uint8List? logo = await _loadLogoBytes(ref);
 
     // 2. بناء الـ PDF
@@ -176,20 +181,15 @@ Future<void> _print(
       style: _readA4Style(ref),
       logoBytes: logo,
       size: selectedSize,
-      companyName: settings?.companyName,
-      branchName: settings?.branchName,
-      companyAddress: settings?.address,
-      companyPhone: settings?.phone,
-      taxNumber: settings?.taxNumber,
-      commercialRegister: settings?.commercialRegister,
+      companyName: companyCtx.currentCompany?.name,
+      branchName: companyCtx.currentBranch?.name,
     );
 
     final String fileName =
         'supplier-statement-${statement.supplier.name}-${DateTime.now().millisecondsSinceEpoch}.pdf';
 
     // 3. محاولة الطباعة المباشرة (إذا كانت مفعلة ومقاس حراري)
-    final bool direct =
-        settings?.printDirectEnabled ?? false;
+    final bool direct = settings?.printDirectEnabled ?? false;
 
     if (direct && selectedSize != ReceiptPaperSize.a4) {
       final bool ok = await DirectPrintService.tryPdfBytes(
