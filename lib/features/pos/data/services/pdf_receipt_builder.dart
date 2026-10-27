@@ -14,15 +14,18 @@ enum ReceiptPaperSize { mm58, mm80, a4 }
 
 abstract final class PdfReceiptBuilder {
   static const String _currency = 'ج.م';
-  
-  // ✅ زيادة الارتفاع الأساسي لاستيعاب الهيدر الكبير، ولمنع قص الجدول
-  static const double _thermalFixedMm = 200;
-  static const double _thermalPerLineMm = 15;
 
-  static double _thermalHeightFor(int lineCount) {
-    final double estimatedMm = _thermalFixedMm + lineCount * _thermalPerLineMm;
-    // زيادة الحد الأقصى إلى 1000mm لضمان عدم القص إطلاقاً
-    return estimatedMm.clamp(200.0, 1000.0) * PdfPageFormat.mm;
+  // ✅ حساب الارتفاع بناءً على عدد الأسطر وحجم الخط
+  static double _thermalHeightFor(int lineCount, double fontScale) {
+    // نحدد حداً أقصى للحجم لتجنب الحسابات المجنونة
+    final double s = fontScale.clamp(0.8, 2.0);
+    
+    // 250mm مساحة أساسية (شعار + عناوين + إجماليات + تذييل)
+    // 35mm لكل سطر لاستيعاب التفاف النص (Text Wrapping)
+    final double estimatedMm = 250 + (lineCount * 35 * s);
+    
+    // نضع حداً أقصى 3000mm لمنع أي مشاكل في الذاكرة
+    return estimatedMm.clamp(250.0, 3000.0) * PdfPageFormat.mm;
   }
 
   static Future<Uint8List> build({
@@ -39,14 +42,14 @@ abstract final class PdfReceiptBuilder {
       case ReceiptPaperSize.mm58:
         pageFormat = PdfPageFormat(
           58 * PdfPageFormat.mm,
-          _thermalHeightFor(receipt.lines.length),
+          _thermalHeightFor(receipt.lines.length, style.fontScale),
           marginAll: 0,
         );
         padding = 4;
       case ReceiptPaperSize.mm80:
         pageFormat = PdfPageFormat(
           80 * PdfPageFormat.mm,
-          _thermalHeightFor(receipt.lines.length),
+          _thermalHeightFor(receipt.lines.length, style.fontScale),
           marginAll: 0,
         );
         padding = 6;
@@ -62,20 +65,40 @@ abstract final class PdfReceiptBuilder {
       creator: 'Hesabi',
     );
 
-    document.addPage(
-      // ✅ استخدام MultiPage بدلاً من Page لمنع اختفاء المحتوى
-      pw.MultiPage(
-        pageFormat: pageFormat,
-        margin: pw.EdgeInsets.all(padding),
-        textDirection: pw.TextDirection.rtl,
-        build: (pw.Context context) => _buildContent(
-          receipt: receipt,
-          paperSize: size,
-          style: style,
-          logoBytes: logoBytes,
+    if (size == ReceiptPaperSize.a4) {
+      // 🟢 A4: متعدد الصفحات مسموح (للأمان إذا كانت الفاتورة طويلة)
+      document.addPage(
+        pw.MultiPage(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.all(padding),
+          textDirection: pw.TextDirection.rtl,
+          build: (pw.Context context) => _buildContent(
+            receipt: receipt,
+            paperSize: size,
+            style: style,
+            logoBytes: logoBytes,
+          ),
         ),
-      ),
-    );
+      );
+    } else {
+      // 🔴 حراري (80mm/58mm): صفحة واحدة فقط (يمنع الانقسام لصفحتين)
+      document.addPage(
+        pw.Page(
+          pageFormat: pageFormat,
+          margin: pw.EdgeInsets.all(padding),
+          textDirection: pw.TextDirection.rtl,
+          build: (pw.Context context) => pw.Column(
+            crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+            children: _buildContent(
+              receipt: receipt,
+              paperSize: size,
+              style: style,
+              logoBytes: logoBytes,
+            ),
+          ),
+        ),
+      );
+    }
 
     return document.save();
   }
