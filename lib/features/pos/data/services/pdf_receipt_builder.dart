@@ -10,23 +10,19 @@ import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/receipt.dart';
 import '../../domain/services/receipt_number_format.dart';
 
-enum ReceiptPaperSize {
-  mm58,
-  mm80,
-  a4,
-}
+enum ReceiptPaperSize { mm58, mm80, a4 }
 
 abstract final class PdfReceiptBuilder {
   static const String _currency = 'ج.م';
-
-  static const double _thermalFixedMm = 120;
-  static const double _thermalPerLineMm = 14;
+  
+  // ✅ زيادة الارتفاع الأساسي لاستيعاب الهيدر الكبير، ولمنع قص الجدول
+  static const double _thermalFixedMm = 200;
+  static const double _thermalPerLineMm = 15;
 
   static double _thermalHeightFor(int lineCount) {
     final double estimatedMm = _thermalFixedMm + lineCount * _thermalPerLineMm;
-    // زيادة الارتفاع لضمان عدم الانقسام إلى صفحتين
-    final double clampedMm = estimatedMm.clamp(170.0, 600.0);
-    return clampedMm * PdfPageFormat.mm;
+    // زيادة الحد الأقصى إلى 1000mm لضمان عدم القص إطلاقاً
+    return estimatedMm.clamp(200.0, 1000.0) * PdfPageFormat.mm;
   }
 
   static Future<Uint8List> build({
@@ -67,19 +63,16 @@ abstract final class PdfReceiptBuilder {
     );
 
     document.addPage(
-      // ⬇️ استخدام pw.Page بدلاً من pw.MultiPage لمنع الانقسام إلى ورقتين
-      pw.Page(
+      // ✅ استخدام MultiPage بدلاً من Page لمنع اختفاء المحتوى
+      pw.MultiPage(
         pageFormat: pageFormat,
         margin: pw.EdgeInsets.all(padding),
         textDirection: pw.TextDirection.rtl,
-        build: (pw.Context context) => pw.Column(
-          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-          children: _buildContent(
-            receipt: receipt,
-            paperSize: size,
-            style: style,
-            logoBytes: logoBytes,
-          ),
+        build: (pw.Context context) => _buildContent(
+          receipt: receipt,
+          paperSize: size,
+          style: style,
+          logoBytes: logoBytes,
         ),
       ),
     );
@@ -95,6 +88,15 @@ abstract final class PdfReceiptBuilder {
   }) {
     final _Sizes s = _Sizes.forSize(paperSize, scale: style.fontScale);
 
+    // ✅ تصغير عرض الشعار للإيصالات الحرارية لترك مساحة للجدول
+    final double logoWidth = paperSize == ReceiptPaperSize.a4
+        ? 160
+        : (paperSize == ReceiptPaperSize.mm80 ? 80 : 60);
+
+    // ✅ الحجم الأساسي للعنوان
+    final double titleBase =
+        paperSize == ReceiptPaperSize.a4 ? 16.0 : 12.0;
+
     return <pw.Widget>[
       PdfSharedHeader.build(
         title: 'فاتورة مبيعات',
@@ -102,16 +104,17 @@ abstract final class PdfReceiptBuilder {
         branchName: receipt.branchName,
         address: receipt.companyAddress,
         phone: receipt.companyPhone,
-        // 🔒 احترام مفاتيح التفعيل: لا نمرر البيانات إلا إذا كان المفتاح مفعل
-        taxNumber: receipt.hasTaxNumberToPrint ? receipt.companyTaxNumber : null,
-        commercialRegister: receipt.hasCommercialRegisterToPrint ? receipt.companyCommercialRegister : null,
+        // 🔒 احترام مفاتيح التفعيل
+        taxNumber: receipt.hasTaxNumberToPrint
+            ? receipt.companyTaxNumber
+            : null,
+        commercialRegister: receipt.hasCommercialRegisterToPrint
+            ? receipt.companyCommercialRegister
+            : null,
         style: style,
         logoBytes: logoBytes,
-        logoWidth: s.logoWidth,
-        // ✅ إرسال الحجم الأساسي (غير المُضاعف)
-        titleFontSize: paperSize == ReceiptPaperSize.a4
-            ? 16
-            : (paperSize == ReceiptPaperSize.mm80 ? 12 : 11),
+        logoWidth: logoWidth,
+        titleFontSize: titleBase,
       ),
       pw.SizedBox(height: s.sectionGap),
       _metaBlock(receipt, s, style),
@@ -149,8 +152,7 @@ abstract final class PdfReceiptBuilder {
               horizontal: s.cellPadH * 2, vertical: s.cellPadV * 1.5),
           decoration: pw.BoxDecoration(
             border: pw.Border.all(color: PdfColors.black, width: 1.2),
-            borderRadius:
-                const pw.BorderRadius.all(pw.Radius.circular(3)),
+            borderRadius: const pw.BorderRadius.all(pw.Radius.circular(3)),
           ),
           child: pw.Row(
             children: <pw.Widget>[
@@ -161,16 +163,16 @@ abstract final class PdfReceiptBuilder {
                       : 'إجمالي الفاتورة',
                   style: pw.TextStyle(
                       fontSize: s.grandTotal,
-                      fontWeight: PdfSharedStyle.weight(style,
-                          emphasized: true)),
+                      fontWeight:
+                          PdfSharedStyle.weight(style, emphasized: true)),
                 ),
               ),
               pw.Text(
                 _money(totalOwed, receipt),
                 style: pw.TextStyle(
                     fontSize: s.grandTotal,
-                    fontWeight: PdfSharedStyle.weight(style,
-                        emphasized: true)),
+                    fontWeight:
+                        PdfSharedStyle.weight(style, emphasized: true)),
               ),
             ],
           ),
