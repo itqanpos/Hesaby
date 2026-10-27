@@ -107,7 +107,10 @@ abstract final class PdfReceiptBuilder {
         style: style,
         logoBytes: logoBytes,
         logoWidth: s.logoWidth,
-        titleFontSize: s.title,
+        // ✅ إرسال الحجم الأساسي (غير المُضاعف)، والدالة ستقوم بتكبيره مرة واحدة
+        titleFontSize: paperSize == ReceiptPaperSize.a4
+            ? 16
+            : (paperSize == ReceiptPaperSize.mm80 ? 12 : 11),
       ),
       pw.SizedBox(height: s.sectionGap),
       _metaBlock(receipt, s, style),
