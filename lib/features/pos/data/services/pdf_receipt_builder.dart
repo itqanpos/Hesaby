@@ -15,10 +15,12 @@ enum ReceiptPaperSize { mm58, mm80, a4 }
 abstract final class PdfReceiptBuilder {
   static const String _currency = 'ج.م';
 
-  static double _thermalHeightFor(int lineCount) {
-    // مساحة ثابتة 250mm + 15mm لكل سطر
-    final double estimatedMm = 250 + (lineCount * 15);
-    return estimatedMm.clamp(250.0, 3000.0) * PdfPageFormat.mm;
+  // ✅ حساب الارتفاع بناءً على عدد الأسطر وحجم الخط لضمان عدم القص
+  static double _thermalHeightFor(int lineCount, double fontScale) {
+    final double s = fontScale.clamp(0.8, 1.2); // سقف أمان للحراري
+    // 200mm مساحة أساسية + 15mm لكل سطر (مع مراعاة التكبير)
+    final double estimatedMm = 200 + (lineCount * 15 * s);
+    return estimatedMm.clamp(200.0, 3000.0) * PdfPageFormat.mm;
   }
 
   static Future<Uint8List> build({
@@ -33,14 +35,18 @@ abstract final class PdfReceiptBuilder {
     final double padding;
     switch (size) {
       case ReceiptPaperSize.mm58:
-        pageFormat = PdfPageFormat(58 * PdfPageFormat.mm,
-            _thermalHeightFor(receipt.lines.length),
-            marginAll: 0);
+        pageFormat = PdfPageFormat(
+          58 * PdfPageFormat.mm,
+          _thermalHeightFor(receipt.lines.length, style.fontScale),
+          marginAll: 0,
+        );
         padding = 4;
       case ReceiptPaperSize.mm80:
-        pageFormat = PdfPageFormat(80 * PdfPageFormat.mm,
-            _thermalHeightFor(receipt.lines.length),
-            marginAll: 0);
+        pageFormat = PdfPageFormat(
+          80 * PdfPageFormat.mm,
+          _thermalHeightFor(receipt.lines.length, style.fontScale),
+          marginAll: 0,
+        );
         padding = 6;
       case ReceiptPaperSize.a4:
         pageFormat = PdfPageFormat.a4;
@@ -55,6 +61,7 @@ abstract final class PdfReceiptBuilder {
     );
 
     if (size == ReceiptPaperSize.a4) {
+      // A4: متعدد الصفحات
       document.addPage(
         pw.MultiPage(
           pageFormat: pageFormat,
@@ -69,7 +76,7 @@ abstract final class PdfReceiptBuilder {
         ),
       );
     } else {
-      // حراري: صفحة واحدة فقط
+      // حراري: صفحة واحدة فقط (يمنع الانقسام)
       document.addPage(
         pw.Page(
           pageFormat: pageFormat,
@@ -167,7 +174,6 @@ abstract final class PdfReceiptBuilder {
       child: pw.Row(
         crossAxisAlignment: pw.CrossAxisAlignment.start,
         children: <pw.Widget>[
-          // عرض ثابت للعنوان (مثل: رقم الفاتورة) يمنع تداخله مع القيمة
           pw.SizedBox(
             width: s.metaLabelWidth,
             child: pw.Text(
@@ -177,7 +183,7 @@ abstract final class PdfReceiptBuilder {
                 fontWeight: PdfSharedStyle.weight(style, emphasized: true),
               ),
               textAlign: pw.TextAlign.right,
-              maxLines: 1, // يمنع نزول العنوان لسطرين
+              maxLines: 1, // منع كسر عنوان الحقل
             ),
           ),
           pw.SizedBox(width: 4),
@@ -200,14 +206,14 @@ abstract final class PdfReceiptBuilder {
 
   static pw.Widget _itemsTable(
       Receipt receipt, _Sizes s, PrintStyleSettings style) {
-    // ✅ توزيع أعمدة ذكي: إعطاء مساحة أكبر للصنف، وتصغير "م"
+    // ✅ توزيع الأعمدة: مساحة أكبر للصنف، وتصغير عمود "م" لمنع الكسر
     final Map<int, pw.TableColumnWidth> columnWidths =
         <int, pw.TableColumnWidth>{
-      0: pw.FlexColumnWidth(1.3), // الإجمالي
-      1: pw.FlexColumnWidth(1.1), // السعر
-      2: pw.FlexColumnWidth(1.1), // الكمية
-      3: pw.FlexColumnWidth(2.5), // الصنف (أكبر مساحة)
-      4: pw.FixedColumnWidth(12), // م (مساحة صغيرة)
+      0: pw.FlexColumnWidth(1.4), // الإجمالي
+      1: pw.FlexColumnWidth(1.2), // السعر
+      2: pw.FlexColumnWidth(1.2), // الكمية
+      3: pw.FlexColumnWidth(2.8), // الصنف
+      4: pw.FixedColumnWidth(18), // م (ثابت)
     };
 
     double totalQuantity = 0;
@@ -224,30 +230,35 @@ abstract final class PdfReceiptBuilder {
               emphasized: true,
               center: true,
               s: s,
-              style: style),
+              style: style,
+              wrap: false),
           _cell('السعر',
               fontSize: s.tableHeader,
               emphasized: true,
               center: true,
               s: s,
-              style: style),
+              style: style,
+              wrap: false),
           _cell('الكمية',
               fontSize: s.tableHeader,
               emphasized: true,
               center: true,
               s: s,
-              style: style),
+              style: style,
+              wrap: false),
           _cell('الصنف',
               fontSize: s.tableHeader,
               emphasized: true,
               s: s,
-              style: style),
+              style: style,
+              wrap: false),
           _cell('م',
               fontSize: s.tableHeader,
               emphasized: true,
               center: true,
               s: s,
-              style: style),
+              style: style,
+              wrap: false),
         ],
       ),
     ];
@@ -263,15 +274,28 @@ abstract final class PdfReceiptBuilder {
                 emphasized: true,
                 center: true,
                 s: s,
-                style: style),
+                style: style,
+                wrap: false),
             _cell(_money(line.unitPrice, receipt),
-                fontSize: s.tableRow, center: true, s: s, style: style),
+                fontSize: s.tableRow,
+                center: true,
+                s: s,
+                style: style,
+                wrap: false),
             _cell('${PdfSharedFormat.quantity(line.quantity)} ${line.unitName}',
-                fontSize: s.tableRow, center: true, s: s, style: style),
+                fontSize: s.tableRow,
+                center: true,
+                s: s,
+                style: style,
+                wrap: true), // يسمح للكمية بالالتفاف إذا كانت طويلة جداً
             _cell(line.productName,
-                fontSize: s.tableRow, s: s, style: style),
+                fontSize: s.tableRow, s: s, style: style, wrap: true),
             _cell('${i + 1}',
-                fontSize: s.tableRow, center: true, s: s, style: style),
+                fontSize: s.tableRow,
+                center: true,
+                s: s,
+                style: style,
+                wrap: false),
           ],
         ),
       );
@@ -286,16 +310,22 @@ abstract final class PdfReceiptBuilder {
               emphasized: true,
               center: true,
               s: s,
-              style: style),
-          _cell('', fontSize: s.tableRow, s: s, style: style),
+              style: style,
+              wrap: false),
+          _cell('', fontSize: s.tableRow, s: s, style: style, wrap: false),
           _cell(PdfSharedFormat.quantity(totalQuantity),
-              fontSize: s.tableRow, center: true, s: s, style: style),
+              fontSize: s.tableRow,
+              center: true,
+              s: s,
+              style: style,
+              wrap: false),
           _cell('المجموع الفرعي',
               fontSize: s.tableRow,
               emphasized: true,
               s: s,
-              style: style),
-          _cell('', fontSize: s.tableRow, s: s, style: style),
+              style: style,
+              wrap: false),
+          _cell('', fontSize: s.tableRow, s: s, style: style, wrap: false),
         ],
       ),
     );
@@ -326,12 +356,17 @@ abstract final class PdfReceiptBuilder {
             emphasized: true,
             center: true,
             s: s,
-            style: style),
-        _cell('', fontSize: s.tableRow, s: s, style: style),
-        _cell('', fontSize: s.tableRow, s: s, style: style),
+            style: style,
+            wrap: false),
+        _cell('', fontSize: s.tableRow, s: s, style: style, wrap: false),
+        _cell('', fontSize: s.tableRow, s: s, style: style, wrap: false),
         _cell(label,
-            fontSize: s.tableRow, emphasized: true, s: s, style: style),
-        _cell('', fontSize: s.tableRow, s: s, style: style),
+            fontSize: s.tableRow,
+            emphasized: true,
+            s: s,
+            style: style,
+            wrap: false),
+        _cell('', fontSize: s.tableRow, s: s, style: style, wrap: false),
       ],
     );
   }
@@ -343,23 +378,21 @@ abstract final class PdfReceiptBuilder {
     required PrintStyleSettings style,
     bool emphasized = false,
     bool center = false,
+    bool wrap = true, // ✅ التحكم في التفاف النص
   }) {
-    // ✅ استخدام FittedBox لمنع كسر الكلمات في الأعمدة الضيقة
     return pw.Padding(
       padding: pw.EdgeInsets.symmetric(
           horizontal: s.cellPadH, vertical: s.cellPadV),
-      child: pw.FittedBox(
-        fit: pw.BoxFit.scaleDown,
-        alignment: center ? pw.Alignment.center : pw.Alignment.centerRight,
-        child: pw.Text(
-          PdfSharedFormat.norm(text),
-          style: pw.TextStyle(
-              fontSize: fontSize,
-              fontWeight:
-                  PdfSharedStyle.weight(style, emphasized: emphasized)),
-          textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
-          maxLines: 1,
-        ),
+      child: pw.Text(
+        PdfSharedFormat.norm(text),
+        style: pw.TextStyle(
+            fontSize: fontSize,
+            fontWeight:
+                PdfSharedStyle.weight(style, emphasized: emphasized)),
+        textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
+        softWrap: wrap, // إذا كان false، لن يكسر السطر
+        maxLines: wrap ? null : 1, // إذا كان false، سطر واحد فقط
+        overflow: wrap ? pw.TextOverflow.visible : pw.TextOverflow.clip,
       ),
     );
   }
@@ -536,11 +569,10 @@ class _Sizes {
   });
 
   factory _Sizes.forSize(ReceiptPaperSize size, {double scale = 1.0}) {
-    // 🚀 السر هنا: نقص أقصى تكبير للورق الحراري إلى 1.1 (بدلاً من 1.6)
-    // حتى لا تنفجر النصوص وتنكسر الكلمات. الـ A4 يظل مسموحاً له بالتكبير.
+    // ✅ سقف التكبير: 1.2 للحراري (يمنع الانفجار)، 1.6 لـ A4
     final double effectiveScale = size == ReceiptPaperSize.a4 
         ? scale.clamp(0.8, 1.6) 
-        : scale.clamp(0.8, 1.1);
+        : scale.clamp(0.8, 1.2);
 
     switch (size) {
       case ReceiptPaperSize.mm58:
@@ -548,9 +580,9 @@ class _Sizes {
           companyName: 14 * effectiveScale,
           branchName: 9 * effectiveScale,
           title: 11 * effectiveScale,
-          meta: 8 * effectiveScale, // تقليل حجم الميتا
-          metaLabelWidth: 55 * effectiveScale, // تقليل عرض العنوان
-          tableHeader: 8 * effectiveScale, // تقليل حجم رأس الجدول
+          meta: 8 * effectiveScale,
+          metaLabelWidth: 55 * effectiveScale,
+          tableHeader: 8 * effectiveScale,
           tableRow: 8 * effectiveScale,
           rowNumWidth: 16 * effectiveScale,
           cellPadH: 2 * effectiveScale,
@@ -568,12 +600,12 @@ class _Sizes {
           companyName: 16 * effectiveScale,
           branchName: 10 * effectiveScale,
           title: 12 * effectiveScale,
-          meta: 9 * effectiveScale, // 9 بدلاً من 9.5
-          metaLabelWidth: 65 * effectiveScale, // 65 بدلاً من 85 لمنع الكسر
-          tableHeader: 8.5 * effectiveScale, // 8.5 بدلاً من 9
+          meta: 9 * effectiveScale,
+          metaLabelWidth: 65 * effectiveScale,
+          tableHeader: 8.5 * effectiveScale,
           tableRow: 9 * effectiveScale,
           rowNumWidth: 18 * effectiveScale,
-          cellPadH: 2.5 * effectiveScale, // تقليل الحواف
+          cellPadH: 2.5 * effectiveScale,
           cellPadV: 3.5 * effectiveScale,
           grandTotal: 14 * effectiveScale,
           kvLabel: 9.5 * effectiveScale,
