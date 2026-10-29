@@ -4,8 +4,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart' show Supabase, SupabaseClient;
 
 import '../../../companies/presentation/providers/company_context_provider.dart';
-import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../../companies/presentation/providers/members_providers.dart';
+// ✅ تم حذف استيراد company_context_state.dart
 import '../../data/datasources/cash_remote_datasource.dart';
 import '../../data/repositories/cash_repository_impl.dart';
 import '../../domain/entities/cash_entities.dart';
