@@ -33,7 +33,6 @@ class ShiftReportPage extends ConsumerWidget {
     double actual,
     double diff,
   ) async {
-    // 1. اختيار مقاس الطباعة
     final ReceiptPaperSize? selectedSize = await showDialog<ReceiptPaperSize>(
       context: context,
       builder: (ctx) => SimpleDialog(
@@ -57,7 +56,6 @@ class ShiftReportPage extends ConsumerWidget {
     final style = settings == null ? const PrintStyleSettings.defaults() : PrintStyleSettings.fromCompanySettings(settings);
     final contextState = ref.read(companyContextProvider);
 
-    // 2. بناء التقرير
     final doc = ReportDocument(
       title: 'تقرير وردية',
       companyName: contextState.currentCompany?.name ?? '—',
@@ -79,7 +77,7 @@ class ShiftReportPage extends ConsumerWidget {
           title: 'تفاصيل الحركات (${transactions.length})',
           table: ReportTable(
             headers: const ['النوع', 'الحساب', 'وارد', 'صادر'],
-            columnCount: 4,
+            // ✅ تم حذف columnCount لأنه غير موجود
             flex: const [2, 2, 1, 1],
             rows: [
               for (final tx in transactions)
@@ -95,7 +93,6 @@ class ShiftReportPage extends ConsumerWidget {
       ],
     );
 
-    // 3. الطباعة / المشاركة
     try {
       final bytes = await PdfReportBuilder.build(
         document: doc,
@@ -105,9 +102,8 @@ class ShiftReportPage extends ConsumerWidget {
       
       final String fileName = 'shift-${shift.id.substring(0, 8)}.pdf';
       
-      // استخدام sharePdf لإخفاء حوار الطباعة الخاص بالنظام
       await Printing.sharePdf(bytes: bytes, filename: fileName);
-    } on Object catch (e) {
+    } on Object { // ✅ تم حذف (e) لأنها غير مستخدمة
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّرت طباعة التقرير.')));
     }
@@ -157,7 +153,6 @@ class ShiftReportPage extends ConsumerWidget {
           final actual = shift.actualClosingBalance ?? 0;
           final diff = actual - expected;
           
-          // محاولة جلب اسم الكاشير
           final cashierName = memberAsync.valueOrNull?.id == shift.cashierId 
               ? (memberAsync.valueOrNull?.displayName ?? 'موظف')
               : 'موظف';
