@@ -6,6 +6,7 @@ import 'package:supabase_flutter/supabase_flutter.dart'
 
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
+import '../../../companies/presentation/providers/members_providers.dart';
 import '../../data/datasources/cash_remote_datasource.dart';
 import '../../data/repositories/cash_repository_impl.dart';
 import '../../domain/entities/cash_entities.dart';
@@ -76,7 +77,6 @@ class CashTransactionsNotifier
     await future;
   }
 
-  /// Adds a manual movement and refreshes the list + overview.
   Future<void> addManual({
     required String accountId,
     String? branchId,
@@ -123,7 +123,7 @@ final AsyncNotifierProvider<CashTransactionsNotifier, List<CashTransaction>>
 );
 
 // ---------------------------------------------------------------------------
-// Accounts + Categories (for pickers)
+// Accounts + Categories
 // ---------------------------------------------------------------------------
 
 class CashAccountsNotifier extends AsyncNotifier<List<CashAccount>> {
@@ -219,4 +219,96 @@ final AsyncNotifierProvider<CashCategoriesNotifier, List<CashCategory>>
     cashCategoriesProvider =
     AsyncNotifierProvider<CashCategoriesNotifier, List<CashCategory>>(
   CashCategoriesNotifier.new,
+);
+
+// ---------------------------------------------------------------------------
+// ✅ Active Shift (جديد)
+// ---------------------------------------------------------------------------
+
+class ActiveShiftNotifier extends AsyncNotifier<Shift?> {
+  @override
+  Future<Shift?> build() async {
+    final String? companyId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) return null;
+    return ref.read(cashRepositoryProvider).getActiveShift(companyId);
+  }
+
+  Future<void> refresh() async {
+    ref.invalidateSelf();
+    await future;
+  }
+
+  /// Opens a new shift for the current user.
+  ///
+  /// Throws if a shift is already open, or if the current user is unknown.
+  Future<Shift> openShift({required double openingBalance}) async {
+    final String? companyId = ref.read(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentCompany?.id,
+      ),
+    );
+    if (companyId == null) {
+      throw const CashException(
+        type: CashFailureType.unauthorized,
+        cause: 'No company selected.',
+      );
+    }
+
+    final member = ref.read(currentMemberProvider).valueOrNull;
+    if (member == null) {
+      throw const CashException(
+        type: CashFailureType.unauthorized,
+        cause: 'Current member not loaded.',
+      );
+    }
+
+    final String? branchId = ref.read(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+
+    final Shift shift = await ref.read(cashRepositoryProvider).openShift(
+          companyId: companyId,
+          cashierId: member.id,
+          branchId: branchId,
+          openingBalance: openingBalance,
+        );
+    await refresh();
+    return shift;
+  }
+
+  /// Closes the currently active shift.
+  Future<Shift> closeShift({
+    required double actualClosingBalance,
+    String? notes,
+  }) async {
+    final Shift? current = state.valueOrNull;
+    if (current == null) {
+      throw const CashException(
+        type: CashFailureType.notFound,
+        cause: 'No active shift to close.',
+      );
+    }
+    final Shift shift = await ref.read(cashRepositoryProvider).closeShift(
+          shiftId: current.id,
+          actualClosingBalance: actualClosingBalance,
+          notes: notes,
+        );
+    await refresh();
+    // Refresh cash overview and transactions too
+    ref.invalidate(cashOverviewProvider);
+    ref.invalidate(cashTransactionsProvider);
+    return shift;
+  }
+}
+
+final AsyncNotifierProvider<ActiveShiftNotifier, Shift?>
+    activeShiftProvider =
+    AsyncNotifierProvider<ActiveShiftNotifier, Shift?>(
+  ActiveShiftNotifier.new,
 );
