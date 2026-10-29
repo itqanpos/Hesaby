@@ -10,6 +10,7 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_error.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../domain/entities/employee.dart';
+import '../../domain/entities/employee_advance.dart';
 import '../../domain/entities/employee_salary.dart';
 import '../../domain/repositories/employee_salary_repository.dart';
 import '../providers/employee_providers.dart';
@@ -17,16 +18,6 @@ import '../providers/payroll_providers.dart';
 import '../widgets/salary_form_sheet.dart';
 
 /// Salaries management page.
-///
-/// Layout:
-/// 1. Month selector.
-/// 2. KPI row (count / total / paid / unpaid).
-/// 3. List of salaries for the selected month.
-/// 4. FAB: "Generate drafts" — creates rows for active employees that do
-///    not yet have one for this month.
-///
-/// **Interaction model:** tapping a card opens the salary form (edit /
-/// pay). A dedicated ⋮ menu is also provided for discoverability.
 class SalariesPage extends ConsumerWidget {
   const SalariesPage({super.key});
 
@@ -49,7 +40,7 @@ class SalariesPage extends ConsumerWidget {
       '${_arabicMonths[month.month - 1]} ${month.year}';
 
   // ---------------------------------------------------------------------------
-  // Generate drafts
+  // Generate drafts (مع أتمتة خصم السلف)
   // ---------------------------------------------------------------------------
 
   Future<void> _generateDrafts(
@@ -81,6 +72,18 @@ class SalariesPage extends ConsumerWidget {
       return;
     }
 
+    // ✅ حساب إجمالي السلف المتاحة لكل موظف
+    final List<EmployeeAdvance> allAdvances =
+        ref.read(advancesProvider).valueOrNull ?? const <EmployeeAdvance>[];
+    
+    final Map<String, double> employeeAdvances = <String, double>{};
+    for (final EmployeeAdvance a in allAdvances) {
+      if (!a.isFullyDeducted) {
+        employeeAdvances[a.employeeId] = 
+            (employeeAdvances[a.employeeId] ?? 0) + a.remainingAmount;
+      }
+    }
+
     final bool? confirm = await showDialog<bool>(
       context: context,
       builder: (BuildContext ctx) => AlertDialog(
@@ -89,7 +92,7 @@ class SalariesPage extends ConsumerWidget {
           'سيتم إنشاء ${AppFormatters.integer(toCreate.length)} سجل راتب '
           'بحالة مسودة بمبلغ الراتب الأساسي لكل موظف.\n\n'
           'الشهر: ${_monthLabel(month)}\n'
-          'يمكنك تعديل كل سجل قبل الدفع.',
+          'سيتم خصم السلف المتاحة تلقائياً.',
         ),
         actions: <Widget>[
           AppButton(
@@ -114,6 +117,7 @@ class SalariesPage extends ConsumerWidget {
               employeeId: e.id,
               salaryMonth: month,
               baseAmount: e.baseSalary,
+              advancesDeducted: employeeAdvances[e.id] ?? 0, // ✅ الخصم التلقائي
             );
         created++;
       } on Object {
@@ -188,6 +192,7 @@ class SalariesPage extends ConsumerWidget {
             onPressed: () {
               ref.read(salariesProvider.notifier).refresh();
               ref.invalidate(employeesProvider);
+              ref.invalidate(advancesProvider);
             },
           ),
         ],
@@ -520,9 +525,6 @@ class _SalaryCard extends StatelessWidget {
 
   final EmployeeSalary salary;
   final String employeeName;
-
-  /// Opens the salary form for edit / pay. Null when the linked employee
-  /// could not be resolved.
   final VoidCallback? onOpen;
 
   @override
