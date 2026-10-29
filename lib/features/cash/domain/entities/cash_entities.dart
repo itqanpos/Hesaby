@@ -5,7 +5,6 @@ import 'package:flutter/foundation.dart';
 
 enum CashAccountType {
   cash, card, bank, instapay, other;
-
   static CashAccountType fromString(String? raw) {
     switch (raw) {
       case 'cash': return CashAccountType.cash;
@@ -15,7 +14,6 @@ enum CashAccountType {
       default: return CashAccountType.other;
     }
   }
-
   String get label => switch (this) {
         CashAccountType.cash => 'خزنة نقدية',
         CashAccountType.card => 'حساب بطاقة',
@@ -27,7 +25,6 @@ enum CashAccountType {
 
 enum CashDirection {
   inFlow, outFlow;
-
   static CashDirection fromString(String? raw) => raw == 'out' ? CashDirection.outFlow : CashDirection.inFlow;
   String get value => this == CashDirection.inFlow ? 'in' : 'out';
   String get label => this == CashDirection.inFlow ? 'وارد' : 'صادر';
@@ -35,7 +32,6 @@ enum CashDirection {
 
 enum CashCategoryKind {
   income, expense, transfer;
-
   static CashCategoryKind fromString(String? raw) {
     switch (raw) {
       case 'income': return CashCategoryKind.income;
@@ -43,7 +39,6 @@ enum CashCategoryKind {
       default: return CashCategoryKind.expense;
     }
   }
-
   String get label => switch (this) {
         CashCategoryKind.income => 'إيراد',
         CashCategoryKind.expense => 'مصروف',
@@ -60,7 +55,6 @@ class CashAccount extends Equatable {
   final CashAccountType type;
   final bool isActive;
   final DateTime createdAt;
-
   @override
   List<Object?> get props => <Object?>[id, companyId, name, type, isActive];
 }
@@ -74,7 +68,6 @@ class CashCategory extends Equatable {
   final CashCategoryKind kind;
   final bool isSystem;
   final bool isActive;
-
   @override
   List<Object?> get props => <Object?>[id, name, kind, isSystem, isActive];
 }
@@ -90,7 +83,7 @@ class CashTransaction extends Equatable {
     required this.amount,
     required this.sourceType,
     required this.transactionDate,
-    this.shiftId, // ✅ تمت إضافته
+    this.shiftId,
     this.branchId,
     this.categoryId,
     this.categoryName,
@@ -116,7 +109,6 @@ class CashTransaction extends Equatable {
   final DateTime transactionDate;
 
   double get signedAmount => direction == CashDirection.inFlow ? amount : -amount;
-
   @override
   List<Object?> get props => <Object?>[id];
 }
@@ -126,7 +118,6 @@ class CashAccountBalance extends Equatable {
   const CashAccountBalance({required this.account, required this.balance});
   final CashAccount account;
   final double balance;
-
   @override
   List<Object?> get props => <Object?>[account.id, balance];
 }
@@ -135,10 +126,8 @@ class CashAccountBalance extends Equatable {
 class CashOverview extends Equatable {
   const CashOverview({required this.balances, required this.totalBalance});
   const CashOverview.empty() : balances = const <CashAccountBalance>[], totalBalance = 0;
-
   final List<CashAccountBalance> balances;
   final double totalBalance;
-
   @override
   List<Object?> get props => <Object?>[balances, totalBalance];
 }
@@ -148,12 +137,10 @@ class SalePaymentDraft extends Equatable {
   const SalePaymentDraft({required this.amount, required this.method});
   final double amount;
   final String method;
-
   @override
   List<Object?> get props => <Object?>[amount, method];
 }
 
-// ✅ كيان الوردية الجديد
 @immutable
 class Shift extends Equatable {
   const Shift({
