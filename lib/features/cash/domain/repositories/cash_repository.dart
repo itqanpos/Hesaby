@@ -26,13 +26,17 @@ abstract interface class CashRepository {
   Future<List<CashAccount>> listAccounts(String companyId);
   Future<List<CashCategory>> listCategories(String companyId);
   Future<CashOverview> getOverview(String companyId);
+
+  // ✅ تمت إضافة shiftId هنا
   Future<List<CashTransaction>> listTransactions({
     required String companyId,
     String? accountId,
+    String? shiftId,
     DateTime? fromDate,
     DateTime? toDate,
     int limit = 100,
   });
+
   Future<void> recordSalePayments({
     required String companyId,
     required String saleId,
@@ -60,7 +64,7 @@ abstract interface class CashRepository {
     required CashCategoryKind kind,
   });
 
-  // ✅ دوال الوردية الجديدة
+  // ✅ دوال الوردية
   Future<Shift?> getActiveShift(String companyId);
   Future<Shift> openShift({
     required String companyId,
