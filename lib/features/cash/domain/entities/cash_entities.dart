@@ -3,26 +3,16 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
-/// Cash account types supported by the register.
 enum CashAccountType {
-  cash,
-  card,
-  bank,
-  instapay,
-  other;
+  cash, card, bank, instapay, other;
 
   static CashAccountType fromString(String? raw) {
     switch (raw) {
-      case 'cash':
-        return CashAccountType.cash;
-      case 'card':
-        return CashAccountType.card;
-      case 'bank':
-        return CashAccountType.bank;
-      case 'instapay':
-        return CashAccountType.instapay;
-      default:
-        return CashAccountType.other;
+      case 'cash': return CashAccountType.cash;
+      case 'card': return CashAccountType.card;
+      case 'bank': return CashAccountType.bank;
+      case 'instapay': return CashAccountType.instapay;
+      default: return CashAccountType.other;
     }
   }
 
@@ -35,34 +25,22 @@ enum CashAccountType {
       };
 }
 
-/// Direction of a cash movement.
 enum CashDirection {
-  inFlow,
-  outFlow;
+  inFlow, outFlow;
 
-  static CashDirection fromString(String? raw) =>
-      raw == 'out' ? CashDirection.outFlow : CashDirection.inFlow;
-
+  static CashDirection fromString(String? raw) => raw == 'out' ? CashDirection.outFlow : CashDirection.inFlow;
   String get value => this == CashDirection.inFlow ? 'in' : 'out';
-
-  String get label =>
-      this == CashDirection.inFlow ? 'وارد' : 'صادر';
+  String get label => this == CashDirection.inFlow ? 'وارد' : 'صادر';
 }
 
-/// Cash category kind.
 enum CashCategoryKind {
-  income,
-  expense,
-  transfer;
+  income, expense, transfer;
 
   static CashCategoryKind fromString(String? raw) {
     switch (raw) {
-      case 'income':
-        return CashCategoryKind.income;
-      case 'transfer':
-        return CashCategoryKind.transfer;
-      default:
-        return CashCategoryKind.expense;
+      case 'income': return CashCategoryKind.income;
+      case 'transfer': return CashCategoryKind.transfer;
+      default: return CashCategoryKind.expense;
     }
   }
 
@@ -73,18 +51,9 @@ enum CashCategoryKind {
       };
 }
 
-/// A cash-equivalent account.
 @immutable
 class CashAccount extends Equatable {
-  const CashAccount({
-    required this.id,
-    required this.companyId,
-    required this.name,
-    required this.type,
-    required this.isActive,
-    required this.createdAt,
-  });
-
+  const CashAccount({required this.id, required this.companyId, required this.name, required this.type, required this.isActive, required this.createdAt});
   final String id;
   final String companyId;
   final String name;
@@ -96,18 +65,9 @@ class CashAccount extends Equatable {
   List<Object?> get props => <Object?>[id, companyId, name, type, isActive];
 }
 
-/// A category used to classify cash movements.
 @immutable
 class CashCategory extends Equatable {
-  const CashCategory({
-    required this.id,
-    required this.companyId,
-    required this.name,
-    required this.kind,
-    required this.isSystem,
-    required this.isActive,
-  });
-
+  const CashCategory({required this.id, required this.companyId, required this.name, required this.kind, required this.isSystem, required this.isActive});
   final String id;
   final String companyId;
   final String name;
@@ -119,7 +79,6 @@ class CashCategory extends Equatable {
   List<Object?> get props => <Object?>[id, name, kind, isSystem, isActive];
 }
 
-/// A single cash movement.
 @immutable
 class CashTransaction extends Equatable {
   const CashTransaction({
@@ -131,6 +90,7 @@ class CashTransaction extends Equatable {
     required this.amount,
     required this.sourceType,
     required this.transactionDate,
+    this.shiftId, // ✅ تمت إضافته
     this.branchId,
     this.categoryId,
     this.categoryName,
@@ -143,6 +103,7 @@ class CashTransaction extends Equatable {
   final String companyId;
   final String accountId;
   final String accountName;
+  final String? shiftId;
   final String? branchId;
   final String? categoryId;
   final String? categoryName;
@@ -154,41 +115,26 @@ class CashTransaction extends Equatable {
   final String? notes;
   final DateTime transactionDate;
 
-  double get signedAmount =>
-      direction == CashDirection.inFlow ? amount : -amount;
+  double get signedAmount => direction == CashDirection.inFlow ? amount : -amount;
 
   @override
   List<Object?> get props => <Object?>[id];
 }
 
-/// Aggregate snapshot for a single account.
 @immutable
 class CashAccountBalance extends Equatable {
-  const CashAccountBalance({
-    required this.account,
-    required this.balance,
-  });
-
+  const CashAccountBalance({required this.account, required this.balance});
   final CashAccount account;
-
-  /// Positive = money in. Negative = overdrawn.
   final double balance;
 
   @override
   List<Object?> get props => <Object?>[account.id, balance];
 }
 
-/// Result of a cash register page load: the accounts + their balances.
 @immutable
 class CashOverview extends Equatable {
-  const CashOverview({
-    required this.balances,
-    required this.totalBalance,
-  });
-
-  const CashOverview.empty()
-      : balances = const <CashAccountBalance>[],
-        totalBalance = 0;
+  const CashOverview({required this.balances, required this.totalBalance});
+  const CashOverview.empty() : balances = const <CashAccountBalance>[], totalBalance = 0;
 
   final List<CashAccountBalance> balances;
   final double totalBalance;
@@ -197,19 +143,49 @@ class CashOverview extends Equatable {
   List<Object?> get props => <Object?>[balances, totalBalance];
 }
 
-/// A payment leg of a sale — one method, one amount.
 @immutable
 class SalePaymentDraft extends Equatable {
-  const SalePaymentDraft({
-    required this.amount,
-    required this.method,
-  });
-
+  const SalePaymentDraft({required this.amount, required this.method});
   final double amount;
-
-  /// `cash` | `card` | `instapay` | `bank_transfer` | `other`.
   final String method;
 
   @override
   List<Object?> get props => <Object?>[amount, method];
+}
+
+// ✅ كيان الوردية الجديد
+@immutable
+class Shift extends Equatable {
+  const Shift({
+    required this.id,
+    required this.companyId,
+    required this.cashierId,
+    required this.openedAt,
+    required this.openingBalance,
+    required this.status,
+    this.branchId,
+    this.closedAt,
+    this.expectedClosingBalance,
+    this.actualClosingBalance,
+    this.difference,
+    this.notes,
+  });
+
+  final String id;
+  final String companyId;
+  final String? branchId;
+  final String cashierId;
+  final DateTime openedAt;
+  final DateTime? closedAt;
+  final double openingBalance;
+  final double? expectedClosingBalance;
+  final double? actualClosingBalance;
+  final double? difference;
+  final String status; // 'open' | 'closed'
+  final String? notes;
+
+  bool get isOpen => status == 'open';
+
+  @override
+  List<Object?> get props => <Object?>[id, status];
 }
