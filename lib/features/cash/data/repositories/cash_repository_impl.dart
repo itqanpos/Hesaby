@@ -42,6 +42,14 @@ class CashRepositoryImpl implements CashRepository {
     throw FormatException('Cash: "$k" is not numeric.');
   }
 
+  static double? _optionalDouble(Map<String, dynamic> m, String k) {
+    final Object? v = m[k];
+    if (v == null) return null;
+    if (v is num) return v.toDouble();
+    if (v is String) return double.tryParse(v);
+    return null;
+  }
+
   static bool _optionalBool(Map<String, dynamic> m, String k) {
     final Object? v = m[k];
     if (v is bool) return v;
@@ -61,6 +69,14 @@ class CashRepositoryImpl implements CashRepository {
       if (d != null) return d.toUtc();
     }
     throw FormatException('Cash: "$k" is not a timestamp.');
+  }
+
+  static DateTime? _optionalTimestamp(Map<String, dynamic> m, String k) {
+    final Object? v = m[k];
+    if (v == null) return null;
+    if (v is DateTime) return v.toUtc();
+    if (v is String) return DateTime.tryParse(v)?.toUtc();
+    return null;
   }
 
   static CashAccount _mapAccount(Map<String, dynamic> m) {
@@ -95,6 +111,7 @@ class CashRepositoryImpl implements CashRepository {
       companyId: _requireString(m, 'company_id'),
       accountId: _requireString(m, 'account_id'),
       accountName: accountName ?? '—',
+      shiftId: _optionalString(m, 'shift_id'),
       branchId: _optionalString(m, 'branch_id'),
       categoryId: _optionalString(m, 'category_id'),
       categoryName: categoryName,
@@ -105,6 +122,23 @@ class CashRepositoryImpl implements CashRepository {
       reference: _optionalString(m, 'reference'),
       notes: _optionalString(m, 'notes'),
       transactionDate: _requireTimestamp(m, 'transaction_date'),
+    );
+  }
+
+  static Shift _mapShift(Map<String, dynamic> m) {
+    return Shift(
+      id: _requireString(m, 'id'),
+      companyId: _requireString(m, 'company_id'),
+      cashierId: _requireString(m, 'cashier_id'),
+      branchId: _optionalString(m, 'branch_id'),
+      openedAt: _requireTimestamp(m, 'opened_at'),
+      closedAt: _optionalTimestamp(m, 'closed_at'),
+      openingBalance: _requireDouble(m, 'opening_balance'),
+      expectedClosingBalance: _optionalDouble(m, 'expected_closing_balance'),
+      actualClosingBalance: _optionalDouble(m, 'actual_closing_balance'),
+      difference: _optionalDouble(m, 'difference'),
+      status: _requireString(m, 'status'),
+      notes: _optionalString(m, 'notes'),
     );
   }
 
@@ -150,9 +184,7 @@ class CashRepositoryImpl implements CashRepository {
   Future<CashOverview> getOverview(String companyId) async {
     try {
       final List<CashAccount> accounts = await listAccounts(companyId);
-      if (accounts.isEmpty) {
-        return const CashOverview.empty();
-      }
+      if (accounts.isEmpty) return const CashOverview.empty();
 
       final List<Map<String, dynamic>> txRows =
           await _remote.fetchAllTransactionsForBalance(companyId);
@@ -216,7 +248,6 @@ class CashRepositoryImpl implements CashRepository {
         limit: limit,
       );
 
-      // Resolve account and category names in bulk.
       final List<CashAccount> accounts = await listAccounts(companyId);
       final List<CashCategory> categories = await listCategories(companyId);
 
@@ -362,6 +393,91 @@ class CashRepositoryImpl implements CashRepository {
       throw _postgrest(e, s, 'createCategory');
     } on Object catch (e, s) {
       throw _unknown(e, s, 'createCategory');
+    }
+  }
+
+  // ---------------------------------------------------------------------------
+  // ✅ Shift methods (جديدة)
+  // ---------------------------------------------------------------------------
+
+  @override
+  Future<Shift?> getActiveShift(String companyId) async {
+    try {
+      final Map<String, dynamic>? row =
+          await _remote.fetchActiveShift(companyId);
+      return row == null ? null : _mapShift(row);
+    } on FormatException catch (e, s) {
+      throw _invalidResponse(e, s, 'getActiveShift');
+    } on supabase.PostgrestException catch (e, s) {
+      throw _postgrest(e, s, 'getActiveShift');
+    } on Object catch (e, s) {
+      throw _unknown(e, s, 'getActiveShift');
+    }
+  }
+
+  @override
+  Future<Shift> openShift({
+    required String companyId,
+    required String cashierId,
+    String? branchId,
+    required double openingBalance,
+  }) async {
+    try {
+      final Map<String, dynamic> row = await _remote.insertShift(
+        companyId: companyId,
+        cashierId: cashierId,
+        branchId: branchId,
+        openingBalance: openingBalance,
+      );
+      return _mapShift(row);
+    } on supabase.PostgrestException catch (e, s) {
+      throw _postgrest(e, s, 'openShift');
+    } on Object catch (e, s) {
+      throw _unknown(e, s, 'openShift');
+    }
+  }
+
+  @override
+  Future<Shift> closeShift({
+    required String shiftId,
+    required double actualClosingBalance,
+    String? notes,
+  }) async {
+    try {
+      // Fetch the shift to compute expected balance
+      final Map<String, dynamic> current = await _remote.fetchShiftById(shiftId);
+      final double opening = _requireDouble(current, 'opening_balance');
+      final DateTime openedAt = _requireTimestamp(current, 'opened_at');
+      final String companyId = _requireString(current, 'company_id');
+
+      // Compute expected closing = opening + in - out (since opened_at)
+      final List<Map<String, dynamic>> txRows =
+          await _remote.fetchTransactions(
+        companyId: companyId,
+        shiftId: shiftId,
+        fromDate: openedAt,
+        limit: 10000,
+      );
+
+      double netMovement = 0;
+      for (final Map<String, dynamic> row in txRows) {
+        final String direction = row['direction'] as String;
+        final double amount = _parseNum(row['amount']);
+        netMovement += direction == 'in' ? amount : -amount;
+      }
+      final double expected = opening + netMovement;
+
+      final Map<String, dynamic> row = await _remote.updateShiftClose(
+        shiftId: shiftId,
+        actualClosingBalance: actualClosingBalance,
+        expectedClosingBalance: expected,
+        notes: notes,
+      );
+      return _mapShift(row);
+    } on supabase.PostgrestException catch (e, s) {
+      throw _postgrest(e, s, 'closeShift');
+    } on Object catch (e, s) {
+      throw _unknown(e, s, 'closeShift');
     }
   }
 
