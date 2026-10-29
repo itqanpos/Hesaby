@@ -13,6 +13,7 @@ import '../features/auth/presentation/pages/signup_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/cash/presentation/pages/cash_register_page.dart';
 import '../features/cash/presentation/pages/cash_reports_page.dart';
+import '../features/cash/presentation/pages/shift_report_page.dart'; // ✅ تمت الإضافة
 import '../features/companies/presentation/pages/branch_form_page.dart';
 import '../features/companies/presentation/pages/branches_page.dart';
 import '../features/companies/presentation/pages/company_profile_page.dart';
@@ -186,6 +187,10 @@ abstract final class AppRouter {
 
   static const String cashReportsPath = '/cash/reports';
   static const String cashReportsName = 'cash-reports';
+
+  // ✅ مسار تقرير الوردية
+  static const String shiftReportPath = '/cash/shifts/:id';
+  static const String shiftReportName = 'shift-report';
 
   static const String employeesPath = '/employees';
   static const String employeesName = 'employees';
@@ -363,6 +368,18 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         name: AppRouter.cashReportsName,
         builder: (BuildContext context, GoRouterState state) =>
             const CashReportsPage(),
+      ),
+      // ✅ إضافة مسار تقرير الوردية
+      GoRoute(
+        path: AppRouter.shiftReportPath,
+        name: AppRouter.shiftReportName,
+        builder: (BuildContext context, GoRouterState state) {
+          final String? id = state.pathParameters['id'];
+          return ShiftReportPage(
+            key: ValueKey<String>('shift-report-${id ?? ''}'),
+            shiftId: id ?? '',
+          );
+        },
       ),
       GoRoute(
         path: AppRouter.employeesPath,
