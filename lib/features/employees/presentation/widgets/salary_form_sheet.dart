@@ -275,26 +275,47 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Advances (with available hint) ----
-                _MoneyField(
-                  controller: _advancesController,
-                  label: 'خصم السلف (−)',
-                  enabled: !_isSaving && !_isPaid,
-                  helperText: totalAvailableAdvances > 0
-                      ? 'المتاح للخصم من السلف: '
-                          '${AppFormatters.money(totalAvailableAdvances)}'
-                      : 'لا يوجد سلف مفتوحة لهذا الموظف',
-                  validator: (String? v) {
-                    final String t = (v ?? '').trim();
-                    if (t.isEmpty) return null;
-                    final double? d = double.tryParse(t);
-                    if (d == null || d < 0) return 'قيمة غير صحيحة';
-                    if (d > totalAvailableAdvances + 0.01) {
-                      return 'المتاح: '
-                          '${AppFormatters.money(totalAvailableAdvances)}';
-                    }
-                    return null;
-                  },
+                // ---- Advances (with available hint & Auto-fill button) ----
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: <Widget>[
+                    _MoneyField(
+                      controller: _advancesController,
+                      label: 'خصم السلف (−)',
+                      enabled: !_isSaving && !_isPaid,
+                      helperText: totalAvailableAdvances > 0
+                          ? 'المتاح للخصم من السلف: '
+                              '${AppFormatters.money(totalAvailableAdvances)}'
+                          : 'لا يوجد سلف مفتوحة لهذا الموظف',
+                      validator: (String? v) {
+                        final String t = (v ?? '').trim();
+                        if (t.isEmpty) return null;
+                        final double? d = double.tryParse(t);
+                        if (d == null || d < 0) return 'قيمة غير صحيحة';
+                        if (d > totalAvailableAdvances + 0.01) {
+                          return 'المتاح: '
+                              '${AppFormatters.money(totalAvailableAdvances)}';
+                        }
+                        return null;
+                      },
+                    ),
+                    // ✅ زر جديد: خصم إجمالي السلف بضغطة واحدة
+                    if (!_isPaid && !_isSaving && totalAvailableAdvances > 0)
+                      Padding(
+                        padding: const EdgeInsets.only(top: 4, right: 8),
+                        child: TextButton.icon(
+                          onPressed: () {
+                            _advancesController.text = _fmt(totalAvailableAdvances);
+                          },
+                          icon: const Icon(Icons.auto_fix_high, size: 16),
+                          label: const Text('خصم كل السلف المتاحة'),
+                          style: TextButton.styleFrom(
+                            visualDensity: VisualDensity.compact,
+                            padding: const EdgeInsets.symmetric(horizontal: 8),
+                          ),
+                        ),
+                      ),
+                  ],
                 ),
                 const SizedBox(height: 16),
 
