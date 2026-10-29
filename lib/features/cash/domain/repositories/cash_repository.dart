@@ -2,7 +2,6 @@
 
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
-
 import '../entities/cash_entities.dart';
 
 enum CashFailureType {
@@ -15,7 +14,6 @@ class CashException extends Equatable implements Exception {
   final CashFailureType type;
   final Object? cause;
   final StackTrace? stackTrace;
-
   @override
   List<Object?> get props => <Object?>[type];
   @override
@@ -26,8 +24,6 @@ abstract interface class CashRepository {
   Future<List<CashAccount>> listAccounts(String companyId);
   Future<List<CashCategory>> listCategories(String companyId);
   Future<CashOverview> getOverview(String companyId);
-
-  // ✅ تمت إضافة shiftId هنا
   Future<List<CashTransaction>> listTransactions({
     required String companyId,
     String? accountId,
@@ -36,7 +32,6 @@ abstract interface class CashRepository {
     DateTime? toDate,
     int limit = 100,
   });
-
   Future<void> recordSalePayments({
     required String companyId,
     required String saleId,
@@ -64,8 +59,8 @@ abstract interface class CashRepository {
     required CashCategoryKind kind,
   });
 
-  // ✅ دوال الوردية
   Future<Shift?> getActiveShift(String companyId);
+  Future<Shift> getShiftById(String shiftId);
   Future<Shift> openShift({
     required String companyId,
     required String cashierId,
