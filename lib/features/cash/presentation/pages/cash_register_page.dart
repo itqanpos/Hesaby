@@ -2,8 +2,11 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
+import 'package:go_router/go_router.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 
+import '../../../../app/router.dart';
+import '../../../../core/utils/formatters.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
@@ -13,16 +16,9 @@ import '../../domain/entities/cash_entities.dart';
 import '../../domain/repositories/cash_repository.dart';
 import '../providers/cash_providers.dart';
 import '../widgets/add_cash_transaction_sheet.dart';
+import '../widgets/close_shift_dialog.dart';
+import '../widgets/open_shift_dialog.dart';
 
-/// Cash register main page.
-///
-/// Layout:
-/// * Total balance card + per-account balance cards.
-/// * Quick actions (record income / record expense).
-/// * Recent transactions list, most recent first.
-///
-/// All writes go through [CashTransactionsNotifier] which invalidates the
-/// overview so the balance cards refresh automatically.
 class CashRegisterPage extends ConsumerStatefulWidget {
   const CashRegisterPage({super.key});
 
@@ -43,18 +39,54 @@ class _CashRegisterPageState extends ConsumerState<CashRegisterPage> {
     ref.invalidate(cashTransactionsProvider);
     ref.invalidate(cashAccountsProvider);
     ref.invalidate(cashCategoriesProvider);
+    ref.invalidate(activeShiftProvider);
     await Future.wait(<Future<void>>[
       ref.read(cashOverviewProvider.future),
       ref.read(cashTransactionsProvider.future),
+      ref.read(activeShiftProvider.future),
     ]);
   }
 
   Future<void> _addMovement(CashDirection direction) async {
+    final Shift? activeShift = ref.read(activeShiftProvider).valueOrNull;
+    if (activeShift == null) {
+      _snack('يجب فتح وردية أولاً قبل تسجيل حركات.');
+      return;
+    }
     await showAddCashTransactionSheet(
       context: context,
       initialDirection: direction,
     );
-    // Providers invalidate themselves; nothing else to do.
+  }
+
+  Future<void> _openShift() async {
+    final Shift? opened = await showOpenShiftDialog(context: context);
+    if (opened != null && mounted) {
+      _snack('تم فتح الوردية بنجاح.');
+    }
+  }
+
+  Future<void> _closeShift(Shift shift) async {
+    final Shift? closed = await showCloseShiftDialog(
+      context: context,
+      shift: shift,
+    );
+    if (closed != null && mounted) {
+      _snack('تم إغلاق الوردية بنجاح.');
+    }
+  }
+
+  Future<void> _openShiftReport(Shift shift) async {
+    await context.pushNamed(
+      AppRouter.shiftReportName,
+      pathParameters: <String, String>{'id': shift.id},
+    );
+  }
+
+  void _snack(String message) {
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
   }
 
   @override
@@ -63,11 +95,14 @@ class _CashRegisterPageState extends ConsumerState<CashRegisterPage> {
         ref.watch(cashOverviewProvider);
     final AsyncValue<List<CashTransaction>> txAsync =
         ref.watch(cashTransactionsProvider);
+    final AsyncValue<Shift?> shiftAsync = ref.watch(activeShiftProvider);
 
-    final Object? firstError = overviewAsync.error ?? txAsync.error;
+    final Object? firstError =
+        overviewAsync.error ?? txAsync.error ?? shiftAsync.error;
     final bool anyLoading =
         (overviewAsync.isLoading && !overviewAsync.hasValue) ||
-            (txAsync.isLoading && !txAsync.hasValue);
+            (txAsync.isLoading && !txAsync.hasValue) ||
+            (shiftAsync.isLoading && !shiftAsync.hasValue);
 
     return AppShell(
       appBar: AppBar(
@@ -99,6 +134,7 @@ class _CashRegisterPageState extends ConsumerState<CashRegisterPage> {
               const CashOverview.empty();
           final List<CashTransaction> tx =
               txAsync.valueOrNull ?? const <CashTransaction>[];
+          final Shift? activeShift = shiftAsync.valueOrNull;
 
           return RefreshIndicator(
             onRefresh: _refresh,
@@ -106,6 +142,17 @@ class _CashRegisterPageState extends ConsumerState<CashRegisterPage> {
               physics: const AlwaysScrollableScrollPhysics(),
               padding: const EdgeInsets.only(top: 12, bottom: 32),
               children: <Widget>[
+                // ✅ شريط الوردية
+                if (activeShift == null)
+                  _NoShiftCard(onOpen: _openShift)
+                else
+                  _ActiveShiftCard(
+                    shift: activeShift,
+                    onClose: () => _closeShift(activeShift),
+                    onReport: () => _openShiftReport(activeShift),
+                  ),
+                const SizedBox(height: 12),
+
                 _TotalBalanceCard(
                   total: overview.totalBalance,
                   money: _money,
@@ -133,9 +180,10 @@ class _CashRegisterPageState extends ConsumerState<CashRegisterPage> {
                       const SizedBox(width: 6),
                       Text(
                         'آخر الحركات',
-                        style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                              fontWeight: FontWeight.w700,
-                            ),
+                        style: Theme.of(context)
+                            .textTheme
+                            .titleMedium
+                            ?.copyWith(fontWeight: FontWeight.w700),
                       ),
                     ],
                   ),
@@ -182,6 +230,151 @@ class _CashRegisterPageState extends ConsumerState<CashRegisterPage> {
           'تعذّر قراءة البيانات من الخادم.',
         CashFailureType.unknown => 'حدث خطأ غير متوقع.',
       };
+}
+
+// ============================================================================
+// ✅ Shift cards (جديد)
+// ============================================================================
+
+class _NoShiftCard extends StatelessWidget {
+  const _NoShiftCard({required this.onOpen});
+
+  final VoidCallback onOpen;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.errorContainer.withValues(alpha: 0.35),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.error.withValues(alpha: 0.3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Row(
+          children: <Widget>[
+            Icon(Icons.warning_amber_outlined, color: scheme.error),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'لا توجد وردية مفتوحة',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w700,
+                  color: scheme.onSurface,
+                ),
+              ),
+            ),
+            AppButton(
+              label: 'فتح وردية',
+              icon: Icons.play_arrow,
+              size: AppButtonSize.small,
+              onPressed: onOpen,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _ActiveShiftCard extends StatelessWidget {
+  const _ActiveShiftCard({
+    required this.shift,
+    required this.onClose,
+    required this.onReport,
+  });
+
+  final Shift shift;
+  final VoidCallback onClose;
+  final VoidCallback onReport;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final DateFormat fmt = DateFormat('yyyy/MM/dd HH:mm', 'en_US');
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.primaryContainer.withValues(alpha: 0.4),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: scheme.primary.withValues(alpha: 0.3)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(14),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Row(
+              children: <Widget>[
+                Icon(Icons.check_circle, color: scheme.primary),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    'وردية مفتوحة',
+                    style: theme.textTheme.titleSmall?.copyWith(
+                      fontWeight: FontWeight.w700,
+                      color: scheme.primary,
+                    ),
+                  ),
+                ),
+                Text(
+                  AppFormatters.money(shift.openingBalance),
+                  style: theme.textTheme.titleSmall?.copyWith(
+                    fontWeight: FontWeight.w800,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 6),
+            Row(
+              children: <Widget>[
+                Icon(
+                  Icons.schedule,
+                  size: 14,
+                  color: scheme.onSurfaceVariant,
+                ),
+                const SizedBox(width: 4),
+                Text(
+                  'فُتحت: ${fmt.format(shift.openedAt.toLocal())}',
+                  style: theme.textTheme.bodySmall?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+            Row(
+              children: <Widget>[
+                Expanded(
+                  child: AppButton(
+                    label: 'تقرير الوردية',
+                    icon: Icons.receipt_long_outlined,
+                    variant: AppButtonVariant.outline,
+                    size: AppButtonSize.small,
+                    onPressed: onReport,
+                  ),
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: AppButton(
+                    label: 'إغلاق الوردية',
+                    icon: Icons.stop_circle_outlined,
+                    variant: AppButtonVariant.danger,
+                    size: AppButtonSize.small,
+                    onPressed: onClose,
+                  ),
+                ),
+              ],
+            ),
+          ],
+        ),
+      ),
+    );
+  }
 }
 
 // ============================================================================
