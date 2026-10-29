@@ -4,10 +4,6 @@ import 'package:supabase_flutter/supabase_flutter.dart' show SupabaseClient;
 
 import '../../domain/repositories/cash_repository.dart';
 
-/// Supabase access for the cash register.
-///
-/// This is the only file in the cash feature that talks to Supabase.
-/// Tenant isolation is enforced by RLS via `has_permission(...)`.
 class CashRemoteDataSource {
   const CashRemoteDataSource(this._client);
 
@@ -86,6 +82,7 @@ class CashRemoteDataSource {
   Future<List<Map<String, dynamic>>> fetchTransactions({
     required String companyId,
     String? accountId,
+    String? shiftId,
     DateTime? fromDate,
     DateTime? toDate,
     int limit = 100,
@@ -99,6 +96,9 @@ class CashRemoteDataSource {
 
     if (accountId != null) {
       query = query.eq('account_id', accountId);
+    }
+    if (shiftId != null) {
+      query = query.eq('shift_id', shiftId);
     }
     if (fromDate != null) {
       query = query.gte('transaction_date', fromDate.toUtc().toIso8601String());
@@ -169,16 +169,6 @@ class CashRemoteDataSource {
     await client.from('sale_payments').insert(payload);
   }
 
-  // ---------------------------------------------------------------------------
-  // Balances — computed via SQL
-  // ---------------------------------------------------------------------------
-
-  /// Returns raw balance rows keyed by account_id.
-  ///
-  /// Uses a lightweight RPC-like query executed inline via `rpc` is not
-  /// available; instead we fetch the aggregate through a PostgREST view
-  /// created in a follow-up migration. For now the datasource computes the
-  /// balance by fetching all transactions — acceptable at the current scale.
   Future<List<Map<String, dynamic>>> fetchAllTransactionsForBalance(
     String companyId,
   ) async {
@@ -187,6 +177,88 @@ class CashRemoteDataSource {
         .from('cash_transactions')
         .select('account_id, direction, amount')
         .eq('company_id', companyId);
+  }
+
+  // ---------------------------------------------------------------------------
+  // ✅ Shift methods (جديدة)
+  // ---------------------------------------------------------------------------
+
+  /// Returns the currently open shift for the company, or null.
+  Future<Map<String, dynamic>?> fetchActiveShift(String companyId) async {
+    final SupabaseClient client = _requireClient();
+    return await client
+        .from('shifts')
+        .select()
+        .eq('company_id', companyId)
+        .eq('status', 'open')
+        .order('opened_at', ascending: false)
+        .limit(1)
+        .maybeSingle();
+  }
+
+  /// Returns the shift with [shiftId] (for detailed view).
+  Future<Map<String, dynamic>> fetchShiftById(String shiftId) async {
+    final SupabaseClient client = _requireClient();
+    final Map<String, dynamic> row = await client
+        .from('shifts')
+        .select()
+        .eq('id', shiftId)
+        .single();
+    return row;
+  }
+
+  /// Creates a new open shift and returns its row.
+  Future<Map<String, dynamic>> insertShift({
+    required String companyId,
+    required String cashierId,
+    String? branchId,
+    required double openingBalance,
+  }) async {
+    final SupabaseClient client = _requireClient();
+    return await client
+        .from('shifts')
+        .insert(<String, dynamic>{
+          'company_id': companyId,
+          'cashier_id': cashierId,
+          'branch_id': branchId,
+          'opening_balance': openingBalance,
+          'status': 'open',
+        })
+        .select()
+        .single();
+  }
+
+  /// Closes the shift with [shiftId].
+  Future<Map<String, dynamic>> updateShiftClose({
+    required String shiftId,
+    required double actualClosingBalance,
+    required double expectedClosingBalance,
+    String? notes,
+  }) async {
+    final SupabaseClient client = _requireClient();
+    return await client
+        .from('shifts')
+        .update(<String, dynamic>{
+          'closed_at': DateTime.now().toUtc().toIso8601String(),
+          'actual_closing_balance': actualClosingBalance,
+          'expected_closing_balance': expectedClosingBalance,
+          'difference': actualClosingBalance - expectedClosingBalance,
+          'status': 'closed',
+          if (notes != null) 'notes': notes,
+        })
+        .eq('id', shiftId)
+        .select()
+        .single();
+  }
+
+  /// Fetches all open shifts for the company (for admin dashboard).
+  Future<List<Map<String, dynamic>>> fetchOpenShifts(String companyId) async {
+    final SupabaseClient client = _requireClient();
+    return await client
+        .from('shifts')
+        .select()
+        .eq('company_id', companyId)
+        .eq('status', 'open');
   }
 
   // ---------------------------------------------------------------------------
