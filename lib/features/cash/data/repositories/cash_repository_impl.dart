@@ -1,6 +1,5 @@
 // lib/features/cash/data/repositories/cash_repository_impl.dart
 
-import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import '../../../../core/utils/logger.dart';
 import '../../domain/entities/cash_entities.dart';
 import '../../domain/repositories/cash_repository.dart';
@@ -63,19 +62,22 @@ class CashRepositoryImpl implements CashRepository {
 
   static CashAccount _mapAccount(Map<String, dynamic> m) => CashAccount(
     id: _requireString(m, 'id'), companyId: _requireString(m, 'company_id'), name: _requireString(m, 'name'),
-    type: CashAccountType.fromString(m['type']), isActive: _optionalBool(m, 'is_active'), createdAt: _requireTimestamp(m, 'created_at'),
+    type: CashAccountType.fromString(m['type'] as String?), // ✅ تم التصحيح
+    isActive: _optionalBool(m, 'is_active'), createdAt: _requireTimestamp(m, 'created_at'),
   );
 
   static CashCategory _mapCategory(Map<String, dynamic> m) => CashCategory(
     id: _requireString(m, 'id'), companyId: _requireString(m, 'company_id'), name: _requireString(m, 'name'),
-    kind: CashCategoryKind.fromString(m['kind']), isSystem: _optionalBool(m, 'is_system'), isActive: _optionalBool(m, 'is_active'),
+    kind: CashCategoryKind.fromString(m['kind'] as String?), // ✅ تم التصحيح
+    isSystem: _optionalBool(m, 'is_system'), isActive: _optionalBool(m, 'is_active'),
   );
 
   static CashTransaction _mapTransaction(Map<String, dynamic> m, {String? accountName, String? categoryName}) => CashTransaction(
     id: _requireString(m, 'id'), companyId: _requireString(m, 'company_id'), accountId: _requireString(m, 'account_id'),
     accountName: accountName ?? '—', shiftId: _optionalString(m, 'shift_id'), branchId: _optionalString(m, 'branch_id'),
     categoryId: _optionalString(m, 'category_id'), categoryName: categoryName,
-    direction: CashDirection.fromString(m['direction']), amount: _requireDouble(m, 'amount'),
+    direction: CashDirection.fromString(m['direction'] as String?), // ✅ تم التصحيح
+    amount: _requireDouble(m, 'amount'),
     sourceType: _requireString(m, 'source_type'), sourceId: _optionalString(m, 'source_id'),
     reference: _optionalString(m, 'reference'), notes: _optionalString(m, 'notes'), transactionDate: _requireTimestamp(m, 'transaction_date'),
   );
