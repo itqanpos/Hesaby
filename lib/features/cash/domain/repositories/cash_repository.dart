@@ -6,45 +6,26 @@ import 'package:flutter/foundation.dart';
 import '../entities/cash_entities.dart';
 
 enum CashFailureType {
-  network,
-  unauthorized,
-  notFound,
-  invalidInput,
-  invalidResponse,
-  unknown,
+  network, unauthorized, notFound, invalidInput, invalidResponse, unknown,
 }
 
 @immutable
 class CashException extends Equatable implements Exception {
-  const CashException({
-    required this.type,
-    this.cause,
-    this.stackTrace,
-  });
-
+  const CashException({required this.type, this.cause, this.stackTrace});
   final CashFailureType type;
   final Object? cause;
   final StackTrace? stackTrace;
 
   @override
   List<Object?> get props => <Object?>[type];
-
   @override
   String toString() => 'CashException(type: ${type.name})';
 }
 
-/// Contract for the cash register feature.
 abstract interface class CashRepository {
-  /// Returns every active account of [companyId].
   Future<List<CashAccount>> listAccounts(String companyId);
-
-  /// Returns every active category of [companyId].
   Future<List<CashCategory>> listCategories(String companyId);
-
-  /// Returns the cash overview: accounts + balances + total.
   Future<CashOverview> getOverview(String companyId);
-
-  /// Returns the most recent transactions of [companyId].
   Future<List<CashTransaction>> listTransactions({
     required String companyId,
     String? accountId,
@@ -52,17 +33,11 @@ abstract interface class CashRepository {
     DateTime? toDate,
     int limit = 100,
   });
-
-  /// Records one or more sale payments for an already-confirmed sale.
-  ///
-  /// The database triggers translate these rows into cash movements.
   Future<void> recordSalePayments({
     required String companyId,
     required String saleId,
     required List<SalePaymentDraft> payments,
   });
-
-  /// Records a manual cash movement.
   Future<CashTransaction> recordManualTransaction({
     required String companyId,
     required String accountId,
@@ -74,18 +49,28 @@ abstract interface class CashRepository {
     String? notes,
     DateTime? transactionDate,
   });
-
-  /// Creates a new account.
   Future<CashAccount> createAccount({
     required String companyId,
     required String name,
     required CashAccountType type,
   });
-
-  /// Creates a new category.
   Future<CashCategory> createCategory({
     required String companyId,
     required String name,
     required CashCategoryKind kind,
+  });
+
+  // ✅ دوال الوردية الجديدة
+  Future<Shift?> getActiveShift(String companyId);
+  Future<Shift> openShift({
+    required String companyId,
+    required String cashierId,
+    String? branchId,
+    required double openingBalance,
+  });
+  Future<Shift> closeShift({
+    required String shiftId,
+    required double actualClosingBalance,
+    String? notes,
   });
 }
