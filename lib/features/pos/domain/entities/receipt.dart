@@ -27,6 +27,22 @@ enum DocumentType {
   }
 }
 
+/// دفعة واحدة داخل الفاتورة (لدعم الدفع المختلط).
+@immutable
+class ReceiptPayment extends Equatable {
+  const ReceiptPayment({
+    required this.method,
+    required this.amount,
+  });
+
+  /// `cash`, `card`, `instapay`, `bank_transfer`, `other`.
+  final String method;
+  final double amount;
+
+  @override
+  List<Object?> get props => <Object?>[method, amount];
+}
+
 /// Immutable, self-contained representation of a sale receipt.
 @immutable
 class Receipt extends Equatable {
@@ -41,6 +57,7 @@ class Receipt extends Equatable {
     required this.taxAmount,
     required this.total,
     required this.paidAmount,
+    this.payments = const <ReceiptPayment>[],
     this.documentType = DocumentType.sale,
     this.invoiceNumber,
     this.companyAddress,
@@ -72,6 +89,10 @@ class Receipt extends Equatable {
 
   /// Amount the customer paid toward the invoice + old balance.
   final double paidAmount;
+
+  /// تفاصيل الدفعات (لدعم الدفع المختلط).
+  /// إذا كانت القائمة فارغة، فهذا يعني أن الفاتورة آجلة (أو غير مدفوع).
+  final List<ReceiptPayment> payments;
 
   /// نوع المستند (مبيعات، مشتريات، مرتجع، إلخ)
   final DocumentType documentType;
@@ -109,6 +130,8 @@ class Receipt extends Equatable {
   // ---------------------------------------------------------------------------
 
   bool get hasCustomer => customerName != null;
+
+  bool get hasPayments => payments.isNotEmpty;
 
   bool get hasCustomerAddress =>
       customerAddress != null && customerAddress!.trim().isNotEmpty;
@@ -170,6 +193,7 @@ class Receipt extends Equatable {
     double? taxAmount,
     double? total,
     double? paidAmount,
+    List<ReceiptPayment>? payments,
     DocumentType? documentType,
     String? companyAddress,
     String? companyPhone,
@@ -198,6 +222,7 @@ class Receipt extends Equatable {
       taxAmount: taxAmount ?? this.taxAmount,
       total: total ?? this.total,
       paidAmount: paidAmount ?? this.paidAmount,
+      payments: payments ?? this.payments,
       documentType: documentType ?? this.documentType,
       companyAddress: companyAddress ?? this.companyAddress,
       companyPhone: companyPhone ?? this.companyPhone,
@@ -232,6 +257,7 @@ class Receipt extends Equatable {
         taxAmount,
         total,
         paidAmount,
+        payments,
         documentType,
         companyAddress,
         companyPhone,
@@ -254,6 +280,7 @@ class Receipt extends Equatable {
       'Receipt(saleId: $saleId, invoiceNumber: $invoiceNumber, '
       'type: ${documentType.name}, '
       'lines: ${lines.length}, total: $total, paidAmount: $paidAmount, '
+      'payments: ${payments.length}, '
       'newBalance: $newBalance, showCurrencySymbol: $showCurrencySymbol)';
 }
 
