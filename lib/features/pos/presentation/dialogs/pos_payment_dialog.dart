@@ -1,5 +1,7 @@
 // lib/features/pos/presentation/dialogs/pos_payment_dialog.dart
 
+import 'dart:typed_data';
+
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -15,7 +17,7 @@ import '../../../cash/domain/entities/cash_entities.dart';
 import '../../../cash/presentation/providers/cash_providers.dart';
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
-import '../../../companies/presentation/providers/company_status_provider.dart'; // ⬅️ استيراد جديد
+import '../../../companies/presentation/providers/company_status_provider.dart';
 import '../../../sales/domain/entities/sale_entities.dart';
 import '../../../sales/domain/repositories/sales_repository.dart';
 import '../../../sales/presentation/providers/sales_providers.dart';
@@ -25,6 +27,7 @@ import '../../../settings/presentation/providers/company_settings_providers.dart
 import '../../../settings/presentation/providers/user_profile_providers.dart';
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
+import '../../data/services/receipt_printer.dart'; // ✅ جديد
 import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/entities/receipt.dart';
@@ -149,7 +152,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   Future<void> _submit() async {
     FocusScope.of(context).unfocus();
 
-    // ⬇️ الفحص الجديد: هل الشركة موقوفة أو اشتراكها منتهي؟
     if (!ref.read(companyCanWriteProvider)) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
@@ -253,7 +255,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
       ref.read(posCartProvider.notifier).reset();
 
-      // ⬇️ التحقق من إعداد الطباعة المباشرة
       final bool directPrint = ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ?? false;
       final bool isDesktop = defaultTargetPlatform == TargetPlatform.windows || 
                              defaultTargetPlatform == TargetPlatform.linux || 
@@ -261,7 +262,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       final bool hasSavedPrinter = ref.read(savedPrinterProvider).valueOrNull != null;
 
       if (directPrint && isDesktop && hasSavedPrinter) {
-        // تنفيذ الطباعة المباشرة
         try {
           final engine = ref.read(appPrintEngineProvider);
           final logo = await _loadLogoBytes();
@@ -289,7 +289,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
           );
         }
       } else {
-        // إظهار حوار المعاينة العادي
         await showDialog<void>(
           context: context,
           barrierDismissible: false,
@@ -396,7 +395,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
     ref.read(posCartProvider.notifier).reset();
 
-    // ⬇️ التحقق من إعداد الطباعة المباشرة للأوفلاين
     final bool directPrint = ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ?? false;
     final bool isDesktop = defaultTargetPlatform == TargetPlatform.windows || 
                            defaultTargetPlatform == TargetPlatform.linux || 
@@ -404,7 +402,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     final bool hasSavedPrinter = ref.read(savedPrinterProvider).valueOrNull != null;
 
     if (directPrint && isDesktop && hasSavedPrinter) {
-      // تنفيذ الطباعة المباشرة
       try {
         final engine = ref.read(appPrintEngineProvider);
         final logo = await _loadLogoBytes();
@@ -432,7 +429,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         );
       }
     } else {
-      // إظهار حوار المعاينة العادي
       await showDialog<void>(
         context: context,
         barrierDismissible: false,
@@ -1102,7 +1098,7 @@ class _ErrorBanner extends StatelessWidget {
 // Receipt Dialog
 // ============================================================================
 
-class _PosReceiptDialog extends ConsumerWidget {
+class _PosReceiptDialog extends ConsumerStatefulWidget {
   const _PosReceiptDialog({
     required this.receipt,
     this.isOffline = false,
@@ -1111,18 +1107,77 @@ class _PosReceiptDialog extends ConsumerWidget {
   final Receipt receipt;
   final bool isOffline;
 
-  Future<void> _handlePrint(BuildContext context, WidgetRef ref) async {
-    if (!context.mounted) return;
+  @override
+  ConsumerState<_PosReceiptDialog> createState() => _PosReceiptDialogState();
+}
+
+class _PosReceiptDialogState extends ConsumerState<_PosReceiptDialog> {
+  static const ReceiptPrinter _pdfPrinter = ReceiptPrinterImpl();
+  
+  bool _isSharing = false;
+
+  Future<void> _handlePrint() async {
+    if (!mounted) return;
     await showPosPrintPreviewDialog(
       context: context,
-      receipt: receipt,
+      receipt: widget.receipt,
     );
   }
 
+  Future<void> _handleShare() async {
+    setState(() => _isSharing = true);
+    try {
+      final settings = ref.read(companySettingsProvider).valueOrNull;
+      final style = settings == null 
+          ? const PrintStyleSettings.defaults() 
+          : PrintStyleSettings.fromCompanySettings(settings);
+      
+      final size = ref.read(posPaperSizeProvider).valueOrNull ?? PosPreferences.defaultPaperSize;
+
+      final logo = await _loadLogoBytes();
+
+      final bool ok = await _pdfPrinter.shareReceipt(
+        receipt: widget.receipt,
+        size: size,
+        style: style,
+        logoBytes: logo,
+      );
+
+      if (!mounted) return;
+      setState(() => _isSharing = false);
+
+      if (!ok) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('تعذّرت مشاركة الإيصال.')),
+        );
+      }
+    } catch (e) {
+      if (!mounted) return;
+      setState(() => _isSharing = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('تعذّرت مشاركة الإيصال.')),
+      );
+    }
+  }
+
+  Future<Uint8List?> _loadLogoBytes() async {
+    final settings = ref.read(companySettingsProvider).valueOrNull;
+    if (settings == null || settings.companyId.isEmpty) return null;
+    try {
+      return await const CompanyLogoLoader().load(
+        companyId: settings.companyId,
+        logoUrl: settings.logoUrl,
+      );
+    } catch (e) {
+      return null;
+    }
+  }
+
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    final Receipt receipt = widget.receipt;
 
     return Dialog(
       insetPadding:
@@ -1143,7 +1198,7 @@ class _PosReceiptDialog extends ConsumerWidget {
                 Row(
                   children: <Widget>[
                     Icon(
-                      isOffline
+                      widget.isOffline
                           ? Icons.cloud_off_outlined
                           : Icons.check_circle,
                       color: scheme.primary,
@@ -1152,7 +1207,7 @@ class _PosReceiptDialog extends ConsumerWidget {
                     const SizedBox(width: 10),
                     Expanded(
                       child: Text(
-                        isOffline
+                        widget.isOffline
                             ? 'تم حفظ البيع محليًا'
                             : 'تم إتمام البيع',
                         style: theme.textTheme.titleLarge,
@@ -1161,7 +1216,7 @@ class _PosReceiptDialog extends ConsumerWidget {
                   ],
                 ),
 
-                if (isOffline) ...<Widget>[
+                if (widget.isOffline) ...<Widget>[
                   const SizedBox(height: 10),
                   DecoratedBox(
                     decoration: BoxDecoration(
@@ -1201,7 +1256,7 @@ class _PosReceiptDialog extends ConsumerWidget {
                 const Divider(height: 1),
                 const SizedBox(height: 12),
 
-                if (!isOffline && receipt.invoiceNumber != null)
+                if (!widget.isOffline && receipt.invoiceNumber != null)
                   Text(
                     'الإيصال: ${receipt.invoiceNumber}',
                     style: theme.textTheme.bodyMedium,
@@ -1219,35 +1274,8 @@ class _PosReceiptDialog extends ConsumerWidget {
                 const Divider(height: 1),
                 const SizedBox(height: 12),
 
-                for (final ReceiptLine line in receipt.lines)
-                  Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    child: Row(
-                      children: <Widget>[
-                        Expanded(
-                          child: Text(
-                            line.productName,
-                            style: theme.textTheme.bodyMedium,
-                          ),
-                        ),
-                        Text(
-                          '${AppFormatters.quantity(line.quantity)} × '
-                          '${AppFormatters.money(line.unitPrice)}',
-                          style: theme.textTheme.bodySmall,
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          AppFormatters.money(line.lineTotal),
-                          style: theme.textTheme.bodyMedium,
-                        ),
-                      ],
-                    ),
-                  ),
-
-                const SizedBox(height: 8),
-                const Divider(height: 1),
-                const SizedBox(height: 8),
-
+                // ✅ تم حذف تفاصيل الأصناف بناءً على الطلب
+                
                 _row(theme, 'المجموع الفرعي',
                     AppFormatters.money(receipt.subtotal)),
                 if (receipt.discount > 0)
@@ -1291,23 +1319,29 @@ class _PosReceiptDialog extends ConsumerWidget {
 
                 const SizedBox(height: 16),
 
-                Row(
+                // ✅ الأزرار الآن رأسية (3 أزرار)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
-                    Expanded(
-                      child: AppButton(
-                        label: 'طباعة',
-                        icon: Icons.print_outlined,
-                        onPressed: () => _handlePrint(context, ref),
-                      ),
+                    AppButton(
+                      label: 'مشاركة',
+                      icon: Icons.ios_share,
+                      variant: AppButtonVariant.outline,
+                      isLoading: _isSharing,
+                      onPressed: _isSharing ? null : _handleShare,
                     ),
-                    const SizedBox(width: 8),
-                    Expanded(
-                      child: AppButton(
-                        label: 'فاتورة جديدة',
-                        icon: Icons.add,
-                        variant: AppButtonVariant.outline,
-                        onPressed: () => Navigator.of(context).pop(),
-                      ),
+                    const SizedBox(height: 8),
+                    AppButton(
+                      label: 'طباعة',
+                      icon: Icons.print_outlined,
+                      variant: AppButtonVariant.outline,
+                      onPressed: _isSharing ? null : _handlePrint,
+                    ),
+                    const SizedBox(height: 8),
+                    AppButton(
+                      label: 'فاتورة جديدة',
+                      icon: Icons.add,
+                      onPressed: _isSharing ? null : () => Navigator.of(context).pop(),
                     ),
                   ],
                 ),
