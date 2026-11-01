@@ -24,7 +24,7 @@ class CashReportPeriodNotifier extends Notifier<CashReportPeriod> {
 
   void setCustom(DateTime from, DateTime to) {
     state = CashReportPeriod(
-      type: CashReportPeriodType.thisMonth, // ignored by label getter
+      type: CashReportPeriodType.thisMonth,
       from: from,
       to: to,
     );
@@ -55,8 +55,6 @@ class CashReportsNotifier extends AsyncNotifier<CashReportBundle> {
       return CashReportBundle.empty(period);
     }
 
-    // Fetch everything once — the dataset is small enough to aggregate
-    // client-side, and this avoids maintaining an RPC per report.
     final List<CashTransaction> all =
         await ref.read(cashRepositoryProvider).listTransactions(
               companyId: companyId,
@@ -82,7 +80,6 @@ class CashReportsNotifier extends AsyncNotifier<CashReportBundle> {
     final DateTime? from = period.from;
     final DateTime? to = period.to;
 
-    // Opening balance = net of every transaction strictly before `from`.
     double opening = 0;
     if (from != null) {
       for (final CashTransaction t in all) {
@@ -92,7 +89,6 @@ class CashReportsNotifier extends AsyncNotifier<CashReportBundle> {
       }
     }
 
-    // In-period transactions.
     final List<CashTransaction> inPeriod = all.where((CashTransaction t) {
       if (from != null && t.transactionDate.isBefore(from)) return false;
       if (to != null && t.transactionDate.isAfter(to)) return false;
@@ -101,22 +97,26 @@ class CashReportsNotifier extends AsyncNotifier<CashReportBundle> {
 
     double totalIn = 0;
     double totalOut = 0;
+    double cashIn = 0;
+    double cardIn = 0;
+    double cashOut = 0;
+    double cardOut = 0;
 
-    // Category aggregation.
     final Map<String, _CatAcc> catMap = <String, _CatAcc>{};
-
-    // Account aggregation.
     final Map<String, _AccAcc> accMap = <String, _AccAcc>{};
 
     for (final CashTransaction t in inPeriod) {
       final bool isIn = t.direction == CashDirection.inFlow;
       if (isIn) {
         totalIn += t.amount;
+        if (t.accountType == CashAccountType.cash) cashIn += t.amount;
+        if (t.accountType == CashAccountType.card) cardIn += t.amount;
       } else {
         totalOut += t.amount;
+        if (t.accountType == CashAccountType.cash) cashOut += t.amount;
+        if (t.accountType == CashAccountType.card) cardOut += t.amount;
       }
 
-      // ---- Category ----
       final String catName = t.categoryName ?? 'بدون تصنيف';
       final _CatAcc cat = catMap.putIfAbsent(catName, () => _CatAcc());
       if (isIn) {
@@ -126,7 +126,6 @@ class CashReportsNotifier extends AsyncNotifier<CashReportBundle> {
       }
       cat.count++;
 
-      // ---- Account ----
       final _AccAcc acc = accMap.putIfAbsent(
         t.accountId,
         () => _AccAcc(name: t.accountName),
@@ -139,7 +138,6 @@ class CashReportsNotifier extends AsyncNotifier<CashReportBundle> {
       acc.count++;
     }
 
-    // Sorted category breakdown — by total (in+out) desc.
     final List<CashCategoryBreakdown> byCategory = catMap.entries
         .map(
           (MapEntry<String, _CatAcc> e) => CashCategoryBreakdown(
@@ -174,6 +172,10 @@ class CashReportsNotifier extends AsyncNotifier<CashReportBundle> {
         totalIn: totalIn,
         totalOut: totalOut,
         transactionCount: inPeriod.length,
+        cashIn: cashIn,
+        cardIn: cardIn,
+        cashOut: cashOut,
+        cardOut: cardOut,
       ),
       byCategory: byCategory,
       byAccount: byAccount,
