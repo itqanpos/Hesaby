@@ -479,7 +479,7 @@ class _TotalsCard extends StatelessWidget {
                   _row(scheme, 'إجمالي الفاتورة', AppFormatters.money(sale.total)),
                   
                   if (hasPrev)
-                    _row(scheme, 'الرصيد السابق', AppFormatters.money(previousBalance!.abs())),
+                    _row(scheme, 'الرصيد السابق', AppFormatters.money(previousBalance.abs())),
 
                   const Divider(height: 20),
                   
@@ -514,7 +514,7 @@ class _TotalsCard extends StatelessWidget {
                     _row(
                       scheme,
                       'الرصيد الجديد',
-                      AppFormatters.money(newBalance.abs()), // ✅ تمت إزالة !
+                      AppFormatters.money(newBalance.abs()),
                       emphasized: true,
                       color: newBalance > 0 ? scheme.error : (newBalance < 0 ? const Color(0xFF0F7B6C) : null),
                     ),
