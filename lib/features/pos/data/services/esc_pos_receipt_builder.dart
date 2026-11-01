@@ -283,7 +283,6 @@ class _Painter {
     _itemsTable(r);
     _gap(_sectionGap);
     
-    // ⬇️ قسم الإجماليات الجديد (بالترتيب المطلوب)
     _totalsSection(r);
 
     _gap(_sectionGap * 1.5);
@@ -292,29 +291,37 @@ class _Painter {
     _footer(r);
   }
 
-  // ⬇️ دالة جديدة لقسم الإجماليات
   void _totalsSection(Receipt r) {
-    // 1. الإجمالي الحالي (قيمة الفاتورة)
     _kvRow('الإجمالي الحالي', _money(r.total));
 
-    // 2. الرصيد السابق (إذا وجد عميل ورصيد)
     if (r.hasCustomer && (r.previousBalance ?? 0) != 0) {
       _gap(4 * _scale);
       _kvRow('الرصيد السابق', _money(r.previousBalance!.abs()));
     }
 
-    // 3. الإجمالي الكلي (الفاتورة + الرصيد السابق)
     final double totalOwed = r.total + (r.previousBalance ?? 0);
     _gap(4 * _scale);
     _grandTotal(r, totalOwed);
 
-    // 4. المدفوع + طريقة الدفع
     _gap(4 * _scale);
-    _kvRow('طريقة الدفع', _paymentMethodLabel(r));
+
+    // ✅ قسم الدفع (معدّل للدفع المختلط)
+    if (r.hasPayments) {
+      if (r.payments.length == 1) {
+        _kvRow('طريقة الدفع', _methodLabel(r.payments.first.method));
+      } else {
+        _kvRow('تفاصيل الدفع', '');
+        for (final ReceiptPayment p in r.payments) {
+          _kvRow('  · ${_methodLabel(p.method)}', _money(p.amount));
+        }
+      }
+    } else {
+      _kvRow('طريقة الدفع', 'آجل');
+    }
+
     _gap(4 * _scale);
     _kvRow('المدفوع', _money(r.paidAmount));
 
-    // 5. الرصيد الجديد (إذا وجد)
     if (r.hasBalanceChange) {
       _gap(4 * _scale);
       _divider();
@@ -333,7 +340,6 @@ class _Painter {
     }
   }
 
-  // ⬇️ تم تكبير اللوجو هنا (من 0.55 إلى 0.70، ومن 140 إلى 180)
   void _drawLogo(ui.Image logo) {
     final double targetW = _contentWidth * 0.70;
     final double ratio = logo.height / logo.width;
@@ -693,12 +699,14 @@ class _Painter {
     return '$day، $y/$m/$d — $hh:$mm $ampm';
   }
 
-  // ⬇️ تمت إعادة الدالة
-  static String _paymentMethodLabel(Receipt r) {
-    if (r.paidAmount <= 0) return 'آجل';
-    if (r.paidAmount >= r.total) return 'نقدي';
-    return 'نقدي (جزئي)';
-  }
+  // ✅ تم حذف `_paymentMethodLabel` القديمة وإضافة `_methodLabel`
+  static String _methodLabel(String method) => switch (method) {
+        'cash' => 'نقدي',
+        'card' => 'بطاقة',
+        'instapay' => 'InstaPay',
+        'bank_transfer' => 'تحويل بنكي',
+        _ => 'أخرى',
+      };
 
   static String _footerText(Receipt r) {
     final String? custom = r.footer;
