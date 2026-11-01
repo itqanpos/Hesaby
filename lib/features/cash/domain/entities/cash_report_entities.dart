@@ -3,7 +3,6 @@
 import 'package:equatable/equatable.dart';
 import 'package:flutter/foundation.dart';
 
-
 /// Preset periods for cash reports.
 enum CashReportPeriodType {
   today,
@@ -72,25 +71,49 @@ class CashFlowSummary extends Equatable {
     required this.totalIn,
     required this.totalOut,
     required this.transactionCount,
+    this.cashIn = 0,
+    this.cardIn = 0,
+    this.cashOut = 0,
+    this.cardOut = 0,
   });
 
   const CashFlowSummary.empty()
       : openingBalance = 0,
         totalIn = 0,
         totalOut = 0,
-        transactionCount = 0;
+        transactionCount = 0,
+        cashIn = 0,
+        cardIn = 0,
+        cashOut = 0,
+        cardOut = 0;
 
   final double openingBalance;
   final double totalIn;
   final double totalOut;
   final int transactionCount;
 
+  /// Detailed incoming by account type.
+  final double cashIn;
+  final double cardIn;
+
+  /// Detailed outgoing by account type.
+  final double cashOut;
+  final double cardOut;
+
   double get netChange => totalIn - totalOut;
   double get closingBalance => openingBalance + netChange;
 
   @override
-  List<Object?> get props =>
-      <Object?>[openingBalance, totalIn, totalOut, transactionCount];
+  List<Object?> get props => <Object?>[
+        openingBalance,
+        totalIn,
+        totalOut,
+        transactionCount,
+        cashIn,
+        cardIn,
+        cashOut,
+        cardOut,
+      ];
 }
 
 /// One row in the "by category" breakdown.
