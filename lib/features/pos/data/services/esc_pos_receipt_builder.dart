@@ -8,9 +8,9 @@ import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:google_fonts/google_fonts.dart';
 
 import '../../../settings/domain/entities/company_settings.dart';
+import '../../../settings/domain/entities/print_style_settings.dart';
 import '../../domain/entities/receipt.dart';
 import '../../domain/services/receipt_number_format.dart';
-import '../../../settings/domain/entities/print_style_settings.dart';
 
 abstract final class EscPosReceiptBuilder {
   static const List<int> _init = <int>[0x1B, 0x40];
@@ -44,11 +44,7 @@ abstract final class EscPosReceiptBuilder {
     final List<int> raster = await _encodeRaster(image);
     image.dispose();
 
-    return <int>[
-      ..._init,
-      ...raster,
-      ..._feedAndCut,
-    ];
+    return <int>[..._init, ...raster, ..._feedAndCut];
   }
 
   static Future<ui.Image> renderToImage({
@@ -118,10 +114,8 @@ abstract final class EscPosReceiptBuilder {
     if (await _loadBundledFonts()) return;
 
     final TextStyle regular = GoogleFonts.cairo();
-    final TextStyle medium =
-        GoogleFonts.cairo(fontWeight: FontWeight.w600);
-    final TextStyle bold =
-        GoogleFonts.cairo(fontWeight: FontWeight.w700);
+    final TextStyle medium = GoogleFonts.cairo(fontWeight: FontWeight.w600);
+    final TextStyle bold = GoogleFonts.cairo(fontWeight: FontWeight.w700);
 
     await GoogleFonts.pendingFonts(<TextStyle>[regular, medium, bold]);
 
@@ -164,15 +158,11 @@ abstract final class EscPosReceiptBuilder {
         final double newVal = oldVal < 128 ? 0.0 : 255.0;
         gray[i] = newVal;
         final double err = oldVal - newVal;
-        if (x + 1 < width) {
-          gray[i + 1] += err * 7 / 16;
-        }
+        if (x + 1 < width) gray[i + 1] += err * 7 / 16;
         if (y + 1 < height) {
           if (x > 0) gray[i + width - 1] += err * 3 / 16;
           gray[i + width] += err * 5 / 16;
-          if (x + 1 < width) {
-            gray[i + width + 1] += err * 1 / 16;
-          }
+          if (x + 1 < width) gray[i + width + 1] += err * 1 / 16;
         }
       }
     }
@@ -186,9 +176,7 @@ abstract final class EscPosReceiptBuilder {
         for (int bit = 0; bit < 8; bit++) {
           final int x = bx * 8 + bit;
           if (x >= width) break;
-          if (gray[rowStart + x] < 128) {
-            byte |= 0x80 >> bit;
-          }
+          if (gray[rowStart + x] < 128) byte |= 0x80 >> bit;
         }
         raster[offset++] = byte;
       }
@@ -204,6 +192,10 @@ abstract final class EscPosReceiptBuilder {
     ];
   }
 }
+
+// ============================================================================
+// Painter
+// ============================================================================
 
 class _Painter {
   _Painter({
@@ -232,13 +224,12 @@ class _Painter {
 
   static const Color _black = Color(0xFF000000);
   static const Color _grey = Color(0xFF444444);
+  static const Color _dividerColor = Color(0xFFAAAAAA);
 
   double _font(double base) => base * fontScale;
 
   ({String family, FontWeight weight}) _fontFor({bool emphasized = false}) {
-    if (emphasized) {
-      return (family: boldFamily, weight: FontWeight.w700);
-    }
+    if (emphasized) return (family: boldFamily, weight: FontWeight.w700);
     switch (baseWeight) {
       case PrintFontWeight.normal:
         return (family: regularFamily, weight: FontWeight.w400);
@@ -282,79 +273,193 @@ class _Painter {
     _gap(_sectionGap);
     _itemsTable(r);
     _gap(_sectionGap);
-
-    _totalsSection(r);
-
+    _totalsBox(r);
     _gap(_sectionGap * 1.5);
     _divider();
     _gap(_sectionGap);
     _footer(r);
   }
 
-  // ⬇️ قسم الإجماليات المُحسّن (بما فيه قسم الدفع)
-  void _totalsSection(Receipt r) {
-    _kvRow('الإجمالي الحالي', _money(r.total));
+  // ==========================================================================
+  // Totals + Payment — ONE unified box
+  // ==========================================================================
 
+  void _totalsBox(Receipt r) {
+    final List<_TotalsRow> rows = <_TotalsRow>[];
+
+    // ---- Row 1: Invoice total ----
+    rows.add(_TotalsRow.text('إجمالي الفاتورة', _money(r.total)));
+
+    // ---- Row 2: Previous balance (if any) ----
     if (r.hasCustomer && (r.previousBalance ?? 0) != 0) {
-      _gap(4 * _scale);
-      _kvRow('الرصيد السابق', _money(r.previousBalance!.abs()));
+      rows.add(_TotalsRow.text(
+        'الرصيد السابق',
+        _money(r.previousBalance!.abs()),
+      ));
     }
 
+    // ---- Divider + Grand total ----
+    rows.add(_TotalsRow.divider());
     final double totalOwed = r.total + (r.previousBalance ?? 0);
-    _gap(4 * _scale);
-    _grandTotal(r, totalOwed);
+    final bool hasPrev = r.hasCustomer && (r.previousBalance ?? 0) != 0;
+    rows.add(_TotalsRow.text(
+      hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
+      _money(totalOwed),
+      emphasized: true,
+    ));
 
-    // ✅ قسم الدفع (مع فاصل قبله)
-    _gap(8 * _scale);
-    _divider();
-    _gap(6 * _scale);
-
-    _paymentSection(r);
-
-    if (r.hasBalanceChange) {
-      _gap(6 * _scale);
-      _divider();
-      _gap(6 * _scale);
-      _newBalanceBlock(r);
+    // ---- Payment block ----
+    rows.add(_TotalsRow.divider());
+    if (r.hasPayments) {
+      if (r.payments.length == 1) {
+        // Single payment: show method only
+        rows.add(_TotalsRow.text(
+          'طريقة الدفع',
+          _methodLabel(r.payments.first.method),
+        ));
+      } else {
+        // Multiple payments: show each method + amount
+        for (final ReceiptPayment p in r.payments) {
+          rows.add(_TotalsRow.text(
+            _methodLabel(p.method),
+            _money(p.amount),
+          ));
+        }
+      }
+    } else {
+      rows.add(_TotalsRow.text('طريقة الدفع', 'آجل'));
     }
+    rows.add(_TotalsRow.divider());
+    rows.add(_TotalsRow.text(
+      'المدفوع',
+      _money(r.paidAmount),
+      emphasized: true,
+    ));
+
+    // ---- New balance (if changed) ----
+    if (r.hasBalanceChange) {
+      rows.add(_TotalsRow.divider());
+      final double newBalance = r.newBalance ?? 0;
+      if (newBalance > 0) {
+        rows.add(_TotalsRow.text(
+          'الرصيد الجديد على العميل',
+          _money(newBalance),
+          emphasized: true,
+        ));
+      } else if (newBalance < 0) {
+        rows.add(_TotalsRow.text(
+          'الرصيد الجديد (له عندنا)',
+          _money(newBalance.abs()),
+          emphasized: true,
+        ));
+      } else {
+        rows.add(_TotalsRow.text(
+          'الرصيد الجديد',
+          _money(0),
+          emphasized: true,
+        ));
+      }
+    }
+
+    _drawTotalsBox(rows);
   }
 
-  // ⬇️ بلوك الدفع: يظهر بشكل مستقل مع إبراز الإجمالي
-  void _paymentSection(Receipt r) {
-    if (r.hasPayments && r.payments.length > 1) {
-      // دفعات متعددة
-      _text(
-        'تفاصيل الدفع',
-        fontSize: _font(15),
-        color: _grey,
-        align: TextAlign.center,
-      );
-      _gap(4 * _scale);
+  void _drawTotalsBox(List<_TotalsRow> rows) {
+    final double boxPadH = 12 * _scale;
+    final double boxPadV = 10 * _scale;
+    final double rowGap = 5 * _scale;
+    final double dividerGap = 6 * _scale;
+    final double innerWidth = _contentWidth - 2 * boxPadH;
 
-      for (final ReceiptPayment p in r.payments) {
-        _kvRow(_methodLabel(p.method), _money(p.amount));
+    // ---- Pre-measure all rows ----
+    final List<TextPainter?> labelPainters = <TextPainter?>[];
+    final List<TextPainter?> valuePainters = <TextPainter?>[];
+    double contentH = 0;
+    int textRows = 0;
+
+    for (final _TotalsRow row in rows) {
+      if (row.isDivider) {
+        labelPainters.add(null);
+        valuePainters.add(null);
+        contentH += dividerGap;
+      } else {
+        final double fontSize = _font(row.emphasized ? 18 : 16);
+        final TextPainter lp = _measure(
+          row.label,
+          fontSize: fontSize,
+          emphasized: true,
+        );
+        final TextPainter vp = _measure(
+          row.value,
+          fontSize: fontSize,
+          emphasized: row.emphasized,
+        );
+        labelPainters.add(lp);
+        valuePainters.add(vp);
+        final double rowH = lp.height > vp.height ? lp.height : vp.height;
+        contentH += rowH + (textRows > 0 ? rowGap : 0);
+        textRows++;
+      }
+    }
+
+    final double totalBoxH = contentH + 2 * boxPadV;
+
+    // ---- Draw outer border ----
+    canvas.drawRect(
+      Rect.fromLTWH(_paddingH, _y, _contentWidth, totalBoxH),
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.5 * _scale
+        ..color = _black,
+    );
+
+    // ---- Draw rows ----
+    double currentY = _y + boxPadV;
+    bool isFirstText = true;
+
+    for (int i = 0; i < rows.length; i++) {
+      final _TotalsRow row = rows[i];
+
+      if (row.isDivider) {
+        final double dy = currentY + dividerGap / 2;
+        canvas.drawRect(
+          Rect.fromLTWH(
+            _paddingH + 4 * _scale,
+            dy,
+            _contentWidth - 8 * _scale,
+            0.6 * _scale,
+          ),
+          Paint()..color = _dividerColor,
+        );
+        currentY += dividerGap;
+        isFirstText = true;
+        continue;
       }
 
-      _gap(3 * _scale);
-      _divider();
-      _gap(3 * _scale);
-      _kvRow(
-        'الإجمالي المدفوع',
-        _money(r.paidAmount),
-        emphasized: true,
+      final TextPainter lp = labelPainters[i]!;
+      final TextPainter vp = valuePainters[i]!;
+      final double rowH = lp.height > vp.height ? lp.height : vp.height;
+
+      if (!isFirstText) currentY += rowGap;
+
+      // Label (right, RTL)
+      lp.paint(
+        canvas,
+        Offset(_paddingH + _contentWidth - boxPadH - lp.width, currentY),
       );
-    } else if (r.hasPayments) {
-      // دفعة واحدة
-      _kvRow('طريقة الدفع', _methodLabel(r.payments.first.method));
-      _gap(4 * _scale);
-      _kvRow('المدفوع', _money(r.paidAmount));
-    } else {
-      // آجل
-      _kvRow('طريقة الدفع', 'آجل');
-      _gap(4 * _scale);
-      _kvRow('المدفوع', _money(0));
+      // Value (left)
+      vp.paint(canvas, Offset(_paddingH + boxPadH, currentY));
+
+      currentY += rowH;
+      isFirstText = false;
     }
+
+    _y += totalBoxH + 4 * _scale;
   }
+
+  // ==========================================================================
+  // Header / Meta / Items
+  // ==========================================================================
 
   Future<ui.Image?> _decodeImage(Uint8List bytes) async {
     try {
@@ -370,11 +475,9 @@ class _Painter {
     final double targetW = _contentWidth * 0.70;
     final double ratio = logo.height / logo.width;
     final double naturalH = targetW * ratio;
-
     final double maxH = 180 * _scale;
     final double targetH = naturalH > maxH ? maxH : naturalH;
     final double finalW = targetH / ratio;
-
     final double x = _paddingH + (_contentWidth - finalW) / 2;
 
     canvas.drawImageRect(
@@ -453,7 +556,8 @@ class _Painter {
         _Cell('الصنف', width: colNameW, bold: true, align: TextAlign.right),
         _Cell('الكمية', width: colQtyW, bold: true, align: TextAlign.center),
         _Cell('السعر', width: colPriceW, bold: true, align: TextAlign.center),
-        _Cell('الإجمالي', width: colTotalW, bold: true, align: TextAlign.center),
+        _Cell('الإجمالي',
+            width: colTotalW, bold: true, align: TextAlign.center),
       ],
       fontSize: _font(15),
       topPad: 8 * _scale,
@@ -484,8 +588,7 @@ class _Painter {
         _Cell('', width: colNumW, align: TextAlign.center),
         _Cell('المجموع الفرعي',
             width: colNameW, bold: true, align: TextAlign.right),
-        _Cell(_qty(totalQuantity),
-            width: colQtyW, align: TextAlign.center),
+        _Cell(_qty(totalQuantity), width: colQtyW, align: TextAlign.center),
         _Cell('', width: colPriceW, align: TextAlign.center),
         _Cell(_money(r.subtotal),
             width: colTotalW, bold: true, align: TextAlign.center),
@@ -529,80 +632,9 @@ class _Painter {
     }
   }
 
-  void _grandTotal(Receipt r, double totalOwed) {
-    final double fontSize = _font(22);
-    final double boxPad = 10 * _scale;
-
-    final String labelText =
-        ((r.previousBalance ?? 0) != 0) ? 'الإجمالي الكلي' : 'إجمالي الفاتورة';
-
-    final TextPainter label =
-        _measure(labelText, fontSize: fontSize, emphasized: true);
-    final TextPainter value =
-        _measure(_money(totalOwed), fontSize: fontSize, emphasized: true);
-    final double lineH =
-        label.height > value.height ? label.height : value.height;
-    final double boxH = lineH + boxPad * 2;
-
-    canvas.drawRect(
-      Rect.fromLTWH(_paddingH, _y, _contentWidth, boxH),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.5 * _scale
-        ..color = _black,
-    );
-
-    label.paint(canvas,
-        Offset(_paddingH + _contentWidth - boxPad - label.width, _y + boxPad));
-    value.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
-
-    _y += boxH;
-  }
-
-  void _newBalanceBlock(Receipt r) {
-    final double newBalance = r.newBalance ?? 0;
-    final String label;
-    final String value;
-    if (newBalance > 0) {
-      label = 'الرصيد الجديد على العميل';
-      value = _money(newBalance);
-    } else if (newBalance < 0) {
-      label = 'الرصيد الجديد (له عندنا)';
-      value = _money(newBalance.abs());
-    } else {
-      label = 'الرصيد الجديد';
-      value = _money(0);
-    }
-
-    _balanceBox(label, value);
-  }
-
-  void _balanceBox(String label, String value) {
-    final double fontSize = _font(18);
-    final double boxPad = 8 * _scale;
-
-    final TextPainter labelP =
-        _measure(label, fontSize: fontSize, emphasized: true);
-    final TextPainter valueP =
-        _measure(value, fontSize: fontSize, emphasized: true);
-    final double lineH =
-        labelP.height > valueP.height ? labelP.height : valueP.height;
-    final double boxH = lineH + boxPad * 2;
-
-    canvas.drawRect(
-      Rect.fromLTWH(_paddingH, _y, _contentWidth, boxH),
-      Paint()
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.2 * _scale
-        ..color = _black,
-    );
-
-    labelP.paint(canvas,
-        Offset(_paddingH + _contentWidth - boxPad - labelP.width, _y + boxPad));
-    valueP.paint(canvas, Offset(_paddingH + boxPad, _y + boxPad));
-
-    _y += boxH;
-  }
+  // ==========================================================================
+  // Footer + helpers
+  // ==========================================================================
 
   void _footer(Receipt r) {
     _text(_footerText(r),
@@ -620,8 +652,7 @@ class _Painter {
     final double gap = 8 * _scale;
     final double naturalLabelW = labelPainter.width + gap;
     final double maxLabelW = _contentWidth * 0.6;
-    final double labelW =
-        naturalLabelW < maxLabelW ? naturalLabelW : maxLabelW;
+    final double labelW = naturalLabelW < maxLabelW ? naturalLabelW : maxLabelW;
     final double valueMaxW = _contentWidth - labelW;
 
     final TextPainter valuePainter = _measure(value,
@@ -640,25 +671,6 @@ class _Painter {
     _y += rowH + 3 * _scale;
   }
 
-  void _kvRow(String label, String value, {bool emphasized = false}) {
-    final double labelFont = _font(16);
-    final double valueFont = emphasized ? _font(20) : _font(16);
-
-    final TextPainter labelPainter =
-        _measure(label, fontSize: labelFont, bold: true);
-    final TextPainter valuePainter =
-        _measure(value, fontSize: valueFont, bold: emphasized);
-    final double rowH = labelPainter.height > valuePainter.height
-        ? labelPainter.height
-        : valuePainter.height;
-
-    labelPainter.paint(canvas,
-        Offset(_paddingH + _contentWidth - labelPainter.width, _y));
-    valuePainter.paint(canvas, Offset(_paddingH, _y));
-
-    _y += rowH + 4 * _scale;
-  }
-
   void _text(String text,
       {required double fontSize,
       bool bold = false,
@@ -674,8 +686,8 @@ class _Painter {
           align: TextAlign.left,
           maxWidth: double.infinity);
       if (natural.width <= _contentWidth) {
-        natural.paint(
-            canvas, Offset(_paddingH + (_contentWidth - natural.width) / 2, _y));
+        natural.paint(canvas,
+            Offset(_paddingH + (_contentWidth - natural.width) / 2, _y));
         _y += natural.height;
         return;
       }
@@ -829,7 +841,6 @@ class _Painter {
     return '$day، $y/$m/$d — $hh:$mm $ampm';
   }
 
-  // ✅ تحويل كود طريقة الدفع إلى تسمية عربية
   static String _methodLabel(String method) => switch (method) {
         'cash' => 'نقدي',
         'card' => 'بطاقة',
@@ -852,4 +863,23 @@ class _Cell {
   final double width;
   final bool bold;
   final TextAlign align;
+}
+
+// ============================================================================
+// Totals row model
+// ============================================================================
+
+class _TotalsRow {
+  const _TotalsRow.text(this.label, this.value, {this.emphasized = false})
+      : isDivider = false;
+  const _TotalsRow.divider()
+      : label = '',
+        value = '',
+        emphasized = false,
+        isDivider = true;
+
+  final String label;
+  final String value;
+  final bool emphasized;
+  final bool isDivider;
 }
