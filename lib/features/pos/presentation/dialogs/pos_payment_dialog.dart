@@ -167,9 +167,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
   bool get _isCredit => _payments.isEmpty;
 
-  bool get _hasBalanceChange =>
-      _cart.hasCustomer && (_settlementTotal - _totalPaid) != _cart.customerBalance;
-
   // ---------------------------------------------------------------------------
   // Payment list mutations
   // ---------------------------------------------------------------------------
