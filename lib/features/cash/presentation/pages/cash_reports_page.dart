@@ -204,7 +204,7 @@ class _SummaryView extends StatelessWidget {
     return ListView(
       padding: const EdgeInsets.only(top: 4, bottom: 24),
       children: <Widget>[
-        // ---- Flow card ----
+        // ---- Flow card with breakdown ----
         _FlowCard(summary: s),
         const SizedBox(height: 12),
 
@@ -307,10 +307,36 @@ class _FlowCard extends StatelessWidget {
                 value: AppFormatters.money(summary.totalIn),
                 color: const Color(0xFF0F7B6C),
               ),
+              // Sub-rows for incoming breakdown
+              _FlowRow(
+                label: '  منها نقدي',
+                value: AppFormatters.money(summary.cashIn),
+                color: const Color(0xFF0F7B6C),
+                small: true,
+              ),
+              _FlowRow(
+                label: '  منها بطاقة',
+                value: AppFormatters.money(summary.cardIn),
+                color: const Color(0xFF0F7B6C),
+                small: true,
+              ),
               _FlowRow(
                 label: 'الصادر (−)',
                 value: AppFormatters.money(summary.totalOut),
                 color: const Color(0xFFC62828),
+              ),
+              // Sub-rows for outgoing breakdown
+              _FlowRow(
+                label: '  منها نقدي',
+                value: AppFormatters.money(summary.cashOut),
+                color: const Color(0xFFC62828),
+                small: true,
+              ),
+              _FlowRow(
+                label: '  منها بطاقة',
+                value: AppFormatters.money(summary.cardOut),
+                color: const Color(0xFFC62828),
+                small: true,
               ),
               const Divider(height: 20),
               _FlowRow(
@@ -332,12 +358,14 @@ class _FlowRow extends StatelessWidget {
     required this.value,
     this.color,
     this.emphasized = false,
+    this.small = false,
   });
 
   final String label;
   final String value;
   final Color? color;
   final bool emphasized;
+  final bool small;
 
   @override
   Widget build(BuildContext context) {
@@ -345,7 +373,7 @@ class _FlowRow extends StatelessWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
+      padding: EdgeInsets.symmetric(vertical: small ? 1 : 4),
       child: Row(
         children: <Widget>[
           Expanded(
@@ -355,14 +383,20 @@ class _FlowRow extends StatelessWidget {
                   ? theme.textTheme.titleSmall?.copyWith(
                       fontWeight: FontWeight.w800,
                     )
-                  : theme.textTheme.bodyMedium,
+                  : small
+                      ? theme.textTheme.bodySmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                        )
+                      : theme.textTheme.bodyMedium,
             ),
           ),
           Text(
             value,
             style: (emphasized
                     ? theme.textTheme.titleMedium
-                    : theme.textTheme.bodyLarge)
+                    : small
+                        ? theme.textTheme.bodySmall
+                        : theme.textTheme.bodyLarge)
                 ?.copyWith(
               color: color ?? scheme.onSurface,
               fontWeight: emphasized ? FontWeight.w800 : FontWeight.w600,
