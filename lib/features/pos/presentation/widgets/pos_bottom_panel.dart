@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:intl/intl.dart';
+import 'package:intl/intl.dart' hide TextDirection;
 
 import '../../../../shared/widgets/app_button.dart';
 import '../../../companies/presentation/widgets/subscription_guard.dart';
@@ -13,17 +13,6 @@ import '../dialogs/pos_payment_dialog.dart';
 import '../state/pos_providers.dart';
 
 /// Compact bottom panel used by the POS **mobile** layout.
-///
-/// Business rules applied here:
-/// * **Default tax** — when the cart has no explicit `taxAmount`, the
-///   panel applies `defaultTaxRate` from company settings.
-/// * **Max discount** — the discount field rejects any value above
-///   `maxDiscountPercent` from company settings.
-///
-/// **Phase T-1:** the pay button is guarded by
-/// [SubscriptionGuard.ensureCanWrite]. An expired account may still build
-/// a cart and see the totals, but tapping "دفع" surfaces the read-only
-/// dialog instead of the payment sheet.
 class PosBottomPanel extends ConsumerWidget {
   const PosBottomPanel({super.key});
 
@@ -64,7 +53,7 @@ class PosBottomPanel extends ConsumerWidget {
               ],
               _TotalRow(total: totals.total),
               const SizedBox(height: 8),
-              _PayButton(isEmpty: cart.isEmpty),
+              _ActionButtons(isEmpty: cart.isEmpty),
             ],
           ),
         ),
@@ -130,7 +119,6 @@ class _TopRow extends ConsumerWidget {
   }
 }
 
-/// Tax line shown above the net total. Only rendered when tax applies.
 class _TaxRow extends StatelessWidget {
   const _TaxRow({required this.tax});
 
@@ -206,10 +194,41 @@ class _TotalRow extends StatelessWidget {
   }
 }
 
-class _PayButton extends ConsumerWidget {
-  const _PayButton({required this.isEmpty});
+/// أزرار أسفل الشاشة: إلغاء + دفع
+class _ActionButtons extends ConsumerWidget {
+  const _ActionButtons({required this.isEmpty});
 
   final bool isEmpty;
+
+  Future<void> _handleCancel(BuildContext context, WidgetRef ref) async {
+    if (isEmpty) return;
+
+    final bool? confirm = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext ctx) => AlertDialog(
+        title: const Text('إلغاء الفاتورة'),
+        content: const Text(
+          'هل أنت متأكد من إلغاء الفاتورة الحالية وحذف جميع الأصناف؟',
+        ),
+        actions: <Widget>[
+          AppButton(
+            label: 'تراجع',
+            variant: AppButtonVariant.text,
+            onPressed: () => Navigator.of(ctx).pop(false),
+          ),
+          AppButton(
+            label: 'نعم، إلغاء',
+            variant: AppButtonVariant.danger,
+            onPressed: () => Navigator.of(ctx).pop(true),
+          ),
+        ],
+      ),
+    );
+
+    if (confirm == true) {
+      ref.read(posCartProvider.notifier).reset();
+    }
+  }
 
   Future<void> _handlePay(BuildContext context, WidgetRef ref) async {
     final bool allowed = await SubscriptionGuard.ensureCanWrite(
@@ -223,12 +242,30 @@ class _PayButton extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    return AppButton(
-      label: 'دفع',
-      icon: Icons.check_circle_outline,
-      expanded: true,
-      size: AppButtonSize.large,
-      onPressed: isEmpty ? null : () => _handlePay(context, ref),
+    return Row(
+      children: <Widget>[
+        Expanded(
+          child: AppButton(
+            label: 'إلغاء',
+            icon: Icons.delete_outline,
+            variant: AppButtonVariant.outline,
+            expanded: true,
+            size: AppButtonSize.large,
+            onPressed: isEmpty ? null : () => _handleCancel(context, ref),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Expanded(
+          flex: 2,
+          child: AppButton(
+            label: 'دفع',
+            icon: Icons.check_circle_outline,
+            expanded: true,
+            size: AppButtonSize.large,
+            onPressed: isEmpty ? null : () => _handlePay(context, ref),
+          ),
+        ),
+      ],
     );
   }
 }
