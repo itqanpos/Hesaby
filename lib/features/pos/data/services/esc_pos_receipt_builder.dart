@@ -312,13 +312,11 @@ class _Painter {
     rows.add(_TotalsRow.divider());
     if (r.hasPayments) {
       if (r.payments.length == 1) {
-        // Single payment: show method only
         rows.add(_TotalsRow.text(
           'طريقة الدفع',
           _methodLabel(r.payments.first.method),
         ));
       } else {
-        // Multiple payments: show each method + amount
         for (final ReceiptPayment p in r.payments) {
           rows.add(_TotalsRow.text(
             _methodLabel(p.method),
@@ -369,7 +367,6 @@ class _Painter {
     final double boxPadV = 10 * _scale;
     final double rowGap = 5 * _scale;
     final double dividerGap = 6 * _scale;
-    final double innerWidth = _contentWidth - 2 * boxPadH;
 
     // ---- Pre-measure all rows ----
     final List<TextPainter?> labelPainters = <TextPainter?>[];
@@ -442,12 +439,10 @@ class _Painter {
 
       if (!isFirstText) currentY += rowGap;
 
-      // Label (right, RTL)
       lp.paint(
         canvas,
         Offset(_paddingH + _contentWidth - boxPadH - lp.width, currentY),
       );
-      // Value (left)
       vp.paint(canvas, Offset(_paddingH + boxPadH, currentY));
 
       currentY += rowH;
