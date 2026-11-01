@@ -424,6 +424,148 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
 }
 
 // ============================================================================
+// Totals Card
+// ============================================================================
+
+class _TotalsCard extends StatelessWidget {
+  const _TotalsCard({
+    required this.sale,
+    required this.payments,
+    this.customer,
+  });
+
+  final Sale sale;
+  final List<Map<String, dynamic>> payments;
+  final Customer? customer;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    double? previousBalance;
+    double? newBalance;
+    if (customer != null) {
+      final double currentBalance = customer!.balance;
+      newBalance = currentBalance;
+      previousBalance = currentBalance - sale.total + sale.paidAmount;
+    }
+
+    final bool hasPrev = previousBalance != null && previousBalance != 0;
+    final double totalOwed = sale.total + (previousBalance ?? 0);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text('الإجماليات', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: scheme.outline),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: <Widget>[
+                  _row(scheme, 'إجمالي الفاتورة', AppFormatters.money(sale.total)),
+                  
+                  if (hasPrev)
+                    _row(scheme, 'الرصيد السابق', AppFormatters.money(previousBalance!.abs())),
+
+                  const Divider(height: 20),
+                  
+                  _row(
+                    scheme,
+                    hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
+                    AppFormatters.money(totalOwed),
+                    emphasized: true,
+                  ),
+
+                  const Divider(height: 20),
+                  
+                  if (payments.isNotEmpty) ...[
+                    if (payments.length == 1)
+                      _row(scheme, 'طريقة الدفع', _methodLabel(payments.first['payment_method'] as String? ?? 'cash'))
+                    else
+                      ...payments.map((p) => _row(
+                        scheme,
+                        _methodLabel(p['payment_method'] as String? ?? 'cash'), 
+                        AppFormatters.money((p['amount'] as num).toDouble())
+                      )),
+                  ] else ...[
+                    _row(scheme, 'طريقة الدفع', 'آجل'),
+                  ],
+
+                  const Divider(height: 20),
+                  
+                  _row(scheme, 'المدفوع', AppFormatters.money(sale.paidAmount), emphasized: true),
+
+                  if (newBalance != null) ...[
+                    const Divider(height: 20),
+                    _row(
+                      scheme,
+                      'الرصيد الجديد',
+                      AppFormatters.money(newBalance.abs()), // ✅ تمت إزالة !
+                      emphasized: true,
+                      color: newBalance > 0 ? scheme.error : (newBalance < 0 ? const Color(0xFF0F7B6C) : null),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(ColorScheme scheme, String label, String value, {bool emphasized = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
+                color: color,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
+              fontSize: emphasized ? 16 : 14,
+              color: color ?? (emphasized ? scheme.primary : null),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _methodLabel(String method) => switch (method) {
+        'cash' => 'نقدي',
+        'card' => 'بطاقة',
+        'instapay' => 'InstaPay',
+        'bank_transfer' => 'تحويل بنكي',
+        _ => 'أخرى',
+      };
+}
+
+// ============================================================================
 // Header & Actions
 // ============================================================================
 
@@ -601,10 +743,6 @@ class _ActionsCard extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Items Card (✅ تم تعديله ليصبح جدولاً)
-// ============================================================================
-
 class _ItemsCard extends StatelessWidget {
   const _ItemsCard({
     required this.items,
@@ -708,152 +846,6 @@ class _ItemsCard extends StatelessWidget {
     );
   }
 }
-
-// ============================================================================
-// Totals Card
-// ============================================================================
-
-class _TotalsCard extends StatelessWidget {
-  const _TotalsCard({
-    required this.sale,
-    required this.payments,
-    this.customer,
-  });
-
-  final Sale sale;
-  final List<Map<String, dynamic>> payments;
-  final Customer? customer;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    double? previousBalance;
-    double? newBalance;
-    if (customer != null) {
-      final double currentBalance = customer!.balance;
-      newBalance = currentBalance;
-      previousBalance = currentBalance - sale.total + sale.paidAmount;
-    }
-
-    final bool hasPrev = previousBalance != null && previousBalance != 0;
-    final double totalOwed = sale.total + (previousBalance ?? 0);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Text('الإجماليات', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: scheme.outline),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: <Widget>[
-                  _row(scheme, 'إجمالي الفاتورة', AppFormatters.money(sale.total)),
-                  
-                  if (hasPrev)
-                    _row(scheme, 'الرصيد السابق', AppFormatters.money(previousBalance.abs())),
-
-                  const Divider(height: 20),
-                  
-                  _row(
-                    scheme,
-                    hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
-                    AppFormatters.money(totalOwed),
-                    emphasized: true,
-                  ),
-
-                  const Divider(height: 20),
-                  
-                  if (payments.isNotEmpty) ...[
-                    if (payments.length == 1)
-                      _row(scheme, 'طريقة الدفع', _methodLabel(payments.first['payment_method'] as String? ?? 'cash'))
-                    else
-                      ...payments.map((p) => _row(
-                        scheme,
-                        _methodLabel(p['payment_method'] as String? ?? 'cash'), 
-                        AppFormatters.money((p['amount'] as num).toDouble())
-                      )),
-                  ] else ...[
-                    _row(scheme, 'طريقة الدفع', 'آجل'),
-                  ],
-
-                  const Divider(height: 20),
-                  
-                  _row(scheme, 'المدفوع', AppFormatters.money(sale.paidAmount), emphasized: true),
-
-                  if (newBalance != null) ...[
-                    const Divider(height: 20),
-                    _row(
-                      scheme,
-                      'الرصيد الجديد',
-                      AppFormatters.money(newBalance!.abs()),
-                      emphasized: true,
-                      color: newBalance > 0 ? scheme.error : (newBalance < 0 ? const Color(0xFF0F7B6C) : null),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _row(ColorScheme scheme, String label, String value, {bool emphasized = false, Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
-                color: color,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
-              fontSize: emphasized ? 16 : 14,
-              color: color ?? (emphasized ? scheme.primary : null),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _methodLabel(String method) => switch (method) {
-        'cash' => 'نقدي',
-        'card' => 'بطاقة',
-        'instapay' => 'InstaPay',
-        'bank_transfer' => 'تحويل بنكي',
-        _ => 'أخرى',
-      };
-}
-
-// ============================================================================
-// Returns Card
-// ============================================================================
 
 class _ReturnsCard extends ConsumerWidget {
   const _ReturnsCard({required this.sale});
