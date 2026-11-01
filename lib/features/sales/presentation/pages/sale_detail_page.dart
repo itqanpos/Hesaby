@@ -3,6 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
+import 'package:supabase_flutter/supabase_flutter.dart'; // ✅ جديد للاتصال بـ Supabase
 
 import '../../../../app/router.dart';
 import '../../../../core/utils/formatters.dart';
@@ -20,6 +21,20 @@ import '../../domain/repositories/sales_repository.dart';
 import '../dialogs/sale_return_dialog.dart';
 import '../providers/sales_providers.dart';
 import '../services/sale_print_actions.dart';
+
+// ✅ 1. مزود لجلب دفعات الفاتورة من جدول sale_payments
+final salePaymentsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, saleId) async {
+  try {
+    final client = Supabase.instance.client;
+    final response = await client
+        .from('sale_payments')
+        .select('amount, payment_method')
+        .eq('sale_id', saleId);
+    return List<Map<String, dynamic>>.from(response);
+  } catch (_) {
+    return const [];
+  }
+});
 
 class SaleDetailPage extends ConsumerStatefulWidget {
   const SaleDetailPage({super.key, required this.saleId});
@@ -47,12 +62,16 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     final AsyncValue<List<Product>> productsAsync =
         ref.watch(productsProvider);
     final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
+    
+    // ✅ 2. مراقبة الدفعات
+    final AsyncValue<List<Map<String, dynamic>>> paymentsAsync = ref.watch(salePaymentsProvider(widget.saleId));
 
     final bool anyLoading = salesAsync.isLoading ||
         itemsAsync.isLoading ||
         customersAsync.isLoading ||
         productsAsync.isLoading ||
-        unitsAsync.isLoading;
+        unitsAsync.isLoading ||
+        paymentsAsync.isLoading; // ✅ إضافة حالة التحميل للدفعات
 
     final Object? firstError = salesAsync.error ??
         itemsAsync.error ??
@@ -80,6 +99,7 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
             ref.invalidate(customersProvider);
             ref.invalidate(productsProvider);
             ref.invalidate(unitsProvider);
+            ref.invalidate(salePaymentsProvider(widget.saleId));
           },
         ),
       );
@@ -101,14 +121,14 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     }
 
     final List<SaleItem> items = itemsAsync.value ?? const <SaleItem>[];
-    final List<Customer> customers =
-        customersAsync.value ?? const <Customer>[];
-    final List<Product> products =
-        productsAsync.value ?? const <Product>[];
+    final List<Customer> customers = customersAsync.value ?? const <Customer>[];
+    final List<Product> products = productsAsync.value ?? const <Product>[];
     final List<Unit> units = unitsAsync.value ?? const <Unit>[];
+    final List<Map<String, dynamic>> payments = paymentsAsync.value ?? const []; // ✅ الدفعات
 
-    final String customerName =
-        _resolveCustomerName(customers, sale.customerId);
+    final Customer? customer = _findCustomer(customers, sale.customerId);
+    final String customerName = customer?.name ?? 'عميل نقدي';
+    
     final Map<String, String> productNames = <String, String>{
       for (final Product product in products) product.id: product.name,
     };
@@ -197,7 +217,8 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
             unitNames: unitNames,
           ),
           const SizedBox(height: 12),
-          _TotalsCard(sale: sale),
+          // ✅ 3. تمرير الدفعات والعميل لبطاقة الإجماليات
+          _TotalsCard(sale: sale, payments: payments, customer: customer),
           const SizedBox(height: 12),
           _ReturnsCard(sale: sale),
         ],
@@ -235,42 +256,28 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
       ),
     );
 
-    if (confirmed != true || !mounted) {
-      return;
-    }
+    if (confirmed != true || !mounted) return;
 
     setState(() => _isActing = true);
     try {
       await ref.read(salesProvider.notifier).confirmSale(sale.id);
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم تأكيد الفاتورة')),
       );
     } on SaleException catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       _showError(context, error);
     } on Object {
-      if (!mounted) {
-        return;
-      }
-      _showError(
-        context,
-        const SaleException(type: SalesFailureType.unknown),
-      );
+      if (!mounted) return;
+      _showError(context, const SaleException(type: SalesFailureType.unknown));
     } finally {
-      if (mounted) {
-        setState(() => _isActing = false);
-      }
+      if (mounted) setState(() => _isActing = false);
     }
   }
 
   Future<void> _cancelSale(Sale sale) async {
     final bool wasConfirmed = sale.isConfirmed;
-
     final bool? confirmed = await showDialog<bool>(
       context: context,
       builder: (BuildContext dialogContext) => AlertDialog(
@@ -295,36 +302,23 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
       ),
     );
 
-    if (confirmed != true || !mounted) {
-      return;
-    }
+    if (confirmed != true || !mounted) return;
 
     setState(() => _isActing = true);
     try {
       await ref.read(salesProvider.notifier).cancelSale(sale.id);
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('تم إلغاء الفاتورة')),
       );
     } on SaleException catch (error) {
-      if (!mounted) {
-        return;
-      }
+      if (!mounted) return;
       _showError(context, error);
     } on Object {
-      if (!mounted) {
-        return;
-      }
-      _showError(
-        context,
-        const SaleException(type: SalesFailureType.unknown),
-      );
+      if (!mounted) return;
+      _showError(context, const SaleException(type: SalesFailureType.unknown));
     } finally {
-      if (mounted) {
-        setState(() => _isActing = false);
-      }
+      if (mounted) setState(() => _isActing = false);
     }
   }
 
@@ -344,9 +338,7 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
       units: units,
     );
 
-    if (created != true || !mounted) {
-      return;
-    }
+    if (created != true || !mounted) return;
 
     ScaffoldMessenger.of(context)
       ..hideCurrentSnackBar()
@@ -365,7 +357,6 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     if (_isPrinting) return;
     setState(() => _isPrinting = true);
     try {
-      // ✅ استخدام المحرك الموحد الجديد
       await handleSalePrintFlow(
         context: context,
         ref: ref,
@@ -394,7 +385,6 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     if (_isSharing) return;
     setState(() => _isSharing = true);
     try {
-      // ✅ استخدام المحرك الموحد الجديد
       await handleSalePrintFlow(
         context: context,
         ref: ref,
@@ -421,31 +411,166 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
 
   static Sale? _findSale(List<Sale> sales, String id) {
     for (final Sale sale in sales) {
-      if (sale.id == id) {
-        return sale;
-      }
+      if (sale.id == id) return sale;
     }
     return null;
   }
 
-  static String _resolveCustomerName(
-    List<Customer> customers,
-    String? customerId,
-  ) {
-    if (customerId == null) {
-      return 'عميل نقدي';
-    }
+  static Customer? _findCustomer(List<Customer> customers, String? customerId) {
+    if (customerId == null) return null;
     for (final Customer customer in customers) {
-      if (customer.id == customerId) {
-        return customer.name;
-      }
+      if (customer.id == customerId) return customer;
     }
-    return 'عميل محذوف';
+    return null;
   }
 }
 
 // ============================================================================
-// Widgets
+// Totals Card (✅ تم إعادة تصميمه ليطابق الفاتورة)
+// ============================================================================
+
+class _TotalsCard extends StatelessWidget {
+  const _TotalsCard({
+    required this.sale,
+    required this.payments,
+    this.customer,
+  });
+
+  final Sale sale;
+  final List<Map<String, dynamic>> payments;
+  final Customer? customer;
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+
+    // حساب الأرصدة بناءً على رصيد العميل الحالي
+    double? previousBalance;
+    double? newBalance;
+    if (customer != null) {
+      final double currentBalance = customer!.balance;
+      newBalance = currentBalance;
+      previousBalance = currentBalance - sale.total + sale.paidAmount;
+    }
+
+    final bool hasPrev = previousBalance != null && previousBalance != 0;
+    final double totalOwed = sale.total + (previousBalance ?? 0);
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: scheme.outlineVariant),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
+          children: <Widget>[
+            Text('الإجماليات', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            
+            // --- الصندوق الموحد ---
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: scheme.outline),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: <Widget>[
+                  _row('إجمالي الفاتورة', AppFormatters.money(sale.total)),
+                  
+                  if (hasPrev)
+                    _row('الرصيد السابق', AppFormatters.money(previousBalance!.abs())),
+
+                  const Divider(height: 20),
+                  
+                  _row(
+                    hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
+                    AppFormatters.money(totalOwed),
+                    emphasized: true,
+                  ),
+
+                  const Divider(height: 20),
+                  
+                  // الدفعات
+                  if (payments.isNotEmpty) ...[
+                    if (payments.length == 1)
+                      _row('طريقة الدفع', _methodLabel(payments.first['payment_method'] as String? ?? 'cash'))
+                    else
+                      ...payments.map((p) => _row(
+                        _methodLabel(p['payment_method'] as String? ?? 'cash'), 
+                        AppFormatters.money((p['amount'] as num).toDouble())
+                      )),
+                  ] else ...[
+                    _row('طريقة الدفع', 'آجل'),
+                  ],
+
+                  const Divider(height: 20),
+                  
+                  // المدفوع
+                  _row('المدفوع', AppFormatters.money(sale.paidAmount), emphasized: true),
+
+                  // الرصيد الجديد
+                  if (newBalance != null) ...[
+                    const Divider(height: 20),
+                    _row(
+                      'الرصيد الجديد',
+                      AppFormatters.money(newBalance.abs()),
+                      emphasized: true,
+                      color: newBalance > 0 ? scheme.error : (newBalance < 0 ? const Color(0xFF0F7B6C) : null),
+                    ),
+                  ],
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _row(String label, String value, {bool emphasized = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
+                color: color,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
+              fontSize: emphasized ? 16 : 14,
+              color: color ?? (emphasized ? Theme.of(context).colorScheme.primary : null),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _methodLabel(String method) => switch (method) {
+        'cash' => 'نقدي',
+        'card' => 'بطاقة',
+        'instapay' => 'InstaPay',
+        'bank_transfer' => 'تحويل بنكي',
+        _ => 'أخرى',
+      };
+}
+
+// ============================================================================
+// باقي الـ Widgets (Header, Items, Actions, Returns)
 // ============================================================================
 
 class _HeaderCard extends StatelessWidget {
@@ -459,10 +584,7 @@ class _HeaderCard extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    final (Color badgeBg, Color badgeFg) = _statusColors(
-      scheme,
-      sale.status,
-    );
+    final (Color badgeBg, Color badgeFg) = _statusColors(scheme, sale.status);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -560,9 +682,7 @@ class _ActionsCard extends StatelessWidget {
     final bool showConfirm = sale.isDraft;
     final bool showCancel = sale.canTransition;
 
-    if (!showEdit && !showConfirm && !showCancel) {
-      return const SizedBox.shrink();
-    }
+    if (!showEdit && !showConfirm && !showCancel) return const SizedBox.shrink();
 
     final List<Widget> buttons = <Widget>[];
 
@@ -593,16 +713,12 @@ class _ActionsCard extends StatelessWidget {
 
     final List<Widget> spaced = <Widget>[];
     for (int i = 0; i < buttons.length; i++) {
-      if (i > 0) {
-        spaced.add(const SizedBox(width: 8));
-      }
+      if (i > 0) spaced.add(const SizedBox(width: 8));
       spaced.add(buttons[i]);
     }
 
     if (showCancel) {
-      if (spaced.isNotEmpty) {
-        spaced.add(const SizedBox(width: 8));
-      }
+      if (spaced.isNotEmpty) spaced.add(const SizedBox(width: 8));
       spaced.add(
         Tooltip(
           message: 'إلغاء الفاتورة',
@@ -674,12 +790,10 @@ class _ItemsCard extends StatelessWidget {
               for (int i = 0; i < items.length; i++) ...<Widget>[
                 _ItemRow(
                   item: items[i],
-                  productName:
-                      productNames[items[i].productId] ?? 'منتج محذوف',
+                  productName: productNames[items[i].productId] ?? 'منتج محذوف',
                   unitName: unitNames[items[i].unitId] ?? 'وحدة',
                 ),
-                if (i < items.length - 1)
-                  const SizedBox(height: 6),
+                if (i < items.length - 1) const SizedBox(height: 6),
               ],
           ],
         ),
@@ -749,88 +863,6 @@ class _ItemRow extends StatelessWidget {
   }
 }
 
-class _TotalsCard extends StatelessWidget {
-  const _TotalsCard({required this.sale});
-
-  final Sale sale;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Text('الإجماليات', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 10),
-            _line(theme, 'المجموع الفرعي',
-                AppFormatters.money(sale.subtotal)),
-            const SizedBox(height: 4),
-            _line(theme, 'الخصم', AppFormatters.money(sale.discount)),
-            const SizedBox(height: 4),
-            _line(theme, 'الضريبة', AppFormatters.money(sale.taxAmount)),
-            const Divider(height: 20),
-            _line(
-              theme,
-              'الإجمالي',
-              AppFormatters.money(sale.total),
-              emphasized: true,
-            ),
-            const SizedBox(height: 4),
-            _line(
-              theme,
-              'المدفوع',
-              AppFormatters.money(sale.paidAmount),
-            ),
-            if (sale.amountDue > 0) ...<Widget>[
-              const SizedBox(height: 4),
-              _line(
-                theme,
-                'المتبقي',
-                AppFormatters.money(sale.amountDue),
-                emphasized: true,
-                color: scheme.error,
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _line(
-    ThemeData theme,
-    String label,
-    String value, {
-    bool emphasized = false,
-    Color? color,
-  }) {
-    return Row(
-      children: <Widget>[
-        Expanded(child: Text(label, style: theme.textTheme.bodyMedium)),
-        Text(
-          value,
-          style: emphasized
-              ? theme.textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: color ?? theme.colorScheme.primary,
-                )
-              : theme.textTheme.bodyMedium,
-        ),
-      ],
-    );
-  }
-}
-
 class _ReturnsCard extends ConsumerWidget {
   const _ReturnsCard({required this.sale});
 
@@ -845,9 +877,7 @@ class _ReturnsCard extends ConsumerWidget {
       loading: () => const SizedBox.shrink(),
       error: (Object error, StackTrace _) => const SizedBox.shrink(),
       data: (List<SaleReturn> returns) {
-        if (returns.isEmpty) {
-          return const SizedBox.shrink();
-        }
+        if (returns.isEmpty) return const SizedBox.shrink();
 
         final ThemeData theme = Theme.of(context);
         final ColorScheme scheme = theme.colorScheme;
@@ -881,11 +911,7 @@ class _ReturnsCard extends ConsumerWidget {
                 for (int i = 0; i < returns.length; i++) ...<Widget>[
                   _ReturnRow(
                     saleReturn: returns[i],
-                    onCancel: () => _cancelReturn(
-                      context,
-                      ref,
-                      returns[i],
-                    ),
+                    onCancel: () => _cancelReturn(context, ref, returns[i]),
                   ),
                   if (i < returns.length - 1) const SizedBox(height: 6),
                 ],
@@ -929,52 +955,39 @@ class _ReturnsCard extends ConsumerWidget {
       ),
     );
 
-    if (confirmed != true || !context.mounted) {
-      return;
-    }
+    if (confirmed != true || !context.mounted) return;
 
     try {
       await ref.read(returnsProvider.notifier).cancelReturn(
             returnId: saleReturn.id,
             saleId: saleReturn.saleId ?? sale.id,
           );
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
           const SnackBar(content: Text('تم إلغاء المرتجع.')),
         );
     } on ReturnException catch (error) {
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
           SnackBar(content: Text(_returnFailureMessage(error.type))),
         );
     } on Object {
-      if (!context.mounted) {
-        return;
-      }
+      if (!context.mounted) return;
       ScaffoldMessenger.of(context)
         ..hideCurrentSnackBar()
         ..showSnackBar(
-          const SnackBar(
-            content: Text('تعذّر إلغاء المرتجع. حاول مرة أخرى.'),
-          ),
+          const SnackBar(content: Text('تعذّر إلغاء المرتجع. حاول مرة أخرى.')),
         );
     }
   }
 }
 
 class _ReturnRow extends StatelessWidget {
-  const _ReturnRow({
-    required this.saleReturn,
-    required this.onCancel,
-  });
+  const _ReturnRow({required this.saleReturn, required this.onCancel});
 
   final SaleReturn saleReturn;
   final VoidCallback onCancel;
@@ -984,8 +997,7 @@ class _ReturnRow extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    final (Color badgeBg, Color badgeFg) =
-        _returnStatusColors(scheme, saleReturn.status);
+    final (Color badgeBg, Color badgeFg) = _returnStatusColors(scheme, saleReturn.status);
 
     return DecoratedBox(
       decoration: BoxDecoration(
@@ -1006,9 +1018,7 @@ class _ReturnRow extends StatelessWidget {
                       Expanded(
                         child: Text(
                           saleReturn.returnNumber ?? '—',
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontWeight: FontWeight.w700,
-                          ),
+                          style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.w700),
                           overflow: TextOverflow.ellipsis,
                         ),
                       ),
@@ -1018,10 +1028,7 @@ class _ReturnRow extends StatelessWidget {
                           borderRadius: BorderRadius.circular(999),
                         ),
                         child: Padding(
-                          padding: const EdgeInsets.symmetric(
-                            horizontal: 8,
-                            vertical: 2,
-                          ),
+                          padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                           child: Text(
                             _returnStatusLabel(saleReturn.status),
                             style: theme.textTheme.labelSmall?.copyWith(
