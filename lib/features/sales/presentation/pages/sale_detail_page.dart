@@ -3,7 +3,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
-import 'package:supabase_flutter/supabase_flutter.dart'; // ✅ جديد للاتصال بـ Supabase
+import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../../app/router.dart';
 import '../../../../core/utils/formatters.dart';
@@ -22,7 +22,7 @@ import '../dialogs/sale_return_dialog.dart';
 import '../providers/sales_providers.dart';
 import '../services/sale_print_actions.dart';
 
-// ✅ 1. مزود لجلب دفعات الفاتورة من جدول sale_payments
+// ✅ مزود لجلب دفعات الفاتورة
 final salePaymentsProvider = FutureProvider.family<List<Map<String, dynamic>>, String>((ref, saleId) async {
   try {
     final client = Supabase.instance.client;
@@ -62,16 +62,15 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     final AsyncValue<List<Product>> productsAsync =
         ref.watch(productsProvider);
     final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
-    
-    // ✅ 2. مراقبة الدفعات
-    final AsyncValue<List<Map<String, dynamic>>> paymentsAsync = ref.watch(salePaymentsProvider(widget.saleId));
+    final AsyncValue<List<Map<String, dynamic>>> paymentsAsync =
+        ref.watch(salePaymentsProvider(widget.saleId));
 
     final bool anyLoading = salesAsync.isLoading ||
         itemsAsync.isLoading ||
         customersAsync.isLoading ||
         productsAsync.isLoading ||
         unitsAsync.isLoading ||
-        paymentsAsync.isLoading; // ✅ إضافة حالة التحميل للدفعات
+        paymentsAsync.isLoading;
 
     final Object? firstError = salesAsync.error ??
         itemsAsync.error ??
@@ -124,7 +123,7 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
     final List<Customer> customers = customersAsync.value ?? const <Customer>[];
     final List<Product> products = productsAsync.value ?? const <Product>[];
     final List<Unit> units = unitsAsync.value ?? const <Unit>[];
-    final List<Map<String, dynamic>> payments = paymentsAsync.value ?? const []; // ✅ الدفعات
+    final List<Map<String, dynamic>> payments = paymentsAsync.value ?? const [];
 
     final Customer? customer = _findCustomer(customers, sale.customerId);
     final String customerName = customer?.name ?? 'عميل نقدي';
@@ -217,7 +216,6 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
             unitNames: unitNames,
           ),
           const SizedBox(height: 12),
-          // ✅ 3. تمرير الدفعات والعميل لبطاقة الإجماليات
           _TotalsCard(sale: sale, payments: payments, customer: customer),
           const SizedBox(height: 12),
           _ReturnsCard(sale: sale),
@@ -426,7 +424,7 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
 }
 
 // ============================================================================
-// Totals Card (✅ تم إعادة تصميمه ليطابق الفاتورة)
+// Totals Card
 // ============================================================================
 
 class _TotalsCard extends StatelessWidget {
@@ -445,7 +443,6 @@ class _TotalsCard extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
-    // حساب الأرصدة بناءً على رصيد العميل الحالي
     double? previousBalance;
     double? newBalance;
     if (customer != null) {
@@ -471,7 +468,6 @@ class _TotalsCard extends StatelessWidget {
             Text('الإجماليات', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
             const SizedBox(height: 12),
             
-            // --- الصندوق الموحد ---
             Container(
               decoration: BoxDecoration(
                 border: Border.all(color: scheme.outline),
@@ -480,14 +476,15 @@ class _TotalsCard extends StatelessWidget {
               padding: const EdgeInsets.all(12),
               child: Column(
                 children: <Widget>[
-                  _row('إجمالي الفاتورة', AppFormatters.money(sale.total)),
+                  _row(context, 'إجمالي الفاتورة', AppFormatters.money(sale.total)),
                   
                   if (hasPrev)
-                    _row('الرصيد السابق', AppFormatters.money(previousBalance!.abs())),
+                    _row(context, 'الرصيد السابق', AppFormatters.money(previousBalance.abs())), // ✅ تمت إزالة !
 
                   const Divider(height: 20),
                   
                   _row(
+                    context,
                     hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
                     AppFormatters.money(totalOwed),
                     emphasized: true,
@@ -495,28 +492,27 @@ class _TotalsCard extends StatelessWidget {
 
                   const Divider(height: 20),
                   
-                  // الدفعات
                   if (payments.isNotEmpty) ...[
                     if (payments.length == 1)
-                      _row('طريقة الدفع', _methodLabel(payments.first['payment_method'] as String? ?? 'cash'))
+                      _row(context, 'طريقة الدفع', _methodLabel(payments.first['payment_method'] as String? ?? 'cash'))
                     else
                       ...payments.map((p) => _row(
+                        context,
                         _methodLabel(p['payment_method'] as String? ?? 'cash'), 
                         AppFormatters.money((p['amount'] as num).toDouble())
                       )),
                   ] else ...[
-                    _row('طريقة الدفع', 'آجل'),
+                    _row(context, 'طريقة الدفع', 'آجل'),
                   ],
 
                   const Divider(height: 20),
                   
-                  // المدفوع
-                  _row('المدفوع', AppFormatters.money(sale.paidAmount), emphasized: true),
+                  _row(context, 'المدفوع', AppFormatters.money(sale.paidAmount), emphasized: true),
 
-                  // الرصيد الجديد
                   if (newBalance != null) ...[
                     const Divider(height: 20),
                     _row(
+                      context,
                       'الرصيد الجديد',
                       AppFormatters.money(newBalance.abs()),
                       emphasized: true,
@@ -532,7 +528,8 @@ class _TotalsCard extends StatelessWidget {
     );
   }
 
-  Widget _row(String label, String value, {bool emphasized = false, Color? color}) {
+  // ✅ تمت إضافة BuildContext للدالة
+  Widget _row(BuildContext context, String label, String value, {bool emphasized = false, Color? color}) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4),
       child: Row(
@@ -570,7 +567,7 @@ class _TotalsCard extends StatelessWidget {
 }
 
 // ============================================================================
-// باقي الـ Widgets (Header, Items, Actions, Returns)
+// باقي الـ Widgets
 // ============================================================================
 
 class _HeaderCard extends StatelessWidget {
