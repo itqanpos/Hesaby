@@ -27,6 +27,7 @@ import '../../domain/entities/stock_movement.dart';
 import '../../domain/repositories/inventory_repository.dart';
 import '../providers/inventory_providers.dart';
 
+/// Inventory page: current stock levels for the selected branch.
 class InventoryPage extends ConsumerStatefulWidget {
   const InventoryPage({super.key});
 
@@ -637,3 +638,536 @@ class _BalanceCard extends StatelessWidget {
     );
   }
 }
+
+// -----------------------------------------------------------------------------
+// Unit option — internal value object for the adjustment dialog
+// -----------------------------------------------------------------------------
+
+@immutable
+class _UnitOption {
+  const _UnitOption({
+    required this.id,
+    required this.name,
+    required this.conversionFactor,
+    required this.isBase,
+  });
+
+  final String id;
+  final String name;
+  final double conversionFactor;
+  final bool isBase;
+}
+
+// -----------------------------------------------------------------------------
+// Adjustment dialog
+// -----------------------------------------------------------------------------
+
+class _StockAdjustmentDialog extends ConsumerStatefulWidget {
+  const _StockAdjustmentDialog({
+    required this.branchId,
+    required this.productId,
+    required this.productName,
+    required this.currentQuantity,
+  });
+
+  final String branchId;
+  final String productId;
+  final String productName;
+  final double currentQuantity;
+
+  @override
+  ConsumerState<_StockAdjustmentDialog> createState() =>
+      _StockAdjustmentDialogState();
+}
+
+class _StockAdjustmentDialogState
+    extends ConsumerState<_StockAdjustmentDialog> {
+  final GlobalKey<FormState> _formKey = GlobalKey<FormState>();
+  final TextEditingController _quantityController = TextEditingController();
+  final TextEditingController _unitCostController = TextEditingController();
+  final TextEditingController _notesController = TextEditingController();
+
+  String _movementType = StockMovementType.adjustmentIn;
+  String? _selectedUnitId;
+
+  bool _isSubmitting = false;
+  InventoryFailureType? _failureType;
+
+  bool get _isIncoming =>
+      _movementType == StockMovementType.adjustmentIn ||
+      _movementType == StockMovementType.openingBalance;
+
+  @override
+  void dispose() {
+    _quantityController.dispose();
+    _unitCostController.dispose();
+    _notesController.dispose();
+    super.dispose();
+  }
+
+  List<_UnitOption> _buildUnitOptions(
+    List<ProductUnit> productUnits,
+    List<Unit> units,
+    String baseUnitId,
+  ) {
+    String nameOf(String unitId) {
+      for (final Unit u in units) {
+        if (u.id == unitId) return u.name;
+      }
+      return 'وحدة';
+    }
+
+    final List<_UnitOption> options = <_UnitOption>[
+      _UnitOption(
+        id: baseUnitId,
+        name: nameOf(baseUnitId),
+        conversionFactor: 1,
+        isBase: true,
+      ),
+    ];
+
+    for (final ProductUnit pu in productUnits) {
+      options.add(
+        _UnitOption(
+          id: pu.unitId,
+          name: nameOf(pu.unitId),
+          conversionFactor: pu.conversionFactor,
+          isBase: false,
+        ),
+      );
+    }
+
+    return options;
+  }
+
+  _UnitOption? _resolveSelectedOption(List<_UnitOption> options) {
+    if (options.isEmpty) return null;
+
+    final String? id = _selectedUnitId;
+    if (id != null) {
+      for (final _UnitOption o in options) {
+        if (o.id == id) return o;
+      }
+    }
+    return options.first;
+  }
+
+  Future<void> _submit(List<_UnitOption> options) async {
+    FocusScope.of(context).unfocus();
+
+    if (_failureType != null) {
+      setState(() => _failureType = null);
+    }
+
+    final bool isValid = _formKey.currentState?.validate() ?? false;
+    if (!isValid) return;
+
+    final _UnitOption? unit = _resolveSelectedOption(options);
+    if (unit == null) {
+      setState(() => _failureType = InventoryFailureType.invalidMovement);
+      return;
+    }
+
+    final double? enteredQuantity =
+        double.tryParse(_quantityController.text.trim());
+    if (enteredQuantity == null || enteredQuantity <= 0) {
+      setState(() => _failureType = InventoryFailureType.invalidMovement);
+      return;
+    }
+
+    final double baseQuantity = enteredQuantity * unit.conversionFactor;
+    final double signedBaseQuantity =
+        _isIncoming ? baseQuantity : -baseQuantity;
+
+    final String costText = _unitCostController.text.trim();
+    final double? enteredUnitCost = costText.isEmpty
+        ? null
+        : double.tryParse(costText);
+    final double? baseUnitCost = enteredUnitCost == null
+        ? null
+        : enteredUnitCost / unit.conversionFactor;
+
+    final String notesText = _notesController.text.trim();
+    final String? notes = notesText.isEmpty ? null : notesText;
+
+    setState(() => _isSubmitting = true);
+
+    final InventoryBalancesNotifier notifier =
+        ref.read(inventoryBalancesProvider(widget.branchId).notifier);
+
+    try {
+      await notifier.recordMovement(
+        productId: widget.productId,
+        movementType: _movementType,
+        quantity: signedBaseQuantity,
+        unitId: unit.id,
+        unitCost: _isIncoming ? baseUnitCost : null,
+        notes: notes,
+      );
+
+      if (!mounted) return;
+      Navigator.of(context).pop(true);
+    } on InventoryException catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _failureType = error.type;
+      });
+    } on Object {
+      if (!mounted) return;
+      setState(() {
+        _isSubmitting = false;
+        _failureType = InventoryFailureType.unknown;
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final ThemeData theme = Theme.of(context);
+    final ColorScheme scheme = theme.colorScheme;
+    final InventoryFailureType? failure = _failureType;
+
+    final AsyncValue<List<ProductUnit>> productUnitsAsync =
+        ref.watch(productUnitsProvider(widget.productId));
+    final AsyncValue<List<Unit>> unitsAsync = ref.watch(unitsProvider);
+    final AsyncValue<List<Product>> productsAsync =
+        ref.watch(productsProvider);
+
+    String? baseUnitId;
+    productsAsync.whenData((List<Product> products) {
+      for (final Product p in products) {
+        if (p.id == widget.productId) {
+          baseUnitId = p.defaultUnitId;
+          break;
+        }
+      }
+    });
+
+    final bool ready = productUnitsAsync.hasValue &&
+        unitsAsync.hasValue &&
+        baseUnitId != null;
+
+    if (!ready) {
+      return AlertDialog(
+        title: Text('حركة مخزون — ${widget.productName}'),
+        content: const SizedBox(
+          height: 120,
+          child: Center(child: CircularProgressIndicator()),
+        ),
+      );
+    }
+
+    final List<_UnitOption> options = _buildUnitOptions(
+      productUnitsAsync.value ?? const <ProductUnit>[],
+      unitsAsync.value ?? const <Unit>[],
+      baseUnitId!,
+    );
+    final _UnitOption? selected = _resolveSelectedOption(options);
+    final bool showOpening =
+        widget.currentQuantity <= 0 &&
+            _movementType != StockMovementType.adjustmentOut;
+
+    final double? entered = double.tryParse(_quantityController.text.trim());
+    final double? basePreview =
+        (entered == null || selected == null)
+            ? null
+            : entered * selected.conversionFactor;
+
+    return AlertDialog(
+      title: Text('حركة مخزون — ${widget.productName}'),
+      content: SizedBox(
+        width: 460,
+        child: SingleChildScrollView(
+          child: Form(
+            key: _formKey,
+            autovalidateMode: AutovalidateMode.onUserInteraction,
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                Text(
+                  'الرصيد الحالي: '
+                  '${AppFormatters.quantity(widget.currentQuantity)} '
+                  '${options.first.name}',
+                  style: theme.textTheme.bodyMedium,
+                ),
+                const SizedBox(height: 12),
+
+                SegmentedButton<String>(
+                  segments: <ButtonSegment<String>>[
+                    if (showOpening)
+                      const ButtonSegment<String>(
+                        value: StockMovementType.openingBalance,
+                        label: Text('افتتاحي'),
+                        icon: Icon(Icons.flag_outlined),
+                      ),
+                    const ButtonSegment<String>(
+                      value: StockMovementType.adjustmentIn,
+                      label: Text('إدخال'),
+                      icon: Icon(Icons.arrow_downward),
+                    ),
+                    const ButtonSegment<String>(
+                      value: StockMovementType.adjustmentOut,
+                      label: Text('إخراج'),
+                      icon: Icon(Icons.arrow_upward),
+                    ),
+                  ],
+                  selected: <String>{_movementType},
+                  onSelectionChanged: _isSubmitting
+                      ? null
+                      : (Set<String> selection) {
+                          if (selection.isEmpty) return;
+                          setState(() {
+                            _movementType = selection.first;
+                          });
+                        },
+                ),
+                const SizedBox(height: 12),
+
+                if (options.length > 1)
+                  DropdownButtonFormField<String>(
+                    initialValue: selected?.id,
+                    isExpanded: true,
+                    decoration: const InputDecoration(
+                      labelText: 'الوحدة',
+                      border: OutlineInputBorder(),
+                    ),
+                    items: <DropdownMenuItem<String>>[
+                      for (final _UnitOption option in options)
+                        DropdownMenuItem<String>(
+                          value: option.id,
+                          child: Text(
+                            option.isBase
+                                ? '${option.name} (أساسية)'
+                                : '${option.name} '
+                                    '(= ${AppFormatters.quantity(option.conversionFactor)} '
+                                    '${options.first.name})',
+                          ),
+                        ),
+                    ],
+                    onChanged: _isSubmitting
+                        ? null
+                        : (String? value) {
+                            setState(() => _selectedUnitId = value);
+                          },
+                  ),
+                if (options.length > 1) const SizedBox(height: 12),
+
+                AppTextField(
+                  controller: _quantityController,
+                  label: 'الكمية (${selected?.name ?? "وحدة"})',
+                  hint: 'مثال: 5',
+                  enabled: !_isSubmitting,
+                  autofocus: true,
+                  keyboardType: const TextInputType.numberWithOptions(
+                    decimal: true,
+                  ),
+                  onChanged: (_) => setState(() {}),
+                  validator: (String? value) {
+                    final String trimmed = value?.trim() ?? '';
+                    if (trimmed.isEmpty) return 'الرجاء إدخال الكمية';
+                    final double? parsed = double.tryParse(trimmed);
+                    if (parsed == null) return 'الرجاء إدخال رقم صحيح';
+                    if (parsed <= 0) return 'يجب أن تكون الكمية أكبر من صفر';
+
+                    if (_movementType ==
+                            StockMovementType.adjustmentOut &&
+                        selected != null) {
+                      final double base =
+                          parsed * selected.conversionFactor;
+                      if (base > widget.currentQuantity) {
+                        final double maxInUnit = widget.currentQuantity /
+                            selected.conversionFactor;
+                        return 'الكمية تتجاوز الرصيد. الأقصى: '
+                            '${AppFormatters.quantity(maxInUnit)} '
+                            '${selected.name}';
+                      }
+                    }
+                    return null;
+                  },
+                ),
+
+                if (basePreview != null &&
+                    selected != null &&
+                    !selected.isBase) ...<Widget>[
+                  const SizedBox(height: 8),
+                  DecoratedBox(
+                    decoration: BoxDecoration(
+                      color: scheme.primaryContainer.withValues(alpha: 0.4),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Padding(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 12,
+                        vertical: 8,
+                      ),
+                      child: Row(
+                        children: <Widget>[
+                          Icon(
+                            Icons.info_outline,
+                            size: 16,
+                            color: scheme.onPrimaryContainer,
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: Text(
+                              'سيُسجَّل: '
+                              '${AppFormatters.quantity(basePreview)} '
+                              '${options.first.name} '
+                              '(${AppFormatters.quantity(entered ?? 0)} × '
+                              '${AppFormatters.quantity(selected.conversionFactor)})',
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: scheme.onPrimaryContainer,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ],
+
+                if (_isIncoming) ...<Widget>[
+                  const SizedBox(height: 12),
+                  AppTextField(
+                    controller: _unitCostController,
+                    label: 'تكلفة الوحدة — اختياري '
+                        '(${selected?.name ?? "وحدة"})',
+                    hint: 'اتركه فارغًا للاحتفاظ بالمتوسط الحالي',
+                    enabled: !_isSubmitting,
+                    keyboardType: const TextInputType.numberWithOptions(
+                      decimal: true,
+                    ),
+                    validator: (String? value) {
+                      final String trimmed = value?.trim() ?? '';
+                      if (trimmed.isEmpty) return null;
+                      final double? parsed = double.tryParse(trimmed);
+                      if (parsed == null) return 'الرجاء إدخال رقم صحيح';
+                      if (parsed < 0) return 'لا يمكن أن تكون التكلفة سالبة';
+                      return null;
+                    },
+                  ),
+                ],
+
+                const SizedBox(height: 12),
+
+                AppTextField(
+                  controller: _notesController,
+                  label: 'ملاحظات — اختياري',
+                  enabled: !_isSubmitting,
+                  maxLines: 3,
+                  validator: (String? value) {
+                    final String trimmed = value?.trim() ?? '';
+                    if (trimmed.length > 1000) {
+                      return 'الملاحظات طويلة جدًا (الحد الأقصى 1000 حرف)';
+                    }
+                    return null;
+                  },
+                ),
+
+                if (failure != null) ...<Widget>[
+                  const SizedBox(height: 12),
+                  _FailureBanner(message: _failureMessage(failure)),
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+      actions: <Widget>[
+        AppButton(
+          label: 'إلغاء',
+          variant: AppButtonVariant.text,
+          onPressed:
+              _isSubmitting ? null : () => Navigator.of(context).pop(false),
+        ),
+        AppButton(
+          label: 'تسجيل',
+          isLoading: _isSubmitting,
+          onPressed: _isSubmitting ? null : () => _submit(options),
+        ),
+      ],
+      backgroundColor: scheme.surface,
+      scrollable: false,
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Inline error banner
+// -----------------------------------------------------------------------------
+
+class _FailureBanner extends StatelessWidget {
+  const _FailureBanner({required this.message});
+
+  final String message;
+
+  @override
+  Widget build(BuildContext context) {
+    final ColorScheme scheme = Theme.of(context).colorScheme;
+
+    return DecoratedBox(
+      decoration: BoxDecoration(
+        color: scheme.errorContainer,
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: scheme.error.withValues(alpha: 0.35)),
+      ),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: <Widget>[
+            Icon(
+              Icons.error_outline,
+              color: scheme.onErrorContainer,
+              size: 20,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                message,
+                style: TextStyle(color: scheme.onErrorContainer),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// -----------------------------------------------------------------------------
+// Localization helpers
+// -----------------------------------------------------------------------------
+
+String _errorMessage(Object error) {
+  if (error is InventoryException) {
+    return _failureMessage(error.type);
+  }
+  return 'حدث خطأ غير متوقع. يرجى المحاولة مرة أخرى.';
+}
+
+String _failureMessage(InventoryFailureType type) => switch (type) {
+      InventoryFailureType.network =>
+        'تعذّر الاتصال بالخادم. يرجى التحقق من اتصالك بالإنترنت.',
+      InventoryFailureType.unauthorized =>
+        'انتهت صلاحية الجلسة أو لا تملك صلاحية. يرجى تسجيل الدخول مجددًا.',
+      InventoryFailureType.notFound =>
+        'الرصيد المطلوب غير موجود أو تم حذفه.',
+      InventoryFailureType.insufficientStock =>
+        'الرصيد غير كافٍ. لا يمكن إخراج كمية أكبر من المتوفرة.',
+      InventoryFailureType.productNotFound =>
+        'المنتج المختار غير متاح. يرجى إعادة اختياره.',
+      InventoryFailureType.branchNotFound =>
+        'الفرع المختار غير متاح. يرجى إعادة اختياره.',
+      InventoryFailureType.invalidMovementType =>
+        'نوع الحركة غير معروف.',
+      InventoryFailureType.invalidMovement =>
+        'بيانات الحركة غير صحيحة. يرجى التحقق من القيم.',
+      InventoryFailureType.invalidResponse =>
+        'تعذّر قراءة بيانات المخزون. يرجى المحاولة لاحقًا.',
+      InventoryFailureType.unknown =>
+        'تعذّر إتمام العملية. يرجى المحاولة مرة أخرى.',
+    };
