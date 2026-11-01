@@ -636,6 +636,17 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       taxAmount: _totals.taxAmount,
       total: _saleTotal,
       paidAmount: totalPaid,
+      // ✅ إضافة قائمة الدفعات (مختلطة أو واحدة) إلى الفاتورة
+      payments: _isCredit
+          ? const <ReceiptPayment>[]
+          : <ReceiptPayment>[
+              for (final _PaymentEntry entry in _payments)
+                if (entry.amount > 0)
+                  ReceiptPayment(
+                    method: entry.method,
+                    amount: entry.amount,
+                  ),
+            ],
       customerName: _cart.customerName,
       customerAddress: customerAddress,
       customerPhone: customerPhone,
