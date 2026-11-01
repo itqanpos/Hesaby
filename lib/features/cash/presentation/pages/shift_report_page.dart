@@ -32,6 +32,8 @@ class ShiftReportPage extends ConsumerWidget {
     double expected,
     double actual,
     double diff,
+    double cashIn, // ✅ Added
+    double cardIn, // ✅ Added
   ) async {
     final ReceiptPaperSize? selectedSize = await showDialog<ReceiptPaperSize>(
       context: context,
@@ -68,6 +70,8 @@ class ShiftReportPage extends ConsumerWidget {
           kpis: [
             ReportKpi(label: 'الكاشير', value: cashierName),
             ReportKpi(label: 'الافتتاحي', value: AppFormatters.money(shift.openingBalance)),
+            ReportKpi(label: 'إجمالي النقدي', value: AppFormatters.money(cashIn)), // ✅ Added
+            ReportKpi(label: 'إجمالي البطاقة', value: AppFormatters.money(cardIn)), // ✅ Added
             ReportKpi(label: 'المتوقع', value: AppFormatters.money(expected)),
             ReportKpi(label: 'الفعلي', value: AppFormatters.money(actual)),
             ReportKpi(label: 'الفرق', value: AppFormatters.money(diff), emphasized: true),
@@ -77,7 +81,6 @@ class ShiftReportPage extends ConsumerWidget {
           title: 'تفاصيل الحركات (${transactions.length})',
           table: ReportTable(
             headers: const ['النوع', 'الحساب', 'وارد', 'صادر'],
-            // ✅ تم حذف columnCount لأنه غير موجود
             flex: const [2, 2, 1, 1],
             rows: [
               for (final tx in transactions)
@@ -99,24 +102,16 @@ class ShiftReportPage extends ConsumerWidget {
         style: style,
         size: selectedSize,
       );
-      
       final String fileName = 'shift-${shift.id.substring(0, 8)}.pdf';
-      
       await Printing.sharePdf(bytes: bytes, filename: fileName);
-    } on Object { // ✅ تم حذف (e) لأنها غير مستخدمة
+    } on Object {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context).showSnackBar(const SnackBar(content: Text('تعذّرت طباعة التقرير.')));
     }
   }
 
   static String _sourceLabel(String sourceType) => switch (sourceType) {
-        'sale' => 'بيع',
-        'purchase' => 'مشتريات',
-        'expense' => 'مصروف',
-        'salary' => 'راتب',
-        'advance' => 'سلفة',
-        'manual' => 'حركة يدوية',
-        _ => sourceType,
+        'sale' => 'بيع', 'purchase' => 'مشتريات', 'expense' => 'مصروف', 'salary' => 'راتب', 'advance' => 'سلفة', 'manual' => 'حركة يدوية', _ => sourceType,
       };
 
   @override
@@ -126,9 +121,7 @@ class ShiftReportPage extends ConsumerWidget {
     final memberAsync = ref.watch(currentMemberProvider);
 
     return AppShell(
-      appBar: AppBar(
-        title: const Text('تقرير الوردية'),
-      ),
+      appBar: AppBar(title: const Text('تقرير الوردية')),
       body: shiftAsync.when(
         loading: () => const AppLoader(),
         error: (e, _) => AppErrorView(
@@ -142,9 +135,13 @@ class ShiftReportPage extends ConsumerWidget {
           
           double totalIn = 0;
           double totalOut = 0;
+          double cashIn = 0; // ✅ Added
+          double cardIn = 0; // ✅ Added
           for (final tx in transactions) {
             if (tx.direction == CashDirection.inFlow) {
               totalIn += tx.amount;
+              if (tx.accountType == CashAccountType.cash) cashIn += tx.amount; // ✅ Added
+              if (tx.accountType == CashAccountType.card) cardIn += tx.amount; // ✅ Added
             } else {
               totalOut += tx.amount;
             }
@@ -152,10 +149,7 @@ class ShiftReportPage extends ConsumerWidget {
           final expected = shift.openingBalance + totalIn - totalOut;
           final actual = shift.actualClosingBalance ?? 0;
           final diff = actual - expected;
-          
-          final cashierName = memberAsync.valueOrNull?.id == shift.cashierId 
-              ? (memberAsync.valueOrNull?.displayName ?? 'موظف')
-              : 'موظف';
+          final cashierName = memberAsync.valueOrNull?.displayName ?? 'موظف';
 
           return ListView(
             padding: const EdgeInsets.all(16),
@@ -166,7 +160,9 @@ class ShiftReportPage extends ConsumerWidget {
                 expected: expected,
                 actual: actual,
                 diff: diff,
-                onPrint: () => _printReport(context, ref, shift, transactions, cashierName, expected, actual, diff),
+                cashIn: cashIn, // ✅ Added
+                cardIn: cardIn, // ✅ Added
+                onPrint: () => _printReport(context, ref, shift, transactions, cashierName, expected, actual, diff, cashIn, cardIn),
               ),
               const SizedBox(height: 16),
               Text('تفاصيل الحركات (${transactions.length})', style: Theme.of(context).textTheme.titleMedium),
@@ -180,10 +176,7 @@ class ShiftReportPage extends ConsumerWidget {
                     subtitle: Text('${tx.accountName} · ${AppFormatters.time(tx.transactionDate)}'),
                     trailing: Text(
                       '${tx.direction == CashDirection.inFlow ? '+' : '-'}${AppFormatters.money(tx.amount)}',
-                      style: TextStyle(
-                        color: tx.direction == CashDirection.inFlow ? Colors.green : Colors.red,
-                        fontWeight: FontWeight.bold,
-                      ),
+                      style: TextStyle(color: tx.direction == CashDirection.inFlow ? Colors.green : Colors.red, fontWeight: FontWeight.bold),
                     ),
                   ),
             ],
@@ -202,6 +195,8 @@ class _SummaryCard extends StatelessWidget {
     required this.actual,
     required this.diff,
     required this.onPrint,
+    required this.cashIn, // ✅ Added
+    required this.cardIn, // ✅ Added
   });
 
   final Shift shift;
@@ -210,6 +205,8 @@ class _SummaryCard extends StatelessWidget {
   final double actual;
   final double diff;
   final VoidCallback onPrint;
+  final double cashIn; // ✅ Added
+  final double cardIn; // ✅ Added
 
   @override
   Widget build(BuildContext context) {
@@ -223,16 +220,15 @@ class _SummaryCard extends StatelessWidget {
               mainAxisAlignment: MainAxisAlignment.spaceBetween,
               children: [
                 Text('الوردية: $cashierName', style: theme.textTheme.titleLarge),
-                IconButton(
-                  icon: const Icon(Icons.print_outlined),
-                  tooltip: 'طباعة التقرير',
-                  onPressed: onPrint,
-                ),
+                IconButton(icon: const Icon(Icons.print_outlined), tooltip: 'طباعة التقرير', onPressed: onPrint),
               ],
             ),
             Text('فُتحت: ${AppFormatters.dateTime(shift.openedAt)}', style: theme.textTheme.bodySmall),
             const Divider(),
             _row('الرصيد الافتتاحي', AppFormatters.money(shift.openingBalance)),
+            _row('إجمالي النقدي', AppFormatters.money(cashIn), color: Colors.green), // ✅ Added
+            _row('إجمالي البطاقة', AppFormatters.money(cardIn), color: Colors.blue), // ✅ Added
+            const Divider(),
             _row('المتوقع', AppFormatters.money(expected)),
             _row('الفعلي', AppFormatters.money(actual)),
             _row('الفرق', AppFormatters.money(diff), isBold: true, color: diff < 0 ? Colors.red : Colors.green),
