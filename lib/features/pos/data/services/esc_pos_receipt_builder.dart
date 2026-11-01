@@ -280,17 +280,11 @@ class _Painter {
     _footer(r);
   }
 
-  // ==========================================================================
-  // Totals + Payment — ONE unified box
-  // ==========================================================================
-
   void _totalsBox(Receipt r) {
     final List<_TotalsRow> rows = <_TotalsRow>[];
 
-    // ---- Row 1: Invoice total ----
     rows.add(_TotalsRow.text('إجمالي الفاتورة', _money(r.total)));
 
-    // ---- Row 2: Previous balance (if any) ----
     if (r.hasCustomer && (r.previousBalance ?? 0) != 0) {
       rows.add(_TotalsRow.text(
         'الرصيد السابق',
@@ -298,7 +292,6 @@ class _Painter {
       ));
     }
 
-    // ---- Divider + Grand total ----
     rows.add(_TotalsRow.divider());
     final double totalOwed = r.total + (r.previousBalance ?? 0);
     final bool hasPrev = r.hasCustomer && (r.previousBalance ?? 0) != 0;
@@ -308,7 +301,6 @@ class _Painter {
       emphasized: true,
     ));
 
-    // ---- Payment block ----
     rows.add(_TotalsRow.divider());
     if (r.hasPayments) {
       if (r.payments.length == 1) {
@@ -334,7 +326,6 @@ class _Painter {
       emphasized: true,
     ));
 
-    // ---- New balance (if changed) ----
     if (r.hasBalanceChange) {
       rows.add(_TotalsRow.divider());
       final double newBalance = r.newBalance ?? 0;
@@ -368,7 +359,6 @@ class _Painter {
     final double rowGap = 5 * _scale;
     final double dividerGap = 6 * _scale;
 
-    // ---- Pre-measure all rows ----
     final List<TextPainter?> labelPainters = <TextPainter?>[];
     final List<TextPainter?> valuePainters = <TextPainter?>[];
     double contentH = 0;
@@ -401,7 +391,6 @@ class _Painter {
 
     final double totalBoxH = contentH + 2 * boxPadV;
 
-    // ---- Draw outer border ----
     canvas.drawRect(
       Rect.fromLTWH(_paddingH, _y, _contentWidth, totalBoxH),
       Paint()
@@ -410,7 +399,6 @@ class _Painter {
         ..color = _black,
     );
 
-    // ---- Draw rows ----
     double currentY = _y + boxPadV;
     bool isFirstText = true;
 
@@ -451,10 +439,6 @@ class _Painter {
 
     _y += totalBoxH + 4 * _scale;
   }
-
-  // ==========================================================================
-  // Header / Meta / Items
-  // ==========================================================================
 
   Future<ui.Image?> _decodeImage(Uint8List bytes) async {
     try {
@@ -534,7 +518,8 @@ class _Painter {
 
   void _itemsTable(Receipt r) {
     final double w = _contentWidth;
-    final double colNumW = 26 * _scale;
+    // ✅ زيادة عرض عمود رقم المسلسل من 26 إلى 36
+    final double colNumW = 36 * _scale;
     final double colQtyW = w * 0.20;
     final double colPriceW = w * 0.20;
     final double colTotalW = w * 0.24;
@@ -626,10 +611,6 @@ class _Painter {
       );
     }
   }
-
-  // ==========================================================================
-  // Footer + helpers
-  // ==========================================================================
 
   void _footer(Receipt r) {
     _text(_footerText(r),
@@ -859,10 +840,6 @@ class _Cell {
   final bool bold;
   final TextAlign align;
 }
-
-// ============================================================================
-// Totals row model
-// ============================================================================
 
 class _TotalsRow {
   const _TotalsRow.text(this.label, this.value, {this.emphasized = false})
