@@ -13,7 +13,6 @@ import '../../domain/services/receipt_number_format.dart';
 enum ReceiptPaperSize { mm58, mm80, a4 }
 
 abstract final class PdfReceiptBuilder {
-  // ✅ زيادة الارتفاع لضمان عدم قص الأصناف (200 مم أساسي + 20 مم لكل صنف)
   static double _calculateHeight(int lineCount, ReceiptPaperSize size) {
     if (size == ReceiptPaperSize.a4) return PdfPageFormat.a4.height;
 
@@ -61,7 +60,6 @@ abstract final class PdfReceiptBuilder {
         pageFormat: pageFormat,
         margin: pw.EdgeInsets.all(padding),
         textDirection: pw.TextDirection.rtl,
-        // ✅ إجبار الخلفية البيضاء ومنع الشفافية
         build: (pw.Context context) => pw.Container(
           color: PdfColors.white,
           child: pw.Column(
@@ -203,7 +201,8 @@ abstract final class PdfReceiptBuilder {
       1: pw.FlexColumnWidth(1.2),
       2: pw.FlexColumnWidth(1.3),
       3: pw.FlexColumnWidth(2.5),
-      4: pw.FixedColumnWidth(16),
+      // ✅ زيادة عرض عمود رقم المسلسل من 16 إلى 24
+      4: pw.FixedColumnWidth(24), 
     };
 
     double totalQuantity = 0;
@@ -347,10 +346,6 @@ abstract final class PdfReceiptBuilder {
     );
   }
 
-  // ==========================================================================
-  // ✅ Totals + Payment — ONE unified box (matching thermal design)
-  // ==========================================================================
-
   static pw.Widget _totalsSection(
       Receipt receipt, _Sizes s, PrintStyleSettings style) {
     final double totalOwed = receipt.total + (receipt.previousBalance ?? 0);
@@ -360,7 +355,6 @@ abstract final class PdfReceiptBuilder {
 
     final List<pw.Widget> children = <pw.Widget>[];
 
-    // 1. Invoice Total
     children.add(_pdfRow(
       'إجمالي الفاتورة',
       _money(receipt.total, receipt),
@@ -368,7 +362,6 @@ abstract final class PdfReceiptBuilder {
       style,
     ));
 
-    // 2. Previous Balance
     if (hasPrev) {
       children.add(_pdfRow(
         'الرصيد السابق',
@@ -378,10 +371,8 @@ abstract final class PdfReceiptBuilder {
       ));
     }
 
-    // 3. Divider
     children.add(_pdfDivider(s));
 
-    // 4. Grand Total
     children.add(_pdfRow(
       hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
       _money(totalOwed, receipt),
@@ -390,10 +381,8 @@ abstract final class PdfReceiptBuilder {
       emphasized: true,
     ));
 
-    // 5. Divider
     children.add(_pdfDivider(s));
 
-    // 6. Payment Details
     if (receipt.hasPayments) {
       if (receipt.payments.length == 1) {
         children.add(_pdfRow(
@@ -421,10 +410,8 @@ abstract final class PdfReceiptBuilder {
       ));
     }
 
-    // 7. Divider
     children.add(_pdfDivider(s));
 
-    // 8. Paid Amount
     children.add(_pdfRow(
       'المدفوع',
       _money(receipt.paidAmount, receipt),
@@ -433,7 +420,6 @@ abstract final class PdfReceiptBuilder {
       emphasized: true,
     ));
 
-    // 9. New Balance
     if (receipt.hasBalanceChange) {
       children.add(_pdfDivider(s));
       final String label;
@@ -511,10 +497,6 @@ abstract final class PdfReceiptBuilder {
     );
   }
 
-  // ==========================================================================
-  // Footer + helpers
-  // ==========================================================================
-
   static pw.Widget _footer(
       Receipt receipt, _Sizes s, PrintStyleSettings style) {
     return pw.Center(
@@ -554,7 +536,6 @@ abstract final class PdfReceiptBuilder {
   static String _money(double value, Receipt receipt) =>
       ReceiptNumberFormat.money(value, currency: '');
 
-  // ✅ تحويل كود طريقة الدفع إلى تسمية عربية
   static String _methodLabel(String method) => switch (method) {
         'cash' => 'نقدي',
         'card' => 'بطاقة',
