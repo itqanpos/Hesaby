@@ -1,5 +1,6 @@
 // lib/features/cash/data/repositories/cash_repository_impl.dart
 
+import 'package:supabase_flutter/supabase_flutter.dart' as supabase;
 import '../../../../core/utils/logger.dart';
 import '../../domain/entities/cash_entities.dart';
 import '../../domain/repositories/cash_repository.dart';
@@ -62,22 +63,26 @@ class CashRepositoryImpl implements CashRepository {
 
   static CashAccount _mapAccount(Map<String, dynamic> m) => CashAccount(
     id: _requireString(m, 'id'), companyId: _requireString(m, 'company_id'), name: _requireString(m, 'name'),
-    type: CashAccountType.fromString(m['type'] as String?), // ✅ تم التصحيح
-    isActive: _optionalBool(m, 'is_active'), createdAt: _requireTimestamp(m, 'created_at'),
+    type: CashAccountType.fromString(m['type'] as String?), isActive: _optionalBool(m, 'is_active'), createdAt: _requireTimestamp(m, 'created_at'),
   );
 
   static CashCategory _mapCategory(Map<String, dynamic> m) => CashCategory(
     id: _requireString(m, 'id'), companyId: _requireString(m, 'company_id'), name: _requireString(m, 'name'),
-    kind: CashCategoryKind.fromString(m['kind'] as String?), // ✅ تم التصحيح
-    isSystem: _optionalBool(m, 'is_system'), isActive: _optionalBool(m, 'is_active'),
+    kind: CashCategoryKind.fromString(m['kind'] as String?), isSystem: _optionalBool(m, 'is_system'), isActive: _optionalBool(m, 'is_active'),
   );
 
-  static CashTransaction _mapTransaction(Map<String, dynamic> m, {String? accountName, String? categoryName}) => CashTransaction(
+  static CashTransaction _mapTransaction(
+    Map<String, dynamic> m, {
+    String? accountName,
+    CashAccountType? accountType, // ✅ Added
+    String? categoryName,
+  }) => CashTransaction(
     id: _requireString(m, 'id'), companyId: _requireString(m, 'company_id'), accountId: _requireString(m, 'account_id'),
-    accountName: accountName ?? '—', shiftId: _optionalString(m, 'shift_id'), branchId: _optionalString(m, 'branch_id'),
+    accountName: accountName ?? '—', 
+    accountType: accountType ?? CashAccountType.other, // ✅ Added
+    shiftId: _optionalString(m, 'shift_id'), branchId: _optionalString(m, 'branch_id'),
     categoryId: _optionalString(m, 'category_id'), categoryName: categoryName,
-    direction: CashDirection.fromString(m['direction'] as String?), // ✅ تم التصحيح
-    amount: _requireDouble(m, 'amount'),
+    direction: CashDirection.fromString(m['direction'] as String?), amount: _requireDouble(m, 'amount'),
     sourceType: _requireString(m, 'source_type'), sourceId: _optionalString(m, 'source_id'),
     reference: _optionalString(m, 'reference'), notes: _optionalString(m, 'notes'), transactionDate: _requireTimestamp(m, 'transaction_date'),
   );
@@ -131,8 +136,9 @@ class CashRepositoryImpl implements CashRepository {
       final accounts = await listAccounts(companyId);
       final categories = await listCategories(companyId);
       final accNames = {for (var a in accounts) a.id: a.name};
+      final accTypes = {for (var a in accounts) a.id: a.type}; // ✅ Added
       final catNames = {for (var c in categories) c.id: c.name};
-      return [for (var r in rows) _mapTransaction(r, accountName: accNames[r['account_id']], categoryName: r['category_id'] == null ? null : catNames[r['category_id']])];
+      return [for (var r in rows) _mapTransaction(r, accountName: accNames[r['account_id']], accountType: accTypes[r['account_id']], categoryName: r['category_id'] == null ? null : catNames[r['category_id']])]; // ✅ Added
     } catch (e, s) { throw _unknown(e, s, 'listTransactions'); }
   }
 
@@ -150,7 +156,8 @@ class CashRepositoryImpl implements CashRepository {
     try {
       final row = await _remote.insertTransaction(companyId: companyId, accountId: accountId, branchId: branchId, categoryId: categoryId, direction: direction.value, amount: amount, sourceType: 'manual', reference: reference, notes: notes, transactionDate: transactionDate);
       final accounts = await listAccounts(companyId);
-      return _mapTransaction(row, accountName: accounts.firstWhere((a) => a.id == accountId, orElse: () => accounts.first).name);
+      final acc = accounts.cast<CashAccount?>().firstWhere((a) => a?.id == accountId, orElse: () => null);
+      return _mapTransaction(row, accountName: acc?.name, accountType: acc?.type); // ✅ Added
     } catch (e, s) { throw _unknown(e, s, 'recordManualTransaction'); }
   }
 
