@@ -20,11 +20,24 @@ import '../dialogs/pos_unit_quick_add_sheet.dart';
 import '../state/pos_providers.dart';
 import '../state/pos_search_notifier.dart';
 
+/// ✅ Provider: مخزون كل المنتجات في الفرع الحالي (مفتاح = productId)
+final posStockMapProvider = FutureProvider.family<Map<String, double>, String>(
+  (ref, branchId) async {
+    try {
+      final List<dynamic> balances =
+          await ref.read(inventoryBalancesProvider(branchId).future);
+      return <String, double>{
+        for (final dynamic b in balances)
+          if (b.productId is String && b.quantityOnHand is num)
+            b.productId as String: (b.quantityOnHand as num).toDouble(),
+      };
+    } on Object {
+      return <String, double>{};
+    }
+  },
+);
+
 /// POS search results.
-///
-/// Two presentations:
-/// * **Desktop / tablet** (`compact: false`): grid of cards.
-/// * **Mobile** (`compact: true`): linear list without cards.
 class PosResultsList extends ConsumerWidget {
   const PosResultsList({super.key, this.compact = false});
 
@@ -43,6 +56,18 @@ class PosResultsList extends ConsumerWidget {
       },
       orElse: () => const <String, String>{},
     );
+
+    // ✅ جلب المخزون
+    final String? branchId = ref.watch(
+      companyContextProvider.select(
+        (CompanyContextState s) => s.currentBranch?.id,
+      ),
+    );
+    final AsyncValue<Map<String, double>> stockAsync = branchId == null
+        ? const AsyncData<Map<String, double>>(<String, double>{})
+        : ref.watch(posStockMapProvider(branchId));
+    final Map<String, double> stockMap =
+        stockAsync.valueOrNull ?? const <String, double>{};
 
     return results.when(
       loading: () => const AppLoader(),
@@ -67,6 +92,7 @@ class PosResultsList extends ConsumerWidget {
           return _ProductList(
             products: products,
             unitNames: unitNames,
+            stockMap: stockMap,
             onTap: (Product p) => _handleProductTap(context, ref, p),
           );
         }
@@ -77,7 +103,7 @@ class PosResultsList extends ConsumerWidget {
             maxCrossAxisExtent: 160,
             mainAxisSpacing: 10,
             crossAxisSpacing: 10,
-            childAspectRatio: 0.9,
+            childAspectRatio: 0.85,
           ),
           itemCount: products.length,
           itemBuilder: (BuildContext context, int index) {
@@ -87,6 +113,7 @@ class PosResultsList extends ConsumerWidget {
             return _ProductGridCard(
               product: product,
               unitName: unitName,
+              stock: stockMap[product.id],
               onTap: () => _handleProductTap(context, ref, product),
             );
           },
@@ -96,7 +123,7 @@ class PosResultsList extends ConsumerWidget {
   }
 
   // ---------------------------------------------------------------------------
-  // Tap handling — option ج
+  // Tap handling
   // ---------------------------------------------------------------------------
 
   Future<void> _handleProductTap(
@@ -126,7 +153,6 @@ class PosResultsList extends ConsumerWidget {
     WidgetRef ref,
     Product product,
   ) async {
-    // ⬇️ جلب مخزون المنتج من الفرع الحالي
     final double? stock = await _fetchStockFor(ref, product.id);
     if (!context.mounted) return;
 
@@ -136,8 +162,6 @@ class PosResultsList extends ConsumerWidget {
       product.defaultUnitId,
     );
 
-    // ⬇️ فحص مسبق: إذا كان المنتج موجودًا في السلة والمخزون معروف،
-    //    تأكد من أن الزيادة لن تتجاوزها.
     if (stock != null) {
       final double currentQty = existing?.quantity ?? 0;
       final double newQty = currentQty + 1;
@@ -252,10 +276,6 @@ class PosResultsList extends ConsumerWidget {
 // Stock helper — reads the current branch inventory for a product
 // ============================================================================
 
-/// Returns the current stock of [productId] in the active branch, or
-/// `null` if it cannot be determined (no branch, network error, missing
-/// balance). When `null`, the caller should skip the local pre-check and
-/// let the server be the source of truth.
 Future<double?> _fetchStockFor(WidgetRef ref, String productId) async {
   try {
     final String? branchId = ref.read(
@@ -271,8 +291,6 @@ Future<double?> _fetchStockFor(WidgetRef ref, String productId) async {
       try {
         final String? pid = b.productId as String?;
         if (pid == productId) {
-          // ⚠️ نفترض أن حقل الكمية اسمه `quantityOnHand`.
-          // إذا كان اسمه مختلفًا في InventoryBalance، يُرجى تعديله.
           final dynamic qty = b.quantityOnHand;
           if (qty is num) return qty.toDouble();
           if (qty is String) return double.tryParse(qty);
@@ -282,7 +300,6 @@ Future<double?> _fetchStockFor(WidgetRef ref, String productId) async {
         continue;
       }
     }
-    // المنتج غير موجود في قائمة الأرصدة → افتراض صفر.
     return 0;
   } on Object {
     return null;
@@ -290,18 +307,63 @@ Future<double?> _fetchStockFor(WidgetRef ref, String productId) async {
 }
 
 // ============================================================================
-// Mobile — linear list (no cards)
+// Stock badge widget
+// ============================================================================
+
+class _StockBadge extends StatelessWidget {
+  const _StockBadge({required this.stock});
+
+  final double stock;
+
+  @override
+  Widget build(BuildContext context) {
+    final (Color bg, Color fg, String label) = stock <= 0
+        ? (const Color(0xFFFFEBEE), const Color(0xFFC62828), 'نفد')
+        : stock <= 10
+            ? (const Color(0xFFFFF3E0), const Color(0xFFE65100),
+                '${_formatQty(stock)} متبقٍ')
+            : (const Color(0xFFE8F5E9), const Color(0xFF2E7D32),
+                '${_formatQty(stock)} متاح');
+
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+      decoration: BoxDecoration(
+        color: bg,
+        borderRadius: BorderRadius.circular(4),
+        border: Border.all(color: fg.withValues(alpha: 0.3)),
+      ),
+      child: Text(
+        label,
+        style: TextStyle(
+          fontSize: 10,
+          fontWeight: FontWeight.w700,
+          color: fg,
+        ),
+      ),
+    );
+  }
+
+  static String _formatQty(double value) {
+    if (value == value.roundToDouble()) return value.toInt().toString();
+    return value.toStringAsFixed(2);
+  }
+}
+
+// ============================================================================
+// Mobile — linear list (with stock badge)
 // ============================================================================
 
 class _ProductList extends StatelessWidget {
   const _ProductList({
     required this.products,
     required this.unitNames,
+    required this.stockMap,
     required this.onTap,
   });
 
   final List<Product> products;
   final Map<String, String> unitNames;
+  final Map<String, double> stockMap;
   final ValueChanged<Product> onTap;
 
   @override
@@ -319,6 +381,7 @@ class _ProductList extends StatelessWidget {
       itemBuilder: (BuildContext context, int index) {
         final Product product = products[index];
         final String? unitName = unitNames[product.defaultUnitId];
+        final double? stock = stockMap[product.id];
 
         return InkWell(
           onTap: () => onTap(product),
@@ -367,6 +430,11 @@ class _ProductList extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(width: 8),
+                // ✅ Stock badge
+                if (stock != null) ...<Widget>[
+                  _StockBadge(stock: stock),
+                  const SizedBox(width: 6),
+                ],
                 Text(
                   '${_formatPrice(product.sellingPrice)} ج.م',
                   style: theme.textTheme.titleSmall?.copyWith(
@@ -385,26 +453,26 @@ class _ProductList extends StatelessWidget {
   }
 
   static String _formatPrice(double value) {
-    if (value == value.roundToDouble()) {
-      return value.toInt().toString();
-    }
+    if (value == value.roundToDouble()) return value.toInt().toString();
     return value.toStringAsFixed(2);
   }
 }
 
 // ============================================================================
-// Desktop — grid card
+// Desktop — grid card (with stock badge)
 // ============================================================================
 
 class _ProductGridCard extends StatefulWidget {
   const _ProductGridCard({
     required this.product,
     required this.unitName,
+    required this.stock,
     required this.onTap,
   });
 
   final Product product;
   final String? unitName;
+  final double? stock;
   final VoidCallback onTap;
 
   @override
@@ -446,36 +514,47 @@ class _ProductGridCardState extends State<_ProductGridCard> {
                   ]
                 : [],
           ),
-          child: Padding(
-            padding: const EdgeInsets.all(12),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: <Widget>[
-                CircleAvatar(
-                  radius: 24,
-                  backgroundColor: scheme.surfaceContainerHighest,
-                  child: Icon(Icons.inventory_2_outlined,
-                      color: scheme.primary),
+          child: Stack(
+            children: <Widget>[
+              Padding(
+                padding: const EdgeInsets.all(12),
+                child: Column(
+                  mainAxisAlignment: MainAxisAlignment.center,
+                  children: <Widget>[
+                    CircleAvatar(
+                      radius: 22,
+                      backgroundColor: scheme.surfaceContainerHighest,
+                      child: Icon(Icons.inventory_2_outlined,
+                          color: scheme.primary),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      widget.product.name,
+                      style: theme.textTheme.titleSmall
+                          ?.copyWith(fontWeight: FontWeight.bold),
+                      textAlign: TextAlign.center,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${widget.product.sellingPrice} ج.م',
+                      style: theme.textTheme.bodyLarge?.copyWith(
+                        color: scheme.primary,
+                        fontWeight: FontWeight.w800,
+                      ),
+                    ),
+                  ],
                 ),
-                const SizedBox(height: 8),
-                Text(
-                  widget.product.name,
-                  style: theme.textTheme.titleSmall
-                      ?.copyWith(fontWeight: FontWeight.bold),
-                  textAlign: TextAlign.center,
-                  maxLines: 2,
-                  overflow: TextOverflow.ellipsis,
+              ),
+              // ✅ Stock badge in the corner
+              if (widget.stock != null)
+                Positioned(
+                  top: 4,
+                  right: 4,
+                  child: _StockBadge(stock: widget.stock!),
                 ),
-                const SizedBox(height: 4),
-                Text(
-                  '${widget.product.sellingPrice} ج.م',
-                  style: theme.textTheme.bodyLarge?.copyWith(
-                    color: scheme.primary,
-                    fontWeight: FontWeight.w800,
-                  ),
-                ),
-              ],
-            ),
+            ],
           ),
         ),
       ),
@@ -484,8 +563,9 @@ class _ProductGridCardState extends State<_ProductGridCard> {
 }
 
 // ============================================================================
-// Public quick-add helper — now accepts availableStock
+// Public quick-add helper
 // ============================================================================
+
 PosQuickAddResult posQuickAddProduct(
   WidgetRef ref,
   Product product, {
@@ -518,7 +598,6 @@ PosQuickAddResult posQuickAddProduct(
         unitPrice: product.sellingPrice,
         minSellingPrice: product.minSellingPrice,
         maxSellingPrice: product.maxSellingPrice,
-        // ⬇️ تمرير المخزون الفعلي (قد يكون null إذا تعذر الحصول عليه)
         availableStock: availableStock,
       );
 
