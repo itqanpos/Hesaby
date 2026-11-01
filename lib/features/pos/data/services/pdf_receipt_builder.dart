@@ -347,118 +347,173 @@ abstract final class PdfReceiptBuilder {
     );
   }
 
+  // ==========================================================================
+  // ✅ Totals + Payment — ONE unified box (matching thermal design)
+  // ==========================================================================
+
   static pw.Widget _totalsSection(
       Receipt receipt, _Sizes s, PrintStyleSettings style) {
     final double totalOwed = receipt.total + (receipt.previousBalance ?? 0);
     final double newBalance = receipt.newBalance ?? 0;
+    final bool hasPrev =
+        receipt.hasCustomer && (receipt.previousBalance ?? 0) != 0;
 
-    return pw.Column(
-      crossAxisAlignment: pw.CrossAxisAlignment.stretch,
-      children: <pw.Widget>[
-        _kvRow('الإجمالي الحالي', _money(receipt.total, receipt), s, style),
-        if (receipt.hasCustomer && (receipt.previousBalance ?? 0) != 0) ...<
-            pw.Widget>[
-          pw.SizedBox(height: 4),
-          _kvRow('الرصيد السابق',
-              _money(receipt.previousBalance!.abs(), receipt), s, style),
-        ],
-        pw.SizedBox(height: 6),
-        pw.Container(
-          padding: pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          decoration: pw.BoxDecoration(
-              border: pw.Border.all(color: PdfColors.black, width: 1)),
-          child: pw.Row(children: <pw.Widget>[
-            pw.Expanded(
-              child: pw.Text(
-                ((receipt.previousBalance ?? 0) != 0)
-                    ? 'الإجمالي الكلي'
-                    : 'إجمالي الفاتورة',
-                style: pw.TextStyle(
-                    fontSize: s.grandTotal,
-                    color: PdfColors.black,
-                    fontWeight:
-                        PdfSharedStyle.weight(style, emphasized: true)),
-              ),
-            ),
-            pw.Text(_money(totalOwed, receipt),
-                style: pw.TextStyle(
-                    fontSize: s.grandTotal,
-                    color: PdfColors.black,
-                    fontWeight:
-                        PdfSharedStyle.weight(style, emphasized: true))),
-          ]),
-        ),
-        pw.SizedBox(height: 6),
+    final List<pw.Widget> children = <pw.Widget>[];
 
-        // ⬇️ قسم الدفع (معدّل للدفع المختلط)
-        if (receipt.hasPayments) ...<pw.Widget>[
-          if (receipt.payments.length == 1)
-            // دفعة واحدة: عرض طريقة الدفع فقط (المبلغ يظهر في "المدفوع")
-            _kvRow(
-              'طريقة الدفع',
-              _methodLabel(receipt.payments.first.method),
-              s,
-              style,
-            )
-          else ...<pw.Widget>[
-            // دفعات متعددة: سطر لكل طريقة مع مبلغها
-            _kvRow('تفاصيل الدفع', '', s, style, emphasized: false),
-            for (final ReceiptPayment p in receipt.payments)
-              _kvRow(
-                '  · ${_methodLabel(p.method)}',
-                _money(p.amount, receipt),
-                s,
-                style,
-              ),
-          ],
-        ] else
-          _kvRow('طريقة الدفع', 'آجل', s, style),
+    // 1. Invoice Total
+    children.add(_pdfRow(
+      'إجمالي الفاتورة',
+      _money(receipt.total, receipt),
+      s,
+      style,
+    ));
 
-        pw.SizedBox(height: 4),
-        _kvRow('المدفوع', _money(receipt.paidAmount, receipt), s, style),
-        if (receipt.hasBalanceChange) ...<pw.Widget>[
-          pw.SizedBox(height: 6),
-          _divider(),
-          pw.SizedBox(height: 6),
-          if (newBalance > 0)
-            _kvRow('الرصيد الجديد على العميل', _money(newBalance, receipt), s,
-                style,
-                emphasized: true)
-          else if (newBalance < 0)
-            _kvRow('الرصيد الجديد (له عندنا)',
-                _money(newBalance.abs(), receipt), s, style,
-                emphasized: true)
-          else
-            _kvRow('الرصيد الجديد', _money(0, receipt), s, style,
-                emphasized: true),
-        ],
-      ],
+    // 2. Previous Balance
+    if (hasPrev) {
+      children.add(_pdfRow(
+        'الرصيد السابق',
+        _money(receipt.previousBalance!.abs(), receipt),
+        s,
+        style,
+      ));
+    }
+
+    // 3. Divider
+    children.add(_pdfDivider(s));
+
+    // 4. Grand Total
+    children.add(_pdfRow(
+      hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
+      _money(totalOwed, receipt),
+      s,
+      style,
+      emphasized: true,
+    ));
+
+    // 5. Divider
+    children.add(_pdfDivider(s));
+
+    // 6. Payment Details
+    if (receipt.hasPayments) {
+      if (receipt.payments.length == 1) {
+        children.add(_pdfRow(
+          'طريقة الدفع',
+          _methodLabel(receipt.payments.first.method),
+          s,
+          style,
+        ));
+      } else {
+        for (final ReceiptPayment p in receipt.payments) {
+          children.add(_pdfRow(
+            _methodLabel(p.method),
+            _money(p.amount, receipt),
+            s,
+            style,
+          ));
+        }
+      }
+    } else {
+      children.add(_pdfRow(
+        'طريقة الدفع',
+        'آجل',
+        s,
+        style,
+      ));
+    }
+
+    // 7. Divider
+    children.add(_pdfDivider(s));
+
+    // 8. Paid Amount
+    children.add(_pdfRow(
+      'المدفوع',
+      _money(receipt.paidAmount, receipt),
+      s,
+      style,
+      emphasized: true,
+    ));
+
+    // 9. New Balance
+    if (receipt.hasBalanceChange) {
+      children.add(_pdfDivider(s));
+      final String label;
+      final String value;
+      if (newBalance > 0) {
+        label = 'الرصيد الجديد على العميل';
+        value = _money(newBalance, receipt);
+      } else if (newBalance < 0) {
+        label = 'الرصيد الجديد (له عندنا)';
+        value = _money(newBalance.abs(), receipt);
+      } else {
+        label = 'الرصيد الجديد';
+        value = _money(0, receipt);
+      }
+      children.add(_pdfRow(label, value, s, style, emphasized: true));
+    }
+
+    return pw.Container(
+      padding: const pw.EdgeInsets.all(10),
+      decoration: pw.BoxDecoration(
+        border: pw.Border.all(color: PdfColors.black, width: 1.2),
+        borderRadius: const pw.BorderRadius.all(pw.Radius.circular(4)),
+      ),
+      child: pw.Column(
+        crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+        children: children,
+      ),
     );
   }
 
-  static pw.Widget _kvRow(
-      String label, String value, _Sizes s, PrintStyleSettings style,
-      {bool emphasized = false}) {
+  static pw.Widget _pdfRow(
+    String label,
+    String value,
+    _Sizes s,
+    PrintStyleSettings style, {
+    bool emphasized = false,
+  }) {
+    final double fontSize = emphasized ? s.kvValueLarge : s.kvValue;
+
     return pw.Padding(
-      padding: const pw.EdgeInsets.symmetric(vertical: 1),
-      child: pw.Row(children: <pw.Widget>[
-        pw.Expanded(
-            child: pw.Text(PdfSharedFormat.norm(label),
-                style: pw.TextStyle(
-                    fontSize: s.kvLabel,
-                    color: PdfColors.black,
-                    fontWeight:
-                        PdfSharedStyle.weight(style, emphasized: true)))),
-        pw.Text(PdfSharedFormat.norm(value),
-            style: pw.TextStyle(
-                fontSize: emphasized ? s.kvValueLarge : s.kvValue,
+      padding: const pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Row(
+        crossAxisAlignment: pw.CrossAxisAlignment.start,
+        children: <pw.Widget>[
+          pw.Expanded(
+            child: pw.Text(
+              PdfSharedFormat.norm(label),
+              style: pw.TextStyle(
+                fontSize: fontSize,
                 color: PdfColors.black,
                 fontWeight:
-                    PdfSharedStyle.weight(style, emphasized: emphasized)),
-            textAlign: pw.TextAlign.left),
-      ]),
+                    PdfSharedStyle.weight(style, emphasized: emphasized),
+              ),
+            ),
+          ),
+          pw.Text(
+            PdfSharedFormat.norm(value),
+            style: pw.TextStyle(
+              fontSize: fontSize,
+              color: PdfColors.black,
+              fontWeight:
+                  PdfSharedStyle.weight(style, emphasized: emphasized),
+            ),
+            textAlign: pw.TextAlign.left,
+          ),
+        ],
+      ),
     );
   }
+
+  static pw.Widget _pdfDivider(_Sizes s) {
+    return pw.Padding(
+      padding: const pw.EdgeInsets.symmetric(vertical: 4),
+      child: pw.Container(height: 0.5, color: PdfColors.grey600),
+    );
+  }
+
+  // ==========================================================================
+  // Footer + helpers
+  // ==========================================================================
 
   static pw.Widget _footer(
       Receipt receipt, _Sizes s, PrintStyleSettings style) {
@@ -499,7 +554,7 @@ abstract final class PdfReceiptBuilder {
   static String _money(double value, Receipt receipt) =>
       ReceiptNumberFormat.money(value, currency: '');
 
-  // ✅ بديل `_paymentMethodLabel` القديم: يحول كود الطريقة إلى تسمية عربية
+  // ✅ تحويل كود طريقة الدفع إلى تسمية عربية
   static String _methodLabel(String method) => switch (method) {
         'cash' => 'نقدي',
         'card' => 'بطاقة',
