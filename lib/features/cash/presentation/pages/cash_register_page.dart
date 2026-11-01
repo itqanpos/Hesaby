@@ -21,6 +21,7 @@ import '../widgets/open_shift_dialog.dart';
 
 class CashRegisterPage extends ConsumerStatefulWidget {
   const CashRegisterPage({super.key});
+
   @override
   ConsumerState<CashRegisterPage> createState() => _CashRegisterPageState();
 }
@@ -58,11 +59,11 @@ class _CashRegisterPageState extends ConsumerState<CashRegisterPage> {
 
   Future<void> _closeShift(Shift shift) async {
     final closed = await showCloseShiftDialog(context: context, shift: shift);
-    if (closed != null && mounted) _snack('تم إغلاق الوردية بنجاح.');
-  }
-
-  Future<void> _openShiftReport(Shift shift) async {
-    await context.pushNamed(AppRouter.shiftReportName, pathParameters: {'id': shift.id});
+    if (closed != null && mounted) {
+      _snack('تم إغلاق الوردية بنجاح.');
+      // ✅ فتح التقرير تلقائياً بعد الإغلاق
+      await context.pushNamed(AppRouter.shiftReportName, pathParameters: {'id': closed.id});
+    }
   }
 
   void _snack(String message) {
@@ -110,7 +111,7 @@ class _CashRegisterPageState extends ConsumerState<CashRegisterPage> {
                 if (activeShift == null)
                   _NoShiftCard(onOpen: _openShift)
                 else
-                  _ActiveShiftCard(shift: activeShift, onClose: () => _closeShift(activeShift), onReport: () => _openShiftReport(activeShift)),
+                  _ActiveShiftCard(shift: activeShift, onClose: () => _closeShift(activeShift)),
                 const SizedBox(height: 12),
                 _TotalBalanceCard(total: overview.totalBalance, money: _money),
                 const SizedBox(height: 12),
@@ -171,10 +172,9 @@ class _NoShiftCard extends StatelessWidget {
 }
 
 class _ActiveShiftCard extends StatelessWidget {
-  const _ActiveShiftCard({required this.shift, required this.onClose, required this.onReport});
+  const _ActiveShiftCard({required this.shift, required this.onClose});
   final Shift shift;
   final VoidCallback onClose;
-  final VoidCallback onReport;
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -194,10 +194,9 @@ class _ActiveShiftCard extends StatelessWidget {
           const SizedBox(height: 6),
           Row(children: [Icon(Icons.schedule, size: 14, color: scheme.onSurfaceVariant), const SizedBox(width: 4), Text('فُتحت: ${fmt.format(shift.openedAt.toLocal())}', style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant))]),
           const SizedBox(height: 10),
+          // ✅ تم حذف زر التقرير من هنا، وأصبح زر الإغلاق يأخذ العرض بالكامل
           Row(children: [
-            Expanded(child: AppButton(label: 'تقرير الوردية', icon: Icons.receipt_long_outlined, variant: AppButtonVariant.outline, size: AppButtonSize.small, onPressed: onReport)),
-            const SizedBox(width: 8),
-            Expanded(child: AppButton(label: 'إغلاق الوردية', icon: Icons.stop_circle_outlined, variant: AppButtonVariant.danger, size: AppButtonSize.small, onPressed: onClose)),
+            Expanded(child: AppButton(label: 'إغلاق الوردية وعرض التقرير', icon: Icons.stop_circle_outlined, variant: AppButtonVariant.danger, size: AppButtonSize.small, onPressed: onClose)),
           ]),
         ]),
       ),
