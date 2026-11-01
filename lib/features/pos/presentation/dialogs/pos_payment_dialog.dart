@@ -1,7 +1,5 @@
 // lib/features/pos/presentation/dialogs/pos_payment_dialog.dart
 
-import 'dart:typed_data';
-
 import 'package:flutter/foundation.dart' show defaultTargetPlatform, TargetPlatform;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -27,7 +25,7 @@ import '../../../settings/presentation/providers/company_settings_providers.dart
 import '../../../settings/presentation/providers/user_profile_providers.dart';
 import '../../data/services/pdf_receipt_builder.dart';
 import '../../data/services/pos_preferences.dart';
-import '../../data/services/receipt_printer.dart'; // ✅ جديد
+import '../../data/services/receipt_printer.dart';
 import '../../domain/entities/pos_cart.dart';
 import '../../domain/entities/pos_cart_line.dart';
 import '../../domain/entities/receipt.dart';
@@ -1274,8 +1272,6 @@ class _PosReceiptDialogState extends ConsumerState<_PosReceiptDialog> {
                 const Divider(height: 1),
                 const SizedBox(height: 12),
 
-                // ✅ تم حذف تفاصيل الأصناف بناءً على الطلب
-                
                 _row(theme, 'المجموع الفرعي',
                     AppFormatters.money(receipt.subtotal)),
                 if (receipt.discount > 0)
@@ -1319,7 +1315,6 @@ class _PosReceiptDialogState extends ConsumerState<_PosReceiptDialog> {
 
                 const SizedBox(height: 16),
 
-                // ✅ الأزرار الآن رأسية (3 أزرار)
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.stretch,
                   children: <Widget>[
