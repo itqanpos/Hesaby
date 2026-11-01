@@ -424,150 +424,7 @@ class _SaleDetailPageState extends ConsumerState<SaleDetailPage> {
 }
 
 // ============================================================================
-// Totals Card
-// ============================================================================
-
-class _TotalsCard extends StatelessWidget {
-  const _TotalsCard({
-    required this.sale,
-    required this.payments,
-    this.customer,
-  });
-
-  final Sale sale;
-  final List<Map<String, dynamic>> payments;
-  final Customer? customer;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    double? previousBalance;
-    double? newBalance;
-    if (customer != null) {
-      final double currentBalance = customer!.balance;
-      newBalance = currentBalance;
-      previousBalance = currentBalance - sale.total + sale.paidAmount;
-    }
-
-    final bool hasPrev = previousBalance != null && previousBalance != 0;
-    final double totalOwed = sale.total + (previousBalance ?? 0);
-
-    return DecoratedBox(
-      decoration: BoxDecoration(
-        color: scheme.surface,
-        borderRadius: BorderRadius.circular(16),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: <Widget>[
-            Text('الإجماليات', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
-            const SizedBox(height: 12),
-            
-            Container(
-              decoration: BoxDecoration(
-                border: Border.all(color: scheme.outline),
-                borderRadius: BorderRadius.circular(8),
-              ),
-              padding: const EdgeInsets.all(12),
-              child: Column(
-                children: <Widget>[
-                  _row(context, 'إجمالي الفاتورة', AppFormatters.money(sale.total)),
-                  
-                  if (hasPrev)
-                    _row(context, 'الرصيد السابق', AppFormatters.money(previousBalance.abs())), // ✅ تمت إزالة !
-
-                  const Divider(height: 20),
-                  
-                  _row(
-                    context,
-                    hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
-                    AppFormatters.money(totalOwed),
-                    emphasized: true,
-                  ),
-
-                  const Divider(height: 20),
-                  
-                  if (payments.isNotEmpty) ...[
-                    if (payments.length == 1)
-                      _row(context, 'طريقة الدفع', _methodLabel(payments.first['payment_method'] as String? ?? 'cash'))
-                    else
-                      ...payments.map((p) => _row(
-                        context,
-                        _methodLabel(p['payment_method'] as String? ?? 'cash'), 
-                        AppFormatters.money((p['amount'] as num).toDouble())
-                      )),
-                  ] else ...[
-                    _row(context, 'طريقة الدفع', 'آجل'),
-                  ],
-
-                  const Divider(height: 20),
-                  
-                  _row(context, 'المدفوع', AppFormatters.money(sale.paidAmount), emphasized: true),
-
-                  if (newBalance != null) ...[
-                    const Divider(height: 20),
-                    _row(
-                      context,
-                      'الرصيد الجديد',
-                      AppFormatters.money(newBalance.abs()),
-                      emphasized: true,
-                      color: newBalance > 0 ? scheme.error : (newBalance < 0 ? const Color(0xFF0F7B6C) : null),
-                    ),
-                  ],
-                ],
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  // ✅ تمت إضافة BuildContext للدالة
-  Widget _row(BuildContext context, String label, String value, {bool emphasized = false, Color? color}) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Expanded(
-            child: Text(
-              label,
-              style: TextStyle(
-                fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
-                color: color,
-              ),
-            ),
-          ),
-          Text(
-            value,
-            style: TextStyle(
-              fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
-              fontSize: emphasized ? 16 : 14,
-              color: color ?? (emphasized ? Theme.of(context).colorScheme.primary : null),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  static String _methodLabel(String method) => switch (method) {
-        'cash' => 'نقدي',
-        'card' => 'بطاقة',
-        'instapay' => 'InstaPay',
-        'bank_transfer' => 'تحويل بنكي',
-        _ => 'أخرى',
-      };
-}
-
-// ============================================================================
-// باقي الـ Widgets
+// Header & Actions
 // ============================================================================
 
 class _HeaderCard extends StatelessWidget {
@@ -744,6 +601,10 @@ class _ActionsCard extends StatelessWidget {
   }
 }
 
+// ============================================================================
+// Items Card (✅ تم تعديله ليصبح جدولاً)
+// ============================================================================
+
 class _ItemsCard extends StatelessWidget {
   const _ItemsCard({
     required this.items,
@@ -784,73 +645,167 @@ class _ItemsCard extends StatelessWidget {
                 ),
               )
             else
-              for (int i = 0; i < items.length; i++) ...<Widget>[
-                _ItemRow(
-                  item: items[i],
-                  productName: productNames[items[i].productId] ?? 'منتج محذوف',
-                  unitName: unitNames[items[i].unitId] ?? 'وحدة',
+              ClipRRect(
+                borderRadius: BorderRadius.circular(8),
+                child: Table(
+                  border: TableBorder.all(color: scheme.outline, width: 1),
+                  columnWidths: const <int, TableColumnWidth>{
+                    0: FixedColumnWidth(30),     // م
+                    1: FlexColumnWidth(3),       // الصنف
+                    2: FlexColumnWidth(1.5),     // الكمية
+                    3: FlexColumnWidth(1.5),     // السعر
+                    4: FlexColumnWidth(1.8),     // الإجمالي
+                  },
+                  defaultVerticalAlignment: TableCellVerticalAlignment.middle,
+                  children: <TableRow>[
+                    // Header Row
+                    TableRow(
+                      decoration: BoxDecoration(color: scheme.surfaceContainerHighest),
+                      children: <Widget>[
+                        _cell('م', bold: true, align: TextAlign.center),
+                        _cell('الصنف', bold: true, align: TextAlign.right),
+                        _cell('الكمية', bold: true, align: TextAlign.center),
+                        _cell('السعر', bold: true, align: TextAlign.center),
+                        _cell('الإجمالي', bold: true, align: TextAlign.center),
+                      ],
+                    ),
+                    // Data Rows
+                    for (int i = 0; i < items.length; i++)
+                      TableRow(
+                        children: <Widget>[
+                          _cell('${i + 1}', align: TextAlign.center),
+                          _cell(productNames[items[i].productId] ?? 'منتج محذوف', align: TextAlign.right),
+                          _cell(
+                            '${AppFormatters.quantity(items[i].quantity)} ${unitNames[items[i].unitId] ?? 'وحدة'}',
+                            align: TextAlign.center,
+                          ),
+                          _cell(AppFormatters.money(items[i].unitPrice), align: TextAlign.center),
+                          _cell(AppFormatters.money(items[i].lineTotal), bold: true, align: TextAlign.center),
+                        ],
+                      ),
+                  ],
                 ),
-                if (i < items.length - 1) const SizedBox(height: 6),
-              ],
+              ),
           ],
         ),
       ),
     );
   }
+
+  Widget _cell(String text, {bool bold = false, TextAlign align = TextAlign.right}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 10),
+      child: Text(
+        text,
+        style: TextStyle(
+          fontSize: 12,
+          fontWeight: bold ? FontWeight.w700 : FontWeight.normal,
+        ),
+        textAlign: align,
+        maxLines: 2,
+        overflow: TextOverflow.ellipsis,
+      ),
+    );
+  }
 }
 
-class _ItemRow extends StatelessWidget {
-  const _ItemRow({
-    required this.item,
-    required this.productName,
-    required this.unitName,
+// ============================================================================
+// Totals Card
+// ============================================================================
+
+class _TotalsCard extends StatelessWidget {
+  const _TotalsCard({
+    required this.sale,
+    required this.payments,
+    this.customer,
   });
 
-  final SaleItem item;
-  final String productName;
-  final String unitName;
+  final Sale sale;
+  final List<Map<String, dynamic>> payments;
+  final Customer? customer;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
+    double? previousBalance;
+    double? newBalance;
+    if (customer != null) {
+      final double currentBalance = customer!.balance;
+      newBalance = currentBalance;
+      previousBalance = currentBalance - sale.total + sale.paidAmount;
+    }
+
+    final bool hasPrev = previousBalance != null && previousBalance != 0;
+    final double totalOwed = sale.total + (previousBalance ?? 0);
+
     return DecoratedBox(
       decoration: BoxDecoration(
-        color: scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
+        color: scheme.surface,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: scheme.outlineVariant),
       ),
       child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
-        child: Row(
+        padding: const EdgeInsets.all(16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: <Widget>[
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: <Widget>[
-                  Text(
-                    productName,
-                    style: theme.textTheme.titleSmall,
-                    overflow: TextOverflow.ellipsis,
-                  ),
-                  const SizedBox(height: 2),
-                  Text(
-                    '${AppFormatters.quantity(item.quantity)} $unitName × '
-                    '${AppFormatters.money(item.unitPrice)}',
-                    style: theme.textTheme.bodySmall?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
+            Text('الإجماليات', style: theme.textTheme.titleMedium?.copyWith(fontWeight: FontWeight.bold)),
+            const SizedBox(height: 12),
+            
+            Container(
+              decoration: BoxDecoration(
+                border: Border.all(color: scheme.outline),
+                borderRadius: BorderRadius.circular(8),
               ),
-            ),
-            const SizedBox(width: 8),
-            Text(
-              AppFormatters.money(item.lineTotal),
-              style: theme.textTheme.titleSmall?.copyWith(
-                color: scheme.primary,
-                fontWeight: FontWeight.w700,
+              padding: const EdgeInsets.all(12),
+              child: Column(
+                children: <Widget>[
+                  _row(scheme, 'إجمالي الفاتورة', AppFormatters.money(sale.total)),
+                  
+                  if (hasPrev)
+                    _row(scheme, 'الرصيد السابق', AppFormatters.money(previousBalance.abs())),
+
+                  const Divider(height: 20),
+                  
+                  _row(
+                    scheme,
+                    hasPrev ? 'المطلوب' : 'إجمالي الفاتورة',
+                    AppFormatters.money(totalOwed),
+                    emphasized: true,
+                  ),
+
+                  const Divider(height: 20),
+                  
+                  if (payments.isNotEmpty) ...[
+                    if (payments.length == 1)
+                      _row(scheme, 'طريقة الدفع', _methodLabel(payments.first['payment_method'] as String? ?? 'cash'))
+                    else
+                      ...payments.map((p) => _row(
+                        scheme,
+                        _methodLabel(p['payment_method'] as String? ?? 'cash'), 
+                        AppFormatters.money((p['amount'] as num).toDouble())
+                      )),
+                  ] else ...[
+                    _row(scheme, 'طريقة الدفع', 'آجل'),
+                  ],
+
+                  const Divider(height: 20),
+                  
+                  _row(scheme, 'المدفوع', AppFormatters.money(sale.paidAmount), emphasized: true),
+
+                  if (newBalance != null) ...[
+                    const Divider(height: 20),
+                    _row(
+                      scheme,
+                      'الرصيد الجديد',
+                      AppFormatters.money(newBalance!.abs()),
+                      emphasized: true,
+                      color: newBalance > 0 ? scheme.error : (newBalance < 0 ? const Color(0xFF0F7B6C) : null),
+                    ),
+                  ],
+                ],
               ),
             ),
           ],
@@ -858,7 +813,47 @@ class _ItemRow extends StatelessWidget {
       ),
     );
   }
+
+  Widget _row(ColorScheme scheme, String label, String value, {bool emphasized = false, Color? color}) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
+                color: color,
+              ),
+            ),
+          ),
+          Text(
+            value,
+            style: TextStyle(
+              fontWeight: emphasized ? FontWeight.bold : FontWeight.normal,
+              fontSize: emphasized ? 16 : 14,
+              color: color ?? (emphasized ? scheme.primary : null),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  static String _methodLabel(String method) => switch (method) {
+        'cash' => 'نقدي',
+        'card' => 'بطاقة',
+        'instapay' => 'InstaPay',
+        'bank_transfer' => 'تحويل بنكي',
+        _ => 'أخرى',
+      };
 }
+
+// ============================================================================
+// Returns Card
+// ============================================================================
 
 class _ReturnsCard extends ConsumerWidget {
   const _ReturnsCard({required this.sale});
