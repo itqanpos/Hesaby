@@ -78,7 +78,7 @@ Future<bool?> showPosPaymentDialog({required BuildContext context}) {
 }
 
 // ============================================================================
-// Payment entry (a single row in the split-payment list)
+// Payment entry
 // ============================================================================
 
 class _PaymentEntry {
@@ -116,8 +116,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   late final PosCart _cart;
   late final PosTotals _totals;
 
-  /// When empty, the sale is treated as credit (آجل).
-  /// When non-empty, each entry represents a portion of the payment.
   late final List<_PaymentEntry> _payments;
 
   bool _isSubmitting = false;
@@ -129,8 +127,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     _cart = ref.read(posCartProvider);
     _totals = ref.read(posTotalsProvider);
 
-    // Default: single cash payment covering the full settlement total
-    // (current sale + any prior customer balance).
     _payments = <_PaymentEntry>[
       _PaymentEntry(
         method: PosPaymentMethod.cash,
@@ -142,26 +138,30 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   @override
   void dispose() {
     for (final _PaymentEntry p in _payments) {
-      p.dispose();
+        p.dispose();
     }
     super.dispose();
   }
 
   // ---------------------------------------------------------------------------
-  // Derived
+  // Derived (✅ تم تصحيح الحسابات)
   // ---------------------------------------------------------------------------
 
   double get _saleTotal => _totals.total;
   double get _settlementTotal => _cart.customerBalance + _saleTotal;
+  
   double get _totalPaid =>
       _payments.fold<double>(0, (double s, _PaymentEntry p) => s + p.amount);
+
+  // ✅ الإصلاح هنا: استخدام `_settlementTotal` بدلاً من `_saleTotal`
   double get _remaining {
-    final double r = _saleTotal - _totalPaid;
+    final double r = _settlementTotal - _totalPaid;
     return r > 0 ? r : 0;
   }
 
+  // ✅ الإصلاح هنا: استخدام `_settlementTotal` بدلاً من `_saleTotal`
   double get _overpay {
-    final double o = _totalPaid - _saleTotal;
+    final double o = _totalPaid - _settlementTotal;
     return o > 0 ? o : 0;
   }
 
@@ -185,10 +185,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     setState(() {
       _payments[index].dispose();
       _payments.removeAt(index);
-      // If we removed the last entry, keep the list valid: credit mode is
-      // signaled by an empty list, but we don't want to auto-switch to
-      // credit without the user's explicit intent. So keep at least one
-      // zero-amount cash entry as the "off" state.
       if (_payments.isEmpty) {
         _payments.add(_PaymentEntry(
           method: PosPaymentMethod.cash,
@@ -337,7 +333,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
 
       final Sale confirmed = await notifier.confirmSale(sale.id);
 
-      // ---- Record split payments (portion applied to the sale) ----
       if (appliedToSale > 0 && _payments.isNotEmpty) {
         final List<SalePaymentDraft> salePayments = <SalePaymentDraft>[];
         double remaining = appliedToSale;
@@ -361,7 +356,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
         }
       }
 
-      // ---- Extra payment applied to the customer's balance ----
       if (appliedToBalance > 0 && _cart.customerId != null) {
         final String method =
             _payments.isNotEmpty ? _payments.last.method : 'cash';
@@ -433,7 +427,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     final double appliedToBalance =
         totalPaid > saleTotal ? (totalPaid - saleTotal) : 0;
 
-    // Offline: keep only the first payment method (until Drift migration).
     final String? paymentMethod = _isCredit
         ? null
         : (_payments.isNotEmpty ? _payments.first.method : 'cash');
@@ -483,8 +476,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     await _afterSubmit(receipt, isOffline: true);
   }
 
-  /// Post-submission flow: either direct-print (desktop + saved printer),
-  /// or show the simplified success dialog.
   Future<void> _afterSubmit(Receipt receipt, {bool isOffline = false}) async {
     final bool directPrint =
         ref.read(companySettingsProvider).valueOrNull?.printDirectEnabled ??
@@ -543,10 +534,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     if (!mounted) return;
     Navigator.of(context).pop(true);
   }
-
-  // ---------------------------------------------------------------------------
-  // Helpers
-  // ---------------------------------------------------------------------------
 
   Future<Uint8List?> _loadLogoBytes() async {
     final settings = ref.read(companySettingsProvider).valueOrNull;
@@ -636,7 +623,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       taxAmount: _totals.taxAmount,
       total: _saleTotal,
       paidAmount: totalPaid,
-      // ✅ إضافة قائمة الدفعات (مختلطة أو واحدة) إلى الفاتورة
       payments: _isCredit
           ? const <ReceiptPayment>[]
           : <ReceiptPayment>[
@@ -656,10 +642,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       footer: ref.read(receiptFooterProvider),
     );
   }
-
-  // ---------------------------------------------------------------------------
-  // Build
-  // ---------------------------------------------------------------------------
 
   @override
   Widget build(BuildContext context) {
@@ -724,7 +706,6 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                   ),
                   const SizedBox(height: 16),
 
-                  // ---- Mode: Pay Now vs Credit ----
                   SegmentedButton<bool>(
                     segments: const <ButtonSegment<bool>>[
                       ButtonSegment<bool>(
@@ -847,7 +828,6 @@ class _PaymentEntryCard extends StatelessWidget {
         padding: const EdgeInsets.fromLTRB(10, 8, 6, 8),
         child: Row(
           children: <Widget>[
-            // Method selector
             PopupMenuButton<String>(
               enabled: enabled,
               tooltip: 'طريقة الدفع',
@@ -901,7 +881,6 @@ class _PaymentEntryCard extends StatelessWidget {
               ),
             ),
             const SizedBox(width: 8),
-            // Amount
             Expanded(
               child: TextField(
                 controller: entry.controller,
@@ -948,7 +927,7 @@ class _PaymentEntryCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Remaining indicator
+// Remaining indicator (✅ تم تعديل النصوص)
 // ============================================================================
 
 class _RemainingIndicator extends StatelessWidget {
@@ -982,8 +961,9 @@ class _RemainingIndicator extends StatelessWidget {
             ? Icons.trending_up
             : Icons.pending_outlined;
 
+    // ✅ تم تعديل النصوص لتكون أوضح
     final String label = fullyPaid
-        ? 'مطابق تماماً'
+        ? 'المدفوع مطابق للمطلوب'
         : overpaid
             ? 'زيادة: ${AppFormatters.money(overpay)}'
             : 'المتبقي: ${AppFormatters.money(remaining)}';
@@ -1059,7 +1039,7 @@ class _InfoBanner extends StatelessWidget {
 }
 
 // ============================================================================
-// Sub-widgets (customer row, totals card, error banner)
+// Sub-widgets
 // ============================================================================
 
 class _CustomerRow extends StatelessWidget {
@@ -1243,7 +1223,7 @@ class _ErrorBanner extends StatelessWidget {
 }
 
 // ============================================================================
-// Receipt Dialog — simplified
+// Receipt Dialog
 // ============================================================================
 
 class _PosReceiptDialog extends ConsumerStatefulWidget {
@@ -1347,7 +1327,6 @@ class _PosReceiptDialogState extends ConsumerState<_PosReceiptDialog> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.stretch,
             children: <Widget>[
-              // ---- Big success icon ----
               Center(
                 child: Container(
                   width: 88,
@@ -1371,7 +1350,6 @@ class _PosReceiptDialogState extends ConsumerState<_PosReceiptDialog> {
               ),
               const SizedBox(height: 18),
 
-              // ---- Success message ----
               Text(
                 widget.isOffline
                     ? 'تم الحفظ محلياً'
@@ -1395,7 +1373,6 @@ class _PosReceiptDialogState extends ConsumerState<_PosReceiptDialog> {
 
               const SizedBox(height: 28),
 
-              // ---- Primary: Print ----
               SizedBox(
                 width: double.infinity,
                 child: FilledButton.icon(
@@ -1422,7 +1399,6 @@ class _PosReceiptDialogState extends ConsumerState<_PosReceiptDialog> {
 
               const SizedBox(height: 12),
 
-              // ---- Secondary: Share + New ----
               Row(
                 children: <Widget>[
                   Expanded(
