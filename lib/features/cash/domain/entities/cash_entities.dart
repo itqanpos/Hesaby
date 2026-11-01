@@ -79,6 +79,7 @@ class CashTransaction extends Equatable {
     required this.companyId,
     required this.accountId,
     required this.accountName,
+    required this.accountType, // ✅ نوع الحساب
     required this.direction,
     required this.amount,
     required this.sourceType,
@@ -96,6 +97,7 @@ class CashTransaction extends Equatable {
   final String companyId;
   final String accountId;
   final String accountName;
+  final CashAccountType accountType; // ✅ نوع الحساب
   final String? shiftId;
   final String? branchId;
   final String? categoryId;
@@ -168,7 +170,7 @@ class Shift extends Equatable {
   final double? expectedClosingBalance;
   final double? actualClosingBalance;
   final double? difference;
-  final String status; // 'open' | 'closed'
+  final String status;
   final String? notes;
 
   bool get isOpen => status == 'open';
