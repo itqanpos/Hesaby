@@ -16,7 +16,7 @@ abstract final class PdfReceiptBuilder {
   // ✅ زيادة الارتفاع لضمان عدم قص الأصناف (200 مم أساسي + 20 مم لكل صنف)
   static double _calculateHeight(int lineCount, ReceiptPaperSize size) {
     if (size == ReceiptPaperSize.a4) return PdfPageFormat.a4.height;
-    
+
     final double baseMm = 200.0 + (lineCount * 20.0);
     return baseMm * PdfPageFormat.mm;
   }
@@ -33,10 +33,16 @@ abstract final class PdfReceiptBuilder {
     final double padding;
     switch (size) {
       case ReceiptPaperSize.mm58:
-        pageFormat = PdfPageFormat(58 * PdfPageFormat.mm, _calculateHeight(receipt.lines.length, size));
+        pageFormat = PdfPageFormat(
+          58 * PdfPageFormat.mm,
+          _calculateHeight(receipt.lines.length, size),
+        );
         padding = 4;
       case ReceiptPaperSize.mm80:
-        pageFormat = PdfPageFormat(80 * PdfPageFormat.mm, _calculateHeight(receipt.lines.length, size));
+        pageFormat = PdfPageFormat(
+          80 * PdfPageFormat.mm,
+          _calculateHeight(receipt.lines.length, size),
+        );
         padding = 6;
       case ReceiptPaperSize.a4:
         pageFormat = PdfPageFormat.a4;
@@ -93,8 +99,12 @@ abstract final class PdfReceiptBuilder {
         branchName: receipt.branchName,
         address: receipt.companyAddress,
         phone: receipt.companyPhone,
-        taxNumber: receipt.hasTaxNumberToPrint ? receipt.companyTaxNumber : null,
-        commercialRegister: receipt.hasCommercialRegisterToPrint ? receipt.companyCommercialRegister : null,
+        taxNumber: receipt.hasTaxNumberToPrint
+            ? receipt.companyTaxNumber
+            : null,
+        commercialRegister: receipt.hasCommercialRegisterToPrint
+            ? receipt.companyCommercialRegister
+            : null,
         style: style,
         logoBytes: logoBytes,
         logoWidth: logoWidth,
@@ -115,24 +125,38 @@ abstract final class PdfReceiptBuilder {
     ];
   }
 
-  static pw.Widget _metaBlock(Receipt receipt, _Sizes s, PrintStyleSettings style) {
+  static pw.Widget _metaBlock(
+    Receipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
     return pw.Column(
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
-        _metaRow('رقم الفاتورة', receipt.invoiceNumber ?? '—', s, style, emphasized: true),
+        _metaRow('رقم الفاتورة', receipt.invoiceNumber ?? '—', s, style,
+            emphasized: true),
         _metaRow('التاريخ', PdfSharedFormat.dayDate(receipt.dateTime), s, style),
-        if (receipt.cashierName != null && receipt.cashierName!.trim().isNotEmpty)
+        if (receipt.cashierName != null &&
+            receipt.cashierName!.trim().isNotEmpty)
           _metaRow('الكاشير', receipt.cashierName!, s, style),
         if (receipt.hasCustomer) ...<pw.Widget>[
           _metaRow('العميل', receipt.customerName!, s, style),
-          if (receipt.hasCustomerAddress) _metaRow('عنوان العميل', receipt.customerAddress!, s, style),
-          if (receipt.hasCustomerPhone) _metaRow('هاتف العميل', receipt.customerPhone!, s, style),
+          if (receipt.hasCustomerAddress)
+            _metaRow('عنوان العميل', receipt.customerAddress!, s, style),
+          if (receipt.hasCustomerPhone)
+            _metaRow('هاتف العميل', receipt.customerPhone!, s, style),
         ],
       ],
     );
   }
 
-  static pw.Widget _metaRow(String label, String value, _Sizes s, PrintStyleSettings style, {bool emphasized = false}) {
+  static pw.Widget _metaRow(
+    String label,
+    String value,
+    _Sizes s,
+    PrintStyleSettings style, {
+    bool emphasized = false,
+  }) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 1),
       child: pw.Row(
@@ -142,7 +166,11 @@ abstract final class PdfReceiptBuilder {
             width: 65,
             child: pw.Text(
               PdfSharedFormat.norm('$label:'),
-              style: pw.TextStyle(fontSize: s.meta, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: true)),
+              style: pw.TextStyle(
+                fontSize: s.meta,
+                color: PdfColors.black,
+                fontWeight: PdfSharedStyle.weight(style, emphasized: true),
+              ),
               textAlign: pw.TextAlign.right,
             ),
           ),
@@ -150,7 +178,12 @@ abstract final class PdfReceiptBuilder {
           pw.Expanded(
             child: pw.Text(
               PdfSharedFormat.norm(value),
-              style: pw.TextStyle(fontSize: s.meta, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)),
+              style: pw.TextStyle(
+                fontSize: s.meta,
+                color: PdfColors.black,
+                fontWeight:
+                    PdfSharedStyle.weight(style, emphasized: emphasized),
+              ),
               textAlign: pw.TextAlign.left,
             ),
           ),
@@ -159,8 +192,13 @@ abstract final class PdfReceiptBuilder {
     );
   }
 
-  static pw.Widget _itemsTable(Receipt receipt, _Sizes s, PrintStyleSettings style) {
-    final Map<int, pw.TableColumnWidth> columnWidths = <int, pw.TableColumnWidth>{
+  static pw.Widget _itemsTable(
+    Receipt receipt,
+    _Sizes s,
+    PrintStyleSettings style,
+  ) {
+    final Map<int, pw.TableColumnWidth> columnWidths =
+        <int, pw.TableColumnWidth>{
       0: pw.FlexColumnWidth(1.4),
       1: pw.FlexColumnWidth(1.2),
       2: pw.FlexColumnWidth(1.3),
@@ -169,17 +207,43 @@ abstract final class PdfReceiptBuilder {
     };
 
     double totalQuantity = 0;
-    for (final line in receipt.lines) { totalQuantity += line.quantity; }
+    for (final line in receipt.lines) {
+      totalQuantity += line.quantity;
+    }
 
     final List<pw.TableRow> rows = <pw.TableRow>[
       pw.TableRow(
         decoration: PdfSharedTable.headerDecoration,
         children: <pw.Widget>[
-          _cell('الإجمالي', fontSize: s.tableHeader, emphasized: true, center: true, s: s, style: style),
-          _cell('السعر', fontSize: s.tableHeader, emphasized: true, center: true, s: s, style: style),
-          _cell('الكمية', fontSize: s.tableHeader, emphasized: true, center: true, s: s, style: style),
-          _cell('الصنف', fontSize: s.tableHeader, emphasized: true, s: s, style: style),
-          _cell('م', fontSize: s.tableHeader, emphasized: true, center: true, s: s, style: style),
+          _cell('الإجمالي',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell('السعر',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell('الكمية',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell('الصنف',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              s: s,
+              style: style),
+          _cell('م',
+              fontSize: s.tableHeader,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
         ],
       ),
     ];
@@ -188,11 +252,24 @@ abstract final class PdfReceiptBuilder {
       final ReceiptLine line = receipt.lines[i];
       rows.add(pw.TableRow(
         children: <pw.Widget>[
-          _cell(_money(line.lineTotal, receipt), fontSize: s.tableRow, emphasized: true, center: true, s: s, style: style),
-          _cell(_money(line.unitPrice, receipt), fontSize: s.tableRow, center: true, s: s, style: style),
-          _cell('${PdfSharedFormat.quantity(line.quantity)} ${line.unitName}', fontSize: s.tableRow, center: true, s: s, style: style),
-          _cell(line.productName, fontSize: s.tableRow, s: s, style: style),
-          _cell('${i + 1}', fontSize: s.tableRow, center: true, s: s, style: style),
+          _cell(_money(line.lineTotal, receipt),
+              fontSize: s.tableRow,
+              emphasized: true,
+              center: true,
+              s: s,
+              style: style),
+          _cell(_money(line.unitPrice, receipt),
+              fontSize: s.tableRow, center: true, s: s, style: style),
+          _cell(
+              '${PdfSharedFormat.quantity(line.quantity)} ${line.unitName}',
+              fontSize: s.tableRow,
+              center: true,
+              s: s,
+              style: style),
+          _cell(line.productName,
+              fontSize: s.tableRow, s: s, style: style),
+          _cell('${i + 1}',
+              fontSize: s.tableRow, center: true, s: s, style: style),
         ],
       ));
     }
@@ -200,16 +277,29 @@ abstract final class PdfReceiptBuilder {
     rows.add(pw.TableRow(
       decoration: PdfSharedTable.totalsDecoration,
       children: <pw.Widget>[
-        _cell(_money(receipt.subtotal, receipt), fontSize: s.tableRow, emphasized: true, center: true, s: s, style: style),
+        _cell(_money(receipt.subtotal, receipt),
+            fontSize: s.tableRow,
+            emphasized: true,
+            center: true,
+            s: s,
+            style: style),
         _cell('', fontSize: s.tableRow, s: s, style: style),
-        _cell(PdfSharedFormat.quantity(totalQuantity), fontSize: s.tableRow, center: true, s: s, style: style),
-        _cell('المجموع الفرعي', fontSize: s.tableRow, emphasized: true, s: s, style: style),
+        _cell(PdfSharedFormat.quantity(totalQuantity),
+            fontSize: s.tableRow, center: true, s: s, style: style),
+        _cell('المجموع الفرعي',
+            fontSize: s.tableRow, emphasized: true, s: s, style: style),
         _cell('', fontSize: s.tableRow, s: s, style: style),
       ],
     ));
 
-    if (receipt.hasDiscountToPrint) { rows.add(_summaryRow('الخصم', '- ${_money(receipt.discount, receipt)}', s, style)); }
-    if (receipt.hasTaxToPrint) { rows.add(_summaryRow('الضريبة', _money(receipt.taxAmount, receipt), s, style)); }
+    if (receipt.hasDiscountToPrint) {
+      rows.add(_summaryRow(
+          'الخصم', '- ${_money(receipt.discount, receipt)}', s, style));
+    }
+    if (receipt.hasTaxToPrint) {
+      rows.add(
+          _summaryRow('الضريبة', _money(receipt.taxAmount, receipt), s, style));
+    }
 
     return pw.Table(
       border: PdfSharedTable.border,
@@ -219,28 +309,46 @@ abstract final class PdfReceiptBuilder {
     );
   }
 
-  static pw.TableRow _summaryRow(String label, String value, _Sizes s, PrintStyleSettings style) {
+  static pw.TableRow _summaryRow(
+      String label, String value, _Sizes s, PrintStyleSettings style) {
     return pw.TableRow(children: <pw.Widget>[
-      _cell(value, fontSize: s.tableRow, emphasized: true, center: true, s: s, style: style),
+      _cell(value,
+          fontSize: s.tableRow,
+          emphasized: true,
+          center: true,
+          s: s,
+          style: style),
       _cell('', fontSize: s.tableRow, s: s, style: style),
       _cell('', fontSize: s.tableRow, s: s, style: style),
-      _cell(label, fontSize: s.tableRow, emphasized: true, s: s, style: style),
+      _cell(label,
+          fontSize: s.tableRow, emphasized: true, s: s, style: style),
       _cell('', fontSize: s.tableRow, s: s, style: style),
     ]);
   }
 
-  static pw.Widget _cell(String text, {required double fontSize, required _Sizes s, required PrintStyleSettings style, bool emphasized = false, bool center = false}) {
+  static pw.Widget _cell(
+    String text, {
+    required double fontSize,
+    required _Sizes s,
+    required PrintStyleSettings style,
+    bool emphasized = false,
+    bool center = false,
+  }) {
     return pw.Padding(
       padding: pw.EdgeInsets.symmetric(horizontal: 2, vertical: 3),
       child: pw.Text(
         PdfSharedFormat.norm(text),
-        style: pw.TextStyle(fontSize: fontSize, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)),
+        style: pw.TextStyle(
+            fontSize: fontSize,
+            color: PdfColors.black,
+            fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)),
         textAlign: center ? pw.TextAlign.center : pw.TextAlign.right,
       ),
     );
   }
 
-  static pw.Widget _totalsSection(Receipt receipt, _Sizes s, PrintStyleSettings style) {
+  static pw.Widget _totalsSection(
+      Receipt receipt, _Sizes s, PrintStyleSettings style) {
     final double totalOwed = receipt.total + (receipt.previousBalance ?? 0);
     final double newBalance = receipt.newBalance ?? 0;
 
@@ -248,53 +356,119 @@ abstract final class PdfReceiptBuilder {
       crossAxisAlignment: pw.CrossAxisAlignment.stretch,
       children: <pw.Widget>[
         _kvRow('الإجمالي الحالي', _money(receipt.total, receipt), s, style),
-        if (receipt.hasCustomer && (receipt.previousBalance ?? 0) != 0) ...<pw.Widget>[
+        if (receipt.hasCustomer && (receipt.previousBalance ?? 0) != 0) ...<
+            pw.Widget>[
           pw.SizedBox(height: 4),
-          _kvRow('الرصيد السابق', _money(receipt.previousBalance!.abs(), receipt), s, style),
+          _kvRow('الرصيد السابق',
+              _money(receipt.previousBalance!.abs(), receipt), s, style),
         ],
         pw.SizedBox(height: 6),
         pw.Container(
           padding: pw.EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-          decoration: pw.BoxDecoration(border: pw.Border.all(color: PdfColors.black, width: 1)),
+          decoration: pw.BoxDecoration(
+              border: pw.Border.all(color: PdfColors.black, width: 1)),
           child: pw.Row(children: <pw.Widget>[
-            pw.Expanded(child: pw.Text(
-              ((receipt.previousBalance ?? 0) != 0) ? 'الإجمالي الكلي' : 'إجمالي الفاتورة',
-              style: pw.TextStyle(fontSize: s.grandTotal, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: true)),
-            )),
-            pw.Text(_money(totalOwed, receipt), style: pw.TextStyle(fontSize: s.grandTotal, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: true))),
+            pw.Expanded(
+              child: pw.Text(
+                ((receipt.previousBalance ?? 0) != 0)
+                    ? 'الإجمالي الكلي'
+                    : 'إجمالي الفاتورة',
+                style: pw.TextStyle(
+                    fontSize: s.grandTotal,
+                    color: PdfColors.black,
+                    fontWeight:
+                        PdfSharedStyle.weight(style, emphasized: true)),
+              ),
+            ),
+            pw.Text(_money(totalOwed, receipt),
+                style: pw.TextStyle(
+                    fontSize: s.grandTotal,
+                    color: PdfColors.black,
+                    fontWeight:
+                        PdfSharedStyle.weight(style, emphasized: true))),
           ]),
         ),
         pw.SizedBox(height: 6),
-        _kvRow('طريقة الدفع', _paymentMethodLabel(receipt), s, style),
+
+        // ⬇️ قسم الدفع (معدّل للدفع المختلط)
+        if (receipt.hasPayments) ...<pw.Widget>[
+          if (receipt.payments.length == 1)
+            // دفعة واحدة: عرض طريقة الدفع فقط (المبلغ يظهر في "المدفوع")
+            _kvRow(
+              'طريقة الدفع',
+              _methodLabel(receipt.payments.first.method),
+              s,
+              style,
+            )
+          else ...<pw.Widget>[
+            // دفعات متعددة: سطر لكل طريقة مع مبلغها
+            _kvRow('تفاصيل الدفع', '', s, style, emphasized: false),
+            for (final ReceiptPayment p in receipt.payments)
+              _kvRow(
+                '  · ${_methodLabel(p.method)}',
+                _money(p.amount, receipt),
+                s,
+                style,
+              ),
+          ],
+        ] else
+          _kvRow('طريقة الدفع', 'آجل', s, style),
+
         pw.SizedBox(height: 4),
         _kvRow('المدفوع', _money(receipt.paidAmount, receipt), s, style),
         if (receipt.hasBalanceChange) ...<pw.Widget>[
           pw.SizedBox(height: 6),
           _divider(),
           pw.SizedBox(height: 6),
-          if (newBalance > 0) _kvRow('الرصيد الجديد على العميل', _money(newBalance, receipt), s, style, emphasized: true)
-          else if (newBalance < 0) _kvRow('الرصيد الجديد (له عندنا)', _money(newBalance.abs(), receipt), s, style, emphasized: true)
-          else _kvRow('الرصيد الجديد', _money(0, receipt), s, style, emphasized: true),
+          if (newBalance > 0)
+            _kvRow('الرصيد الجديد على العميل', _money(newBalance, receipt), s,
+                style,
+                emphasized: true)
+          else if (newBalance < 0)
+            _kvRow('الرصيد الجديد (له عندنا)',
+                _money(newBalance.abs(), receipt), s, style,
+                emphasized: true)
+          else
+            _kvRow('الرصيد الجديد', _money(0, receipt), s, style,
+                emphasized: true),
         ],
       ],
     );
   }
 
-  static pw.Widget _kvRow(String label, String value, _Sizes s, PrintStyleSettings style, {bool emphasized = false}) {
+  static pw.Widget _kvRow(
+      String label, String value, _Sizes s, PrintStyleSettings style,
+      {bool emphasized = false}) {
     return pw.Padding(
       padding: const pw.EdgeInsets.symmetric(vertical: 1),
       child: pw.Row(children: <pw.Widget>[
-        pw.Expanded(child: pw.Text(PdfSharedFormat.norm(label), style: pw.TextStyle(fontSize: s.kvLabel, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: true)))),
-        pw.Text(PdfSharedFormat.norm(value), style: pw.TextStyle(fontSize: emphasized ? s.kvValueLarge : s.kvValue, color: PdfColors.black, fontWeight: PdfSharedStyle.weight(style, emphasized: emphasized)), textAlign: pw.TextAlign.left),
+        pw.Expanded(
+            child: pw.Text(PdfSharedFormat.norm(label),
+                style: pw.TextStyle(
+                    fontSize: s.kvLabel,
+                    color: PdfColors.black,
+                    fontWeight:
+                        PdfSharedStyle.weight(style, emphasized: true)))),
+        pw.Text(PdfSharedFormat.norm(value),
+            style: pw.TextStyle(
+                fontSize: emphasized ? s.kvValueLarge : s.kvValue,
+                color: PdfColors.black,
+                fontWeight:
+                    PdfSharedStyle.weight(style, emphasized: emphasized)),
+            textAlign: pw.TextAlign.left),
       ]),
     );
   }
 
-  static pw.Widget _footer(Receipt receipt, _Sizes s, PrintStyleSettings style) {
+  static pw.Widget _footer(
+      Receipt receipt, _Sizes s, PrintStyleSettings style) {
     return pw.Center(
       child: pw.Text(
         PdfSharedFormat.norm(_footerText(receipt)),
-        style: pw.TextStyle(fontSize: s.footer, color: PdfColors.black, fontStyle: pw.FontStyle.italic),
+        style: pw.TextStyle(
+            fontSize: s.footer,
+            color: PdfColors.black,
+            fontStyle: pw.FontStyle.italic),
         textAlign: pw.TextAlign.center,
       ),
     );
@@ -307,29 +481,70 @@ abstract final class PdfReceiptBuilder {
   }
 
   static pw.Widget _divider({bool double = false}) {
-    if (double) return pw.Column(crossAxisAlignment: pw.CrossAxisAlignment.stretch, children: <pw.Widget>[_singleRule(), pw.SizedBox(height: 2), _singleRule()]);
+    if (double) {
+      return pw.Column(
+          crossAxisAlignment: pw.CrossAxisAlignment.stretch,
+          children: <pw.Widget>[
+            _singleRule(),
+            pw.SizedBox(height: 2),
+            _singleRule()
+          ]);
+    }
     return _singleRule();
   }
 
-  static pw.Widget _singleRule() => pw.Container(height: 0.6, color: PdfColors.grey600);
+  static pw.Widget _singleRule() =>
+      pw.Container(height: 0.6, color: PdfColors.grey600);
 
-  static String _money(double value, Receipt receipt) => ReceiptNumberFormat.money(value, currency: '');
+  static String _money(double value, Receipt receipt) =>
+      ReceiptNumberFormat.money(value, currency: '');
 
-  static String _paymentMethodLabel(Receipt receipt) {
-    if (receipt.paidAmount <= 0) return 'آجل';
-    if (receipt.paidAmount >= receipt.total) return 'نقدي';
-    return 'نقدي (جزئي)';
-  }
+  // ✅ بديل `_paymentMethodLabel` القديم: يحول كود الطريقة إلى تسمية عربية
+  static String _methodLabel(String method) => switch (method) {
+        'cash' => 'نقدي',
+        'card' => 'بطاقة',
+        'instapay' => 'InstaPay',
+        'bank_transfer' => 'تحويل بنكي',
+        _ => 'أخرى',
+      };
 }
 
 class _Sizes {
-  const _Sizes({required this.meta, required this.tableHeader, required this.tableRow, required this.grandTotal, required this.kvLabel, required this.kvValue, required this.kvValueLarge, required this.footer, required this.sectionGap});
+  const _Sizes({
+    required this.meta,
+    required this.tableHeader,
+    required this.tableRow,
+    required this.grandTotal,
+    required this.kvLabel,
+    required this.kvValue,
+    required this.kvValueLarge,
+    required this.footer,
+    required this.sectionGap,
+  });
 
   factory _Sizes.forSize(ReceiptPaperSize size) {
     if (size == ReceiptPaperSize.a4) {
-      return const _Sizes(meta: 10, tableHeader: 10, tableRow: 10, grandTotal: 14, kvLabel: 11, kvValue: 11, kvValueLarge: 13, footer: 10, sectionGap: 10);
+      return const _Sizes(
+          meta: 10,
+          tableHeader: 10,
+          tableRow: 10,
+          grandTotal: 14,
+          kvLabel: 11,
+          kvValue: 11,
+          kvValueLarge: 13,
+          footer: 10,
+          sectionGap: 10);
     }
-    return const _Sizes(meta: 8, tableHeader: 8, tableRow: 8, grandTotal: 11, kvLabel: 9, kvValue: 9, kvValueLarge: 10, footer: 8, sectionGap: 6);
+    return const _Sizes(
+        meta: 8,
+        tableHeader: 8,
+        tableRow: 8,
+        grandTotal: 11,
+        kvLabel: 9,
+        kvValue: 9,
+        kvValueLarge: 10,
+        footer: 8,
+        sectionGap: 6);
   }
 
   final double meta;
