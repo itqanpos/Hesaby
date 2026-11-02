@@ -1,0 +1,35 @@
+name: Generate Drift Code
+
+on:
+  workflow_dispatch: # يسمح بالتشغيل اليدوي من واجهة GitHub
+  push:
+    branches:
+      - feature/offline-first # يعمل تلقائياً عند الرفع على هذا الفرع
+
+jobs:
+  build_runner:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install dependencies
+        run: flutter pub get
+
+      - name: Run Build Runner
+        run: dart run build_runner build --delete-conflicting-outputs
+
+      # (اختياري) رفع الملفات المولدة كـ Artifact لتنزيلها
+      - name: Upload generated files
+        uses: actions/upload-artifact@v4
+        with:
+          name: generated-files
+          path: |
+            lib/**/*.g.dart
+            lib/**/*.freezed.dart
