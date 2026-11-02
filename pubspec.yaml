@@ -13,55 +13,28 @@ dependencies:
   flutter_localizations:
     sdk: flutter
 
-  # State management
   flutter_riverpod: ^2.6.1
-
-  # Routing
   go_router: ^14.6.2
-
-  # Backend
   supabase_flutter: ^2.8.0
-
-  # Storage
   flutter_secure_storage: ^9.2.2
   shared_preferences: ^2.3.3
-
-  # UI
   google_fonts: ^6.2.1
-
-  # Utilities
   intl: ^0.20.3
   logger: ^2.4.0
   equatable: ^2.0.5
   uuid: ^4.5.1
-
-  # External links
   url_launcher: ^6.3.1
-
-  # Media & imaging
   mobile_scanner: 7.1.2
   image_picker: ^1.1.2
-
-  # POS — printing
   printing: ^5.13.4
   pdf: ^3.11.1
   image: ^4.2.0
   flutter_pos_printer_platform_image_3: ^1.2.0
   esc_pos_utils_plus: ^2.0.4
-
-  # ✅ حزم المشاركة والملفات (جديدة)
   share_plus: ^10.1.2
   path_provider: ^2.1.5
-
-  # Offline support (Drift + Connectivity)
   connectivity_plus: ^6.1.0
-  drift: ^2.35.3
-  drift_flutter: ^0.3.1
-
-  # App version info (for update notifications)
   package_info_plus: ^8.1.0
-
-  # ⬇️ صوت الباركود (WAV مولد برمجياً، بدون ملف خارجي)
   audioplayers: ^6.1.0
 
 dev_dependencies:
@@ -71,12 +44,7 @@ dev_dependencies:
   flutter_launcher_icons: ^0.14.1
   flutter_native_splash: ^2.4.3
 
-  # Drift Code Generation
-  drift_dev: ^2.35.2
-  build_runner: ^2.4.15
-
 flutter:
   uses-material-design: true
-
   assets:
     - assets/images/
