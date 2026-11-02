@@ -1,5 +1,6 @@
 // lib/data/local/daos/products_dao.dart
 
+import 'dart:convert';
 import 'package:drift/drift.dart';
 import 'package:uuid/uuid.dart';
 
@@ -12,6 +13,9 @@ import '../../../features/products/domain/entities/product.dart';
 
 part 'products_dao.g.dart';
 
+/// DAO (Data Access Object) for the `products` table.
+///
+/// Handles all local read/write operations for products.
 @DriftAccessor(tables: [ProductsTable, OutboxTable])
 class ProductsDao extends DatabaseAccessor<AppDatabase>
     with _$ProductsDaoMixin {
@@ -23,6 +27,8 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
   // Read Operations
   // ---------------------------------------------------------------------------
 
+  /// Watches the list of products for a specific company.
+  /// Used by Riverpod StreamProviders to auto-update the UI.
   Stream<List<Product>> watchProducts({
     required String companyId,
     bool includeInactive = false,
@@ -62,6 +68,7 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
         rows.map((ProductRow row) => row.toEntity()).toList(growable: false));
   }
 
+  /// Gets a single product by its ID.
   Future<Product?> getProductById(String productId) async {
     final ProductRow? row = await (select(productsTable)
           ..where((t) => t.id.equals(productId)))
@@ -69,6 +76,7 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
     return row?.toEntity();
   }
 
+  /// Gets a product by barcode (useful for POS scanning).
   Future<Product?> getProductByBarcode({
     required String companyId,
     required String barcode,
@@ -81,15 +89,19 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
   }
 
   // ---------------------------------------------------------------------------
-  // Write Operations
+  // Write Operations (with Outbox)
   // ---------------------------------------------------------------------------
 
+  /// Creates a new product locally and enqueues the operation in the outbox.
   Future<void> createProduct({
     required ProductsTableCompanion product,
     required String productPayload,
   }) async {
     await transaction(() async {
+      // 1. Insert into local products table
       await into(productsTable).insert(product);
+
+      // 2. Insert into outbox
       await _enqueueOutbox(
         companyId: product.companyId.value,
         operation: 'insert',
@@ -99,13 +111,17 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
     });
   }
 
+  /// Updates an existing product locally and enqueues the operation.
   Future<void> updateProduct({
     required ProductsTableCompanion product,
     required String productPayload,
   }) async {
     await transaction(() async {
+      // 1. Update local products table
       await (update(productsTable)..where((t) => t.id.equals(product.id.value)))
           .write(product);
+
+      // 2. Insert into outbox
       await _enqueueOutbox(
         companyId: product.companyId.value,
         operation: 'update',
@@ -115,12 +131,16 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
     });
   }
 
+  /// Deletes a product locally and enqueues the delete operation.
   Future<void> deleteProduct({
     required String productId,
     required String companyId,
   }) async {
     await transaction(() async {
+      // 1. Delete from local products table
       await (delete(productsTable)..where((t) => t.id.equals(productId))).go();
+
+      // 2. Insert into outbox
       await _enqueueOutbox(
         companyId: companyId,
         operation: 'delete',
@@ -129,6 +149,10 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
       );
     });
   }
+
+  // ---------------------------------------------------------------------------
+  // Internal Helpers
+  // ---------------------------------------------------------------------------
 
   Future<void> _enqueueOutbox({
     required String companyId,
@@ -140,7 +164,7 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
       OutboxTableCompanion.insert(
         id: _uuid.v4(),
         companyId: companyId,
-        targetTable: 'products',
+        targetTable: 'products', // ✅ اسم الجدول في Supabase
         operation: operation,
         recordId: recordId,
         payload: payload,
@@ -152,7 +176,10 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
   }
 }
 
-// ✅ إضافة Extension لتحويل ProductRow (Drift) إلى Product (Domain)
+// ============================================================================
+// Extensions for Mapping
+// ============================================================================
+
 extension ProductRowMapper on ProductRow {
   Product toEntity() {
     return Product(
@@ -173,5 +200,51 @@ extension ProductRowMapper on ProductRow {
       maxSellingPrice: maxSellingPrice,
       taxRate: taxRate,
     );
+  }
+}
+
+extension ProductDomainMapper on Product {
+  /// يحول الكيان إلى Companion لاستخدامه في Drift
+  ProductsTableCompanion toCompanion() {
+    return ProductsTableCompanion(
+      id: Value(id),
+      companyId: Value(companyId),
+      defaultUnitId: Value(defaultUnitId),
+      name: Value(name),
+      costPrice: Value(costPrice),
+      sellingPrice: Value(sellingPrice),
+      isActive: Value(isActive),
+      createdAt: Value(createdAt),
+      updatedAt: Value(updatedAt),
+      categoryId: Value(categoryId),
+      sku: Value(sku),
+      barcode: Value(barcode),
+      description: Value(description),
+      minSellingPrice: Value(minSellingPrice),
+      maxSellingPrice: Value(maxSellingPrice),
+      taxRate: Value(taxRate),
+    );
+  }
+
+  /// يحول الكيان إلى JSON لإرساله في الـ Outbox (متوافق مع Supabase snake_case)
+  String toJsonPayload() {
+    return jsonEncode({
+      'id': id,
+      'company_id': companyId,
+      'default_unit_id': defaultUnitId,
+      'name': name,
+      'cost_price': costPrice,
+      'selling_price': sellingPrice,
+      'is_active': isActive,
+      'created_at': createdAt.toIso8601String(),
+      'updated_at': updatedAt.toIso8601String(),
+      'category_id': categoryId,
+      'sku': sku,
+      'barcode': barcode,
+      'description': description,
+      'min_selling_price': minSellingPrice,
+      'max_selling_price': maxSellingPrice,
+      'tax_rate': taxRate,
+    });
   }
 }
