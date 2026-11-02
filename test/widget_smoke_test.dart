@@ -1,50 +1,30 @@
 // test/widget_smoke_test.dart
 
-import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hesabi/app/app.dart';
-import 'package:hesabi/data/local/app_database.dart';
-import 'package:hesabi/data/local/sync/sync_service.dart';
 import 'package:hesabi/features/auth/presentation/pages/login_page.dart';
 import 'package:hesabi/shared/layouts/app_shell.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'package:supabase_flutter/supabase_flutter.dart';
 
+/// Smoke test: verifies that the application boots without framework or
+/// provider errors and settles on the screen produced by the current router
+/// configuration for an unauthenticated session.
+///
+/// After Phase 1, HESABI's router redirects unauthenticated users to the
+/// login screen. This test intentionally does NOT mock authentication: it
+/// lets the real [authProvider] resolve to its default `unauthenticated`
+/// state (no Supabase session is available in a test environment) and
+/// asserts that the router lands on [LoginPage] without throwing.
 void main() {
-  setUpAll(() async {
-    // ✅ 1. تهيئة SharedPreferences بشكل وهمي لتجنب أخطاء المنصة
-    SharedPreferences.setMockInitialValues({});
-    
-    // ✅ 2. تهيئة Supabase بشكل وهمي مع تعطيل المؤقت (Auto Refresh)
-    await Supabase.initialize(
-      url: 'https://dummy.supabase.co',
-      publishableKey: 'dummy_key', // ✅ استخدام publishableKey بدلاً من anonKey
-      authOptions: const FlutterAuthClientOptions( // ✅ استخدام FlutterAuthClientOptions
-        autoRefreshToken: false,
-      ),
-    );
-  });
-
   testWidgets(
     'HesabiApp boots without errors and lands on the login page',
     (WidgetTester tester) async {
-      // ✅ 3. استخدام قاعدة بيانات في الذاكرة
-      final AppDatabase db = AppDatabase(NativeDatabase.memory());
-      addTearDown(() => db.close());
+      await tester.pumpWidget(const ProviderScope(child: HesabiApp()));
 
-      await tester.pumpWidget(
-        ProviderScope(
-          overrides: [
-            appDatabaseProvider.overrideWithValue(db),
-            // ✅ 4. استخدام خدمة مزامنة وهمية لا تتصل بالشبكة
-            syncServiceProvider.overrideWith((ref) => FakeSyncService()),
-          ],
-          child: const HesabiApp(),
-        ),
-      );
-
-      // Give the router enough frames to resolve the initial redirect chain
+      // Give the router enough frames to resolve the initial redirect
+      // chain (unknown -> /loading -> unauthenticated -> /login). Each
+      // pump advances a frame and flushes pending microtasks, so a handful
+      // of short pumps covers the asynchronous session restore.
       for (int i = 0; i < 5; i++) {
         await tester.pump(const Duration(milliseconds: 16));
       }
@@ -56,19 +36,4 @@ void main() {
       expect(find.byType(AppShell), findsOneWidget);
     },
   );
-}
-
-/// ✅ كلاس وهمي يطبق واجهة SyncService بدون أي عمليات شبكة أو مؤقتات
-class FakeSyncService implements SyncService {
-  @override
-  Stream<SyncStatus> get statusStream => const Stream.empty();
-
-  @override
-  SyncStatus get currentStatus => SyncStatus.idle;
-
-  @override
-  Future<void> processOutbox() async {}
-
-  @override
-  void dispose() {}
 }
