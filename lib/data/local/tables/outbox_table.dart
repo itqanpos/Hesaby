@@ -29,7 +29,9 @@ class OutboxTable extends Table {
   TextColumn get companyId => text()();
 
   /// The name of the target table in Supabase (e.g., 'products', 'customers').
-  TextColumn get tableName => text()();
+  /// Note: We use `targetTable` in Dart to avoid clashing with Drift's built-in
+  /// `tableName` property. The SQL column name remains `table_name`.
+  TextColumn get targetTable => text().named('table_name')();
 
   /// The operation type: 'insert', 'update', 'delete'.
   TextColumn get operation => text()();
