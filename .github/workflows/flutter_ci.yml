@@ -1,37 +1,3 @@
-# ============================================================================
-# HESABI — Continuous Integration
-# ----------------------------------------------------------------------------
-# Verifies every change pushed to `main` / `develop` and every pull request
-# targeting those branches. Runs on Flutter stable.
-#
-# This project is Flutter/Dart only. It does NOT use Node.js or npm.
-# Do not add `actions/setup-node`, `npm ci`, `yarn`, or npm caching here.
-# Adding npm caching without a package-lock.json causes the CI to fail with
-# "Dependencies lock file is not found".
-#
-# Security model:
-#   * Secrets (SUPABASE_URL, SUPABASE_ANON_KEY) are only referenced by the
-#     web build step, which runs on trusted pushes and manual dispatches.
-#   * Pull requests never depend on secrets, so forked PRs are never blocked
-#     by missing credentials.
-#   * Only the public anon / publishable Supabase key may ever be supplied.
-#     A service-role key must never reach the Flutter client.
-#
-# Branding assets:
-#   `flutter_launcher_icons` and `flutter_native_splash` regenerate the
-#   launcher icon and splash screen from assets/images/logo.png on every
-#   build. They are idempotent and cheap, so we run them here instead of
-#   committing generated binaries to the repository.
-#
-# Formatting policy:
-#   The `Verify Dart formatting` step is INFORMATIONAL. It reports which files
-#   would change under `dart format`, but it does not fail the job. This lets
-#   analyze/test reveal real issues while the codebase is progressively being
-#   formatted. Once the whole repository is formatted, remove
-#   `continue-on-error: true` and re-add `--set-exit-if-changed` to make the
-#   check strict again.
-# ============================================================================
-
 name: Flutter CI
 
 on:
@@ -39,27 +5,23 @@ on:
     branches:
       - main
       - develop
-      - feature/offline-first # ✅ تمت الإضافة لتشغيل الـ CI على فرع المزامنة
+      - feature/offline-first
   pull_request:
     branches:
       - main
       - develop
   workflow_dispatch:
 
-# Cancel superseded runs on the same branch / PR.
 concurrency:
   group: flutter-ci-${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-# Minimal default permissions: only reading repository contents.
 permissions:
   contents: read
 
 jobs:
   analyze-and-test:
     name: Analyze & Test
-    # Pinned LTS runner instead of ubuntu-latest, to avoid an unexpected
-    # migration to Ubuntu 26 while the project is still under development.
     runs-on: ubuntu-24.04
     timeout-minutes: 20
 
@@ -79,7 +41,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # ✅ [إضافة جديدة]: توليد كود Drift
       - name: Run Build Runner
         run: dart run build_runner build --delete-conflicting-outputs
 
@@ -98,8 +59,6 @@ jobs:
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     needs: analyze-and-test
-    # Only run when secrets are expected to be available:
-    # pushes to main/develop and manual dispatches, never pull requests.
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
 
     steps:
@@ -115,7 +74,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # ✅ [إضافة جديدة]: توليد كود Drift
       - name: Run Build Runner
         run: dart run build_runner build --delete-conflicting-outputs
 
@@ -125,11 +83,11 @@ jobs:
       - name: Generate native splash
         run: dart run flutter_native_splash:create
 
-      # ✅ [إضافة جديدة]: تحميل ملفات Drift المطلوبة للويب (بأحدث الإصدارات المتوافقة)
+      # ✅ تصحيح روابط التحميل حسب التوثيق الرسمي
       - name: Download Drift Web Assets
         run: |
           mkdir -p web
-          wget https://github.com/simolus3/drift/releases/download/drift-2.35.3/sqlite3.wasm -O web/sqlite3.wasm
+          wget https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-3.8.0/sqlite3.wasm -O web/sqlite3.wasm
           wget https://github.com/simolus3/drift/releases/download/drift-2.35.3/drift_worker.js -O web/drift_worker.js
 
       - name: Build Flutter Web
