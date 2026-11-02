@@ -5,15 +5,13 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/network/operation_trigger.dart';
 import '../../core/responsive/responsive_helper.dart';
-import '../../data/local/sync/sync_service.dart'; // ✅ [إضافة]: استيراد خدمة المزامنة
 import '../../features/admin/presentation/providers/admin_app_config_provider.dart';
 import '../../features/admin/presentation/providers/platform_admin_provider.dart';
-import '../widgets/company_status_banner.dart';
+import '../widgets/company_status_banner.dart'; 
 import '../widgets/sync_status_indicator.dart';
 import '../widgets/update_available_banner.dart';
 import 'app_navigation.dart';
 
-/// Standard page scaffold used across HESABI.
 class AppShell extends ConsumerWidget {
   const AppShell({
     super.key,
@@ -40,9 +38,6 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
-    // ✅ [إضافة]: تشغيل محرك المزامنة في الخلفية
-    ref.watch(syncServiceProvider);
-
     final DeviceType deviceType = context.deviceType;
     final double horizontalPadding = applyHorizontalPadding
         ? ResponsiveHelper.horizontalPadding(deviceType)
@@ -55,36 +50,19 @@ class AppShell extends ConsumerWidget {
     final bool showSidebar = includeNavigation && hasAppBar && isWide;
     final bool showDrawer = includeNavigation && hasAppBar && !isWide;
 
-    // -------------------------------------------------------------------------
-    // Maintenance mode gate
-    // -------------------------------------------------------------------------
-    final AppConfig? appConfig =
-        ref.watch(adminAppConfigProvider).valueOrNull;
+    final AppConfig? appConfig = ref.watch(adminAppConfigProvider).valueOrNull;
     final bool isAdmin = ref.watch(isPlatformAdminProvider);
-    final bool underMaintenance =
-        (appConfig?.maintenanceMode ?? false) && !isAdmin;
+    final bool underMaintenance = (appConfig?.maintenanceMode ?? false) && !isAdmin;
 
     if (underMaintenance) {
-      return _MaintenanceView(
-        message: appConfig?.maintenanceMessage ?? 'التطبيق تحت الصيانة.',
-      );
+      return _MaintenanceView(message: appConfig?.maintenanceMessage ?? 'التطبيق تحت الصيانة.');
     }
 
-    // -------------------------------------------------------------------------
-    // Announcement banner
-    // -------------------------------------------------------------------------
     final Widget? announcementBanner =
-        (appConfig?.announcementVisible ?? false) &&
-                (appConfig?.announcementText.isNotEmpty ?? false)
-            ? _AnnouncementBanner(
-                text: appConfig!.announcementText,
-                severity: appConfig.announcementSeverity,
-              )
+        (appConfig?.announcementVisible ?? false) && (appConfig?.announcementText.isNotEmpty ?? false)
+            ? _AnnouncementBanner(text: appConfig!.announcementText, severity: appConfig.announcementSeverity)
             : null;
 
-    // -------------------------------------------------------------------------
-    // Content
-    // -------------------------------------------------------------------------
     final Widget content = SafeArea(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -97,9 +75,7 @@ class AppShell extends ConsumerWidget {
             child: Center(
               child: ConstrainedBox(
                 constraints: BoxConstraints(
-                  maxWidth: constrainContentWidth
-                      ? ResponsiveHelper.contentMaxWidth
-                      : double.infinity,
+                  maxWidth: constrainContentWidth ? ResponsiveHelper.contentMaxWidth : double.infinity,
                 ),
                 child: Padding(
                   padding: EdgeInsets.symmetric(horizontal: horizontalPadding),
@@ -134,13 +110,8 @@ class AppShell extends ConsumerWidget {
   }
 }
 
-// ============================================================================
-// Maintenance View
-// ============================================================================
-
 class _MaintenanceView extends StatelessWidget {
   const _MaintenanceView({required this.message});
-
   final String message;
 
   @override
@@ -160,43 +131,16 @@ class _MaintenanceView extends StatelessWidget {
                 mainAxisSize: MainAxisSize.min,
                 children: <Widget>[
                   Container(
-                    width: 96,
-                    height: 96,
-                    decoration: BoxDecoration(
-                      color: scheme.primaryContainer,
-                      borderRadius: BorderRadius.circular(28),
-                    ),
-                    child: Icon(
-                      Icons.engineering_outlined,
-                      size: 56,
-                      color: scheme.onPrimaryContainer,
-                    ),
+                    width: 96, height: 96,
+                    decoration: BoxDecoration(color: scheme.primaryContainer, borderRadius: BorderRadius.circular(28)),
+                    child: Icon(Icons.engineering_outlined, size: 56, color: scheme.onPrimaryContainer),
                   ),
                   const SizedBox(height: 24),
-                  Text(
-                    'التطبيق تحت الصيانة',
-                    style: theme.textTheme.headlineSmall?.copyWith(
-                      fontWeight: FontWeight.w800,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+                  Text('التطبيق تحت الصيانة', style: theme.textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800), textAlign: TextAlign.center),
                   const SizedBox(height: 12),
-                  Text(
-                    message,
-                    style: theme.textTheme.bodyLarge?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+                  Text(message, style: theme.textTheme.bodyLarge?.copyWith(color: scheme.onSurfaceVariant), textAlign: TextAlign.center),
                   const SizedBox(height: 24),
-                  Text(
-                    'سنعود قريباً — شكراً لصبركم.',
-                    style: theme.textTheme.bodyMedium?.copyWith(
-                      color: scheme.onSurfaceVariant,
-                      fontStyle: FontStyle.italic,
-                    ),
-                    textAlign: TextAlign.center,
-                  ),
+                  Text('سنعود قريباً — شكراً لصبركم.', style: theme.textTheme.bodyMedium?.copyWith(color: scheme.onSurfaceVariant, fontStyle: FontStyle.italic), textAlign: TextAlign.center),
                 ],
               ),
             ),
@@ -207,44 +151,21 @@ class _MaintenanceView extends StatelessWidget {
   }
 }
 
-// ============================================================================
-// Announcement Banner
-// ============================================================================
-
 class _AnnouncementBanner extends StatelessWidget {
-  const _AnnouncementBanner({
-    required this.text,
-    required this.severity,
-  });
-
+  const _AnnouncementBanner({required this.text, required this.severity});
   final String text;
   final String severity;
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
-
-    final Color bg;
-    final Color fg;
-    final IconData icon;
+    final Color bg; final Color fg; final IconData icon;
 
     switch (severity) {
-      case 'critical':
-        bg = const Color(0xFFC62828);
-        fg = Colors.white;
-        icon = Icons.dangerous_outlined;
-        break;
-      case 'warning':
-        bg = const Color(0xFFF9A825);
-        fg = Colors.black87;
-        icon = Icons.warning_amber_outlined;
-        break;
+      case 'critical': bg = const Color(0xFFC62828); fg = Colors.white; icon = Icons.dangerous_outlined; break;
+      case 'warning': bg = const Color(0xFFF9A825); fg = Colors.black87; icon = Icons.warning_amber_outlined; break;
       case 'info':
-      default:
-        bg = const Color(0xFF0288D1);
-        fg = Colors.white;
-        icon = Icons.info_outline;
-        break;
+      default: bg = const Color(0xFF0288D1); fg = Colors.white; icon = Icons.info_outline; break;
     }
 
     return Material(
@@ -256,13 +177,7 @@ class _AnnouncementBanner extends StatelessWidget {
             Icon(icon, color: fg, size: 20),
             const SizedBox(width: 10),
             Expanded(
-              child: Text(
-                text,
-                style: theme.textTheme.bodyMedium?.copyWith(
-                  color: fg,
-                  fontWeight: FontWeight.w600,
-                ),
-              ),
+              child: Text(text, style: theme.textTheme.bodyMedium?.copyWith(color: fg, fontWeight: FontWeight.w600)),
             ),
           ],
         ),
