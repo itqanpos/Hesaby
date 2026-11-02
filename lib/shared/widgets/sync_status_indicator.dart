@@ -1,7 +1,8 @@
 // lib/shared/widgets/sync_status_indicator.dart
 
-import 'dart:async'; // ✅ [إضافة]: لاستخدام unawaited
-import 'package:drift/drift.dart'; // ✅ [إضافة]: ضروري لاستخدام Value و OrderingTerm
+import 'dart:async';
+// ✅ [تصحيح]: إخفاء Column الخاص بـ drift لتجنب التعارض مع Column الخاص بـ Flutter
+import 'package:drift/drift.dart' hide Column; 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -212,7 +213,8 @@ class _SyncCenterSheet extends ConsumerWidget {
                 ..where((t) =>
                     t.companyId.equals(companyId) &
                     t.status.isIn(<String>['pending', 'failed']))
-                ..orderBy(<OrderClauseGenerator<$OutboxTable>>[
+                // ✅ [تصحيح]: إزالة النوع الصريح ليستنتجه المترجم تلقائياً
+                ..orderBy([
                   (t) => OrderingTerm(
                       expression: t.createdAt, mode: OrderingMode.desc)
                 ]))
