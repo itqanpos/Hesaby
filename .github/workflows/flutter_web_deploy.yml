@@ -1,25 +1,5 @@
 # ============================================================================
 # HESABI — Flutter Web Deploy to GitHub Pages
-# ----------------------------------------------------------------------------
-# Production deployment of the Flutter Web build to GitHub Pages, using the
-# modern Pages deployment model (source = GitHub Actions).
-#
-# This project is Flutter/Dart only. It does NOT use Node.js or npm.
-# Do not add `actions/setup-node`, `npm ci`, `yarn`, or npm caching here.
-# Adding npm caching without a package-lock.json causes the CI to fail with
-# "Dependencies lock file is not found".
-#
-# Preconditions (repository setting, not enforced by YAML):
-#   * Repository → Settings → Pages → Source = "GitHub Actions"
-#   * Repository secrets SUPABASE_URL and SUPABASE_ANON_KEY are configured.
-#
-# Branding assets:
-#   `flutter_launcher_icons` and `flutter_native_splash` regenerate the
-#   launcher icon and splash screen from assets/images/logo.png on every
-#   deploy. They are idempotent and cheap, so we run them here instead of
-#   committing generated binaries to the repository.
-#
-# Formatting policy: informational (see flutter_ci.yml for rationale).
 # ============================================================================
 
 name: Flutter Web Deploy
@@ -30,7 +10,6 @@ on:
       - main
   workflow_dispatch:
 
-# Serialise deploys without cancelling an in-progress deployment.
 concurrency:
   group: flutter-web-deploy-${{ github.ref }}
   cancel-in-progress: false
@@ -43,8 +22,6 @@ permissions:
 jobs:
   build:
     name: Build Web
-    # Pinned LTS runner instead of ubuntu-latest, to avoid an unexpected
-    # migration to Ubuntu 26 while the project is still under development.
     runs-on: ubuntu-24.04
     timeout-minutes: 30
 
@@ -64,7 +41,7 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # ✅ [إضافة جديدة]: توليد كود Drift (app_database.g.dart)
+      # ✅ توليد كود Drift
       - name: Run Build Runner
         run: dart run build_runner build --delete-conflicting-outputs
 
@@ -84,12 +61,14 @@ jobs:
       - name: Generate native splash
         run: dart run flutter_native_splash:create
 
-      # ✅ [إضافة جديدة]: تحميل ملفات Drift المطلوبة للويب (WASM & Worker)
+      # ✅ تصحيح روابط التحميل (تأكد من تطابق الإصدارات)
       - name: Download Drift Web Assets
         run: |
           mkdir -p web
-          wget https://github.com/simolus3/drift/releases/download/drift-2.22.0/sqlite3.wasm -O web/sqlite3.wasm
-          wget https://github.com/simolus3/drift/releases/download/drift-2.22.0/drift_worker.js -O web/drift_worker.js
+          # تحميل sqlite3.wasm من إصدارات sqlite3.dart
+          wget https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-3.8.0/sqlite3.wasm -O web/sqlite3.wasm
+          # تحميل drift_worker.js من إصدارات drift (استخدم نفس إصدار pubspec)
+          wget https://github.com/simolus3/drift/releases/download/drift-2.35.2/drift_worker.js -O web/drift_worker.js
 
       - name: Build Flutter Web
         env:
