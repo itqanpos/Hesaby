@@ -31,7 +31,7 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
   /// Used by Riverpod StreamProviders to auto-update the UI.
   Stream<List<Product>> watchProducts({
     required String companyId,
-    bool includeInactive = false,
+    bool? isActive, // ✅ تم التعديل: يدعم الآن النشط/المعطل/الكل (null)
     String? categoryId,
     String? searchQuery,
     int? limit,
@@ -41,8 +41,8 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
         select(productsTable)
           ..where((t) => t.companyId.equals(companyId));
 
-    if (!includeInactive) {
-      query.where((t) => t.isActive.equals(true));
+    if (isActive != null) {
+      query.where((t) => t.isActive.equals(isActive));
     }
 
     if (categoryId != null && categoryId.isNotEmpty) {
@@ -86,6 +86,24 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
               t.companyId.equals(companyId) & t.barcode.equals(barcode)))
         .getSingleOrNull();
     return row?.toEntity();
+  }
+
+  /// ✅ [إضافة جديدة]: حساب عدد المنتجات (الإجمالي، النشط، غير النشط)
+  Future<int> count({
+    required String companyId,
+    bool? isActive,
+  }) async {
+    final countExp = productsTable.id.count();
+    final query = selectOnly(productsTable)
+      ..addColumns([countExp])
+      ..where(productsTable.companyId.equals(companyId));
+
+    if (isActive != null) {
+      query.where(productsTable.isActive.equals(isActive));
+    }
+
+    final row = await query.getSingle();
+    return row.read(countExp) ?? 0;
   }
 
   // ---------------------------------------------------------------------------
