@@ -1,9 +1,12 @@
 // test/customers_notifier_test.dart
 
+import 'package:drift/native.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
 
-import 'package:hesabi/features/companies/domain/entities/branch.dart'; // ⬅️ جديد
+import 'package:hesabi/data/local/app_database.dart';
+import 'package:hesabi/data/local/daos/customers_dao.dart';
+import 'package:hesabi/features/companies/domain/entities/branch.dart';
 import 'package:hesabi/features/companies/presentation/providers/company_context_provider.dart';
 import 'package:hesabi/features/companies/presentation/providers/company_context_state.dart';
 import 'package:hesabi/features/sales/domain/entities/sale_entities.dart';
@@ -11,74 +14,22 @@ import 'package:hesabi/features/sales/domain/repositories/sales_repository.dart'
 import 'package:hesabi/features/sales/presentation/providers/sales_providers.dart';
 
 // ============================================================================
-// Fake Customer Repository
+// Fake Customer Repository (فقط لمنع محاولة تهيئة Supabase أثناء الاختبار)
 // ============================================================================
-
-class FakeCustomerRepository implements CustomerRepository {
-  FakeCustomerRepository(this._initial);
-
-  final List<Customer> _initial;
-  int updateCallCount = 0;
-  bool? lastIsActive;
-
+class _FakeCustomerRepository implements CustomerRepository {
   @override
-  Future<List<Customer>> listCustomers(
-    String companyId, {
-    bool includeInactive = false,
-  }) async {
-    return _initial;
-  }
-
-  @override
-  Future<Customer> updateCustomer({
-    required String customerId,
-    String? name,
-    String? code,
-    bool clearCode = false,
-    String? phone,
-    bool clearPhone = false,
-    String? email,
-    bool clearEmail = false,
-    String? address,
-    bool clearAddress = false,
-    String? notes,
-    bool clearNotes = false,
-    bool? isActive,
-  }) async {
-    updateCallCount++;
-    lastIsActive = isActive;
-
-    final Customer old = _initial.firstWhere((c) => c.id == customerId);
-    final Customer updated = old.copyWith(
-      name: name,
-      phone: phone,
-      isActive: isActive,
-    );
-
-    final int index = _initial.indexWhere((c) => c.id == customerId);
-    _initial[index] = updated;
-    return updated;
-  }
-
-  @override
-  dynamic noSuchMethod(Invocation invocation) =>
-      throw UnimplementedError(
-        'FakeCustomerRepository.${invocation.memberName} is not implemented',
-      );
+  dynamic noSuchMethod(Invocation invocation) => throw UnimplementedError();
 }
 
 // ============================================================================
 // Fake Company Context Notifier
 // ============================================================================
-
 class _FakeCompanyContextNotifier extends CompanyContextNotifier {
-  _FakeCompanyContextNotifier();
-
   @override
   CompanyContextState build() {
     return const CompanyContextState(
       currentCompany: null,
-      branches: <Branch>[], // ⬅️ تم التصحيح
+      branches: <Branch>[],
       currentBranch: null,
     );
   }
@@ -87,12 +38,13 @@ class _FakeCompanyContextNotifier extends CompanyContextNotifier {
 // ============================================================================
 // Helpers
 // ============================================================================
-
-ProviderContainer buildContainer(FakeCustomerRepository repo) {
+ProviderContainer buildContainer(AppDatabase db) {
   return ProviderContainer(
     overrides: <Override>[
+      // ✅ استخدام قاعدة بيانات وهمية في الذاكرة
+      appDatabaseProvider.overrideWithValue(db),
       companyContextProvider.overrideWith(_FakeCompanyContextNotifier.new),
-      customerRepositoryProvider.overrideWithValue(repo),
+      customerRepositoryProvider.overrideWithValue(_FakeCustomerRepository()),
     ],
   );
 }
@@ -100,53 +52,78 @@ ProviderContainer buildContainer(FakeCustomerRepository repo) {
 // ============================================================================
 // Tests
 // ============================================================================
-
 void main() {
-  final activeCustomer = Customer(
-    id: 'c1',
-    companyId: 'co1',
-    name: 'أحمد محمد',
-    balance: 500,
-    isActive: true,
-    createdAt: DateTime(2026, 1, 1),
-    updatedAt: DateTime(2026, 1, 1),
-  );
+  late AppDatabase db;
+  late Customer activeCustomer;
+  late Customer secondCustomer;
 
-  final secondCustomer = Customer(
-    id: 'c2',
-    companyId: 'co1',
-    name: 'علي',
-    balance: 0,
-    isActive: true,
-    createdAt: DateTime(2026, 1, 1),
-    updatedAt: DateTime(2026, 1, 1),
-  );
+  setUp(() {
+    // إنشاء قاعدة بيانات في الذاكرة لكل اختبار
+    db = AppDatabase(NativeDatabase.memory());
+
+    activeCustomer = Customer(
+      id: 'c1',
+      companyId: 'co1',
+      name: 'أحمد محمد',
+      balance: 500,
+      isActive: true,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+
+    secondCustomer = Customer(
+      id: 'c2',
+      companyId: 'co1',
+      name: 'علي',
+      balance: 0,
+      isActive: true,
+      createdAt: DateTime(2026, 1, 1),
+      updatedAt: DateTime(2026, 1, 1),
+    );
+  });
+
+  tearDown(() async {
+    await db.close();
+  });
 
   group('CustomersNotifier — updateCustomer(isActive)', () {
     test('disables a customer successfully', () async {
-      final repo = FakeCustomerRepository(
-        <Customer>[activeCustomer, secondCustomer],
+      // 1. إدخال العميل في Drift
+      await db.customersDao.createCustomer(
+        customer: activeCustomer.toCompanion(),
+        customerPayload: activeCustomer.toJsonPayload(),
+      );
+      await db.customersDao.createCustomer(
+        customer: secondCustomer.toCompanion(),
+        customerPayload: secondCustomer.toJsonPayload(),
       );
 
-      final container = buildContainer(repo);
+      final container = buildContainer(db);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
+      
+      // 2. تنفيذ التعديل
       final Customer result = await notifier.updateCustomer(
         customerId: 'c1',
         isActive: false,
       );
 
       expect(result.isActive, isFalse);
-      expect(repo.updateCallCount, 1);
-      expect(repo.lastIsActive, isFalse);
+
+      // 3. التأكد من أن التعديل تم حفظه في Drift
+      final dbCustomer = await db.customersDao.getCustomerById('c1');
+      expect(dbCustomer?.isActive, isFalse);
     });
 
     test('re-enables a disabled customer successfully', () async {
       final disabledCustomer = activeCustomer.copyWith(isActive: false);
-      final repo = FakeCustomerRepository(<Customer>[disabledCustomer]);
+      await db.customersDao.createCustomer(
+        customer: disabledCustomer.toCompanion(),
+        customerPayload: disabledCustomer.toJsonPayload(),
+      );
 
-      final container = buildContainer(repo);
+      final container = buildContainer(db);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
@@ -156,14 +133,18 @@ void main() {
       );
 
       expect(result.isActive, isTrue);
-      expect(repo.updateCallCount, 1);
-      expect(repo.lastIsActive, isTrue);
+
+      final dbCustomer = await db.customersDao.getCustomerById('c1');
+      expect(dbCustomer?.isActive, isTrue);
     });
 
     test('updating other fields does not alter isActive', () async {
-      final repo = FakeCustomerRepository(<Customer>[activeCustomer]);
+      await db.customersDao.createCustomer(
+        customer: activeCustomer.toCompanion(),
+        customerPayload: activeCustomer.toJsonPayload(),
+      );
 
-      final container = buildContainer(repo);
+      final container = buildContainer(db);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
@@ -173,59 +154,56 @@ void main() {
       );
 
       expect(result.isActive, isTrue);
-      expect(repo.lastIsActive, isNull);
+
+      final dbCustomer = await db.customersDao.getCustomerById('c1');
+      expect(dbCustomer?.isActive, isTrue);
+      expect(dbCustomer?.phone, '01099999999');
     });
 
     test('full disable → re-enable → disable cycle', () async {
-      final repo = FakeCustomerRepository(<Customer>[activeCustomer]);
+      await db.customersDao.createCustomer(
+        customer: activeCustomer.toCompanion(),
+        customerPayload: activeCustomer.toJsonPayload(),
+      );
 
-      final container = buildContainer(repo);
+      final container = buildContainer(db);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
 
-      final Customer disabled = await notifier.updateCustomer(
-        customerId: 'c1',
-        isActive: false,
-      );
+      final Customer disabled = await notifier.updateCustomer(customerId: 'c1', isActive: false);
       expect(disabled.isActive, isFalse);
-      expect(repo.updateCallCount, 1);
 
-      final Customer reEnabled = await notifier.updateCustomer(
-        customerId: 'c1',
-        isActive: true,
-      );
+      final Customer reEnabled = await notifier.updateCustomer(customerId: 'c1', isActive: true);
       expect(reEnabled.isActive, isTrue);
-      expect(repo.updateCallCount, 2);
 
-      final Customer disabledAgain = await notifier.updateCustomer(
-        customerId: 'c1',
-        isActive: false,
-      );
+      final Customer disabledAgain = await notifier.updateCustomer(customerId: 'c1', isActive: false);
       expect(disabledAgain.isActive, isFalse);
-      expect(repo.updateCallCount, 3);
+
+      final dbCustomer = await db.customersDao.getCustomerById('c1');
+      expect(dbCustomer?.isActive, isFalse);
     });
 
     test('balance is preserved across disable/enable', () async {
       final richCustomer = activeCustomer.copyWith(balance: 1234.56);
-      final repo = FakeCustomerRepository(<Customer>[richCustomer]);
+      await db.customersDao.createCustomer(
+        customer: richCustomer.toCompanion(),
+        customerPayload: richCustomer.toJsonPayload(),
+      );
 
-      final container = buildContainer(repo);
+      final container = buildContainer(db);
       addTearDown(container.dispose);
 
       final notifier = container.read(customersProvider.notifier);
 
-      final Customer disabled = await notifier.updateCustomer(
-        customerId: 'c1',
-        isActive: false,
-      );
+      final Customer disabled = await notifier.updateCustomer(customerId: 'c1', isActive: false);
       expect(disabled.balance, 1234.56);
 
-      final Customer reEnabled = await notifier.updateCustomer(
-        customerId: 'c1',
-        isActive: true,
-      );
+      final Customer reEnabled = await notifier.updateCustomer(customerId: 'c1', isActive: true);
       expect(reEnabled.balance, 1234.56);
+
+      final dbCustomer = await db.customersDao.getCustomerById('c1');
+      expect(dbCustomer?.balance, 1234.56);
     });
   });
 }
