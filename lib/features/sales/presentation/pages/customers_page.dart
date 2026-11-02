@@ -190,10 +190,7 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
     Customer customer,
   ) async {
     try {
-      // 1. تحديد الحالة الجديدة (عكس الحالة الحالية)
       final bool newState = !customer.isActive;
-
-      // 2. إرسال التحديث
       await ref.read(customersProvider.notifier).updateCustomer(
             customerId: customer.id,
             isActive: newState,
@@ -201,7 +198,6 @@ class _CustomersPageState extends ConsumerState<CustomersPage> {
       
       if (!context.mounted) return;
       
-      // 3. إظهار رسالة النجاح بناءً على الحالة الجديدة
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text(
@@ -301,6 +297,13 @@ class _CustomerCard extends StatelessWidget {
       meta.add(email);
     }
 
+    // ✅ تحديد لون الرصيد
+    final Color balanceColor = customer.isDebtor
+        ? Colors.red.shade700
+        : (customer.balance < 0
+            ? Colors.green.shade700
+            : scheme.onSurfaceVariant);
+
     return Material(
       color: scheme.surface,
       borderRadius: BorderRadius.circular(16),
@@ -333,7 +336,9 @@ class _CustomerCard extends StatelessWidget {
                             customer.name,
                             style: theme.textTheme.titleMedium?.copyWith(
                               color: isActive ? null : scheme.onSurfaceVariant,
-                              decoration: isActive ? null : TextDecoration.lineThrough,
+                              decoration: isActive
+                                  ? null
+                                  : TextDecoration.lineThrough,
                             ),
                             overflow: TextOverflow.ellipsis,
                           ),
@@ -364,11 +369,29 @@ class _CustomerCard extends StatelessWidget {
                       style: theme.textTheme.bodySmall,
                       overflow: TextOverflow.ellipsis,
                     ),
+                    // ✅ عرض الرصيد هنا
+                    const SizedBox(height: 6),
+                    Row(
+                      children: <Widget>[
+                        Icon(
+                          Icons.account_balance_wallet_outlined,
+                          size: 16,
+                          color: balanceColor,
+                        ),
+                        const SizedBox(width: 4),
+                        Text(
+                          'الرصيد: ${customer.balance.toStringAsFixed(2)}',
+                          style: theme.textTheme.labelMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: balanceColor,
+                          ),
+                        ),
+                      ],
+                    ),
                   ],
                 ),
               ),
               
-              // قائمة الخيارات (المنطق يعتمد على isActive)
               PopupMenuButton<_CustomerAction>(
                 tooltip: 'خيارات',
                 onSelected: (_CustomerAction action) {
@@ -406,10 +429,9 @@ class _CustomerCard extends StatelessWidget {
                     child: ListTile(
                       leading: Icon(
                         isActive
-                            ? Icons.block // أيقونة تعطيل
-                            : Icons.check_circle_outline, // أيقونة تفعيل
+                            ? Icons.block
+                            : Icons.check_circle_outline,
                       ),
-                      // المنطق هنا صحيح: إذا كان نشطاً يعرض "تعطيل"، وإذا كان معطلاً يعرض "تفعيل"
                       title: Text(isActive ? 'تعطيل' : 'تفعيل'),
                       contentPadding: EdgeInsets.zero,
                     ),
