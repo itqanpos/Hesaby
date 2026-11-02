@@ -53,8 +53,10 @@ dependencies:
   share_plus: ^10.1.2
   path_provider: ^2.1.5
 
-  # Offline support
+  # Offline support (Drift + Connectivity)
   connectivity_plus: ^6.1.0
+  drift: ^2.22.0
+  drift_flutter: ^0.2.4
 
   # App version info (for update notifications)
   package_info_plus: ^8.1.0
@@ -68,6 +70,10 @@ dev_dependencies:
   flutter_lints: ^5.0.0
   flutter_launcher_icons: ^0.14.1
   flutter_native_splash: ^2.4.3
+
+  # Drift Code Generation
+  drift_dev: ^2.22.0
+  build_runner: ^2.4.15
 
 flutter:
   uses-material-design: true
