@@ -1,7 +1,3 @@
-# ============================================================================
-# HESABI — Flutter Web Deploy to GitHub Pages
-# ============================================================================
-
 name: Flutter Web Deploy
 
 on:
@@ -41,10 +37,6 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
-      # ✅ توليد كود Drift
-      - name: Run Build Runner
-        run: dart run build_runner build --delete-conflicting-outputs
-
       - name: Verify Dart formatting (informational)
         continue-on-error: true
         run: dart format --output=none lib test
@@ -60,15 +52,6 @@ jobs:
 
       - name: Generate native splash
         run: dart run flutter_native_splash:create
-
-      # ✅ تصحيح روابط التحميل (تأكد من تطابق الإصدارات)
-      - name: Download Drift Web Assets
-        run: |
-          mkdir -p web
-          # تحميل sqlite3.wasm من إصدارات sqlite3.dart
-          wget https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-3.8.0/sqlite3.wasm -O web/sqlite3.wasm
-          # تحميل drift_worker.js من إصدارات drift (استخدم نفس إصدار pubspec)
-          wget https://github.com/simolus3/drift/releases/download/drift-2.35.2/drift_worker.js -O web/drift_worker.js
 
       - name: Build Flutter Web
         env:
