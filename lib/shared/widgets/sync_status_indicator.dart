@@ -1,5 +1,7 @@
 // lib/shared/widgets/sync_status_indicator.dart
 
+import 'dart:async'; // ✅ [إضافة]: لاستخدام unawaited
+import 'package:drift/drift.dart'; // ✅ [إضافة]: ضروري لاستخدام Value و OrderingTerm
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart' hide TextDirection;
@@ -19,14 +21,20 @@ class SyncStatusIndicator extends ConsumerWidget {
     );
     if (companyId == null) return const SizedBox.shrink();
 
-    final SyncStatus status = ref.watch(syncStatusProvider).valueOrNull ?? SyncStatus.idle;
-    final int pending = ref.watch(pendingOutboxCountProvider(companyId)).valueOrNull ?? 0;
-    final int failed = ref.watch(failedOutboxCountProvider(companyId)).valueOrNull ?? 0;
+    final SyncStatus status =
+        ref.watch(syncStatusProvider).valueOrNull ?? SyncStatus.idle;
+    final int pending =
+        ref.watch(pendingOutboxCountProvider(companyId)).valueOrNull ?? 0;
+    final int failed =
+        ref.watch(failedOutboxCountProvider(companyId)).valueOrNull ?? 0;
 
     final bool isOffline = status == SyncStatus.offline;
 
     // Everything is fine: online + no pending + no failures
-    if (!isOffline && status != SyncStatus.syncing && pending == 0 && failed == 0) {
+    if (!isOffline &&
+        status != SyncStatus.syncing &&
+        pending == 0 &&
+        failed == 0) {
       return const SizedBox.shrink();
     }
 
@@ -190,10 +198,8 @@ class _SyncCenterSheet extends ConsumerWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final AppDatabase db = ref.watch(appDatabaseProvider);
-    final bool isOffline = ref.watch(syncStatusProvider).valueOrNull == SyncStatus.offline;
-
-    final int pending = ref.watch(pendingOutboxCountProvider(companyId)).valueOrNull ?? 0;
-    final int failed = ref.watch(failedOutboxCountProvider(companyId)).valueOrNull ?? 0;
+    final bool isOffline =
+        ref.watch(syncStatusProvider).valueOrNull == SyncStatus.offline;
 
     return DraggableScrollableSheet(
       expand: false,
@@ -201,11 +207,15 @@ class _SyncCenterSheet extends ConsumerWidget {
       maxChildSize: 0.95,
       minChildSize: 0.4,
       builder: (BuildContext context, ScrollController scrollController) {
-        // جلب جميع العمليات من Drift (سواء معلقة أو فاشلة)
         return StreamBuilder<List<OutboxRow>>(
           stream: (db.select(db.outboxTable)
-                ..where((t) => t.companyId.equals(companyId) & t.status.isIn(['pending', 'failed']))
-                ..orderBy([(t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc)]))
+                ..where((t) =>
+                    t.companyId.equals(companyId) &
+                    t.status.isIn(<String>['pending', 'failed']))
+                ..orderBy(<OrderClauseGenerator<$OutboxTable>>[
+                  (t) => OrderingTerm(
+                      expression: t.createdAt, mode: OrderingMode.desc)
+                ]))
               .watch(),
           builder: (context, snapshot) {
             if (!snapshot.hasData) {
@@ -213,8 +223,10 @@ class _SyncCenterSheet extends ConsumerWidget {
             }
 
             final List<OutboxRow> allOps = snapshot.data!;
-            final List<OutboxRow> failedOps = allOps.where((op) => op.status == 'failed').toList();
-            final List<OutboxRow> pendingOps = allOps.where((op) => op.status == 'pending').toList();
+            final List<OutboxRow> failedOps =
+                allOps.where((op) => op.status == 'failed').toList();
+            final List<OutboxRow> pendingOps =
+                allOps.where((op) => op.status == 'pending').toList();
 
             return ListView(
               controller: scrollController,
@@ -278,7 +290,8 @@ class _SyncCenterSheet extends ConsumerWidget {
                       icon: const Icon(Icons.sync),
                       label: const Text('مزامنة الآن'),
                       onPressed: () {
-                        ref.read(syncServiceProvider).processOutbox();
+                        unawaited(
+                            ref.read(syncServiceProvider).processOutbox());
                       },
                     ),
                   ),
@@ -322,15 +335,18 @@ class _SyncCenterSheet extends ConsumerWidget {
                         isFailed: true,
                         onRetry: !isOffline
                             ? () async {
-                                // إعادة الحالة إلى pending
-                                await (db.update(db.outboxTable)..where((t) => t.id.equals(op.id)))
-                                    .write(const OutboxTableCompanion(
-                                  status: Value('pending'),
-                                  retryCount: Value(0),
-                                  lastError: Value(null),
-                                ));
-                                // إعادة المحاولة
-                                ref.read(syncServiceProvider).processOutbox();
+                                await (db.update(db.outboxTable)
+                                      ..where((t) => t.id.equals(op.id)))
+                                    .write(
+                                  OutboxTableCompanion(
+                                    status: const Value('pending'),
+                                    retryCount: const Value(0),
+                                    lastError: const Value(null),
+                                  ),
+                                );
+                                await ref
+                                    .read(syncServiceProvider)
+                                    .processOutbox();
                               }
                             : null,
                       ),
@@ -516,7 +532,8 @@ class _OperationCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final String dateStr = DateFormat('yyyy/MM/dd HH:mm').format(operation.createdAt);
+    final String dateStr =
+        DateFormat('yyyy/MM/dd HH:mm').format(operation.createdAt);
 
     return Container(
       padding: const EdgeInsets.all(12),
