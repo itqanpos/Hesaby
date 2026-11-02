@@ -1,15 +1,14 @@
 // lib/shared/widgets/sync_status_indicator.dart
 
-import 'dart:async';
-// ✅ [تصحيح]: إخفاء Column الخاص بـ drift لتجنب التعارض مع Column الخاص بـ Flutter
-import 'package:drift/drift.dart' hide Column; 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
-import '../../data/local/app_database.dart';
-import '../../data/local/sync/outbox_providers.dart';
-import '../../data/local/sync/sync_service.dart';
+import '../../core/network/network_status_provider.dart';
+import '../../core/network/operation_queue.dart';
+import '../../core/network/operation_queue_providers.dart';
+import '../../core/network/operation_trigger.dart';
+import '../../core/network/pending_operation.dart';
 import '../../features/companies/presentation/providers/company_context_provider.dart';
 
 class SyncStatusIndicator extends ConsumerWidget {
@@ -22,41 +21,28 @@ class SyncStatusIndicator extends ConsumerWidget {
     );
     if (companyId == null) return const SizedBox.shrink();
 
-    final SyncStatus status =
-        ref.watch(syncStatusProvider).valueOrNull ?? SyncStatus.idle;
-    final int pending =
-        ref.watch(pendingOutboxCountProvider(companyId)).valueOrNull ?? 0;
-    final int failed =
-        ref.watch(failedOutboxCountProvider(companyId)).valueOrNull ?? 0;
+    final bool isOnline = ref.watch(isOnlineProvider);
+    final int pending = ref.watch(pendingOperationCountProvider(companyId));
+    final int failed = ref.watch(failedOperationCountProvider(companyId));
 
-    final bool isOffline = status == SyncStatus.offline;
-
-    // Everything is fine: online + no pending + no failures
-    if (!isOffline &&
-        status != SyncStatus.syncing &&
-        pending == 0 &&
-        failed == 0) {
+    if (isOnline && pending == 0 && failed == 0) {
       return const SizedBox.shrink();
     }
 
     final ColorScheme scheme = Theme.of(context).colorScheme;
 
-    // 1. Failed operations — highest priority
     if (failed > 0) {
       return _SyncBanner(
         icon: Icons.error_outline,
         background: scheme.error,
         foreground: scheme.onError,
         title: '$failed عملية فشلت في المزامنة',
-        subtitle: pending > 0
-            ? 'و $pending عملية معلقة · اضغط للمراجعة'
-            : 'اضغط للمراجعة وإعادة المحاولة',
-        onTap: () => _openSyncCenter(context, companyId),
+        subtitle: pending > 0 ? 'و $pending عملية معلقة · اضغط للمراجعة' : 'اضغط للمراجعة وإعادة المحاولة',
+        onTap: () => _openSyncCenter(context),
       );
     }
 
-    // 2. Syncing state
-    if (status == SyncStatus.syncing) {
+    if (isOnline && pending > 0) {
       return _SyncBanner(
         icon: Icons.sync,
         background: const Color(0xFF0288D1),
@@ -67,46 +53,36 @@ class SyncStatusIndicator extends ConsumerWidget {
       );
     }
 
-    // 3. Offline + pending
-    if (isOffline && pending > 0) {
+    if (!isOnline && pending > 0) {
       return _SyncBanner(
         icon: Icons.cloud_off_outlined,
         background: const Color(0xFFEF6C00),
         foreground: Colors.white,
         title: 'غير متصل — $pending عملية معلقة',
         subtitle: 'ستتم المزامنة تلقائياً عند عودة الإنترنت',
-        onTap: () => _openSyncCenter(context, companyId),
+        onTap: () => _openSyncCenter(context),
       );
     }
 
-    // 4. Offline + no pending → subtle
-    if (isOffline) {
-      return _SyncBanner(
-        icon: Icons.cloud_off_outlined,
-        background: scheme.surfaceContainerHighest,
-        foreground: scheme.onSurfaceVariant,
-        title: 'غير متصل بالإنترنت',
-        subtitle: 'يمكنك البيع — ستُحفظ العمليات محلياً',
-      );
-    }
-
-    return const SizedBox.shrink();
+    return _SyncBanner(
+      icon: Icons.cloud_off_outlined,
+      background: scheme.surfaceContainerHighest,
+      foreground: scheme.onSurfaceVariant,
+      title: 'غير متصل بالإنترنت',
+      subtitle: 'يمكنك البيع — ستُحفظ العمليات محلياً',
+    );
   }
 
-  void _openSyncCenter(BuildContext context, String companyId) {
+  void _openSyncCenter(BuildContext context) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (_) => _SyncCenterSheet(companyId: companyId),
+      builder: (_) => const _SyncCenterSheet(),
     );
   }
 }
-
-// ============================================================================
-// Banner widget (shared)
-// ============================================================================
 
 class _SyncBanner extends StatelessWidget {
   const _SyncBanner({
@@ -178,29 +154,28 @@ class _SyncBanner extends StatelessWidget {
 
     return Material(
       color: background,
-      child: onTap == null
-          ? content
-          : InkWell(onTap: onTap, child: content),
+      child: onTap == null ? content : InkWell(onTap: onTap, child: content),
     );
   }
 }
 
-// ============================================================================
-// Sync Center (bottom sheet)
-// ============================================================================
-
 class _SyncCenterSheet extends ConsumerWidget {
-  const _SyncCenterSheet({required this.companyId});
-
-  final String companyId;
+  const _SyncCenterSheet();
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final AppDatabase db = ref.watch(appDatabaseProvider);
-    final bool isOffline =
-        ref.watch(syncStatusProvider).valueOrNull == SyncStatus.offline;
+    final String? companyId = ref.watch(
+      companyContextProvider.select((s) => s.currentCompany?.id),
+    );
+
+    if (companyId == null) {
+      return const Center(child: CircularProgressIndicator());
+    }
+
+    final AsyncValue<OperationQueue> queueAsync = ref.watch(operationQueueProvider);
+    final bool isOnline = ref.watch(isOnlineProvider);
 
     return DraggableScrollableSheet(
       expand: false,
@@ -208,189 +183,85 @@ class _SyncCenterSheet extends ConsumerWidget {
       maxChildSize: 0.95,
       minChildSize: 0.4,
       builder: (BuildContext context, ScrollController scrollController) {
-        return StreamBuilder<List<OutboxRow>>(
-          stream: (db.select(db.outboxTable)
-                ..where((t) =>
-                    t.companyId.equals(companyId) &
-                    t.status.isIn(<String>['pending', 'failed']))
-                // ✅ [تصحيح]: إزالة النوع الصريح ليستنتجه المترجم تلقائياً
-                ..orderBy([
-                  (t) => OrderingTerm(
-                      expression: t.createdAt, mode: OrderingMode.desc)
-                ]))
-              .watch(),
-          builder: (context, snapshot) {
-            if (!snapshot.hasData) {
-              return const Center(child: CircularProgressIndicator());
-            }
-
-            final List<OutboxRow> allOps = snapshot.data!;
-            final List<OutboxRow> failedOps =
-                allOps.where((op) => op.status == 'failed').toList();
-            final List<OutboxRow> pendingOps =
-                allOps.where((op) => op.status == 'pending').toList();
+        return queueAsync.when(
+          loading: () => const Center(child: CircularProgressIndicator()),
+          error: (Object e, StackTrace _) => Center(child: Text('خطأ: $e')),
+          data: (OperationQueue queue) {
+            final List<PendingOperation> all = queue.forCompany(companyId);
+            final List<PendingOperation> pending = all.where((op) => op.isPending).toList(growable: false);
+            final List<PendingOperation> failed = all.where((op) => op.isFailed).toList(growable: false);
 
             return ListView(
               controller: scrollController,
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 24),
               children: <Widget>[
-                // Header
                 Row(
                   children: <Widget>[
                     Icon(Icons.sync, color: scheme.primary, size: 24),
                     const SizedBox(width: 8),
                     Expanded(
-                      child: Text(
-                        'مركز المزامنة',
-                        style: theme.textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                      ),
+                      child: Text('مركز المزامنة', style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.bold)),
                     ),
                   ],
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  isOffline
-                      ? 'أنت غير متصل. ستتم المزامنة تلقائياً عند عودة الإنترنت.'
-                      : 'أنت متصل. اضغط "مزامنة الآن" لإرسال العمليات.',
-                  style: theme.textTheme.bodySmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
+                  isOnline ? 'أنت متصل. اضغط "مزامنة الآن" لإرسال العمليات.' : 'أنت غير متصل. ستتم المزامنة تلقائياً عند عودة الإنترنت.',
+                  style: theme.textTheme.bodySmall?.copyWith(color: scheme.onSurfaceVariant),
                 ),
                 const SizedBox(height: 16),
-
-                // Summary cards
                 Row(
                   children: <Widget>[
-                    Expanded(
-                      child: _SummaryCard(
-                        icon: Icons.schedule,
-                        color: const Color(0xFFEF6C00),
-                        label: 'معلقة',
-                        value: pendingOps.length.toString(),
-                      ),
-                    ),
+                    Expanded(child: _SummaryCard(icon: Icons.schedule, color: const Color(0xFFEF6C00), label: 'معلقة', value: pending.length.toString())),
                     const SizedBox(width: 8),
-                    Expanded(
-                      child: _SummaryCard(
-                        icon: Icons.error_outline,
-                        color: scheme.error,
-                        label: 'فشلت',
-                        value: failedOps.length.toString(),
-                      ),
-                    ),
+                    Expanded(child: _SummaryCard(icon: Icons.error_outline, color: scheme.error, label: 'فشلت', value: failed.length.toString())),
                   ],
                 ),
                 const SizedBox(height: 16),
-
-                // Sync now button
-                if (!isOffline && pendingOps.isNotEmpty)
+                if (isOnline && pending.isNotEmpty)
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
                       icon: const Icon(Icons.sync),
                       label: const Text('مزامنة الآن'),
-                      onPressed: () {
-                        unawaited(
-                            ref.read(syncServiceProvider).processOutbox());
-                      },
-                    ),
-                  ),
-                if (isOffline)
-                  Container(
-                    padding: const EdgeInsets.all(12),
-                    decoration: BoxDecoration(
-                      color: scheme.surfaceContainerHighest,
-                      borderRadius: BorderRadius.circular(12),
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        Icon(
-                          Icons.cloud_off_outlined,
-                          color: scheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'لا يمكن المزامنة الآن. سيتم المحاولة تلقائياً عند توفر الإنترنت.',
-                            style: theme.textTheme.bodySmall,
-                          ),
-                        ),
-                      ],
+                      onPressed: () => ref.read(operationTriggerProvider).triggerIfPossible(),
                     ),
                   ),
                 const SizedBox(height: 16),
-
-                // Failed section
-                if (failedOps.isNotEmpty) ...<Widget>[
-                  _SectionTitle(
-                    title: 'عمليات فشلت (${failedOps.length})',
-                    color: scheme.error,
-                  ),
+                if (failed.isNotEmpty) ...<Widget>[
+                  _SectionTitle(title: 'عمليات فشلت (${failed.length})', color: scheme.error),
                   const SizedBox(height: 8),
-                  for (final OutboxRow op in failedOps)
+                  for (final PendingOperation op in failed)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: _OperationCard(
                         operation: op,
                         isFailed: true,
-                        onRetry: !isOffline
-                            ? () async {
-                                await (db.update(db.outboxTable)
-                                      ..where((t) => t.id.equals(op.id)))
-                                    .write(
-                                  OutboxTableCompanion(
-                                    status: const Value('pending'),
-                                    retryCount: const Value(0),
-                                    lastError: const Value(null),
-                                  ),
-                                );
-                                await ref
-                                    .read(syncServiceProvider)
-                                    .processOutbox();
-                              }
-                            : null,
+                        onRetry: isOnline ? () async {
+                          await queue.update(op.copyWith(status: PendingOperationStatus.pending, attemptCount: 0, lastError: null));
+                          await ref.read(operationTriggerProvider).triggerIfPossible();
+                        } : null,
                       ),
                     ),
                   const SizedBox(height: 16),
                 ],
-
-                // Pending section
-                if (pendingOps.isNotEmpty) ...<Widget>[
-                  _SectionTitle(
-                    title: 'قيد الانتظار (${pendingOps.length})',
-                    color: const Color(0xFFEF6C00),
-                  ),
+                if (pending.isNotEmpty) ...<Widget>[
+                  _SectionTitle(title: 'قيد الانتظار (${pending.length})', color: const Color(0xFFEF6C00)),
                   const SizedBox(height: 8),
-                  for (final OutboxRow op in pendingOps)
+                  for (final PendingOperation op in pending)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
-                      child: _OperationCard(
-                        operation: op,
-                        isFailed: false,
-                        onRetry: null,
-                      ),
+                      child: _OperationCard(operation: op, isFailed: false, onRetry: null),
                     ),
                 ],
-
-                if (allOps.isEmpty)
+                if (pending.isEmpty && failed.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 48),
                     child: Column(
                       children: <Widget>[
-                        Icon(
-                          Icons.check_circle_outline,
-                          size: 64,
-                          color: const Color(0xFF0F7B6C).withValues(alpha: 0.6),
-                        ),
+                        Icon(Icons.check_circle_outline, size: 64, color: const Color(0xFF0F7B6C).withValues(alpha: 0.6)),
                         const SizedBox(height: 16),
-                        Text(
-                          'كل شيء متزامن',
-                          style: theme.textTheme.titleMedium?.copyWith(
-                            color: scheme.onSurfaceVariant,
-                          ),
-                        ),
+                        Text('كل شيء متزامن', style: theme.textTheme.titleMedium?.copyWith(color: scheme.onSurfaceVariant)),
                       ],
                     ),
                   ),
@@ -403,10 +274,6 @@ class _SyncCenterSheet extends ConsumerWidget {
   }
 }
 
-// ============================================================================
-// Small widgets
-// ============================================================================
-
 class _SectionTitle extends StatelessWidget {
   const _SectionTitle({required this.title, required this.color});
   final String title;
@@ -416,21 +283,13 @@ class _SectionTitle extends StatelessWidget {
   Widget build(BuildContext context) {
     return Text(
       title,
-      style: Theme.of(context).textTheme.titleSmall?.copyWith(
-            color: color,
-            fontWeight: FontWeight.bold,
-          ),
+      style: Theme.of(context).textTheme.titleSmall?.copyWith(color: color, fontWeight: FontWeight.bold),
     );
   }
 }
 
 class _SummaryCard extends StatelessWidget {
-  const _SummaryCard({
-    required this.icon,
-    required this.color,
-    required this.label,
-    required this.value,
-  });
+  const _SummaryCard({required this.icon, required this.color, required this.label, required this.value});
 
   final IconData icon;
   final Color color;
@@ -454,10 +313,7 @@ class _SummaryCard extends StatelessWidget {
           Container(
             width: 36,
             height: 36,
-            decoration: BoxDecoration(
-              color: color.withValues(alpha: 0.12),
-              borderRadius: BorderRadius.circular(8),
-            ),
+            decoration: BoxDecoration(color: color.withValues(alpha: 0.12), borderRadius: BorderRadius.circular(8)),
             child: Icon(icon, color: color, size: 20),
           ),
           const SizedBox(width: 10),
@@ -466,19 +322,8 @@ class _SummaryCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: <Widget>[
-                Text(
-                  label,
-                  style: theme.textTheme.labelSmall?.copyWith(
-                    color: scheme.onSurfaceVariant,
-                  ),
-                ),
-                Text(
-                  value,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w800,
-                    color: color,
-                  ),
-                ),
+                Text(label, style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant)),
+                Text(value, style: theme.textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w800, color: color)),
               ],
             ),
           ),
@@ -489,114 +334,65 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _OperationCard extends StatelessWidget {
-  const _OperationCard({
-    required this.operation,
-    required this.isFailed,
-    this.onRetry,
-  });
+  const _OperationCard({required this.operation, required this.isFailed, this.onRetry});
 
-  final OutboxRow operation;
+  final PendingOperation operation;
   final bool isFailed;
   final Future<void> Function()? onRetry;
 
-  // ✅ ربط العمليات بجدول Drift
-  String get _typeLabel {
-    switch (operation.targetTable) {
-      case 'sales':
-        return 'فاتورة بيع';
-      case 'customers':
-        return 'عميل';
-      case 'products':
-        return 'منتج';
-      case 'customer_payments':
-        return 'دفعة عميل';
-      default:
-        return operation.targetTable;
-    }
-  }
+  String get _typeLabel => switch (operation.type) {
+        PendingOperationType.sale => 'فاتورة بيع',
+        PendingOperationType.customerPayment => 'دفعة عميل',
+        PendingOperationType.supplierPayment => 'دفعة مورد',
+        PendingOperationType.expense => 'مصروف',
+      };
 
-  IconData get _typeIcon {
-    switch (operation.targetTable) {
-      case 'sales':
-        return Icons.receipt_long_outlined;
-      case 'customers':
-        return Icons.people_outline;
-      case 'products':
-        return Icons.inventory_2_outlined;
-      case 'customer_payments':
-        return Icons.payments_outlined;
-      default:
-        return Icons.sync;
-    }
-  }
+  IconData get _typeIcon => switch (operation.type) {
+        PendingOperationType.sale => Icons.receipt_long_outlined,
+        PendingOperationType.customerPayment => Icons.payments_outlined,
+        PendingOperationType.supplierPayment => Icons.local_shipping_outlined,
+        PendingOperationType.expense => Icons.money_off,
+      };
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final String dateStr =
-        DateFormat('yyyy/MM/dd HH:mm').format(operation.createdAt);
+    final String dateStr = DateFormat('yyyy/MM/dd HH:mm').format(operation.createdAt);
 
     return Container(
       padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: scheme.surface,
         borderRadius: BorderRadius.circular(12),
-        border: Border.all(
-          color: isFailed
-              ? scheme.error.withValues(alpha: 0.4)
-              : scheme.outlineVariant,
-        ),
+        border: Border.all(color: isFailed ? scheme.error.withValues(alpha: 0.4) : scheme.outlineVariant),
       ),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
           Row(
             children: <Widget>[
-              Icon(
-                _typeIcon,
-                color: isFailed ? scheme.error : scheme.primary,
-                size: 20,
-              ),
+              Icon(_typeIcon, color: isFailed ? scheme.error : scheme.primary, size: 20),
               const SizedBox(width: 8),
               Expanded(
-                child: Text(
-                  '$_typeLabel (${operation.operation})',
-                  style: theme.textTheme.titleSmall?.copyWith(
-                    fontWeight: FontWeight.bold,
-                  ),
-                ),
+                child: Text(_typeLabel, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
               ),
-              Text(
-                dateStr,
-                style: theme.textTheme.labelSmall?.copyWith(
-                  color: scheme.onSurfaceVariant,
-                ),
-              ),
+              Text(dateStr, style: theme.textTheme.labelSmall?.copyWith(color: scheme.onSurfaceVariant)),
             ],
           ),
           if (isFailed && operation.lastError != null) ...<Widget>[
             const SizedBox(height: 6),
             Container(
               padding: const EdgeInsets.all(8),
-              decoration: BoxDecoration(
-                color: scheme.errorContainer,
-                borderRadius: BorderRadius.circular(8),
-              ),
+              decoration: BoxDecoration(color: scheme.errorContainer, borderRadius: BorderRadius.circular(8)),
               child: Row(
                 children: <Widget>[
-                  Icon(
-                    Icons.warning_amber_outlined,
-                    color: scheme.onErrorContainer,
-                    size: 16,
-                  ),
+                  Icon(Icons.warning_amber_outlined, color: scheme.onErrorContainer, size: 16),
                   const SizedBox(width: 6),
                   Expanded(
                     child: Text(
                       operation.lastError!,
-                      style: theme.textTheme.bodySmall?.copyWith(
-                        color: scheme.onErrorContainer,
-                      ),
+                      style: theme.textTheme.bodySmall?.copyWith(color: scheme.onErrorContainer),
                       maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
@@ -612,9 +408,7 @@ class _OperationCard extends StatelessWidget {
               child: OutlinedButton.icon(
                 icon: const Icon(Icons.refresh, size: 18),
                 label: const Text('إعادة المحاولة'),
-                onPressed: () async {
-                  await onRetry!();
-                },
+                onPressed: () async => await onRetry!(),
               ),
             ),
           ],
