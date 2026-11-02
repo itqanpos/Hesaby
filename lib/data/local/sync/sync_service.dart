@@ -10,15 +10,24 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 
 import '../../../core/utils/logger.dart';
 import '../app_database.dart';
-import '../tables/outbox_table.dart';
+// ✅ [تم الحذف]: import '../tables/outbox_table.dart'; (غير مستخدم)
 
+/// الحالات المحتملة لعملية المزامنة.
 enum SyncStatus {
+  /// متصل، ولا توجد عمليات معلقة.
   idle,
+
+  /// جاري إرسال العمليات إلى Supabase.
   syncing,
+
+  /// لا يوجد اتصال بالإنترنت (أو Supabase غير متاح).
   offline,
+
+  /// حدث خطأ أثناء المزامنة.
   error,
 }
 
+/// خدمة المزامنة (Sync Service).
 class SyncService {
   SyncService(this._db, this._supabase) {
     _init();
@@ -31,6 +40,7 @@ class SyncService {
   StreamSubscription<List<ConnectivityResult>>? _connectivitySub;
   bool _isProcessing = false;
 
+  /// بث (Stream) لحالة المزامنة لكي تعرضها الواجهة.
   final StreamController<SyncStatus> _statusController =
       StreamController<SyncStatus>.broadcast();
   Stream<SyncStatus> get statusStream => _statusController.stream;
@@ -45,17 +55,23 @@ class SyncService {
     }
   }
 
+  // ---------------------------------------------------------------------------
+  // Initialization & Listening
+  // ---------------------------------------------------------------------------
+
   void _init() {
+    // الاستماع لتغيرات الشبكة
     _connectivitySub = _connectivity.onConnectivityChanged.listen(
       (List<ConnectivityResult> results) {
         if (!results.contains(ConnectivityResult.none)) {
-          unawaited(processOutbox()); // ✅ إصلاح تحذير الـ await
+          unawaited(processOutbox());
         } else {
           _updateStatus(SyncStatus.offline);
         }
       },
     );
 
+    // فحص أولي عند بدء التطبيق
     unawaited(_checkInitialConnection());
   }
 
@@ -68,6 +84,10 @@ class SyncService {
       unawaited(processOutbox());
     }
   }
+
+  // ---------------------------------------------------------------------------
+  // Core Processing Logic
+  // ---------------------------------------------------------------------------
 
   Future<void> processOutbox() async {
     if (_isProcessing) return;
@@ -130,8 +150,9 @@ class SyncService {
       AppLogger.error('SyncService: Postgrest error on ${item.id}', error, StackTrace.current);
       await _markAsFailed(item, error.message);
       return true; 
-    } on Object catch (error) { // ✅ حذف stackTrace غير المستخدم
-      AppLogger.warning('SyncService: Network error on ${item.id}, will retry later.');
+    } on Object catch (error) {
+      // ✅ [تم التعديل]: استخدام متغير error في رسالة السجل لإزالة التحذير
+      AppLogger.warning('SyncService: Network error on ${item.id}: $error, will retry later.');
       
       await (_db.update(_db.outboxTable)..where((t) => t.id.equals(item.id)))
           .write(const OutboxTableCompanion(status: Value('pending')));
@@ -158,6 +179,10 @@ class SyncService {
   }
 }
 
+// ============================================================================
+// Riverpod Providers
+// ============================================================================
+
 final Provider<SyncService> syncServiceProvider = Provider<SyncService>((ref) {
   final AppDatabase db = ref.watch(appDatabaseProvider);
   final SupabaseClient supabase = Supabase.instance.client;
@@ -165,6 +190,8 @@ final Provider<SyncService> syncServiceProvider = Provider<SyncService>((ref) {
   final SyncService service = SyncService(db, supabase);
 
   ref.onDispose(() => service.dispose());
+
+  service.processOutbox();
 
   return service;
 });
