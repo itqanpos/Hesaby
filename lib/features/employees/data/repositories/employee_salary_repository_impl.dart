@@ -302,8 +302,18 @@ class EmployeeSalaryRepositoryImpl implements EmployeeSalaryRepository {
     String op,
   ) {
     final String code = (e.code ?? '').toUpperCase();
+    final String message = e.message.toLowerCase();
+    
+    // ✅ [إضافة مهمة]: طباعة رسالة الخطأ الحقيقية من الـ Trigger أو RLS
+    AppLogger.error('Salary PostgREST "$op" | Code: $code | Message: ${e.message}');
+
     final SalaryFailureType type;
-    if (code.startsWith('42501') || code.startsWith('28')) {
+    
+    if (code == 'P0001' || code == '23514') {
+      // P0001 (Trigger Exception) أو 23514 (Check Constraint)
+      // نعتبرها invalidInput لكي تظهر للمستخدم في الشاشة
+      type = SalaryFailureType.invalidInput;
+    } else if (code.startsWith('42501') || code.startsWith('28')) {
       type = SalaryFailureType.unauthorized;
     } else if (code == '23505') {
       type = SalaryFailureType.duplicateEntry;
@@ -311,10 +321,13 @@ class EmployeeSalaryRepositoryImpl implements EmployeeSalaryRepository {
       type = SalaryFailureType.invalidInput;
     } else if (code == 'PGRST116') {
       type = SalaryFailureType.notFound;
+    } else if (message.contains('shift') || message.contains('cash') || message.contains('balance')) {
+      // إذا كانت الرسالة تحتوي على كلمات متعلقة بالخزنة أو الوردية
+      type = SalaryFailureType.invalidInput;
     } else {
       type = SalaryFailureType.unknown;
     }
-    AppLogger.warning('Salary PostgREST "$op" → ${type.name} ($code).');
+
     return SalaryException(type: type, cause: e, stackTrace: s);
   }
 
