@@ -125,12 +125,12 @@ jobs:
       - name: Generate native splash
         run: dart run flutter_native_splash:create
 
-      # ✅ [إضافة جديدة]: تحميل ملفات Drift المطلوبة للويب
+      # ✅ [إضافة جديدة]: تحميل ملفات Drift المطلوبة للويب (بأحدث الإصدارات المتوافقة)
       - name: Download Drift Web Assets
         run: |
           mkdir -p web
-          wget https://github.com/simolus3/drift/releases/download/drift-2.22.0/sqlite3.wasm -O web/sqlite3.wasm
-          wget https://github.com/simolus3/drift/releases/download/drift-2.22.0/drift_worker.js -O web/drift_worker.js
+          wget https://github.com/simolus3/sqlite3.dart/releases/download/sqlite3-3.8.0/sqlite3.wasm -O web/sqlite3.wasm
+          wget https://github.com/simolus3/drift/releases/download/drift-2.35.3/drift_worker.js -O web/drift_worker.js
 
       - name: Build Flutter Web
         env:
