@@ -2,16 +2,8 @@
 
 import 'package:drift/drift.dart';
 
-/// Drift table definition for `customers`.
-///
-/// Mirrors the [Customer] domain entity from `sale_entities.dart`.
-///
-/// Important Notes:
-/// * Includes the `balance` column, which will be updated locally whenever
-///   a sale or payment is made (so the UI can display it instantly offline).
-/// * Unique constraints are added locally for `(companyId, code)` and
-///   `(companyId, phone)` to prevent duplicates while offline.
-/// * Indexes are added for fast local search by name/phone.
+/// ✅ إضافة اسم مخصص للكلاس المولد لتجنب التعارض مع الكيان الأصلي
+@DataClassName('CustomerRow')
 @TableIndex(name: 'idx_customers_company_id', columns: {#companyId})
 @TableIndex(name: 'idx_customers_company_name', columns: {#companyId, #name})
 @TableIndex(name: 'idx_customers_phone', columns: {#phone})
@@ -24,41 +16,16 @@ class CustomersTable extends Table {
   @override
   Set<Column> get primaryKey => {id};
 
-  /// Unique identifier (UUID).
   TextColumn get id => text()();
-
-  /// Owning company.
   TextColumn get companyId => text()();
-
-  /// Customer name.
   TextColumn get name => text()();
-
-  /// Optional unique code per company.
   TextColumn get code => text().nullable()();
-
-  /// Optional phone number.
   TextColumn get phone => text().nullable()();
-
-  /// Optional email.
   TextColumn get email => text().nullable()();
-
-  /// Optional address.
   TextColumn get address => text().nullable()();
-
-  /// Optional notes.
   TextColumn get notes => text().nullable()();
-
-  /// Current balance. 
-  /// Positive = customer owes us (Debtor). 
-  /// Negative = customer has credit (Creditor).
   RealColumn get balance => real().withDefault(const Constant(0.0))();
-
-  /// Status flag.
   BoolColumn get isActive => boolean().withDefault(const Constant(true))();
-
-  /// Creation timestamp.
   DateTimeColumn get createdAt => dateTime()();
-
-  /// Last update timestamp.
   DateTimeColumn get updatedAt => dateTime()();
 }
