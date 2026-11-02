@@ -64,6 +64,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # ✅ [إضافة جديدة]: توليد كود Drift (app_database.g.dart)
+      - name: Run Build Runner
+        run: dart run build_runner build --delete-conflicting-outputs
+
       - name: Verify Dart formatting (informational)
         continue-on-error: true
         run: dart format --output=none lib test
@@ -79,6 +83,13 @@ jobs:
 
       - name: Generate native splash
         run: dart run flutter_native_splash:create
+
+      # ✅ [إضافة جديدة]: تحميل ملفات Drift المطلوبة للويب (WASM & Worker)
+      - name: Download Drift Web Assets
+        run: |
+          mkdir -p web
+          wget https://github.com/simolus3/drift/releases/download/drift-2.22.0/sqlite3.wasm -O web/sqlite3.wasm
+          wget https://github.com/simolus3/drift/releases/download/drift-2.22.0/drift_worker.js -O web/drift_worker.js
 
       - name: Build Flutter Web
         env:
