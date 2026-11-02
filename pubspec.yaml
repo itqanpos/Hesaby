@@ -55,7 +55,7 @@ dependencies:
 
   # Offline support (Drift + Connectivity)
   connectivity_plus: ^6.1.0
-  drift: ^2.22.0
+  drift: ^2.35.3
   drift_flutter: ^0.2.4
 
   # App version info (for update notifications)
@@ -72,7 +72,7 @@ dev_dependencies:
   flutter_native_splash: ^2.4.3
 
   # Drift Code Generation
-  drift_dev: ^2.22.0
+  drift_dev: ^2.35.3
   build_runner: ^2.4.15
 
 flutter:
