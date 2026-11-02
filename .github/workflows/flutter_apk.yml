@@ -42,6 +42,10 @@ jobs:
       - name: Install dependencies
         run: flutter pub get
 
+      # ✅ [إضافة جديدة]: توليد كود Drift (ضروري قبل الاختبارات والبناء)
+      - name: Run Build Runner
+        run: dart run build_runner build --delete-conflicting-outputs
+
       - name: Extract version from pubspec.yaml
         id: get_version
         run: |
