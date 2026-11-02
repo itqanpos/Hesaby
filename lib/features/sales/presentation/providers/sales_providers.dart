@@ -11,6 +11,9 @@ import 'package:uuid/uuid.dart';
 
 import '../../../../core/utils/logger.dart';
 import '../../../../data/local/app_database.dart';
+// ✅ [إضافة مهمة جداً]: استيراد ملف الـ DAO للوصول إلى toCompanion و toJsonPayload
+import '../../../../data/local/daos/customers_dao.dart';
+
 import '../../../companies/presentation/providers/company_context_provider.dart';
 import '../../../companies/presentation/providers/company_context_state.dart';
 import '../../data/datasources/sales_remote_datasource.dart';
@@ -25,7 +28,7 @@ import '../../domain/entities/sale_return.dart';
 import '../../domain/repositories/sales_repository.dart';
 
 // ============================================================================
-// Repository providers (Legacy - used for Payments/Adjustments/Statements)
+// Repository providers
 // ============================================================================
 
 final Provider<CustomerRepository> customerRepositoryProvider =
@@ -100,7 +103,6 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
 
     final AppDatabase db = ref.watch(appDatabaseProvider);
 
-    // 1. الاستماع المستمر للتغييرات في Drift
     final StreamSubscription<List<Customer>> sub =
         db.customersDao.watchCustomers(companyId: companyId).listen((List<Customer> data) {
       state = AsyncData(data);
@@ -108,7 +110,6 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
 
     ref.onDispose(() => sub.cancel());
 
-    // 2. إرجاع القيمة الأولى لكي تظهر الشاشة فوراً
     return db.customersDao.watchCustomers(companyId: companyId).first;
   }
 
@@ -141,13 +142,11 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
 
     final AppDatabase db = ref.read(appDatabaseProvider);
     
-    // الكتابة في Drift + Outbox
     await db.customersDao.createCustomer(
       customer: newCustomer.toCompanion(),
       customerPayload: newCustomer.toJsonPayload(),
     );
 
-    // لا حاجة لـ _reload()، الـ Stream سيتكفل بتحديث الواجهة
     return newCustomer;
   }
 
@@ -210,10 +209,6 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
     );
   }
 
-  // ---------------------------------------------------------------------------
-  // Payment & Adjustment (Phase 2 - Still uses Supabase for now)
-  // ---------------------------------------------------------------------------
-
   Future<CustomerPayment> recordPayment({
     required String customerId,
     required double amount,
@@ -235,7 +230,6 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
 
     ref.invalidate(customerPaymentsProvider(customerId));
     _invalidateStatements();
-    // TODO(Phase 2): Move to Drift
     return payment;
   }
 
@@ -257,7 +251,6 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
             );
 
     _invalidateStatements();
-    // TODO(Phase 2): Move to Drift
     return adjustment;
   }
 
@@ -285,7 +278,7 @@ final AsyncNotifierProvider<CustomersNotifier, List<Customer>>
 );
 
 // ============================================================================
-// باقي الملف (Sales, Returns, etc.) يبقى كما هو تماماً...
+// باقي الملف كما هو (Payments, Statements, Sales, Returns)
 // ============================================================================
 
 class CustomerPaymentsNotifier
