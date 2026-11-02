@@ -1,20 +1,29 @@
+# Builds the Windows desktop app.
+#
+# The repository has no windows/ folder yet. This workflow creates the Windows
+# runner files on the fly with `flutter create --platforms=windows`, then builds.
+# Once the windows/ folder is committed, the create step is skipped.
+#
+# Required repository secrets (same as flutter_apk.yml):
+#   SUPABASE_URL, SUPABASE_ANON_KEY
+
 name: Windows build
 
 on:
-  push:
-    branches: [ main, feature/offline-first ]
-  pull_request:
-    branches: [ main, feature/offline-first ]
   workflow_dispatch:
+  push:
+    branches: [main, feature/offline-first] # ✅ تمت إضافة الفرع
+
+permissions:
+  contents: read
 
 jobs:
-  build_windows:
-    name: Build Windows
+  build:
     runs-on: windows-latest
-    timeout-minutes: 30
+    timeout-minutes: 45
 
     steps:
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
       - name: Setup Flutter
@@ -23,23 +32,41 @@ jobs:
           channel: stable
           cache: true
 
-      - name: Display Flutter version
-        run: flutter --version
+      - name: Enable Windows desktop
+        run: flutter config --enable-windows-desktop
 
-      - name: Install dependencies
+      - name: Get dependencies
         run: flutter pub get
 
-      # ✅ [إضافة جديدة]: توليد كود Drift
+      # ✅ [إضافة جديدة]: توليد كود Drift (ضروري قبل البناء)
       - name: Run Build Runner
         run: dart run build_runner build --delete-conflicting-outputs
 
-      - name: Build Windows
-        run: flutter build windows --release
+      - name: Create Windows runner if missing
+        shell: bash
+        run: |
+          if [ ! -d windows ]; then
+            flutter create --platforms=windows --project-name hesabi .
+          fi
 
-      - name: Upload Windows build artifact
+      # ✅ [إضافة جديدة]: إعادة تثبيت الاعتماديات لربط إضافات الويندوز (مثل Drift و sqlite3)
+      - name: Re-install dependencies after windows generation
+        run: flutter pub get
+
+      - name: Build Windows release
+        env:
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_ANON_KEY: ${{ secrets.SUPABASE_ANON_KEY }}
+        shell: bash
+        run: |
+          flutter build windows --release \
+            --dart-define=APP_ENV=production \
+            --dart-define=SUPABASE_URL="$SUPABASE_URL" \
+            --dart-define=SUPABASE_ANON_KEY="$SUPABASE_ANON_KEY"
+
+      - name: Upload Windows app
         uses: actions/upload-artifact@v4
         with:
-          name: windows-build
+          name: hesabi-windows
           path: build/windows/x64/runner/Release/
-          retention-days: 7
           if-no-files-found: error
