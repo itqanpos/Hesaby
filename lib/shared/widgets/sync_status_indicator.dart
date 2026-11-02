@@ -4,23 +4,11 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:intl/intl.dart' hide TextDirection;
 
-import '../../core/network/network_status_provider.dart';
-import '../../core/network/operation_queue.dart';
-import '../../core/network/operation_queue_providers.dart';
-import '../../core/network/operation_trigger.dart';
-import '../../core/network/pending_operation.dart';
+import '../../data/local/app_database.dart';
+import '../../data/local/sync/outbox_providers.dart';
+import '../../data/local/sync/sync_service.dart';
 import '../../features/companies/presentation/providers/company_context_provider.dart';
 
-/// A smart banner that adapts its message and action based on the state:
-///
-/// * **Online + no pending** → hidden (nothing to show).
-/// * **Online + pending** → blue "جاري مزامنة N عملية..." with spinner.
-/// * **Online + failed** → red "N عملية فشلت في المزامنة" (tap → sync center).
-/// * **Offline + pending** → orange "غير متصل - N معلقة" (tap → sync center).
-/// * **Offline + no pending** → grey "غير متصل بالإنترنت" (subtle).
-///
-/// For a **field sales rep**, this is critical: the banner always tells
-/// them exactly what's going on, and tapping it reveals a full sync center.
 class SyncStatusIndicator extends ConsumerWidget {
   const SyncStatusIndicator({super.key});
 
@@ -31,12 +19,14 @@ class SyncStatusIndicator extends ConsumerWidget {
     );
     if (companyId == null) return const SizedBox.shrink();
 
-    final bool isOnline = ref.watch(isOnlineProvider);
-    final int pending = ref.watch(pendingOperationCountProvider(companyId));
-    final int failed = ref.watch(failedOperationCountProvider(companyId));
+    final SyncStatus status = ref.watch(syncStatusProvider).valueOrNull ?? SyncStatus.idle;
+    final int pending = ref.watch(pendingOutboxCountProvider(companyId)).valueOrNull ?? 0;
+    final int failed = ref.watch(failedOutboxCountProvider(companyId)).valueOrNull ?? 0;
+
+    final bool isOffline = status == SyncStatus.offline;
 
     // Everything is fine: online + no pending + no failures
-    if (isOnline && pending == 0 && failed == 0) {
+    if (!isOffline && status != SyncStatus.syncing && pending == 0 && failed == 0) {
       return const SizedBox.shrink();
     }
 
@@ -52,12 +42,12 @@ class SyncStatusIndicator extends ConsumerWidget {
         subtitle: pending > 0
             ? 'و $pending عملية معلقة · اضغط للمراجعة'
             : 'اضغط للمراجعة وإعادة المحاولة',
-        onTap: () => _openSyncCenter(context),
+        onTap: () => _openSyncCenter(context, companyId),
       );
     }
 
-    // 2. Online + pending → syncing
-    if (isOnline && pending > 0) {
+    // 2. Syncing state
+    if (status == SyncStatus.syncing) {
       return _SyncBanner(
         icon: Icons.sync,
         background: const Color(0xFF0288D1),
@@ -69,34 +59,38 @@ class SyncStatusIndicator extends ConsumerWidget {
     }
 
     // 3. Offline + pending
-    if (!isOnline && pending > 0) {
+    if (isOffline && pending > 0) {
       return _SyncBanner(
         icon: Icons.cloud_off_outlined,
         background: const Color(0xFFEF6C00),
         foreground: Colors.white,
         title: 'غير متصل — $pending عملية معلقة',
         subtitle: 'ستتم المزامنة تلقائياً عند عودة الإنترنت',
-        onTap: () => _openSyncCenter(context),
+        onTap: () => _openSyncCenter(context, companyId),
       );
     }
 
     // 4. Offline + no pending → subtle
-    return _SyncBanner(
-      icon: Icons.cloud_off_outlined,
-      background: scheme.surfaceContainerHighest,
-      foreground: scheme.onSurfaceVariant,
-      title: 'غير متصل بالإنترنت',
-      subtitle: 'يمكنك البيع — ستُحفظ العمليات محلياً',
-    );
+    if (isOffline) {
+      return _SyncBanner(
+        icon: Icons.cloud_off_outlined,
+        background: scheme.surfaceContainerHighest,
+        foreground: scheme.onSurfaceVariant,
+        title: 'غير متصل بالإنترنت',
+        subtitle: 'يمكنك البيع — ستُحفظ العمليات محلياً',
+      );
+    }
+
+    return const SizedBox.shrink();
   }
 
-  void _openSyncCenter(BuildContext context) {
+  void _openSyncCenter(BuildContext context, String companyId) {
     showModalBottomSheet<void>(
       context: context,
       isScrollControlled: true,
       useSafeArea: true,
       showDragHandle: true,
-      builder: (_) => const _SyncCenterSheet(),
+      builder: (_) => _SyncCenterSheet(companyId: companyId),
     );
   }
 }
@@ -187,23 +181,19 @@ class _SyncBanner extends StatelessWidget {
 // ============================================================================
 
 class _SyncCenterSheet extends ConsumerWidget {
-  const _SyncCenterSheet();
+  const _SyncCenterSheet({required this.companyId});
+
+  final String companyId;
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final String? companyId = ref.watch(
-      companyContextProvider.select((s) => s.currentCompany?.id),
-    );
+    final AppDatabase db = ref.watch(appDatabaseProvider);
+    final bool isOffline = ref.watch(syncStatusProvider).valueOrNull == SyncStatus.offline;
 
-    if (companyId == null) {
-      return const Center(child: CircularProgressIndicator());
-    }
-
-    final AsyncValue<OperationQueue> queueAsync =
-        ref.watch(operationQueueProvider);
-    final bool isOnline = ref.watch(isOnlineProvider);
+    final int pending = ref.watch(pendingOutboxCountProvider(companyId)).valueOrNull ?? 0;
+    final int failed = ref.watch(failedOutboxCountProvider(companyId)).valueOrNull ?? 0;
 
     return DraggableScrollableSheet(
       expand: false,
@@ -211,18 +201,20 @@ class _SyncCenterSheet extends ConsumerWidget {
       maxChildSize: 0.95,
       minChildSize: 0.4,
       builder: (BuildContext context, ScrollController scrollController) {
-        return queueAsync.when(
-          loading: () => const Center(child: CircularProgressIndicator()),
-          error: (Object e, StackTrace _) =>
-              Center(child: Text('خطأ: $e')),
-          data: (OperationQueue queue) {
-            final List<PendingOperation> all = queue.forCompany(companyId);
-            final List<PendingOperation> pending = all
-                .where((PendingOperation op) => op.isPending)
-                .toList(growable: false);
-            final List<PendingOperation> failed = all
-                .where((PendingOperation op) => op.isFailed)
-                .toList(growable: false);
+        // جلب جميع العمليات من Drift (سواء معلقة أو فاشلة)
+        return StreamBuilder<List<OutboxRow>>(
+          stream: (db.select(db.outboxTable)
+                ..where((t) => t.companyId.equals(companyId) & t.status.isIn(['pending', 'failed']))
+                ..orderBy([(t) => OrderingTerm(expression: t.createdAt, mode: OrderingMode.desc)]))
+              .watch(),
+          builder: (context, snapshot) {
+            if (!snapshot.hasData) {
+              return const Center(child: CircularProgressIndicator());
+            }
+
+            final List<OutboxRow> allOps = snapshot.data!;
+            final List<OutboxRow> failedOps = allOps.where((op) => op.status == 'failed').toList();
+            final List<OutboxRow> pendingOps = allOps.where((op) => op.status == 'pending').toList();
 
             return ListView(
               controller: scrollController,
@@ -245,9 +237,9 @@ class _SyncCenterSheet extends ConsumerWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  isOnline
-                      ? 'أنت متصل. اضغط "مزامنة الآن" لإرسال العمليات.'
-                      : 'أنت غير متصل. ستتم المزامنة تلقائياً عند عودة الإنترنت.',
+                  isOffline
+                      ? 'أنت غير متصل. ستتم المزامنة تلقائياً عند عودة الإنترنت.'
+                      : 'أنت متصل. اضغط "مزامنة الآن" لإرسال العمليات.',
                   style: theme.textTheme.bodySmall?.copyWith(
                     color: scheme.onSurfaceVariant,
                   ),
@@ -262,7 +254,7 @@ class _SyncCenterSheet extends ConsumerWidget {
                         icon: Icons.schedule,
                         color: const Color(0xFFEF6C00),
                         label: 'معلقة',
-                        value: pending.length.toString(),
+                        value: pendingOps.length.toString(),
                       ),
                     ),
                     const SizedBox(width: 8),
@@ -271,7 +263,7 @@ class _SyncCenterSheet extends ConsumerWidget {
                         icon: Icons.error_outline,
                         color: scheme.error,
                         label: 'فشلت',
-                        value: failed.length.toString(),
+                        value: failedOps.length.toString(),
                       ),
                     ),
                   ],
@@ -279,20 +271,18 @@ class _SyncCenterSheet extends ConsumerWidget {
                 const SizedBox(height: 16),
 
                 // Sync now button
-                if (isOnline && pending.isNotEmpty)
+                if (!isOffline && pendingOps.isNotEmpty)
                   SizedBox(
                     width: double.infinity,
                     child: FilledButton.icon(
                       icon: const Icon(Icons.sync),
                       label: const Text('مزامنة الآن'),
                       onPressed: () {
-                        ref
-                            .read(operationTriggerProvider)
-                            .triggerIfPossible();
+                        ref.read(syncServiceProvider).processOutbox();
                       },
                     ),
                   ),
-                if (!isOnline)
+                if (isOffline)
                   Container(
                     padding: const EdgeInsets.all(12),
                     decoration: BoxDecoration(
@@ -317,31 +307,30 @@ class _SyncCenterSheet extends ConsumerWidget {
                   ),
                 const SizedBox(height: 16),
 
-                // Failed section (priority)
-                if (failed.isNotEmpty) ...<Widget>[
+                // Failed section
+                if (failedOps.isNotEmpty) ...<Widget>[
                   _SectionTitle(
-                    title: 'عمليات فشلت (${failed.length})',
+                    title: 'عمليات فشلت (${failedOps.length})',
                     color: scheme.error,
                   ),
                   const SizedBox(height: 8),
-                  for (final PendingOperation op in failed)
+                  for (final OutboxRow op in failedOps)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: _OperationCard(
                         operation: op,
                         isFailed: true,
-                        onRetry: isOnline
+                        onRetry: !isOffline
                             ? () async {
-                                await queue.update(
-                                  op.copyWith(
-                                    status: PendingOperationStatus.pending,
-                                    attemptCount: 0,
-                                    lastError: null,
-                                  ),
-                                );
-                                await ref
-                                    .read(operationTriggerProvider)
-                                    .triggerIfPossible();
+                                // إعادة الحالة إلى pending
+                                await (db.update(db.outboxTable)..where((t) => t.id.equals(op.id)))
+                                    .write(const OutboxTableCompanion(
+                                  status: Value('pending'),
+                                  retryCount: Value(0),
+                                  lastError: Value(null),
+                                ));
+                                // إعادة المحاولة
+                                ref.read(syncServiceProvider).processOutbox();
                               }
                             : null,
                       ),
@@ -350,13 +339,13 @@ class _SyncCenterSheet extends ConsumerWidget {
                 ],
 
                 // Pending section
-                if (pending.isNotEmpty) ...<Widget>[
+                if (pendingOps.isNotEmpty) ...<Widget>[
                   _SectionTitle(
-                    title: 'قيد الانتظار (${pending.length})',
+                    title: 'قيد الانتظار (${pendingOps.length})',
                     color: const Color(0xFFEF6C00),
                   ),
                   const SizedBox(height: 8),
-                  for (final PendingOperation op in pending)
+                  for (final OutboxRow op in pendingOps)
                     Padding(
                       padding: const EdgeInsets.only(bottom: 8),
                       child: _OperationCard(
@@ -367,7 +356,7 @@ class _SyncCenterSheet extends ConsumerWidget {
                     ),
                 ],
 
-                if (pending.isEmpty && failed.isEmpty)
+                if (allOps.isEmpty)
                   Padding(
                     padding: const EdgeInsets.symmetric(vertical: 48),
                     child: Column(
@@ -375,8 +364,7 @@ class _SyncCenterSheet extends ConsumerWidget {
                         Icon(
                           Icons.check_circle_outline,
                           size: 64,
-                          color: const Color(0xFF0F7B6C)
-                              .withValues(alpha: 0.6),
+                          color: const Color(0xFF0F7B6C).withValues(alpha: 0.6),
                         ),
                         const SizedBox(height: 16),
                         Text(
@@ -489,31 +477,46 @@ class _OperationCard extends StatelessWidget {
     this.onRetry,
   });
 
-  final PendingOperation operation;
+  final OutboxRow operation;
   final bool isFailed;
   final Future<void> Function()? onRetry;
 
-  String get _typeLabel => switch (operation.type) {
-        PendingOperationType.sale => 'فاتورة بيع',
-        PendingOperationType.customerPayment => 'دفعة عميل',
-        PendingOperationType.supplierPayment => 'دفعة مورد',
-        PendingOperationType.expense => 'مصروف',
-      };
+  // ✅ ربط العمليات بجدول Drift
+  String get _typeLabel {
+    switch (operation.targetTable) {
+      case 'sales':
+        return 'فاتورة بيع';
+      case 'customers':
+        return 'عميل';
+      case 'products':
+        return 'منتج';
+      case 'customer_payments':
+        return 'دفعة عميل';
+      default:
+        return operation.targetTable;
+    }
+  }
 
-  IconData get _typeIcon => switch (operation.type) {
-        PendingOperationType.sale => Icons.receipt_long_outlined,
-        PendingOperationType.customerPayment => Icons.payments_outlined,
-        PendingOperationType.supplierPayment =>
-          Icons.local_shipping_outlined,
-        PendingOperationType.expense => Icons.money_off,
-      };
+  IconData get _typeIcon {
+    switch (operation.targetTable) {
+      case 'sales':
+        return Icons.receipt_long_outlined;
+      case 'customers':
+        return Icons.people_outline;
+      case 'products':
+        return Icons.inventory_2_outlined;
+      case 'customer_payments':
+        return Icons.payments_outlined;
+      default:
+        return Icons.sync;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
-    final String dateStr =
-        DateFormat('yyyy/MM/dd HH:mm').format(operation.createdAt);
+    final String dateStr = DateFormat('yyyy/MM/dd HH:mm').format(operation.createdAt);
 
     return Container(
       padding: const EdgeInsets.all(12),
@@ -539,7 +542,7 @@ class _OperationCard extends StatelessWidget {
               const SizedBox(width: 8),
               Expanded(
                 child: Text(
-                  _typeLabel,
+                  '$_typeLabel (${operation.operation})',
                   style: theme.textTheme.titleSmall?.copyWith(
                     fontWeight: FontWeight.bold,
                   ),
