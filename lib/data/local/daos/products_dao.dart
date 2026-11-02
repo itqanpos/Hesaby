@@ -7,9 +7,11 @@ import '../app_database.dart';
 import '../tables/products_table.dart';
 import '../tables/outbox_table.dart';
 
+// ✅ استيراد الكيان الأصلي
+import '../../../features/products/domain/entities/product.dart';
+
 part 'products_dao.g.dart';
 
-/// DAO (Data Access Object) for the `products` table.
 @DriftAccessor(tables: [ProductsTable, OutboxTable])
 class ProductsDao extends DatabaseAccessor<AppDatabase>
     with _$ProductsDaoMixin {
@@ -29,7 +31,7 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
     int? limit,
     int? offset,
   }) {
-    final SimpleSelectStatement<$ProductsTableTable, Product> query =
+    final SimpleSelectStatement<$ProductsTableTable, ProductRow> query =
         select(productsTable)
           ..where((t) => t.companyId.equals(companyId));
 
@@ -55,27 +57,31 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
       query.limit(limit, offset: offset);
     }
 
-    return query.watch();
+    // ✅ تحويل النتيجة إلى كيان Product
+    return query.watch().map((List<ProductRow> rows) =>
+        rows.map((ProductRow row) => row.toEntity()).toList(growable: false));
   }
 
-  Future<Product?> getProductById(String productId) {
-    return (select(productsTable)
+  Future<Product?> getProductById(String productId) async {
+    final ProductRow? row = await (select(productsTable)
           ..where((t) => t.id.equals(productId)))
         .getSingleOrNull();
+    return row?.toEntity();
   }
 
   Future<Product?> getProductByBarcode({
     required String companyId,
     required String barcode,
-  }) {
-    return (select(productsTable)
+  }) async {
+    final ProductRow? row = await (select(productsTable)
           ..where((t) =>
               t.companyId.equals(companyId) & t.barcode.equals(barcode)))
         .getSingleOrNull();
+    return row?.toEntity();
   }
 
   // ---------------------------------------------------------------------------
-  // Write Operations (with Outbox)
+  // Write Operations
   // ---------------------------------------------------------------------------
 
   Future<void> createProduct({
@@ -114,23 +120,15 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
     required String companyId,
   }) async {
     await transaction(() async {
-      final Product? existing = await getProductById(productId);
       await (delete(productsTable)..where((t) => t.id.equals(productId))).go();
-
-      if (existing != null) {
-        await _enqueueOutbox(
-          companyId: companyId,
-          operation: 'delete',
-          recordId: productId,
-          payload: '{"id": "$productId"}',
-        );
-      }
+      await _enqueueOutbox(
+        companyId: companyId,
+        operation: 'delete',
+        recordId: productId,
+        payload: '{"id": "$productId"}',
+      );
     });
   }
-
-  // ---------------------------------------------------------------------------
-  // Internal Helpers
-  // ---------------------------------------------------------------------------
 
   Future<void> _enqueueOutbox({
     required String companyId,
@@ -142,7 +140,7 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
       OutboxTableCompanion.insert(
         id: _uuid.v4(),
         companyId: companyId,
-        targetTable: 'products', // ✅ تم التعديل هنا
+        targetTable: 'products',
         operation: operation,
         recordId: recordId,
         payload: payload,
@@ -150,6 +148,30 @@ class ProductsDao extends DatabaseAccessor<AppDatabase>
         retryCount: const Value(0),
         createdAt: DateTime.now(),
       ),
+    );
+  }
+}
+
+// ✅ إضافة Extension لتحويل ProductRow (Drift) إلى Product (Domain)
+extension ProductRowMapper on ProductRow {
+  Product toEntity() {
+    return Product(
+      id: id,
+      companyId: companyId,
+      defaultUnitId: defaultUnitId,
+      name: name,
+      costPrice: costPrice,
+      sellingPrice: sellingPrice,
+      isActive: isActive,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+      categoryId: categoryId,
+      sku: sku,
+      barcode: barcode,
+      description: description,
+      minSellingPrice: minSellingPrice,
+      maxSellingPrice: maxSellingPrice,
+      taxRate: taxRate,
     );
   }
 }
