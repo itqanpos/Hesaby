@@ -1,18 +1,9 @@
-# Builds the Windows desktop app.
-#
-# The repository has no windows/ folder yet. This workflow creates the Windows
-# runner files on the fly with `flutter create --platforms=windows`, then builds.
-# Once the windows/ folder is committed, the create step is skipped.
-#
-# Required repository secrets (same as flutter_apk.yml):
-#   SUPABASE_URL, SUPABASE_ANON_KEY
-
 name: Windows build
 
 on:
   workflow_dispatch:
   push:
-    branches: [main, feature/offline-first] # ✅ تمت إضافة الفرع
+    branches: [main]
 
 permissions:
   contents: read
@@ -35,13 +26,6 @@ jobs:
       - name: Enable Windows desktop
         run: flutter config --enable-windows-desktop
 
-      - name: Get dependencies
-        run: flutter pub get
-
-      # ✅ [إضافة جديدة]: توليد كود Drift (ضروري قبل البناء)
-      - name: Run Build Runner
-        run: dart run build_runner build --delete-conflicting-outputs
-
       - name: Create Windows runner if missing
         shell: bash
         run: |
@@ -49,8 +33,7 @@ jobs:
             flutter create --platforms=windows --project-name hesabi .
           fi
 
-      # ✅ [إضافة جديدة]: إعادة تثبيت الاعتماديات لربط إضافات الويندوز (مثل Drift و sqlite3)
-      - name: Re-install dependencies after windows generation
+      - name: Get dependencies
         run: flutter pub get
 
       - name: Build Windows release
