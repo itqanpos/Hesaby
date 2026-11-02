@@ -5,9 +5,10 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/network/operation_trigger.dart';
 import '../../core/responsive/responsive_helper.dart';
+import '../../data/local/sync/sync_service.dart'; // ✅ [إضافة]: استيراد خدمة المزامنة
 import '../../features/admin/presentation/providers/admin_app_config_provider.dart';
 import '../../features/admin/presentation/providers/platform_admin_provider.dart';
-import '../widgets/company_status_banner.dart'; // ⬅️ إضافة استيراد البانر
+import '../widgets/company_status_banner.dart';
 import '../widgets/sync_status_indicator.dart';
 import '../widgets/update_available_banner.dart';
 import 'app_navigation.dart';
@@ -39,6 +40,9 @@ class AppShell extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    // ✅ [إضافة]: تشغيل محرك المزامنة في الخلفية
+    ref.watch(syncServiceProvider);
+
     final DeviceType deviceType = context.deviceType;
     final double horizontalPadding = applyHorizontalPadding
         ? ResponsiveHelper.horizontalPadding(deviceType)
@@ -86,7 +90,7 @@ class AppShell extends ConsumerWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: <Widget>[
           if (announcementBanner != null) announcementBanner,
-          const CompanyStatusBanner(), // ⬅️ البانر الجديد للشركات الموقوفة
+          const CompanyStatusBanner(),
           const SyncStatusIndicator(),
           const UpdateAvailableBanner(),
           Expanded(
