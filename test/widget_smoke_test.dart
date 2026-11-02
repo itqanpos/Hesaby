@@ -19,8 +19,10 @@ void main() {
     // ✅ 2. تهيئة Supabase بشكل وهمي مع تعطيل المؤقت (Auto Refresh)
     await Supabase.initialize(
       url: 'https://dummy.supabase.co',
-      anonKey: 'dummy_key',
-      authOptions: const AuthClientOptions(autoRefreshToken: false),
+      publishableKey: 'dummy_key', // ✅ استخدام publishableKey بدلاً من anonKey
+      authOptions: const FlutterAuthClientOptions( // ✅ استخدام FlutterAuthClientOptions
+        autoRefreshToken: false,
+      ),
     );
   });
 
