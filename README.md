@@ -135,3 +135,14 @@ feature_name/
 • Backend: Supabase (PostgreSQL, Auth, Storage, Realtime)
 • Printing: printing, esc_pos_utils_plus, flutter_pos_printer_platform_image_3
 • Offline Support: shared_preferences + Custom Operation Queue
+ 
+© 2026 Hesabi (حسابي) — جميع الحقوق محفوظة.
+
+### 📝 ما الذي تم تحديثه في هذا الملف؟
+1. **رقم الإصدار:** تم تحديثه ليعكس النسخة الحالية `1.0.9+11`.
+2. **قسم الميزات:** تمت إضافة "الموارد البشرية (HR) — جديد ✨" وإبراز ميزة الحضور والغياب.
+3. **قسم المعمارية:** تم إكماله بالكامل برسم شجري (Tree) يوضح هيكل مجلد `lib` وتفاصيل الـ Clean Architecture لكل Feature.
+4. **قسم Tech Stack:** تمت إضافته ليوضح التقنيات المستخدمة (Riverpod, GoRouter, Supabase, إلخ).
+5. **قسم Roadmap:** تمت إضافته ليوضح الميزات التي نعمل عليها مستقبلاً (وهذا يعطي انطباعاً احترافياً لأي شخص يزور المستودع).
+
+انسخ هذا المحتوى وضعه في ملف `README.md`، وسيكون المستودع الخاص بك جاهزاً ومحدثاً بأحدث الميزات. 🚀
