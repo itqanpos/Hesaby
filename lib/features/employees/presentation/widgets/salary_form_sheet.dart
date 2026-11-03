@@ -12,13 +12,6 @@ import '../../domain/entities/employee_salary.dart';
 import '../../domain/repositories/employee_salary_repository.dart';
 import '../providers/payroll_providers.dart';
 
-/// Bottom sheet to create or edit a single salary entry.
-///
-/// Two actions:
-/// * **حفظ كمسودة** — saves without paying (`paid_at = null`).
-/// * **حفظ ودفع** — saves and marks as paid immediately. The DB trigger
-///   posts the cash movement and reduces the employee's open advances
-///   by the `advancesDeducted` amount (FIFO).
 Future<bool?> showSalaryFormSheet({
   required BuildContext context,
   required Employee employee,
@@ -64,7 +57,9 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
 
   String _paymentMethod = 'cash';
   bool _isSaving = false;
-  SalaryFailureType? _failure;
+  
+  // ✅ تعديل: استخدام String لعرض الخطأ الحقيقي
+  String? _errorMessage;
 
   bool get _isEdit => widget.existing != null;
   bool get _isPaid => widget.existing?.isPaid ?? false;
@@ -132,7 +127,7 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
 
   Future<void> _submit({required bool markPaid}) async {
     FocusScope.of(context).unfocus();
-    if (_failure != null) setState(() => _failure = null);
+    if (_errorMessage != null) setState(() => _errorMessage = null);
     if (!(_formKey.currentState?.validate() ?? false)) return;
 
     setState(() => _isSaving = true);
@@ -181,13 +176,14 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
       if (!mounted) return;
       setState(() {
         _isSaving = false;
-        _failure = e.type;
+        // ✅ عرض تفاصيل الخطأ الحقيقي إن وجدت
+        _errorMessage = e.cause?.toString() ?? e.type.toString(); 
       });
-    } on Object {
+    } on Object catch (e) {
       if (!mounted) return;
       setState(() {
         _isSaving = false;
-        _failure = SalaryFailureType.unknown;
+        _errorMessage = e.toString(); // ✅ عرض الخطأ الحقيقي
       });
     }
   }
@@ -200,7 +196,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
 
     final Employee e = widget.employee;
 
-    // ---- Available advances (open) for this employee ----
     final List<EmployeeAdvance> employeeAdvances =
         (ref.watch(advancesProvider).valueOrNull ??
                 const <EmployeeAdvance>[])
@@ -251,7 +246,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                     ),
                   ),
 
-                // ---- Base ----
                 _MoneyField(
                   controller: _baseController,
                   label: 'الراتب الأساسي',
@@ -259,7 +253,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Bonuses ----
                 _MoneyField(
                   controller: _bonusesController,
                   label: 'الحوافز (+)',
@@ -267,7 +260,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Deductions ----
                 _MoneyField(
                   controller: _deductionsController,
                   label: 'الخصومات (−)',
@@ -275,7 +267,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Advances (with available hint & Auto-fill button) ----
                 Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: <Widget>[
@@ -299,7 +290,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                         return null;
                       },
                     ),
-                    // ✅ زر جديد: خصم إجمالي السلف بضغطة واحدة
                     if (!_isPaid && !_isSaving && totalAvailableAdvances > 0)
                       Padding(
                         padding: const EdgeInsets.only(top: 4, right: 8),
@@ -319,7 +309,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 16),
 
-                // ---- Net preview ----
                 DecoratedBox(
                   decoration: BoxDecoration(
                     color: scheme.primaryContainer,
@@ -352,7 +341,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 16),
 
-                // ---- Payment method ----
                 DropdownButtonFormField<String>(
                   key: ValueKey<String>('pm-$_paymentMethod'),
                   initialValue: _paymentMethod,
@@ -392,7 +380,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                 ),
                 const SizedBox(height: 12),
 
-                // ---- Notes ----
                 TextFormField(
                   controller: _notesController,
                   enabled: !_isSaving,
@@ -403,14 +390,13 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
                   ),
                 ),
 
-                if (_failure != null) ...<Widget>[
+                if (_errorMessage != null) ...<Widget>[
                   const SizedBox(height: 12),
-                  _FailureBanner(message: _failureMessage(_failure!)),
+                  _FailureBanner(message: _errorMessage!), // ✅ عرض الخطأ الحقيقي
                 ],
 
                 const SizedBox(height: 20),
 
-                // ---- Actions ----
                 if (!_isPaid) ...<Widget>[
                   AppButton(
                     label: 'حفظ ودفع',
@@ -452,10 +438,6 @@ class _SalaryFormSheetState extends ConsumerState<_SalaryFormSheet> {
     );
   }
 }
-
-// ============================================================================
-// Money field
-// ============================================================================
 
 class _MoneyField extends StatelessWidget {
   const _MoneyField({
@@ -555,13 +537,14 @@ class _FailureBanner extends StatelessWidget {
       child: Padding(
         padding: const EdgeInsets.all(12),
         child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: <Widget>[
             Icon(Icons.error_outline, color: scheme.onErrorContainer),
             const SizedBox(width: 8),
             Expanded(
               child: Text(
                 message,
-                style: TextStyle(color: scheme.onErrorContainer),
+                style: TextStyle(color: scheme.onErrorContainer, fontSize: 13),
               ),
             ),
           ],
@@ -570,18 +553,3 @@ class _FailureBanner extends StatelessWidget {
     );
   }
 }
-
-String _failureMessage(SalaryFailureType type) => switch (type) {
-      SalaryFailureType.network =>
-        'تعذّر الاتصال بالخادم. تحقق من اتصالك.',
-      SalaryFailureType.unauthorized =>
-        'لا تملك صلاحية إدارة الرواتب.',
-      SalaryFailureType.notFound => 'الراتب غير موجود.',
-      SalaryFailureType.invalidInput =>
-        'تحقق من المبالغ المُدخلة (خصم السلف يتجاوز المتاح؟).',
-      SalaryFailureType.duplicateEntry =>
-        'يوجد راتب مسجَّل لهذا الموظف في هذا الشهر بالفعل.',
-      SalaryFailureType.invalidResponse =>
-        'تعذّر قراءة البيانات من الخادم.',
-      SalaryFailureType.unknown => 'حدث خطأ غير متوقع. حاول مرة أخرى.',
-    };
