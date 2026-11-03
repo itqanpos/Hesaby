@@ -3,7 +3,7 @@
 > **Multi-tenant SaaS for POS, Inventory, Sales, Purchases & Accounting**  
 > نظام إدارة متكامل للمتاجر والمندوبين والشركات الصغيرة والمتوسطة — عربي بالكامل، RTL، ويعمل على الويب والأندرويد.
 
-[![Version](https://img.shields.io/badge/version-1.0.0%2B1-blue)](https://github.com/itqanpos/Hesaby)
+[![Version](https://img.shields.io/badge/version-1.0.9%2B11-blue)](https://github.com/itqanpos/Hesaby)
 [![Flutter](https://img.shields.io/badge/Flutter-%3E%3D3.24.0-02569B)](https://flutter.dev)
 [![Supabase](https://img.shields.io/badge/Supabase-PostgreSQL%20%2B%20RLS-3ECF8E)](https://supabase.com)
 [![Platform](https://img.shields.io/badge/Web%20%2B%20Android-✓-success)](#)
@@ -29,6 +29,7 @@
 - 💰 **المبيعات** — فواتير، مرتجعات، عملاء، أرصدة (مدين/دائن)، آجل.
 - 🧾 **المشتريات** — موردين، أوامر شراء، دفعات.
 - 🧮 **المحاسبة** — خزنة، مصروفات، رواتب، سلف، تقارير مالية.
+- 👥 **الموارد البشرية** — إدارة الموظفين، **الحضور والغياب**، السلف، الرواتب.
 - 🏢 **متعدد الشركات والفروع** — مع صلاحيات دقيقة لكل مستخدم.
 - 🔐 **اشتراكات SaaS** — تجربة مجانية، باقات، تجديد، حظر، سجل مدفوعات.
 - ⚙️ **لوحة تحكم المنصة (Platform Admin)** — إدارة كاملة للمنصة من داخل التطبيق.
@@ -64,9 +65,14 @@
 
 ### 🧮 المحاسبة والرواتب
 - خزنة (نقدي + بطاقة + بنكي)، حركات، تدفق نقدي.
-- موظفون، سلف، رواتب، خصومات تلقائية.
+- موظفون، سلف، رواتب، خصومات تلقائية (FIFO للسلف).
 - مصروفات (إيجار، كهرباء، صيانة، ...).
-- **تقارير:** الأرباح والخسائر، تقييم المخزون، أفضل المنتجات/العملاء، المستحقات، المدفوعات، إلخ.
+- **تقارير دقيقة:** الأرباح والخسائر (COGS & Margins)، تقييم المخزون، أفضل المنتجات/العملاء، المستحقات، المدفوعات.
+
+### 👥 الموارد البشرية (HR) — جديد ✨
+- **نظام الحضور والغياب:** تسجيل يومي (حاضر/غائب/متأخر/إجازة) مع إمكانية "تحضير الجميع" بضغطة زر.
+- تقرير الورديات: ربط الوردية بالكاشير والفرع.
+- إدارة حسابات الدخول للموظفين (إنشاء كود دخول وصلاحيات).
 
 ### 🔐 الصلاحيات والأمان
 - **Row Level Security (RLS)** على كل جدول.
@@ -91,12 +97,41 @@
 - **Feature Flags** — تعطيل أي ميزة من المنصة.
 
 ### 📡 العمل بدون إنترنت (Offline)
-- طابور عمليات (Operation Queue).
+- طابور عمليات (Operation Queue) يعتمد على التخزين المحلي.
 - إعادة المحاولة التلقائية عند عودة الشبكة.
-- لا يفقد البيانات في حالة انقطاع الاتصال.
+- لا يفقد البيانات في حالة انقطاع الاتصال (يُحفظ الطابور محلياً لحين المزامنة).
 
 ---
 
 ## 🏗️ المعمارية
 
-**Feature-first architecture** (على نمط Clean Architecture):
+المشروع مبني على **Feature-first architecture** (على نمط Clean Architecture)، لضمان قابلية التوسع والصيانة، ويتم فصل المسؤوليات كالتالي:
+
+```text
+lib/
+├── app/                  # إعدادات التطبيق، الراوتر (GoRouter)، الثيم (Theme)
+├── core/                 # أدوات مشتركة (Network, Storage, Responsive, Validators)
+├── shared/               # واجهات مستخدم قابلة لإعادة الاستخدام (Widgets, Layouts)
+└── features/             # كل ميزة معزولة بداخلها
+    ├── auth/             # تسجيل الدخول، الحسابات
+    ├── companies/        # الشركات، الفروع، الأعضاء
+    ├── products/         # المنتجات، الفئات، الوحدات
+    ├── inventory/        # المخزون، حركات المخزون، الجرد
+    ├── sales/            # المبيعات، المرتجعات، العملاء، نقاط البيع (POS)
+    ├── purchases/        # المشتريات، الموردين
+    ├── cash/             # الخزنة، المصروفات
+    ├── employees/        # الموظفين، السلف، الرواتب، الحضور والغياب
+    ├── reports/          # التقارير المالية (أرباح، خسائر، مخزون، ...)
+    └── admin/            # لوحة تحكم المنصة (Platform Admin)
+feature_name/
+├── data/                 # التعامل مع Supabase (Datasources, Repositories Impl)
+├── domain/               # الكيانات (Entities) والواجهات (Repository Interfaces)
+└── presentation/         # الواجهات (Pages) والمزودات (Providers - Riverpod) والويدجت
+ 
+🛠️ التقنيات المستخدمة (Tech Stack)
+• Framework: Flutter (Dart)
+• State Management: Riverpod (AsyncNotifier, StreamProvider)
+• Routing: GoRouter
+• Backend: Supabase (PostgreSQL, Auth, Storage, Realtime)
+• Printing: printing, esc_pos_utils_plus, flutter_pos_printer_platform_image_3
+• Offline Support: shared_preferences + Custom Operation Queue
