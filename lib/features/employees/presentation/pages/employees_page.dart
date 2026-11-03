@@ -17,6 +17,8 @@ import '../../domain/entities/employee.dart';
 import '../../domain/repositories/employee_repository.dart';
 import '../providers/employee_providers.dart';
 import '../widgets/employee_form_sheet.dart';
+// ✅ [إضافة]: استيراد صفحة الحضور
+import 'attendance_page.dart'; 
 
 class EmployeesPage extends ConsumerStatefulWidget {
   const EmployeesPage({super.key});
@@ -150,12 +152,24 @@ class _EmployeesPageState extends ConsumerState<EmployeesPage> {
       appBar: AppBar(
         title: const Text('الفريق'),
         actions: <Widget>[
-          // ⬇️ الزر يظهر دائماً في هذه الصفحة (لأن صفحة الفريق مخصصة للإدارة)
+          // ⬇️ زر الصلاحيات والأدوار
           IconButton(
             tooltip: 'الصلاحيات والأدوار',
             icon: const Icon(Icons.admin_panel_settings_outlined),
             onPressed: () =>
                 context.pushNamed(AppRouter.membersName),
+          ),
+          // ✅ [إضافة]: زر سجل الحضور
+          IconButton(
+            tooltip: 'سجل الحضور',
+            icon: const Icon(Icons.calendar_month_outlined),
+            onPressed: () {
+              Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => const AttendancePage(),
+                ),
+              );
+            },
           ),
           IconButton(
             tooltip: includeInactive
