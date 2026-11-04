@@ -11,6 +11,8 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/platform_admin_provider.dart';
 import 'admin_notifications_page.dart';
+// ✅ [إضافة]: استيراد صفحة فريق المنصة الجديدة
+import 'admin_platform_team_page.dart'; 
 import 'tabs/admin_overview_tab.dart';
 import 'tabs/admin_audit_log_tab.dart';
 import 'tabs/admin_companies_tab.dart';
@@ -72,6 +74,19 @@ class AdminDashboardPage extends ConsumerWidget {
           ),
           title: const Text('لوحة تحكم المنصة'),
           actions: <Widget>[
+            // ✅ [إضافة]: زر فريق المنصة
+            IconButton(
+              tooltip: 'فريق المنصة (الأدمن والموظفين)',
+              icon: const Icon(Icons.shield_outlined, color: Colors.teal),
+              onPressed: () {
+                Navigator.of(context).push(
+                  MaterialPageRoute(
+                    builder: (_) => const AdminPlatformTeamPage(),
+                  ),
+                );
+              },
+            ),
+            // زر الإشعارات
             Stack(
               children: <Widget>[
                 IconButton(
