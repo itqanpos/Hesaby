@@ -2,46 +2,45 @@
 
 import 'package:supabase_flutter/supabase_flutter.dart';
 
-class AdminUserService {
-  const AdminUserService(this._client);
+class AdminUserException implements Exception {
+  final String message;
+  AdminUserException(this.message);
+  @override
+  String toString() => message;
+}
 
+class AdminUserService {
   final SupabaseClient _client;
 
-  Future<String> createUser({
+  AdminUserService(this._client);
+
+  Future<String?> createUser({
     required String email,
     required String password,
     String? fullName,
+    bool isPlatformAdmin = false,
   }) async {
     try {
-      final FunctionResponse response = await _client.functions.invoke(
+      final response = await _client.functions.invoke(
         'admin-create-user',
-        body: <String, dynamic>{
-          'email': email.trim().toLowerCase(),
+        body: {
+          'email': email,
           'password': password,
-          if (fullName != null && fullName.trim().isNotEmpty)
-            'fullName': fullName.trim(),
+          'fullName': fullName,
+          'isPlatformAdmin': isPlatformAdmin,
         },
       );
 
       if (response.status != 200) {
-        throw AdminUserException(_extractError(response));
+        final errorMsg = response.data?['error'] ?? 'حدث خطأ أثناء إنشاء المستخدم';
+        throw AdminUserException(errorMsg);
       }
 
-      final Map<String, dynamic> data =
-          (response.data as Map<dynamic, dynamic>).cast<String, dynamic>();
-      final Object? id = data['user_id'];
-      if (id is! String || id.isEmpty) {
-        throw const AdminUserException('استجابة غير صالحة من الخادم.');
-      }
-      return id;
-    } on AdminUserException {
-      rethrow;
-    } on FunctionException catch (error) {
-      throw AdminUserException(
-        _translateErrorDetails(error.details, error.reasonPhrase),
-      );
-    } on Object catch (error) {
-      throw AdminUserException('تعذّر الاتصال بالخادم: $error');
+      return response.data?['user_id'] as String?;
+    } on FunctionException catch (e) {
+      throw AdminUserException(e.details?['error'] ?? 'فشل الاتصال بالخادم');
+    } catch (e) {
+      throw AdminUserException(e.toString());
     }
   }
 
@@ -50,87 +49,32 @@ class AdminUserService {
     String? email,
     String? password,
     String? fullName,
-    bool? isPlatformAdmin,
-    bool? isBanned, // ⬅️ تمت إضافة هذا المتغير
+    required bool isPlatformAdmin,
+    required bool isBanned,
   }) async {
     try {
-      final FunctionResponse response = await _client.functions.invoke(
+      final payload = <String, dynamic>{
+        'userId': userId,
+        'isPlatformAdmin': isPlatformAdmin,
+        'isBanned': isBanned,
+      };
+      if (email != null && email.isNotEmpty) payload['email'] = email;
+      if (password != null && password.isNotEmpty) payload['password'] = password;
+      if (fullName != null) payload['fullName'] = fullName;
+
+      final response = await _client.functions.invoke(
         'admin-update-user',
-        body: <String, dynamic>{
-          'userId': userId,
-          if (email != null && email.trim().isNotEmpty)
-            'email': email.trim().toLowerCase(),
-          if (password != null && password.isNotEmpty) 'password': password,
-          if (fullName != null) 'fullName': fullName.trim(),
-          if (isPlatformAdmin != null) 'isPlatformAdmin': isPlatformAdmin,
-          if (isBanned != null) 'isBanned': isBanned, // ⬅️ تمرير المتغير للـ Edge Function
-        },
+        body: payload,
       );
 
       if (response.status != 200) {
-        throw AdminUserException(_extractError(response));
+        final errorMsg = response.data?['error'] ?? 'حدث خطأ أثناء تحديث المستخدم';
+        throw AdminUserException(errorMsg);
       }
-    } on AdminUserException {
-      rethrow;
-    } on FunctionException catch (error) {
-      throw AdminUserException(
-        _translateErrorDetails(error.details, error.reasonPhrase),
-      );
-    } on Object catch (error) {
-      throw AdminUserException('تعذّر الاتصال بالخادم: $error');
+    } on FunctionException catch (e) {
+      throw AdminUserException(e.details?['error'] ?? 'فشل الاتصال بالخادم');
+    } catch (e) {
+      throw AdminUserException(e.toString());
     }
   }
-
-  static String _extractError(FunctionResponse response) {
-    final Object? data = response.data;
-    if (data is Map) {
-      final Object? error = data['error'];
-      if (error is String && error.isNotEmpty) {
-        return _translateServerMessage(error);
-      }
-    }
-    return 'تعذّر إتمام العملية (رمز ${response.status}).';
-  }
-
-  static String _translateErrorDetails(Object? details, String? reason) {
-    if (details is Map) {
-      final Object? error = details['error'];
-      final Object? extra = details['details'];
-      if (error is String) {
-        final String base = _translateServerMessage(error);
-        return extra == null ? base : '$base\n$extra';
-      }
-    }
-    if (details is String && details.isNotEmpty) {
-      return _translateServerMessage(details);
-    }
-    return reason ?? 'تعذّر إتمام العملية.';
-  }
-
-  static String _translateServerMessage(String raw) {
-    final String lower = raw.toLowerCase();
-    if (lower.contains('already') && lower.contains('registered')) {
-      return 'هذا البريد مستخدم بالفعل.';
-    }
-    if (lower.contains('invalid email')) return 'بريد إلكتروني غير صالح.';
-    if (lower.contains('password') && lower.contains('6')) {
-      return 'كلمة المرور يجب أن تكون 6 أحرف على الأقل.';
-    }
-    if (lower.contains('forbidden')) return 'غير مصرّح لهذه العملية.';
-    if (lower.contains('invalid session')) {
-      return 'انتهت الجلسة. سجّل الدخول مجددًا.';
-    }
-    if (lower.contains('non-2xx')) {
-      return 'تعذّر تنفيذ الطلب على الخادم.';
-    }
-    return raw;
-  }
-}
-
-class AdminUserException implements Exception {
-  const AdminUserException(this.message);
-  final String message;
-
-  @override
-  String toString() => message;
 }
