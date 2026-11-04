@@ -242,6 +242,7 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
         password: _passwordCtrl.text,
         fullName: _nameCtrl.text,
         isPlatformAdmin: isAdmin,
+        isPlatformStaff: !isAdmin, // ✅ إضافة الموظف
       );
 
       if (mounted) Navigator.pop(context, true);
@@ -267,7 +268,7 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
               AppTextField(controller: _passwordCtrl, label: 'كلمة المرور', obscureText: true, validator: (v) => v!.length >= 6 ? null : '6 أحرف على الأقل'),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                initialValue: _role, // ✅ تم التعديل هنا: استخدام initialValue بدلاً من value
+                initialValue: _role, // ✅ تم التعديل هنا
                 decoration: const InputDecoration(labelText: 'الدور', border: OutlineInputBorder()),
                 items: const [
                   DropdownMenuItem(value: 'staff', child: Text('موظف منصة')),
