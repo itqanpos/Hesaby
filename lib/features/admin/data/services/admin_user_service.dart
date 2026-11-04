@@ -14,12 +14,13 @@ class AdminUserService {
 
   AdminUserService(this._client);
 
+  /// إنشاء مستخدم جديد (موظف منصة أو أدمن)
   Future<String?> createUser({
     required String email,
     required String password,
     String? fullName,
     bool isPlatformAdmin = false,
-    bool isPlatformStaff = false, // ✅ إضافة
+    bool isPlatformStaff = false,
   }) async {
     try {
       final response = await _client.functions.invoke(
@@ -29,7 +30,7 @@ class AdminUserService {
           'password': password,
           'fullName': fullName,
           'isPlatformAdmin': isPlatformAdmin,
-          'isPlatformStaff': isPlatformStaff, // ✅ إضافة
+          'isPlatformStaff': isPlatformStaff,
         },
       );
 
@@ -53,6 +54,7 @@ class AdminUserService {
     }
   }
 
+  /// تعديل بيانات مستخدم موجود
   Future<void> updateUser({
     required String userId,
     String? email,
@@ -78,6 +80,32 @@ class AdminUserService {
 
       if (response.status != 200) {
         final errorMsg = (response.data?['error'] as String?) ?? 'حدث خطأ أثناء تحديث المستخدم';
+        throw AdminUserException(errorMsg);
+      }
+    } on FunctionException catch (e) {
+      final details = e.details;
+      final String errorMsg;
+      if (details is Map && details['error'] != null) {
+        errorMsg = details['error'].toString();
+      } else {
+        errorMsg = 'فشل الاتصال بالخادم';
+      }
+      throw AdminUserException(errorMsg);
+    } catch (e) {
+      throw AdminUserException(e.toString());
+    }
+  }
+
+  /// حذف المستخدم نهائياً
+  Future<void> deleteUser(String userId) async {
+    try {
+      final response = await _client.functions.invoke(
+        'admin-delete-user',
+        body: {'userId': userId},
+      );
+
+      if (response.status != 200) {
+        final errorMsg = (response.data?['error'] as String?) ?? 'حدث خطأ أثناء حذف المستخدم';
         throw AdminUserException(errorMsg);
       }
     } on FunctionException catch (e) {
