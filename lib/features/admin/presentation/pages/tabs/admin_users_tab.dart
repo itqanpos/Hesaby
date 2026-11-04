@@ -293,7 +293,7 @@ class _UserCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Create User Dialog
+// Create User Dialog (Normal User)
 // ============================================================================
 class _CreateUserDialog extends ConsumerStatefulWidget {
   const _CreateUserDialog();
@@ -358,7 +358,7 @@ class _CreateUserDialogState extends ConsumerState<_CreateUserDialog> {
 }
 
 // ============================================================================
-// Edit User Dialog
+// Edit User Dialog (No Admin Switch)
 // ============================================================================
 class _EditUserDialog extends ConsumerStatefulWidget {
   final AdminUser user;
@@ -372,7 +372,6 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
   late final _nameCtrl = TextEditingController(text: widget.user.fullName);
   late final _emailCtrl = TextEditingController(text: widget.user.email);
   final _passwordCtrl = TextEditingController();
-  late bool _isAdmin = widget.user.isAdmin;
   late bool _isBanned = widget.user.isBanned;
   bool _isLoading = false;
   String? _error;
@@ -394,7 +393,7 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
         email: _emailCtrl.text != widget.user.email ? _emailCtrl.text : null,
         password: _passwordCtrl.text.isNotEmpty ? _passwordCtrl.text : null,
         fullName: _nameCtrl.text,
-        isPlatformAdmin: _isAdmin,
+        isPlatformAdmin: widget.user.isAdmin, // ✅ نحافظ على الحالة كما هي ولا نغيرها من هنا
         isBanned: _isBanned,
       );
       if (mounted) Navigator.of(context).pop(true);
@@ -407,9 +406,9 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('تعديل بيانات المستخدم'),
-      content: Form(
-        key: _formKey,
-        child: SingleChildScrollView(
+      content: SingleChildScrollView(
+        child: Form(
+          key: _formKey,
           child: Column(
             mainAxisSize: MainAxisSize.min,
             children: [
@@ -419,19 +418,14 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
               const SizedBox(height: 12),
               AppTextField(controller: _passwordCtrl, label: 'كلمة مرور جديدة (اختياري)', obscureText: true),
               const SizedBox(height: 16),
-              SwitchListTile(
-                title: const Text('صلاحية أدمن (Platform Admin)'),
-                value: _isAdmin,
-                onChanged: (v) => setState(() => _isAdmin = v),
-                contentPadding: EdgeInsets.zero,
-              ),
+              // ✅ تم حذف Switch الخاص بالأدمن من هنا
               SwitchListTile(
                 title: const Text('حظر المستخدم (منع الدخول)'),
                 subtitle: const Text('لن يتمكن المستخدم من تسجيل الدخول'),
                 value: _isBanned,
                 onChanged: (v) => setState(() => _isBanned = v),
                 contentPadding: EdgeInsets.zero,
-                activeThumbColor: Theme.of(context).colorScheme.error, // ⬅️ تم إصلاح التحذير
+                activeThumbColor: Theme.of(context).colorScheme.error,
               ),
               if (_error != null) ...[
                 const SizedBox(height: 12),
