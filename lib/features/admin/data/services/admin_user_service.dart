@@ -32,13 +32,22 @@ class AdminUserService {
       );
 
       if (response.status != 200) {
-        final errorMsg = response.data?['error'] ?? 'حدث خطأ أثناء إنشاء المستخدم';
+        // ✅ إصلاح: تحويل ديناميكي آمن إلى String
+        final errorMsg = (response.data?['error'] as String?) ?? 'حدث خطأ أثناء إنشاء المستخدم';
         throw AdminUserException(errorMsg);
       }
 
       return response.data?['user_id'] as String?;
     } on FunctionException catch (e) {
-      throw AdminUserException(e.details?['error'] ?? 'فشل الاتصال بالخادم');
+      // ✅ إصلاح: تحويل ديناميكي آمن إلى String
+      final details = e.details;
+      final String errorMsg;
+      if (details is Map && details['error'] != null) {
+        errorMsg = details['error'].toString();
+      } else {
+        errorMsg = 'فشل الاتصال بالخادم';
+      }
+      throw AdminUserException(errorMsg);
     } catch (e) {
       throw AdminUserException(e.toString());
     }
@@ -68,11 +77,20 @@ class AdminUserService {
       );
 
       if (response.status != 200) {
-        final errorMsg = response.data?['error'] ?? 'حدث خطأ أثناء تحديث المستخدم';
+        // ✅ إصلاح: تحويل ديناميكي آمن إلى String
+        final errorMsg = (response.data?['error'] as String?) ?? 'حدث خطأ أثناء تحديث المستخدم';
         throw AdminUserException(errorMsg);
       }
     } on FunctionException catch (e) {
-      throw AdminUserException(e.details?['error'] ?? 'فشل الاتصال بالخادم');
+      // ✅ إصلاح: تحويل ديناميكي آمن إلى String
+      final details = e.details;
+      final String errorMsg;
+      if (details is Map && details['error'] != null) {
+        errorMsg = details['error'].toString();
+      } else {
+        errorMsg = 'فشل الاتصال بالخادم';
+      }
+      throw AdminUserException(errorMsg);
     } catch (e) {
       throw AdminUserException(e.toString());
     }
