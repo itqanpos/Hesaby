@@ -27,6 +27,7 @@ class AdminUser {
     required this.fullName,
     required this.email,
     required this.isAdmin,
+    required this.isStaff, // ✅ إضافة جديدة
     required this.isBanned,
     required this.createdAt,
     required this.companies,
@@ -36,6 +37,7 @@ class AdminUser {
   final String fullName;
   final String email;
   final bool isAdmin;
+  final bool isStaff; // ✅ إضافة جديدة
   final bool isBanned;
   final DateTime createdAt;
   final List<AdminUserCompany> companies;
@@ -81,6 +83,7 @@ final adminUsersProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) asy
           fullName: map['full_name'] as String? ?? 'بدون اسم',
           email: map['email'] as String? ?? 'غير متوفر',
           isAdmin: map['is_platform_admin'] as bool? ?? false,
+          isStaff: map['is_platform_staff'] as bool? ?? false, // ✅ إضافة جديدة
           isBanned: map['banned_until'] != null && DateTime.tryParse(map['banned_until'].toString())?.isAfter(DateTime.now()) == true,
           createdAt: _safeParseDate(map['created_at']),
           companies: memberships[userId] ?? [],
@@ -418,7 +421,6 @@ class _EditUserDialogState extends ConsumerState<_EditUserDialog> {
               const SizedBox(height: 12),
               AppTextField(controller: _passwordCtrl, label: 'كلمة مرور جديدة (اختياري)', obscureText: true),
               const SizedBox(height: 16),
-              // ✅ تم حذف Switch الخاص بالأدمن من هنا
               SwitchListTile(
                 title: const Text('حظر المستخدم (منع الدخول)'),
                 subtitle: const Text('لن يتمكن المستخدم من تسجيل الدخول'),
