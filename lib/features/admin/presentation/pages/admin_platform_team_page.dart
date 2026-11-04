@@ -8,7 +8,8 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
-import '../data/services/admin_user_service.dart';
+// ✅ [تصحيح المسار]: تم إضافة مستوى صعود إضافي (../../) للوصول لمجلد data
+import '../../data/services/admin_user_service.dart'; 
 import 'tabs/admin_users_tab.dart'; // نستخدم نفس الموديل والمزود
 
 class AdminPlatformTeamPage extends ConsumerStatefulWidget {
@@ -211,7 +212,7 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
-  String _role = 'admin';
+  String _role = 'staff';
   bool _isLoading = false;
   String? _error;
 
