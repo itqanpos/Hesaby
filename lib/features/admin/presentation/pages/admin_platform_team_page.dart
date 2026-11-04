@@ -9,7 +9,72 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../data/services/admin_user_service.dart'; 
-import 'tabs/admin_users_tab.dart'; 
+import 'tabs/admin_users_tab.dart'; // نستخدم نفس الموديل
+
+// ✅ إنشاء مزود خاص بفريق المنصة (يستخدم الدالة الجديدة)
+final platformTeamProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) async {
+  final client = Supabase.instance.client;
+  final rpcResponse = await client.rpc('get_platform_team'); // ✅ استدعاء الدالة الجديدة
+  
+  List<dynamic> membersResponse = [];
+  try {
+    membersResponse = await client.from('company_members').select('user_id, role, companies(name)');
+  } catch (_) {}
+
+  final Map<String, List<AdminUserCompany>> memberships = {};
+  for (final row in membersResponse) {
+    final userId = row['user_id'] as String?;
+    final companyData = row['companies'] as Map<String, dynamic>?;
+    if (userId != null && companyData != null) {
+      memberships.putIfAbsent(userId, () => []).add(
+        AdminUserCompany(
+          companyName: companyData['name'] as String? ?? 'شركة محذوفة',
+          role: row['role'] as String? ?? 'عضو',
+        ),
+      );
+    }
+  }
+
+  final List<AdminUser> users = [];
+  if (rpcResponse is List) {
+    for (final p in rpcResponse) {
+      final map = p as Map<String, dynamic>;
+      final userId = map['user_id'] as String?;
+      if (userId == null) continue;
+      
+      users.add(
+        AdminUser(
+          id: userId,
+          fullName: map['full_name'] as String? ?? 'بدون اسم',
+          email: map['email'] as String? ?? 'غير متوفر',
+          isAdmin: map['is_platform_admin'] as bool? ?? false,
+          isStaff: map['is_platform_staff'] as bool? ?? false,
+          isBanned: map['banned_until'] != null && DateTime.tryParse(map['banned_until'].toString())?.isAfter(DateTime.now()) == true,
+          createdAt: _safeParseDate(map['created_at']),
+          companies: memberships[userId] ?? [],
+        ),
+      );
+    }
+  }
+  return users;
+});
+
+DateTime _safeParseDate(Object? value) {
+  if (value == null) return DateTime.now();
+  if (value is DateTime) return value;
+  if (value is String) {
+    DateTime? parsed = DateTime.tryParse(value);
+    if (parsed != null) return parsed;
+    try {
+      String normalized = value.trim();
+      if (normalized.contains(' ')) normalized = normalized.replaceFirst(' ', 'T');
+      if (normalized.endsWith('+00')) normalized = normalized.replaceAll('+00', 'Z');
+      parsed = DateTime.tryParse(normalized);
+      if (parsed != null) return parsed;
+    } catch (_) {}
+  }
+  return DateTime.now();
+}
 
 class AdminPlatformTeamPage extends ConsumerStatefulWidget {
   const AdminPlatformTeamPage({super.key});
@@ -34,7 +99,7 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
       barrierDismissible: false,
       builder: (_) => const _AddPlatformAdminDialog(),
     );
-    if (created == true) ref.invalidate(adminUsersProvider);
+    if (created == true) ref.invalidate(platformTeamProvider);
   }
 
   Future<void> _promoteExistingUser(AdminUser user) async {
@@ -53,7 +118,7 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
         isBanned: user.isBanned,
       );
       if (mounted) {
-        ref.invalidate(adminUsersProvider);
+        ref.invalidate(platformTeamProvider);
         ScaffoldMessenger.of(context).showSnackBar(
           SnackBar(
             content: Text(user.isAdmin ? 'تم إلغاء صلاحية الأدمن' : 'تم ترقية المستخدم إلى أدمن'),
@@ -72,7 +137,7 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
 
   @override
   Widget build(BuildContext context) {
-    final usersAsync = ref.watch(adminUsersProvider);
+    final usersAsync = ref.watch(platformTeamProvider); // ✅ استخدام المزود الجديد
 
     return Scaffold(
       appBar: AppBar(
@@ -81,7 +146,7 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
           IconButton(
             tooltip: 'تحديث',
             icon: const Icon(Icons.refresh),
-            onPressed: () => ref.invalidate(adminUsersProvider),
+            onPressed: () => ref.invalidate(platformTeamProvider),
           ),
         ],
       ),
@@ -242,7 +307,7 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
         password: _passwordCtrl.text,
         fullName: _nameCtrl.text,
         isPlatformAdmin: isAdmin,
-        isPlatformStaff: !isAdmin, // ✅ إضافة الموظف
+        isPlatformStaff: !isAdmin,
       );
 
       if (mounted) Navigator.pop(context, true);
@@ -268,7 +333,7 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
               AppTextField(controller: _passwordCtrl, label: 'كلمة المرور', obscureText: true, validator: (v) => v!.length >= 6 ? null : '6 أحرف على الأقل'),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                initialValue: _role, // ✅ تم التعديل هنا
+                initialValue: _role, 
                 decoration: const InputDecoration(labelText: 'الدور', border: OutlineInputBorder()),
                 items: const [
                   DropdownMenuItem(value: 'staff', child: Text('موظف منصة')),
