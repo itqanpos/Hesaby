@@ -31,10 +31,10 @@ class AdminSyncTab extends ConsumerWidget {
         return RefreshIndicator(
           onRefresh: () => ref.read(syncOverviewProvider.notifier).refresh(),
           child: ListView(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 24),
+            // ✅ تعديل: زيادة المسافة العلوية لتكون 16 بدلاً من 12 بعد إزالة الرسالة
+            padding: const EdgeInsets.fromLTRB(16, 16, 16, 24),
             children: <Widget>[
-              const _PartialCoverageBanner(),
-              const SizedBox(height: 12),
+              // ✅ تم حذف _PartialCoverageBanner من هنا
               _Header(computedAt: data.computedAt),
               const SizedBox(height: 12),
               _DevicesKpiGrid(data: data),
@@ -65,46 +65,6 @@ class AdminSyncTab extends ConsumerWidget {
           ),
         );
       },
-    );
-  }
-}
-
-// ============================================================================
-// Banner
-// ============================================================================
-
-class _PartialCoverageBanner extends StatelessWidget {
-  const _PartialCoverageBanner();
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-
-    return Container(
-      padding: const EdgeInsets.all(10),
-      decoration: BoxDecoration(
-        color: scheme.tertiaryContainer.withValues(alpha: 0.45),
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: <Widget>[
-          Icon(Icons.info_outline,
-              color: scheme.onTertiaryContainer, size: 20),
-          const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              'عرض جزئي — البيانات مستخرجة من الفواتير فقط. '
-              'العمليات المعلقة والفاشلة وأسبابها، ومزامنة المخزون/المشتريات، '
-              'غير متتبَّعة بعد. يتطلب Phase 5b (سجل sync_events كامل).',
-              style: theme.textTheme.bodySmall
-                  ?.copyWith(color: scheme.onTertiaryContainer),
-            ),
-          ),
-        ],
-      ),
     );
   }
 }
