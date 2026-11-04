@@ -8,9 +8,8 @@ import '../../../../shared/widgets/app_button.dart';
 import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
-// ✅ [تصحيح المسار]: تم إضافة مستوى صعود إضافي (../../) للوصول لمجلد data
 import '../../data/services/admin_user_service.dart'; 
-import 'tabs/admin_users_tab.dart'; // نستخدم نفس الموديل والمزود
+import 'tabs/admin_users_tab.dart'; 
 
 class AdminPlatformTeamPage extends ConsumerStatefulWidget {
   const AdminPlatformTeamPage({super.key});
@@ -50,7 +49,7 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
       final service = AdminUserService(Supabase.instance.client);
       await service.updateUser(
         userId: user.id,
-        isPlatformAdmin: !user.isAdmin, // Toggle
+        isPlatformAdmin: !user.isAdmin, 
         isBanned: user.isBanned,
       );
       if (mounted) {
@@ -268,7 +267,7 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
               AppTextField(controller: _passwordCtrl, label: 'كلمة المرور', obscureText: true, validator: (v) => v!.length >= 6 ? null : '6 أحرف على الأقل'),
               const SizedBox(height: 16),
               DropdownButtonFormField<String>(
-                value: _role,
+                initialValue: _role, // ✅ تم التعديل هنا: استخدام initialValue بدلاً من value
                 decoration: const InputDecoration(labelText: 'الدور', border: OutlineInputBorder()),
                 items: const [
                   DropdownMenuItem(value: 'staff', child: Text('موظف منصة')),
