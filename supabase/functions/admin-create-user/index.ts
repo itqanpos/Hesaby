@@ -1,5 +1,4 @@
 // supabase/functions/admin-create-user/index.ts
-
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -85,7 +84,7 @@ serve(async (req: Request): Promise<Response> => {
     
     // ✅ قراءة الصلاحيات الجديدة
     const isPlatformAdmin = body.isPlatformAdmin === true; 
-    const isPlatformStaff = body.isPlatformStaff === true || (!isPlatformAdmin && body.role === 'staff');
+    const isPlatformStaff = body.isPlatformStaff === true;
 
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return json({ error: "بريد إلكتروني غير صالح" }, 400);
