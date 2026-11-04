@@ -9,12 +9,11 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../../shared/widgets/app_loader.dart';
 import '../../../../shared/widgets/app_text_field.dart';
 import '../../data/services/admin_user_service.dart'; 
-import 'tabs/admin_users_tab.dart'; // نستخدم نفس الموديل
+import 'tabs/admin_users_tab.dart';
 
-// ✅ إنشاء مزود خاص بفريق المنصة (يستخدم الدالة الجديدة)
 final platformTeamProvider = FutureProvider.autoDispose<List<AdminUser>>((ref) async {
   final client = Supabase.instance.client;
-  final rpcResponse = await client.rpc('get_platform_team'); // ✅ استدعاء الدالة الجديدة
+  final rpcResponse = await client.rpc('get_platform_team'); 
   
   List<dynamic> membersResponse = [];
   try {
@@ -135,9 +134,34 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
     }
   }
 
+  Future<void> _deleteUser(AdminUser user) async {
+    final bool? confirmed = await _showDeleteWarning(context, user.fullName);
+    if (confirmed != true) return;
+
+    try {
+      final service = AdminUserService(Supabase.instance.client);
+      await service.deleteUser(user.id);
+      if (mounted) {
+        ref.invalidate(platformTeamProvider);
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(
+            content: Text('تم حذف المستخدم نهائياً'),
+            backgroundColor: Colors.green,
+          ),
+        );
+      }
+    } on AdminUserException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
-    final usersAsync = ref.watch(platformTeamProvider); // ✅ استخدام المزود الجديد
+    final usersAsync = ref.watch(platformTeamProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -187,6 +211,7 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
                           return _PlatformMemberCard(
                             user: user,
                             onToggleRole: () => _promoteExistingUser(user),
+                            onDelete: () => _deleteUser(user), // ✅ تمرير دالة الحذف
                           );
                         },
                       ),
@@ -200,9 +225,14 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
 }
 
 class _PlatformMemberCard extends StatelessWidget {
-  const _PlatformMemberCard({required this.user, required this.onToggleRole});
+  const _PlatformMemberCard({
+    required this.user, 
+    required this.onToggleRole,
+    required this.onDelete, // ✅ إضافة
+  });
   final AdminUser user;
   final VoidCallback onToggleRole;
+  final VoidCallback onDelete; // ✅ إضافة
 
   @override
   Widget build(BuildContext context) {
@@ -257,6 +287,12 @@ class _PlatformMemberCard extends StatelessWidget {
               color: user.isAdmin ? Colors.orange : Colors.green,
             ),
             onPressed: onToggleRole,
+          ),
+          // ✅ زر الحذف
+          IconButton(
+            tooltip: 'حذف نهائي',
+            icon: const Icon(Icons.delete_outline, color: Colors.red),
+            onPressed: onDelete,
           ),
         ],
       ),
@@ -379,6 +415,31 @@ Future<bool?> _showWarning(BuildContext context, String name, {bool isRevoke = f
           style: FilledButton.styleFrom(backgroundColor: isRevoke ? Colors.orange : Colors.red),
           onPressed: () => Navigator.pop(ctx, true),
           child: Text(isRevoke ? 'نعم، اسحب' : 'نعم، امنح'),
+        ),
+      ],
+    ),
+  );
+}
+
+// ✅ شاشة تأكيد الحذف النهائي
+Future<bool?> _showDeleteWarning(BuildContext context, String name) {
+  return showDialog<bool>(
+    context: context,
+    builder: (ctx) => AlertDialog(
+      icon: const Icon(Icons.delete_forever, color: Colors.red, size: 48),
+      title: const Text('تأكيد الحذف النهائي'),
+      content: Text(
+        'أنت على وشك حذف المستخدم "$name" نهائياً من النظام.\n\n'
+        'لا يمكن التراجع عن هذا الإجراء. سيتم حذف حسابه وبياناته الشخصية.\n\n'
+        'هل أنت متأكد؟'
+      ),
+      actionsAlignment: MainAxisAlignment.center,
+      actions: [
+        TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
+        FilledButton(
+          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          onPressed: () => Navigator.pop(ctx, true),
+          child: const Text('نعم، احذف نهائياً'),
         ),
       ],
     ),
