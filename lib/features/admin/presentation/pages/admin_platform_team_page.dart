@@ -37,6 +37,39 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
     if (created == true) ref.invalidate(adminUsersProvider);
   }
 
+  Future<void> _promoteExistingUser(AdminUser user) async {
+    final bool? confirmed = await _showWarning(
+      context,
+      user.fullName,
+      isRevoke: user.isAdmin,
+    );
+    if (confirmed != true) return;
+
+    try {
+      final service = AdminUserService(Supabase.instance.client);
+      await service.updateUser(
+        userId: user.id,
+        isPlatformAdmin: !user.isAdmin, // Toggle
+        isBanned: user.isBanned,
+      );
+      if (mounted) {
+        ref.invalidate(adminUsersProvider);
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: Text(user.isAdmin ? 'تم إلغاء صلاحية الأدمن' : 'تم ترقية المستخدم إلى أدمن'),
+            backgroundColor: user.isAdmin ? Colors.orange : Colors.green,
+          ),
+        );
+      }
+    } on AdminUserException catch (e) {
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(content: Text(e.message), backgroundColor: Colors.red),
+        );
+      }
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     final usersAsync = ref.watch(adminUsersProvider);
@@ -44,18 +77,23 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
     return Scaffold(
       appBar: AppBar(
         title: const Text('فريق المنصة'),
+        actions: [
+          IconButton(
+            tooltip: 'تحديث',
+            icon: const Icon(Icons.refresh),
+            onPressed: () => ref.invalidate(adminUsersProvider),
+          ),
+        ],
       ),
       floatingActionButton: FloatingActionButton.extended(
         onPressed: _showAddAdminDialog,
-        icon: const Icon(Icons.shield),
-        label: const Text('إضافة أدمن / موظف'),
+        icon: const Icon(Icons.person_add),
+        label: const Text('إضافة عضو جديد'),
       ),
       body: usersAsync.when(
         loading: () => const AppLoader(),
         error: (error, _) => Center(child: Text('خطأ: $error')),
         data: (allUsers) {
-          // نعرض فقط من هم أدمن حالياً (أو يمكن عرض الكل)
-          // هنا سنعرض الكل للسماح بالبحث عن أي شخص لترقيته
           final filtered = allUsers.where((u) {
             final q = _searchQuery.toLowerCase();
             return u.fullName.toLowerCase().contains(q) || u.email.toLowerCase().contains(q);
@@ -74,14 +112,17 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
               ),
               Expanded(
                 child: filtered.isEmpty
-                    ? const AppEmptyView(icon: Icons.people_outline, title: 'لا يوجد أعضاء', message: 'ابحث عن شخص لإضافته.')
+                    ? const AppEmptyView(icon: Icons.people_outline, title: 'لا يوجد أعضاء', message: 'ابحث عن شخص أو أضف عضواً جديداً.')
                     : ListView.separated(
-                        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                        padding: const EdgeInsets.fromLTRB(16, 0, 16, 90),
                         itemCount: filtered.length,
                         separatorBuilder: (_, __) => const SizedBox(height: 8),
                         itemBuilder: (context, index) {
                           final user = filtered[index];
-                          return _PlatformMemberCard(user: user);
+                          return _PlatformMemberCard(
+                            user: user,
+                            onToggleRole: () => _promoteExistingUser(user),
+                          );
                         },
                       ),
               ),
@@ -94,8 +135,9 @@ class _AdminPlatformTeamPageState extends ConsumerState<AdminPlatformTeamPage> {
 }
 
 class _PlatformMemberCard extends StatelessWidget {
-  const _PlatformMemberCard({required this.user});
+  const _PlatformMemberCard({required this.user, required this.onToggleRole});
   final AdminUser user;
+  final VoidCallback onToggleRole;
 
   @override
   Widget build(BuildContext context) {
@@ -112,7 +154,7 @@ class _PlatformMemberCard extends StatelessWidget {
       child: Row(
         children: [
           CircleAvatar(
-            backgroundColor: user.isAdmin ? Colors.green.withValues(alpha: 0.2) : scheme.surfaceContainerHighest,
+            backgroundColor: user.isAdmin ? Colors.green.withValues(alpha: 0.15) : scheme.surfaceContainerHighest,
             child: Icon(user.isAdmin ? Icons.shield : Icons.support_agent, color: user.isAdmin ? Colors.green : scheme.onSurfaceVariant),
           ),
           const SizedBox(width: 12),
@@ -120,23 +162,37 @@ class _PlatformMemberCard extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                Text(user.fullName, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Text(user.fullName, style: theme.textTheme.titleSmall?.copyWith(fontWeight: FontWeight.bold)),
+                    ),
+                    if (user.isAdmin)
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(4)),
+                        child: const Text('أدمن', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
+                      )
+                    else
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(4)),
+                        child: Text('موظف', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 10, fontWeight: FontWeight.bold)),
+                      ),
+                  ],
+                ),
                 Text(user.email, style: theme.textTheme.bodySmall, textDirection: TextDirection.ltr),
               ],
             ),
           ),
-          if (user.isAdmin)
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: Colors.green, borderRadius: BorderRadius.circular(8)),
-              child: const Text('مدير منصة', style: TextStyle(color: Colors.white, fontSize: 10, fontWeight: FontWeight.bold)),
-            )
-          else
-            Container(
-              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-              decoration: BoxDecoration(color: scheme.surfaceContainerHighest, borderRadius: BorderRadius.circular(8)),
-              child: Text('موظف', style: TextStyle(color: scheme.onSurfaceVariant, fontSize: 10, fontWeight: FontWeight.bold)),
+          IconButton(
+            tooltip: user.isAdmin ? 'إلغاء صلاحية الأدمن' : 'ترقية إلى أدمن',
+            icon: Icon(
+              user.isAdmin ? Icons.remove_moderator : Icons.add_moderator,
+              color: user.isAdmin ? Colors.orange : Colors.green,
             ),
+            onPressed: onToggleRole,
+          ),
         ],
       ),
     );
@@ -155,7 +211,7 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
   final _nameCtrl = TextEditingController();
   final _emailCtrl = TextEditingController();
   final _passwordCtrl = TextEditingController();
-  String _role = 'admin'; // Default
+  String _role = 'admin';
   bool _isLoading = false;
   String? _error;
 
@@ -170,8 +226,9 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
-    // 🛑 تحذير صارم
-    if (_role == 'admin') {
+    final bool isAdmin = _role == 'admin';
+
+    if (isAdmin) {
       final confirmed = await _showWarning(context, _nameCtrl.text);
       if (confirmed != true) return;
     }
@@ -180,23 +237,13 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
 
     try {
       final service = AdminUserService(Supabase.instance.client);
-      // Create user
-      final newUser = await service.createUser(
+      await service.createUser(
         email: _emailCtrl.text,
         password: _passwordCtrl.text,
         fullName: _nameCtrl.text,
+        isPlatformAdmin: isAdmin,
       );
-      
-      // If admin, promote them (assuming createUser returns the user object)
-      // Note: If service doesn't return ID, we might need to fetch it.
-      // For simplicity here, assuming createUser handles the creation.
-      // Ideally, updateUser should be called if _role == 'admin'.
-      // Let's assume we need to update them right after creation.
-      
-      // Note: This requires AdminUserService to return the user ID.
-      // If it doesn't, we will just create them and you can promote them later.
-      // Assuming the service works, I'll call update.
-      
+
       if (mounted) Navigator.pop(context, true);
     } on AdminUserException catch (e) {
       if (mounted) setState(() { _isLoading = false; _error = e.message; });
@@ -223,7 +270,7 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
                 value: _role,
                 decoration: const InputDecoration(labelText: 'الدور', border: OutlineInputBorder()),
                 items: const [
-                  DropdownMenuItem(value: 'staff', child: Text('موظف (بدون صلاحيات كاملة)')),
+                  DropdownMenuItem(value: 'staff', child: Text('موظف منصة')),
                   DropdownMenuItem(value: 'admin', child: Text('مدير منصة (صلاحيات كاملة)')),
                 ],
                 onChanged: (v) => setState(() => _role = v!),
@@ -238,26 +285,34 @@ class _AddPlatformAdminDialogState extends ConsumerState<_AddPlatformAdminDialog
       ),
       actions: [
         TextButton(onPressed: _isLoading ? null : () => Navigator.pop(context), child: const Text('إلغاء')),
-        AppButton(label: 'حفظ', isLoading: _isLoading, onPressed: _isLoading ? null : _submit),
+        AppButton(label: 'إنشاء', isLoading: _isLoading, onPressed: _isLoading ? null : _submit),
       ],
     );
   }
 }
 
-Future<bool?> _showWarning(BuildContext context, String name) {
+Future<bool?> _showWarning(BuildContext context, String name, {bool isRevoke = false}) {
   return showDialog<bool>(
     context: context,
     builder: (ctx) => AlertDialog(
-      icon: const Icon(Icons.warning_amber_rounded, color: Colors.red, size: 48),
-      title: const Text('تأكيد منح صلاحية الأدمن'),
-      content: Text('أنت على وشك منح "$name" صلاحيات كاملة كمدير للمنصة (Platform Admin).\n\nهل أنت متأكد؟'),
+      icon: Icon(
+        isRevoke ? Icons.gpp_bad_outlined : Icons.warning_amber_rounded,
+        color: isRevoke ? Colors.orange : Colors.red,
+        size: 48,
+      ),
+      title: Text(isRevoke ? 'تأكيد إلغاء صلاحية الأدمن' : 'تأكيد منح صلاحية الأدمن'),
+      content: Text(
+        isRevoke
+            ? 'أنت على وشك سحب صلاحيات الأدمن من "$name".\n\nلن يتمكن من رؤية أو تعديل اشتراكات الشركات.\n\nهل أنت متأكد؟'
+            : 'أنت على وشك منح "$name" صلاحيات كاملة كمدير للمنصة (Platform Admin).\n\nهذا يمنحه وصولاً كاملاً لجميع الشركات.\n\nهل أنت متأكد؟'
+      ),
       actionsAlignment: MainAxisAlignment.center,
       actions: [
         TextButton(onPressed: () => Navigator.pop(ctx, false), child: const Text('إلغاء')),
         FilledButton(
-          style: FilledButton.styleFrom(backgroundColor: Colors.red),
+          style: FilledButton.styleFrom(backgroundColor: isRevoke ? Colors.orange : Colors.red),
           onPressed: () => Navigator.pop(ctx, true),
-          child: const Text('نعم، متأكد'),
+          child: Text(isRevoke ? 'نعم، اسحب' : 'نعم، امنح'),
         ),
       ],
     ),
