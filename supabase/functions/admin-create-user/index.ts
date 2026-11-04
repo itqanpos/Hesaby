@@ -1,4 +1,5 @@
 // supabase/functions/admin-create-user/index.ts
+
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -81,7 +82,10 @@ serve(async (req: Request): Promise<Response> => {
     const email = (body.email ?? "").trim().toLowerCase();
     const password = body.password ?? "";
     const fullName = (body.fullName ?? "").trim();
+    
+    // ✅ قراءة الصلاحيات الجديدة
     const isPlatformAdmin = body.isPlatformAdmin === true; 
+    const isPlatformStaff = body.isPlatformStaff === true || (!isPlatformAdmin && body.role === 'staff');
 
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return json({ error: "بريد إلكتروني غير صالح" }, 400);
@@ -101,6 +105,7 @@ serve(async (req: Request): Promise<Response> => {
       return json({ error: "تعذّر إنشاء المستخدم", details: createError?.message }, 400);
     }
 
+    // ✅ حفظ الصلاحيات الجديدة في الملف الشخصي
     const { error: profileUpsertError } = await adminClient
       .from("profiles")
       .upsert(
@@ -108,6 +113,7 @@ serve(async (req: Request): Promise<Response> => {
           user_id: created.user.id,
           full_name: fullName || null,
           is_platform_admin: isPlatformAdmin,
+          is_platform_staff: isPlatformStaff, 
         },
         { onConflict: "user_id" },
       );
@@ -120,13 +126,14 @@ serve(async (req: Request): Promise<Response> => {
 
     await writeAudit(adminClient, {
       actorId: callerId,
-      action: isPlatformAdmin ? "platform_admin.create" : "user.create",
+      action: isPlatformAdmin ? "platform_admin.create" : "platform_staff.create",
       entityId: created.user.id,
       entityLabel: email,
       after: {
         email,
         full_name: fullName || null,
         is_platform_admin: isPlatformAdmin,
+        is_platform_staff: isPlatformStaff,
       },
     });
 
