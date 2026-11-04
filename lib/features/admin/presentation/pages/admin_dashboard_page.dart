@@ -11,8 +11,7 @@ import '../../../../shared/widgets/app_empty.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../providers/platform_admin_provider.dart';
 import 'admin_notifications_page.dart';
-// ✅ [إضافة]: استيراد صفحة فريق المنصة الجديدة
-import 'admin_platform_team_page.dart'; 
+import 'admin_platform_team_page.dart'; // ✅ استيراد الصفحة الجديدة
 import 'tabs/admin_overview_tab.dart';
 import 'tabs/admin_audit_log_tab.dart';
 import 'tabs/admin_companies_tab.dart';
@@ -25,7 +24,6 @@ import 'tabs/admin_storage_tab.dart';
 import 'tabs/admin_versions_tab.dart';
 import 'tabs/admin_reports_tab.dart';
 
-// عدد الإشعارات غير المقروءة
 final unreadNotificationsCountProvider = FutureProvider.autoDispose<int>((ref) async {
   final client = Supabase.instance.client;
   final response = await client
@@ -74,7 +72,7 @@ class AdminDashboardPage extends ConsumerWidget {
           ),
           title: const Text('لوحة تحكم المنصة'),
           actions: <Widget>[
-            // ✅ [إضافة]: زر فريق المنصة
+            // ✅ زر فريق المنصة
             IconButton(
               tooltip: 'فريق المنصة (الأدمن والموظفين)',
               icon: const Icon(Icons.shield_outlined, color: Colors.teal),
