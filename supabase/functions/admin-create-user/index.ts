@@ -1,5 +1,4 @@
 // supabase/functions/admin-create-user/index.ts
-
 import { serve } from "https://deno.land/std@0.224.0/http/server.ts";
 import { createClient, SupabaseClient } from "https://esm.sh/@supabase/supabase-js@2.45.0";
 
@@ -16,12 +15,6 @@ function json(body: unknown, status = 200): Response {
   });
 }
 
-/// Best-effort audit write. Never fails the request on audit errors.
-///
-/// The caller runs with the service_role key, which we granted EXECUTE
-/// on audit_log_insert() via the A1 migration. If this ever fails, we log
-/// to console but the primary operation still succeeds — audit is a
-/// secondary concern that should not break user flows.
 async function writeAudit(
   adminClient: SupabaseClient,
   params: {
@@ -29,30 +22,22 @@ async function writeAudit(
     action: string;
     entityId: string;
     entityLabel: string | null;
-    before?: Record<string, unknown> | null;
     after?: Record<string, unknown> | null;
   },
 ): Promise<void> {
   try {
-    const { error } = await adminClient.rpc("audit_log_insert", {
+    await adminClient.rpc("audit_log_insert", {
       p_actor_user_id: params.actorId,
       p_action: params.action,
       p_entity_type: "user",
       p_entity_id: params.entityId,
       p_entity_label: params.entityLabel,
-      p_reason: null,
-      p_before: params.before ?? null,
+      p_before: null,
       p_after: params.after ?? null,
       p_metadata: null,
     });
-    if (error) {
-      console.error(
-        `audit_log_insert(${params.action}) returned error:`,
-        error.message,
-      );
-    }
   } catch (e) {
-    console.error(`audit_log_insert(${params.action}) threw:`, e);
+    console.error(`audit_log_insert failed:`, e);
   }
 }
 
@@ -77,7 +62,6 @@ serve(async (req: Request): Promise<Response> => {
     if (userError || !userData.user) {
       return json({ error: "Invalid session", details: userError?.message }, 401);
     }
-
     const callerId = userData.user.id;
 
     const adminClient = createClient(SUPABASE_URL, SERVICE_ROLE_KEY, {
@@ -90,17 +74,14 @@ serve(async (req: Request): Promise<Response> => {
       .eq("user_id", callerId)
       .maybeSingle();
 
-    if (callerProfileError) {
-      return json({ error: "Failed to verify permissions", details: callerProfileError.message }, 500);
-    }
-    if (!callerProfile?.is_platform_admin) {
-      return json({ error: "Forbidden: platform admin only" }, 403);
-    }
+    if (callerProfileError) return json({ error: "Failed to verify permissions" }, 500);
+    if (!callerProfile?.is_platform_admin) return json({ error: "Forbidden" }, 403);
 
     const body = await req.json();
     const email = (body.email ?? "").trim().toLowerCase();
     const password = body.password ?? "";
     const fullName = (body.fullName ?? "").trim();
+    const isPlatformAdmin = body.isPlatformAdmin === true; 
 
     if (!email || !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email)) {
       return json({ error: "بريد إلكتروني غير صالح" }, 400);
@@ -126,25 +107,26 @@ serve(async (req: Request): Promise<Response> => {
         {
           user_id: created.user.id,
           full_name: fullName || null,
-          is_platform_admin: false,
+          is_platform_admin: isPlatformAdmin,
         },
         { onConflict: "user_id" },
       );
 
     if (profileUpsertError) {
       console.error("Profile upsert failed:", profileUpsertError);
+      await adminClient.auth.admin.deleteUser(created.user.id);
+      return json({ error: "تعذّر إنشاء الملف الشخصي" }, 500);
     }
 
-    // ---- Audit (best-effort) ----
     await writeAudit(adminClient, {
       actorId: callerId,
-      action: "user.create",
+      action: isPlatformAdmin ? "platform_admin.create" : "user.create",
       entityId: created.user.id,
       entityLabel: email,
       after: {
         email,
         full_name: fullName || null,
-        is_platform_admin: false,
+        is_platform_admin: isPlatformAdmin,
       },
     });
 
