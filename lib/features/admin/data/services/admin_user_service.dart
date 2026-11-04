@@ -19,6 +19,7 @@ class AdminUserService {
     required String password,
     String? fullName,
     bool isPlatformAdmin = false,
+    bool isPlatformStaff = false, // ✅ إضافة
   }) async {
     try {
       final response = await _client.functions.invoke(
@@ -28,18 +29,17 @@ class AdminUserService {
           'password': password,
           'fullName': fullName,
           'isPlatformAdmin': isPlatformAdmin,
+          'isPlatformStaff': isPlatformStaff, // ✅ إضافة
         },
       );
 
       if (response.status != 200) {
-        // ✅ إصلاح: تحويل ديناميكي آمن إلى String
         final errorMsg = (response.data?['error'] as String?) ?? 'حدث خطأ أثناء إنشاء المستخدم';
         throw AdminUserException(errorMsg);
       }
 
       return response.data?['user_id'] as String?;
     } on FunctionException catch (e) {
-      // ✅ إصلاح: تحويل ديناميكي آمن إلى String
       final details = e.details;
       final String errorMsg;
       if (details is Map && details['error'] != null) {
@@ -77,12 +77,10 @@ class AdminUserService {
       );
 
       if (response.status != 200) {
-        // ✅ إصلاح: تحويل ديناميكي آمن إلى String
         final errorMsg = (response.data?['error'] as String?) ?? 'حدث خطأ أثناء تحديث المستخدم';
         throw AdminUserException(errorMsg);
       }
     } on FunctionException catch (e) {
-      // ✅ إصلاح: تحويل ديناميكي آمن إلى String
       final details = e.details;
       final String errorMsg;
       if (details is Map && details['error'] != null) {
