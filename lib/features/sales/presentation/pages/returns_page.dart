@@ -439,7 +439,7 @@ class _EmptyReturns extends StatelessWidget {
 }
 
 // ============================================================================
-// KPI row (unchanged)
+// KPI row — English numbers
 // ============================================================================
 
 class _ReturnsKpiRow extends StatelessWidget {
@@ -470,8 +470,9 @@ class _ReturnsKpiRow extends StatelessWidget {
       }
     }
 
+    // ✅ English numerals, Arabic currency symbol preserved
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
@@ -686,7 +687,7 @@ class _FilterButton extends StatelessWidget {
 }
 
 // ============================================================================
-// Active chips (unchanged)
+// Active chips — English date numerals
 // ============================================================================
 
 class _ActiveChips extends StatelessWidget {
@@ -752,7 +753,8 @@ class _ActiveChips extends StatelessWidget {
         return 'هذا العام';
       case SalesDateFilter.custom:
         if (filter.customRange != null) {
-          final DateFormat fmt = DateFormat('yy/MM/dd');
+          // ✅ English numerals for the date range
+          final DateFormat fmt = DateFormat('yy/MM/dd', 'en');
           return '${fmt.format(filter.customRange!.start)} → '
               '${fmt.format(filter.customRange!.end)}';
         }
@@ -775,7 +777,7 @@ class _ActiveChips extends StatelessWidget {
 }
 
 // ============================================================================
-// Return card (with label instead of raw invoice)
+// Return card — English numbers & date
 // ============================================================================
 
 class _ReturnCard extends StatelessWidget {
@@ -798,12 +800,14 @@ class _ReturnCard extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
 
+    // ✅ English numerals, Arabic currency symbol preserved
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
-    final DateFormat date = DateFormat.yMd('ar_EG');
+    // ✅ English date format (e.g., 11/14/2026)
+    final DateFormat date = DateFormat.yMd('en_US');
 
     final (Color badgeBg, Color badgeFg) =
         _returnStatusColors(scheme, saleReturn.status);
@@ -916,7 +920,7 @@ class _ReturnCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Return detail sheet (unchanged)
+// Return detail sheet — English numbers
 // ============================================================================
 
 class _ReturnDetailSheet extends ConsumerWidget {
@@ -928,12 +932,13 @@ class _ReturnDetailSheet extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
+    // ✅ English numerals
     final NumberFormat money = NumberFormat.currency(
-      locale: 'ar_EG',
+      locale: 'en_US',
       symbol: 'ج.م ',
       decimalDigits: 2,
     );
-    final NumberFormat qty = NumberFormat.decimalPattern('ar_EG');
+    final NumberFormat qty = NumberFormat.decimalPattern('en_US');
     final AsyncValue<List<SaleReturnItem>> itemsAsync =
         ref.watch(returnItemsProvider(saleReturn.id));
     final List<Product> products =
