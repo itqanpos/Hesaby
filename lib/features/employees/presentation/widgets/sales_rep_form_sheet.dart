@@ -132,6 +132,7 @@ class _SalesRepFormSheetState extends ConsumerState<_SalesRepFormSheet> {
     final AsyncValue<List<Map<String, dynamic>>> branchesAsync =
         ref.watch(branchesForRepsProvider);
 
+    // لا يوجد أعضاء متاحون (وضع الإضافة)
     if (!_isEdit && _availableCandidates.isEmpty) {
       return Padding(
         padding: const EdgeInsets.all(24),
@@ -201,7 +202,7 @@ class _SalesRepFormSheetState extends ConsumerState<_SalesRepFormSheet> {
                   )
                 else
                   DropdownButtonFormField<String>(
-                    value: _selectedUserId,
+                    initialValue: _selectedUserId,
                     isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'العضو *',
@@ -225,13 +226,16 @@ class _SalesRepFormSheetState extends ConsumerState<_SalesRepFormSheet> {
 
                 // ── الفرع (إلزامي) ──
                 branchesAsync.when(
-                  loading: () => const LinearProgressIndicator(),
+                  loading: () => const Padding(
+                    padding: EdgeInsets.symmetric(vertical: 8),
+                    child: LinearProgressIndicator(),
+                  ),
                   error: (_, __) => const Text(
                     'تعذّر تحميل الفروع',
                     style: TextStyle(color: Colors.red),
                   ),
                   data: (branches) => DropdownButtonFormField<String>(
-                    value: _selectedBranchId,
+                    initialValue: _selectedBranchId,
                     isExpanded: true,
                     decoration: const InputDecoration(
                       labelText: 'الفرع *',
@@ -256,7 +260,7 @@ class _SalesRepFormSheetState extends ConsumerState<_SalesRepFormSheet> {
 
                 // ── نوع العهدة ──
                 DropdownButtonFormField<String>(
-                  value: _repType,
+                  initialValue: _repType,
                   decoration: const InputDecoration(
                     labelText: 'نوع العهدة *',
                     border: OutlineInputBorder(),
