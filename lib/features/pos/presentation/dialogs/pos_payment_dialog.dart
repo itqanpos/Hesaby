@@ -127,10 +127,11 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
     _cart = ref.read(posCartProvider);
     _totals = ref.read(posTotalsProvider);
 
+    // ✅ الإصلاح 1: لا نضع قيمة سالبة في الحقل
     _payments = <_PaymentEntry>[
       _PaymentEntry(
         method: PosPaymentMethod.cash,
-        amount: _settlementTotal,
+        amount: _settlementTotal > 0 ? _settlementTotal : 0,
       ),
     ];
   }
@@ -138,34 +139,37 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   @override
   void dispose() {
     for (final _PaymentEntry p in _payments) {
-        p.dispose();
+      p.dispose();
     }
     super.dispose();
   }
 
   // ---------------------------------------------------------------------------
-  // Derived (✅ تم تصحيح الحسابات)
+  // Derived
   // ---------------------------------------------------------------------------
 
   double get _saleTotal => _totals.total;
   double get _settlementTotal => _cart.customerBalance + _saleTotal;
-  
+
   double get _totalPaid =>
       _payments.fold<double>(0, (double s, _PaymentEntry p) => s + p.amount);
 
-  // ✅ الإصلاح هنا: استخدام `_settlementTotal` بدلاً من `_saleTotal`
   double get _remaining {
     final double r = _settlementTotal - _totalPaid;
     return r > 0 ? r : 0;
   }
 
-  // ✅ الإصلاح هنا: استخدام `_settlementTotal` بدلاً من `_saleTotal`
+  // ✅ الإصلاح 2: الأساس هو max(settlementTotal, 0) — لا "زيادة" وهمية
   double get _overpay {
-    final double o = _totalPaid - _settlementTotal;
+    final double base = _settlementTotal > 0 ? _settlementTotal : 0;
+    final double o = _totalPaid - base;
     return o > 0 ? o : 0;
   }
 
   bool get _isCredit => _payments.isEmpty;
+
+  /// لا يوجد مبلغ مطلوب (الرصيد الدائن يغطي)
+  bool get _hasNoDue => _settlementTotal <= 0.001;
 
   // ---------------------------------------------------------------------------
   // Payment list mutations
@@ -215,9 +219,10 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
   void _selectPayNow() {
     setState(() {
       if (_payments.isEmpty) {
+        // ✅ الإصلاح 4: clamp القيمة الافتراضية
         _payments.add(_PaymentEntry(
           method: PosPaymentMethod.cash,
-          amount: _settlementTotal,
+          amount: _settlementTotal > 0 ? _settlementTotal : 0,
         ));
       }
     });
@@ -247,7 +252,8 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
       return 'أضف طريقة دفع واحدة على الأقل.';
     }
 
-    if (_totalPaid <= 0) {
+    // ✅ الإصلاح 3: لا نطلب دفعًا إن كان الرصيد الدائن يغطي
+    if (_settlementTotal > 0 && _totalPaid <= 0) {
       return 'أدخل مبلغاً أكبر من صفر في إحدى الدفعات.';
     }
 
@@ -759,6 +765,7 @@ class _PosPaymentSheetState extends ConsumerState<_PosPaymentSheet> {
                       remaining: _remaining,
                       overpay: _overpay,
                       totalPaid: _totalPaid,
+                      hasNoDue: _hasNoDue,
                     ),
                   ] else ...<Widget>[
                     _InfoBanner(
@@ -927,7 +934,7 @@ class _PaymentEntryCard extends StatelessWidget {
 }
 
 // ============================================================================
-// Remaining indicator (✅ تم تعديل النصوص)
+// Remaining indicator (✅ محدَّث — حالة "الرصيد يغطي")
 // ============================================================================
 
 class _RemainingIndicator extends StatelessWidget {
@@ -935,11 +942,13 @@ class _RemainingIndicator extends StatelessWidget {
     required this.remaining,
     required this.overpay,
     required this.totalPaid,
+    required this.hasNoDue,
   });
 
   final double remaining;
   final double overpay;
   final double totalPaid;
+  final bool hasNoDue;
 
   @override
   Widget build(BuildContext context) {
@@ -961,12 +970,17 @@ class _RemainingIndicator extends StatelessWidget {
             ? Icons.trending_up
             : Icons.pending_outlined;
 
-    // ✅ تم تعديل النصوص لتكون أوضح
-    final String label = fullyPaid
-        ? 'المدفوع مطابق للمطلوب'
-        : overpaid
-            ? 'زيادة: ${AppFormatters.money(overpay)}'
-            : 'المتبقي: ${AppFormatters.money(remaining)}';
+    // ✅ رسالة خاصة عندما الرصيد الدائن يغطي الفاتورة
+    final String label;
+    if (hasNoDue && !overpaid) {
+      label = 'الرصيد السابق يغطي الفاتورة — لا مبلغ مطلوب';
+    } else if (fullyPaid) {
+      label = 'المدفوع مطابق للمطلوب';
+    } else if (overpaid) {
+      label = 'زيادة: ${AppFormatters.money(overpay)}';
+    } else {
+      label = 'المتبقي: ${AppFormatters.money(remaining)}';
+    }
 
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 10),
