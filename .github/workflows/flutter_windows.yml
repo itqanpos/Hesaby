@@ -41,16 +41,11 @@ jobs:
             echo "ERROR: windows/CMakeLists.txt not found after runner creation." >&2
             exit 1
           fi
-          if grep -q 'set(PDFIUM_VERSION' windows/CMakeLists.txt; then
-            echo "PDFIUM_VERSION already pinned — skipping."
-          else
-            {
-              echo 'set(PDFIUM_VERSION "4634" CACHE STRING "")'
-              cat windows/CMakeLists.txt
-            } > windows/CMakeLists.txt.new
-            mv windows/CMakeLists.txt.new windows/CMakeLists.txt
-            echo "Injected PDFIUM_VERSION=4634 into windows/CMakeLists.txt"
-          fi
+          # إزالة أي سطر قديم لـ PDFIUM_VERSION لتجنب التكرار
+          sed -i '/set(PDFIUM_VERSION/d' windows/CMakeLists.txt
+          # إضافة الإصدار الجديد (5200) في بداية الملف
+          sed -i '1i set(PDFIUM_VERSION "5200" CACHE STRING "" FORCE)' windows/CMakeLists.txt
+          echo "Injected PDFIUM_VERSION=5200 into windows/CMakeLists.txt"
           head -n 5 windows/CMakeLists.txt
 
       - name: Get dependencies
