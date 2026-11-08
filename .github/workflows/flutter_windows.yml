@@ -33,6 +33,26 @@ jobs:
             flutter create --platforms=windows --project-name hesabi .
           fi
 
+      - name: Patch CMakeLists for pdfium version
+        shell: bash
+        run: |
+          set -e
+          if [ ! -f windows/CMakeLists.txt ]; then
+            echo "ERROR: windows/CMakeLists.txt not found after runner creation." >&2
+            exit 1
+          fi
+          if grep -q 'set(PDFIUM_VERSION' windows/CMakeLists.txt; then
+            echo "PDFIUM_VERSION already pinned — skipping."
+          else
+            {
+              echo 'set(PDFIUM_VERSION "4634" CACHE STRING "")'
+              cat windows/CMakeLists.txt
+            } > windows/CMakeLists.txt.new
+            mv windows/CMakeLists.txt.new windows/CMakeLists.txt
+            echo "Injected PDFIUM_VERSION=4634 into windows/CMakeLists.txt"
+          fi
+          head -n 5 windows/CMakeLists.txt
+
       - name: Get dependencies
         run: flutter pub get
 
