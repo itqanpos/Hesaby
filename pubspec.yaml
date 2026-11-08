@@ -1,7 +1,7 @@
 name: hesabi
 description: "Hesabi - Multi-tenant SaaS for POS, Inventory, Sales and Accounting"
 publish_to: "none"
-version: 1.0.9+11
+version: 1.1.0+12
 
 environment:
   sdk: ">=3.5.0 <4.0.0"
