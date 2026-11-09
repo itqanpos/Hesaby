@@ -49,11 +49,7 @@ class HomePage extends ConsumerWidget {
       appBar: AppBar(
         title: const Text('الرئيسية'),
         actions: <Widget>[
-          IconButton(
-            tooltip: 'تحديث',
-            icon: const Icon(Icons.refresh),
-            onPressed: () => _refresh(ref),
-          ),
+          // ✅ تم إزالة زر التحديث من هنا
           IconButton(
             tooltip: 'الإعدادات',
             icon: const Icon(Icons.settings_outlined),
@@ -1371,7 +1367,7 @@ class _InfrastructureFooter extends StatelessWidget {
           ),
           const Spacer(),
           Text(
-            'v1.0.9',
+            'v1.1.0',
             style: theme.textTheme.bodySmall?.copyWith(
               color: scheme.onSurfaceVariant,
             ),
