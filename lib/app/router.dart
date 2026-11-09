@@ -13,7 +13,7 @@ import '../features/auth/presentation/pages/signup_page.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
 import '../features/cash/presentation/pages/cash_register_page.dart';
 import '../features/cash/presentation/pages/cash_reports_page.dart';
-import '../features/cash/presentation/pages/shift_report_page.dart'; // ✅ تمت الإضافة
+import '../features/cash/presentation/pages/shift_report_page.dart';
 import '../features/companies/presentation/pages/branch_form_page.dart';
 import '../features/companies/presentation/pages/branches_page.dart';
 import '../features/companies/presentation/pages/company_profile_page.dart';
@@ -266,7 +266,10 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
       }
 
       if (auth.isUnauthenticated) {
-        if (location == AppRouter.loginPath) return null;
+        // ✅ الإصلاح: السماح بالوصول لصفحة الدخول وصفحة التسجيل معاً
+        if (location == AppRouter.loginPath || location == AppRouter.signupPath) {
+          return null;
+        }
         return AppRouter.loginPath;
       }
 
@@ -369,7 +372,6 @@ final Provider<GoRouter> appRouterProvider = Provider<GoRouter>((ref) {
         builder: (BuildContext context, GoRouterState state) =>
             const CashReportsPage(),
       ),
-      // ✅ إضافة مسار تقرير الوردية
       GoRoute(
         path: AppRouter.shiftReportPath,
         name: AppRouter.shiftReportName,
