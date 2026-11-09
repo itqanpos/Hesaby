@@ -2,7 +2,9 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:go_router/go_router.dart'; // ✅ تمت الإضافة
 
+import '../../../../app/router.dart'; // ✅ تمت الإضافة
 import '../../../../core/responsive/responsive_helper.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../widgets/login_form.dart';
@@ -17,7 +19,7 @@ class LoginPage extends ConsumerWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     return AppShell(
-      backgroundColor: Colors.transparent, // للسماح بظهور التدرج
+      backgroundColor: Colors.transparent,
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -88,6 +90,29 @@ class _LoginCard extends StatelessWidget {
             _BrandHeader(titleStyle: title),
             const SizedBox(height: 32),
             child,
+            
+            // ✅ [الإضافة الجديدة]: زر التسجيل
+            const SizedBox(height: 24),
+            const Divider(),
+            const SizedBox(height: 12),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: <Widget>[
+                Text(
+                  'ليس لديك حساب؟',
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
+                ),
+                TextButton(
+                  onPressed: () => context.pushNamed(AppRouter.signupName),
+                  child: const Text(
+                    'إنشاء حساب جديد',
+                    style: TextStyle(fontWeight: FontWeight.bold),
+                  ),
+                ),
+              ],
+            ),
           ],
         ),
       ),
@@ -108,7 +133,6 @@ class _BrandHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: <Widget>[
-        // إطار دائري خفيف حول الشعار ليعطيه بروزاً
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
