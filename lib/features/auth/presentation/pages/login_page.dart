@@ -4,7 +4,6 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart'; // ✅ تمت الإضافة
 
-import '../../../../app/router.dart'; // ✅ تمت الإضافة
 import '../../../../core/responsive/responsive_helper.dart';
 import '../../../../shared/layouts/app_shell.dart';
 import '../widgets/login_form.dart';
@@ -19,7 +18,7 @@ class LoginPage extends ConsumerWidget {
     final ColorScheme scheme = theme.colorScheme;
 
     return AppShell(
-      backgroundColor: Colors.transparent,
+      backgroundColor: Colors.transparent, // للسماح بظهور التدرج
       body: Container(
         decoration: BoxDecoration(
           gradient: LinearGradient(
@@ -91,12 +90,14 @@ class _LoginCard extends StatelessWidget {
             const SizedBox(height: 32),
             child,
             
-            // ✅ [الإضافة الجديدة]: زر التسجيل
+            // ✅ [الإضافة الجديدة]: زر التسجيل - تم استخدام Wrap لتجنب مشاكل الأبعاد
             const SizedBox(height: 24),
             const Divider(),
             const SizedBox(height: 12),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
+            Wrap(
+              alignment: WrapAlignment.center,
+              crossAxisAlignment: WrapCrossAlignment.center,
+              spacing: 4,
               children: <Widget>[
                 Text(
                   'ليس لديك حساب؟',
@@ -105,7 +106,12 @@ class _LoginCard extends StatelessWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: () => context.pushNamed(AppRouter.signupName),
+                  onPressed: () => context.push('/signup'), // استخدام المسار المباشر لمنع الاستيراد الدائري
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 8),
+                    minimumSize: Size.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
                   child: const Text(
                     'إنشاء حساب جديد',
                     style: TextStyle(fontWeight: FontWeight.bold),
@@ -133,6 +139,7 @@ class _BrandHeader extends StatelessWidget {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.center,
       children: <Widget>[
+        // إطار دائري خفيف حول الشعار ليعطيه بروزاً
         Container(
           padding: const EdgeInsets.all(16),
           decoration: BoxDecoration(
