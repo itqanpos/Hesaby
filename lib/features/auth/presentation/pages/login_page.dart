@@ -2,7 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:go_router/go_router.dart'; // ✅ تمت الإضافة
+import 'package:go_router/go_router.dart'; // ✅ تمت الإضافة للتوجيه
 
 import '../../../../core/responsive/responsive_helper.dart';
 import '../../../../shared/layouts/app_shell.dart';
@@ -90,7 +90,7 @@ class _LoginCard extends StatelessWidget {
             const SizedBox(height: 32),
             child,
             
-            // ✅ [الإضافة الجديدة]: زر التسجيل - تم استخدام Wrap لتجنب مشاكل الأبعاد
+            // ✅ [الإضافة الجديدة]: زر التسجيل
             const SizedBox(height: 24),
             const Divider(),
             const SizedBox(height: 12),
@@ -106,7 +106,7 @@ class _LoginCard extends StatelessWidget {
                   ),
                 ),
                 TextButton(
-                  onPressed: () => context.push('/signup'), // استخدام المسار المباشر لمنع الاستيراد الدائري
+                  onPressed: () => context.go('/signup'), // التوجيه المباشر
                   style: TextButton.styleFrom(
                     padding: const EdgeInsets.symmetric(horizontal: 8),
                     minimumSize: Size.zero,
