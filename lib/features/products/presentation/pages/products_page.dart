@@ -350,7 +350,8 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                     return RefreshIndicator(
                       onRefresh: () async {
                         ref.invalidate(productCountsProvider);
-                        ref.read(pagedProductsProvider.notifier).refresh();
+                        // ✅ إضافة await لإصلاح تحذير المحلل وضمان بقاء المؤشر حتى انتهاء التحديث
+                        await ref.read(pagedProductsProvider.notifier).refresh();
                         // Small delay to ensure the refresh indicator is visible if data loads instantly
                         await Future<void>.delayed(const Duration(milliseconds: 300));
                       },
