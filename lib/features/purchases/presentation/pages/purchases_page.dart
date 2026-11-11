@@ -74,16 +74,7 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
       appBar: AppBar(
         title: const Text('فواتير الشراء'),
         actions: <Widget>[
-          IconButton(
-            tooltip: 'تحديث',
-            onPressed: anyLoading || firstError != null
-                ? null
-                : () {
-                    ref.invalidate(purchasesProvider);
-                    ref.invalidate(suppliersProvider);
-                  },
-            icon: const Icon(Icons.refresh),
-          ),
+          // ✅ تم إزالة زر التحديث من هنا (الاعتماد على السحب للتحديث)
           IconButton(
             tooltip: 'إضافة فاتورة',
             onPressed: anyLoading || firstError != null || branchId == null
@@ -181,65 +172,96 @@ class _PurchasesPageState extends ConsumerState<PurchasesPage> {
 
               // ---- List ----
               Expanded(
-                child: allPurchases.isEmpty
-                    ? AppEmptyView(
-                        icon: Icons.receipt_long_outlined,
-                        title: 'لا توجد فواتير شراء',
-                        message:
-                            'ابدأ بتسجيل أول فاتورة شراء من أحد الموردين.',
-                        action: AppButton(
-                          label: 'إضافة فاتورة',
-                          icon: Icons.add,
-                          onPressed: () =>
-                              context.pushNamed(AppRouter.purchaseNewName),
-                        ),
-                      )
-                    : visible.isEmpty
-                        ? AppEmptyView(
-                            icon: Icons.search_off_outlined,
-                            title: 'لا نتائج',
-                            message:
-                                'لم تُطابق أي فاتورة معايير البحث أو الفلترة.',
-                            action: AppButton(
-                              label: 'مسح الفلاتر',
-                              icon: Icons.filter_alt_off_outlined,
-                              variant: AppButtonVariant.secondary,
-                              onPressed: _clearAllFilters,
+                child: RefreshIndicator(
+                  onRefresh: () async {
+                    ref.invalidate(purchasesProvider);
+                    ref.invalidate(suppliersProvider);
+                    try {
+                      await Future.wait(<Future<void>>[
+                        ref.read(purchasesProvider.future),
+                        ref.read(suppliersProvider.future),
+                      ]);
+                    } catch (_) {
+                      // Errors are handled by the providers / UI
+                    }
+                  },
+                  child: allPurchases.isEmpty
+                      ? LayoutBuilder(
+                          builder: (BuildContext context, BoxConstraints constraints) {
+                            return SingleChildScrollView(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              child: ConstrainedBox(
+                                constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                                child: AppEmptyView(
+                                  icon: Icons.receipt_long_outlined,
+                                  title: 'لا توجد فواتير شراء',
+                                  message: 'ابدأ بتسجيل أول فاتورة شراء من أحد الموردين.',
+                                  action: AppButton(
+                                    label: 'إضافة فاتورة',
+                                    icon: Icons.add,
+                                    onPressed: () => context.pushNamed(AppRouter.purchaseNewName),
+                                  ),
+                                ),
+                              ),
+                            );
+                          },
+                        )
+                      : visible.isEmpty
+                          ? LayoutBuilder(
+                              builder: (BuildContext context, BoxConstraints constraints) {
+                                return SingleChildScrollView(
+                                  physics: const AlwaysScrollableScrollPhysics(),
+                                  child: ConstrainedBox(
+                                    constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                                    child: AppEmptyView(
+                                      icon: Icons.search_off_outlined,
+                                      title: 'لا نتائج',
+                                      message: 'لم تُطابق أي فاتورة معايير البحث أو الفلترة.',
+                                      action: AppButton(
+                                        label: 'مسح الفلاتر',
+                                        icon: Icons.filter_alt_off_outlined,
+                                        variant: AppButtonVariant.secondary,
+                                        onPressed: _clearAllFilters,
+                                      ),
+                                    ),
+                                  ),
+                                );
+                              },
+                            )
+                          : ListView.separated(
+                              physics: const AlwaysScrollableScrollPhysics(),
+                              padding: const EdgeInsets.only(bottom: 24),
+                              itemCount: visible.length,
+                              separatorBuilder: (_, __) =>
+                                  const SizedBox(height: 8),
+                              itemBuilder: (BuildContext context, int index) {
+                                final Purchase purchase = visible[index];
+                                final String supplierName =
+                                    supplierNames[purchase.supplierId] ??
+                                        'مورد محذوف';
+                                return _PurchaseCard(
+                                  purchase: purchase,
+                                  supplierName: supplierName,
+                                  onTap: () => _openDetail(context, purchase),
+                                  onEdit: purchase.canEdit
+                                      ? () => _openEdit(context, purchase)
+                                      : null,
+                                  onConfirm: purchase.isDraft
+                                      ? () => _confirmPurchase(
+                                            context,
+                                            purchase,
+                                          )
+                                      : null,
+                                  onCancel: purchase.canTransition
+                                      ? () => _confirmCancel(
+                                            context,
+                                            purchase,
+                                          )
+                                      : null,
+                                );
+                              },
                             ),
-                          )
-                        : ListView.separated(
-                            padding: const EdgeInsets.only(bottom: 24),
-                            itemCount: visible.length,
-                            separatorBuilder: (_, __) =>
-                                const SizedBox(height: 8),
-                            itemBuilder:
-                                (BuildContext context, int index) {
-                              final Purchase purchase = visible[index];
-                              final String supplierName =
-                                  supplierNames[purchase.supplierId] ??
-                                      'مورد محذوف';
-                              return _PurchaseCard(
-                                purchase: purchase,
-                                supplierName: supplierName,
-                                onTap: () => _openDetail(context, purchase),
-                                onEdit: purchase.canEdit
-                                    ? () => _openEdit(context, purchase)
-                                    : null,
-                                onConfirm: purchase.isDraft
-                                    ? () => _confirmPurchase(
-                                          context,
-                                          purchase,
-                                        )
-                                    : null,
-                                onCancel: purchase.canTransition
-                                    ? () => _confirmCancel(
-                                          context,
-                                          purchase,
-                                        )
-                                    : null,
-                              );
-                            },
-                          ),
+                ),
               ),
             ],
           );
