@@ -125,14 +125,7 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
       appBar: AppBar(
         title: const Text('المنتجات'),
         actions: <Widget>[
-          IconButton(
-            tooltip: 'تحديث',
-            onPressed: () {
-              ref.invalidate(productCountsProvider);
-              ref.read(pagedProductsProvider.notifier).refresh();
-            },
-            icon: const Icon(Icons.refresh),
-          ),
+          // ✅ تم إزالة زر التحديث من هنا
           IconButton(
             tooltip: 'إضافة منتج',
             onPressed: anyLoading || firstError != null
@@ -251,9 +244,11 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                       return const AppLoader();
                     }
 
+                    Widget content;
+
                     if (pagedError != null &&
                         (paged?.items.isEmpty ?? true)) {
-                      return AppErrorView(
+                      content = AppErrorView(
                         title: 'تعذّر تحميل المنتجات',
                         message: _errorMessage(pagedError),
                         retryLabel: 'إعادة المحاولة',
@@ -261,78 +256,105 @@ class _ProductsPageState extends ConsumerState<ProductsPage> {
                             .read(pagedProductsProvider.notifier)
                             .refresh(),
                       );
-                    }
+                    } else {
+                      final List<Product> items =
+                          paged?.items ?? const <Product>[];
 
-                    final List<Product> items =
-                        paged?.items ?? const <Product>[];
+                      if (items.isEmpty) {
+                        if (hasActiveFilters) {
+                          content = AppEmptyView(
+                            icon: Icons.search_off_outlined,
+                            title: 'لا نتائج',
+                            message:
+                                'لم يُطابق أي منتج الفلاتر أو كلمة البحث.',
+                            action: AppButton(
+                              label: 'مسح الفلاتر',
+                              icon: Icons.filter_alt_off_outlined,
+                              variant: AppButtonVariant.secondary,
+                              onPressed: _clearAllFilters,
+                            ),
+                          );
+                        } else {
+                          content = AppEmptyView(
+                            icon: Icons.inventory_2_outlined,
+                            title: 'لا توجد منتجات',
+                            message: units.isEmpty
+                                ? 'أضف وحدة قياس واحدة على الأقل قبل إنشاء المنتجات.'
+                                : 'ابدأ بإضافة أول منتج إلى كتالوجك.',
+                            action: units.isEmpty
+                                ? null
+                                : AppButton(
+                                    label: 'إضافة منتج',
+                                    icon: Icons.add,
+                                    onPressed: () =>
+                                        _openProductForm(context),
+                                  ),
+                          );
+                        }
+                      } else {
+                        final bool showLoader = paged?.isLoadingMore ?? false;
 
-                    if (items.isEmpty) {
-                      if (hasActiveFilters) {
-                        return AppEmptyView(
-                          icon: Icons.search_off_outlined,
-                          title: 'لا نتائج',
-                          message:
-                              'لم يُطابق أي منتج الفلاتر أو كلمة البحث.',
-                          action: AppButton(
-                            label: 'مسح الفلاتر',
-                            icon: Icons.filter_alt_off_outlined,
-                            variant: AppButtonVariant.secondary,
-                            onPressed: _clearAllFilters,
-                          ),
+                        content = ListView.separated(
+                          controller: _scrollController,
+                          physics: const AlwaysScrollableScrollPhysics(),
+                          padding: const EdgeInsets.only(bottom: 24),
+                          itemCount: items.length + (showLoader ? 1 : 0),
+                          separatorBuilder: (_, __) =>
+                              const SizedBox(height: 8),
+                          itemBuilder: (BuildContext context, int index) {
+                            if (index >= items.length) {
+                              return const Padding(
+                                padding: EdgeInsets.symmetric(vertical: 16),
+                                child: Center(
+                                  child: CircularProgressIndicator(),
+                                ),
+                              );
+                            }
+                            final Product product = items[index];
+                            return _ProductCard(
+                              product: product,
+                              categoryName: product.categoryId == null
+                                  ? null
+                                  : categoryNames[product.categoryId],
+                              unitName: unitNames[product.defaultUnitId],
+                              onEdit: () => _openProductForm(
+                                context,
+                                product: product,
+                              ),
+                              onToggleActive: () =>
+                                  _toggleActive(context, product),
+                              onDelete: () => _confirmDelete(context, product),
+                              onManageUnits: () =>
+                                  _openProductUnits(context, product),
+                            );
+                          },
                         );
                       }
-                      return AppEmptyView(
-                        icon: Icons.inventory_2_outlined,
-                        title: 'لا توجد منتجات',
-                        message: units.isEmpty
-                            ? 'أضف وحدة قياس واحدة على الأقل قبل إنشاء المنتجات.'
-                            : 'ابدأ بإضافة أول منتج إلى كتالوجك.',
-                        action: units.isEmpty
-                            ? null
-                            : AppButton(
-                                label: 'إضافة منتج',
-                                icon: Icons.add,
-                                onPressed: () =>
-                                    _openProductForm(context),
-                              ),
-                      );
                     }
 
-                    final bool showLoader = paged?.isLoadingMore ?? false;
-
-                    return ListView.separated(
-                      controller: _scrollController,
-                      padding: const EdgeInsets.only(bottom: 24),
-                      itemCount: items.length + (showLoader ? 1 : 0),
-                      separatorBuilder: (_, __) =>
-                          const SizedBox(height: 8),
-                      itemBuilder: (BuildContext context, int index) {
-                        if (index >= items.length) {
-                          return const Padding(
-                            padding: EdgeInsets.symmetric(vertical: 16),
-                            child: Center(
-                              child: CircularProgressIndicator(),
+                    // Wrap non-scrollable content (empty/error views) so the RefreshIndicator works.
+                    if (content is! ListView) {
+                      content = LayoutBuilder(
+                        builder: (BuildContext context, BoxConstraints constraints) {
+                          return SingleChildScrollView(
+                            physics: const AlwaysScrollableScrollPhysics(),
+                            child: ConstrainedBox(
+                              constraints: BoxConstraints(minHeight: constraints.maxHeight),
+                              child: content,
                             ),
                           );
                         }
-                        final Product product = items[index];
-                        return _ProductCard(
-                          product: product,
-                          categoryName: product.categoryId == null
-                              ? null
-                              : categoryNames[product.categoryId],
-                          unitName: unitNames[product.defaultUnitId],
-                          onEdit: () => _openProductForm(
-                            context,
-                            product: product,
-                          ),
-                          onToggleActive: () =>
-                              _toggleActive(context, product),
-                          onDelete: () => _confirmDelete(context, product),
-                          onManageUnits: () =>
-                              _openProductUnits(context, product),
-                        );
+                      );
+                    }
+
+                    return RefreshIndicator(
+                      onRefresh: () async {
+                        ref.invalidate(productCountsProvider);
+                        ref.read(pagedProductsProvider.notifier).refresh();
+                        // Small delay to ensure the refresh indicator is visible if data loads instantly
+                        await Future<void>.delayed(const Duration(milliseconds: 300));
                       },
+                      child: content,
                     );
                   },
                 ),
