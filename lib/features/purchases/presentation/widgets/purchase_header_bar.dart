@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
-import '../../../../core/utils/formatters.dart';
 import '../../../suppliers/domain/entities/supplier.dart';
 import '../../../suppliers/presentation/providers/supplier_providers.dart';
 import '../../domain/entities/purchase_cart.dart';
@@ -15,9 +14,7 @@ import '../state/purchase_providers.dart';
 /// Layout (RTL):
 /// ```
 /// ┌──────────────────────────────────────────────────────┐
-/// │ المورد: [شركة الأمل ▾]   التاريخ: [2026/10/09 📅]  │
-/// │ رقم الفاتورة: [_________________________________]   │
-/// │ ℹ️ اتركه فارغًا ليُولَّد تلقائيًا                     │
+/// │  🔍 [ ابحث عن مورد بالاسم أو الكود أو الهاتف... ]  │
 /// └──────────────────────────────────────────────────────┘
 /// ```
 class PurchaseHeaderBar extends ConsumerWidget {
@@ -42,54 +39,24 @@ class PurchaseHeaderBar extends ConsumerWidget {
           ),
         ),
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: <Widget>[
-          Row(
-            children: <Widget>[
-              // ---- Supplier picker ----
-              Expanded(
-                flex: 3,
-                child: _SupplierSelector(
-                  suppliers: suppliersAsync,
-                  supplierId: cart.supplierId,
-                  supplierName: cart.supplierName,
-                  enabled: true,
-                  onSelected: (Supplier supplier) {
-                    notifier.setSupplier(
-                      id: supplier.id,
-                      name: supplier.name,
-                    );
-                  },
-                ),
-              ),
-              const SizedBox(width: 8),
-
-              // ---- Date picker ----
-              Expanded(
-                flex: 2,
-                child: _DateSelector(
-                  date: cart.purchaseDate,
-                  onPicked: notifier.setPurchaseDate,
-                ),
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-
-          // ---- Invoice number ----
-          _InvoiceNumberField(
-            value: cart.invoiceNumber,
-            onChanged: notifier.setInvoiceNumber,
-          ),
-        ],
+      child: _SupplierSelector(
+        suppliers: suppliersAsync,
+        supplierId: cart.supplierId,
+        supplierName: cart.supplierName,
+        enabled: true,
+        onSelected: (Supplier supplier) {
+          notifier.setSupplier(
+            id: supplier.id,
+            name: supplier.name,
+          );
+        },
       ),
     );
   }
 }
 
 // ============================================================================
-// Supplier selector
+// Supplier selector (Search style)
 // ============================================================================
 
 class _SupplierSelector extends StatelessWidget {
@@ -112,11 +79,11 @@ class _SupplierSelector extends StatelessWidget {
     final ThemeData theme = Theme.of(context);
     final ColorScheme scheme = theme.colorScheme;
     final bool hasSupplier = supplierId != null;
-    final String label = hasSupplier ? (supplierName ?? '—') : 'اختر المورد';
+    final String label = hasSupplier ? (supplierName ?? '—') : 'ابحث عن مورد...';
 
     return Material(
       color: hasSupplier
-          ? scheme.primaryContainer.withValues(alpha: 0.4)
+          ? scheme.primaryContainer.withValues(alpha: 0.3)
           : scheme.surfaceContainerHighest,
       borderRadius: BorderRadius.circular(10),
       child: InkWell(
@@ -127,21 +94,27 @@ class _SupplierSelector extends StatelessWidget {
                   suppliers.value ?? const <Supplier>[],
                 )
             : null,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
+        child: Container(
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(10),
+            border: Border.all(
+              color: hasSupplier ? scheme.primary.withValues(alpha: 0.5) : scheme.outlineVariant,
+            ),
+          ),
+          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
           child: Row(
             children: <Widget>[
               Icon(
-                Icons.local_shipping_outlined,
-                size: 16,
+                Icons.search,
+                size: 20,
                 color: hasSupplier ? scheme.primary : scheme.onSurfaceVariant,
               ),
-              const SizedBox(width: 6),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   label,
                   style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
+                    fontWeight: hasSupplier ? FontWeight.w700 : FontWeight.w600,
                     color: hasSupplier
                         ? scheme.onSurface
                         : scheme.onSurfaceVariant,
@@ -151,14 +124,20 @@ class _SupplierSelector extends StatelessWidget {
               ),
               if (suppliers.isLoading)
                 const SizedBox(
-                  width: 12,
-                  height: 12,
+                  width: 16,
+                  height: 16,
                   child: CircularProgressIndicator(strokeWidth: 2),
+                )
+              else if (hasSupplier)
+                Icon(
+                  Icons.check_circle,
+                  size: 18,
+                  color: scheme.primary,
                 )
               else
                 Icon(
                   Icons.expand_more,
-                  size: 16,
+                  size: 20,
                   color: scheme.onSurfaceVariant,
                 ),
             ],
@@ -323,128 +302,6 @@ class _SupplierPickerSheetState extends State<_SupplierPickerSheet> {
               ),
             ],
           ),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Date selector
-// ============================================================================
-
-class _DateSelector extends StatelessWidget {
-  const _DateSelector({
-    required this.date,
-    required this.onPicked,
-  });
-
-  final DateTime? date;
-  final ValueChanged<DateTime> onPicked;
-
-  @override
-  Widget build(BuildContext context) {
-    final ThemeData theme = Theme.of(context);
-    final ColorScheme scheme = theme.colorScheme;
-    final bool hasDate = date != null;
-
-    return Material(
-      color: scheme.surfaceContainerHighest,
-      borderRadius: BorderRadius.circular(10),
-      child: InkWell(
-        borderRadius: BorderRadius.circular(10),
-        onTap: () async {
-          final DateTime picked = await showDatePicker(
-            context: context,
-            initialDate: date ?? DateTime.now(),
-            firstDate: DateTime(2000),
-            lastDate: DateTime(2100),
-          ) ??
-              DateTime.now();
-          onPicked(picked);
-        },
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 10),
-          child: Row(
-            children: <Widget>[
-              Icon(
-                Icons.calendar_today_outlined,
-                size: 16,
-                color: scheme.onSurfaceVariant,
-              ),
-              const SizedBox(width: 6),
-              Expanded(
-                child: Text(
-                  hasDate ? AppFormatters.date(date!) : 'التاريخ',
-                  style: theme.textTheme.bodyMedium?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: hasDate
-                        ? scheme.onSurface
-                        : scheme.onSurfaceVariant,
-                  ),
-                  overflow: TextOverflow.ellipsis,
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-// ============================================================================
-// Invoice number field
-// ============================================================================
-
-class _InvoiceNumberField extends StatefulWidget {
-  const _InvoiceNumberField({
-    required this.value,
-    required this.onChanged,
-  });
-
-  final String value;
-  final ValueChanged<String> onChanged;
-
-  @override
-  State<_InvoiceNumberField> createState() => _InvoiceNumberFieldState();
-}
-
-class _InvoiceNumberFieldState extends State<_InvoiceNumberField> {
-  late final TextEditingController _controller;
-
-  @override
-  void initState() {
-    super.initState();
-    _controller = TextEditingController(text: widget.value);
-  }
-
-  @override
-  void dispose() {
-    _controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    return TextField(
-      controller: _controller,
-      onChanged: widget.onChanged,
-      textInputAction: TextInputAction.next,
-      decoration: InputDecoration(
-        isDense: true,
-        labelText: 'رقم الفاتورة — اختياري',
-        hintText: 'اتركه فارغًا ليُولَّد تلقائيًا',
-        helperText: 'إذا تركته فارغًا سيعطيك النظام رقمًا داخليًا '
-            'مثل PUR-2026-0001',
-        helperMaxLines: 2,
-        prefixIcon: const Icon(Icons.numbers, size: 18),
-        contentPadding: const EdgeInsets.symmetric(
-          horizontal: 12,
-          vertical: 12,
-        ),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(10),
         ),
       ),
     );
