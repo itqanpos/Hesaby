@@ -59,6 +59,7 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
         final PurchaseCartNotifier cart =
             ref.read(purchaseCartProvider.notifier);
         cart.reset();
+        // ✅ التاريخ أصبح تلقائياً (لن نعرضه في الواجهة)
         cart.setPurchaseDate(DateTime.now());
       });
     }
@@ -111,7 +112,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
       cart.reset();
 
       cart.setPurchaseDate(purchase.purchaseDate);
-      cart.setInvoiceNumber(purchase.invoiceNumber ?? '');
       cart.setNotes(purchase.notes ?? '');
       cart.setDiscount(purchase.discount);
       cart.setTaxAmount(purchase.taxAmount);
@@ -158,10 +158,6 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
 
     if (!cart.hasSupplier || cart.supplierId == null) {
       _snack('اختر المورد أولًا.');
-      return;
-    }
-    if (!cart.hasPurchaseDate || cart.purchaseDate == null) {
-      _snack('اختر تاريخ الفاتورة.');
       return;
     }
     if (cart.isEmpty) {
@@ -222,11 +218,9 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
           purchaseId: widget.purchaseId!,
           branchId: branchId,
           supplierId: cart.supplierId!,
-          purchaseDate: cart.purchaseDate!,
+          purchaseDate: cart.purchaseDate ?? DateTime.now(), // نحتفظ بالأصل
           items: items,
-          invoiceNumber: cart.invoiceNumber.trim().isEmpty
-              ? null
-              : cart.invoiceNumber.trim(),
+          invoiceNumber: null, // ✅ لا نرسل رقم فاتورة (يتولد تلقائياً)
           discount: cart.discount,
           taxAmount: cart.taxAmount,
           paidAmount: cart.paidAmount,
@@ -237,11 +231,9 @@ class _PurchaseFormPageState extends ConsumerState<PurchaseFormPage> {
         saved = await notifier.createPurchase(
           branchId: branchId,
           supplierId: cart.supplierId!,
-          purchaseDate: cart.purchaseDate!,
+          purchaseDate: DateTime.now(), // ✅ التاريخ تلقائي
           items: items,
-          invoiceNumber: cart.invoiceNumber.trim().isEmpty
-              ? null
-              : cart.invoiceNumber.trim(),
+          invoiceNumber: null, // ✅ لا نرسل رقم فاتورة
           discount: cart.discount,
           taxAmount: cart.taxAmount,
           paidAmount: cart.paidAmount,
