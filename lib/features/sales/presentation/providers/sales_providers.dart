@@ -54,7 +54,11 @@ class CustomersNotifier extends AsyncNotifier<List<Customer>> {
   Future<List<Customer>> build() async {
     final String? companyId = ref.watch(companyContextProvider.select((CompanyContextState state) => state.currentCompany?.id));
     if (companyId == null) return const <Customer>[];
-    return ref.read(customerRepositoryProvider).listCustomers(companyId);
+    // ✅ التعديل: جلب جميع العملاء (النشطين والمعطلين)
+    return ref.read(customerRepositoryProvider).listCustomers(
+      companyId,
+      includeInactive: true,
+    );
   }
 
   Future<Customer> createCustomer({required String name, String? code, String? phone, String? email, String? address, String? notes}) async {
